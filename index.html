@@ -1055,6 +1055,25 @@ function sendApplicationAction(leadId, channel){
   showToast("Application marked as sent");
   persist();
 }
+function submitPhoneApplication(leadId, patch){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  if (patch.purchasePrice && patch.loanAmount){
+    lead.ltv = Math.round((patch.loanAmount / patch.purchasePrice) * 1000) / 10;
+  }
+  lead.applicationSentAt = lead.applicationSentAt || d;
+  lead.applicationTakenByPhone = true;
+  lead.applicationTakenAt = d;
+  var idx = stageIndex(lead.stage);
+  if (idx >= 0 && idx < stageIndex("app_completed")) lead.stage = "app_completed";
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"application", text:"Application taken by phone with " + lead.name, author: currentUser().name });
+  ui.modal = null;
+  showToast("Application saved for " + lead.name);
+  persist();
+}
 function sendDocumentAction(leadId, kind, channel){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -1251,6 +1270,83 @@ function borrowerUploadDoc(leadId, idx, fileName){
   persist();
 }
 
+/* ---------------------------------------------------------------------
+   AI document review (simulated — prototype has no real file content
+   to inspect, so findings are drawn deterministically per document so
+   the same document always reviews the same way)
+--------------------------------------------------------------------- */
+var AI_DOC_FINDINGS = {
+  "Government ID": [
+    { status:"clear", note:"Name, date of birth, and expiration date are legible and match the borrower record." },
+    { status:"flag", note:"ID expiration date appears to be in the past — request a current, unexpired copy." },
+    { status:"flag", note:"Name on the ID doesn't exactly match the borrower name on file — confirm spelling/legal name." }
+  ],
+  "Bank Statements (2mo)": [
+    { status:"clear", note:"Account holder name and statement period match; balances are consistent across pages." },
+    { status:"flag", note:"Most recent statement is more than 60 days old — request an updated copy before underwriting." },
+    { status:"flag", note:"Large unexplained deposit on this statement — will likely need a letter of explanation." }
+  ],
+  "Purchase Contract": [
+    { status:"clear", note:"Purchase price and property address match what's on file, and the contract is signed by all parties." },
+    { status:"flag", note:"Contract is missing a signature or date on the signature page." },
+    { status:"flag", note:"Purchase price on the contract doesn't match the amount entered on this loan." }
+  ],
+  "Entity Docs (Operating Agreement)": [
+    { status:"clear", note:"Entity name, formation state, and authorized signer match the borrower record." },
+    { status:"flag", note:"Operating agreement doesn't clearly name an authorized signer — may need a certification page." }
+  ],
+  "Appraisal": [
+    { status:"clear", note:"Appraised value supports the requested loan amount at the target LTV." },
+    { status:"flag", note:"Appraised value came in below the value used to calculate LTV — loan terms may need revisiting." }
+  ],
+  "Insurance Binder": [
+    { status:"clear", note:"Coverage amount and effective dates look sufficient for this property and loan." },
+    { status:"flag", note:"Coverage amount looks lower than the loan amount — confirm with the insurance agent." }
+  ],
+  "_default": [
+    { status:"clear", note:"Document looks complete and consistent with the loan file." },
+    { status:"flag", note:"Scan quality is low in places — some fields may be hard to verify. Consider requesting a clearer copy." }
+  ]
+};
+function hashStr(s){
+  var h = 0;
+  for (var i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) | 0; }
+  return Math.abs(h);
+}
+function runAiDocReview(leadId, idx){
+  var lead = leadById(leadId);
+  if (!lead || !lead.documents[idx]) return;
+  var doc = lead.documents[idx];
+  var pool = AI_DOC_FINDINGS[doc.name] || AI_DOC_FINDINGS["_default"];
+  var pick = pool[hashStr(lead.id + "|" + doc.name + "|" + (doc.fileName||"")) % pool.length];
+  doc.aiReview = { status: pick.status, note: pick.note, reviewedAt: todayISO(), dismissed:false };
+  lead.activity = lead.activity || [];
+  lead.activity.push({
+    date: todayISO(), type:"note",
+    text: "AI review — " + doc.name + ": " + (pick.status==="clear" ? "looks good, no issues found." : ("flagged — " + pick.note)),
+    author: "AI Assistant"
+  });
+  showToast(pick.status === "clear" ? "AI review: looks good" : "AI review: flagged for follow-up");
+  persist();
+}
+function dismissAiFlag(leadId, idx){
+  var lead = leadById(leadId);
+  if (!lead || !lead.documents[idx] || !lead.documents[idx].aiReview) return;
+  lead.documents[idx].aiReview.dismissed = true;
+  persist();
+}
+function aiFlaggedDocs(){
+  var out = [];
+  state.leads.forEach(function(lead){
+    (lead.documents||[]).forEach(function(d, i){
+      if (d.aiReview && d.aiReview.status === "flag" && !d.aiReview.dismissed){
+        out.push({ lead:lead, doc:d, idx:i });
+      }
+    });
+  });
+  return out;
+}
+
 function updateMarketRate(key, newVal){
   var r = state.marketRates[key];
   if (!r || isNaN(newVal)) return;
@@ -1388,8 +1484,7 @@ function renderProcessingTodo(){
   var items = (state.notifications||[]).filter(function(n){
     return !n.read && (isOwner() || n.toUserId===ui.viewAs) && n.kind !== "review";
   });
-  if (!items.length) return '<div class="empty">Nothing waiting on processing right now.</div>';
-  return items.map(function(n){
+  var notifHTML = items.map(function(n){
     var lead = leadById(n.leadId);
     if (!lead) return "";
     var lo = userById(lead.assignedTo) || {};
@@ -1408,6 +1503,24 @@ function renderProcessingTodo(){
       '</div>' +
     '</div>';
   }).join("");
+
+  var aiHTML = aiFlaggedDocs().map(function(f){
+    return '<div class="queue-card type-winback">' +
+      '<div class="queue-main">' +
+        '<div class="queue-title">AI flagged a document — ' + esc(f.doc.name) + '</div>' +
+        '<div class="queue-reason">' + esc(f.lead.name) + ' · ' + esc(f.doc.aiReview.note) + '</div>' +
+        '<div class="queue-meta"><span>LO: ' + esc(userName(f.lead.assignedTo)) + '</span><span>Stage: ' + esc(stageLabel(f.lead.stage)) + '</span></div>' +
+      '</div>' +
+      '<div class="queue-actions">' +
+        '<button class="btn btn-sm btn-ghost" data-action="dismiss-ai-flag" data-lead="' + f.lead.id + '" data-idx="' + f.idx + '">Dismiss</button>' +
+        '<button class="btn btn-sm btn-primary" data-action="select-lead" data-lead="' + f.lead.id + '">View Loan</button>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+
+  var combined = notifHTML + aiHTML;
+  if (!combined) return '<div class="empty">Nothing waiting on processing right now.</div>';
+  return combined;
 }
 
 var STAGE_GROUPS = [
@@ -1677,15 +1790,35 @@ function renderTabScenario(lead){
 }
 
 function renderTabDocuments(lead){
-  var rows = (lead.documents||[]).map(function(d,i){
+  var docs = lead.documents||[];
+  var receivedCount = docs.filter(function(d){ return d.status==="received"; }).length;
+  var reviewedCount = docs.filter(function(d){ return d.aiReview; }).length;
+  var flaggedCount = docs.filter(function(d){ return d.aiReview && d.aiReview.status==="flag" && !d.aiReview.dismissed; }).length;
+  var summary = receivedCount ? (
+    '<div class="hint" style="margin-bottom:10px">' + reviewedCount + ' of ' + receivedCount + ' received document(s) AI-reviewed' +
+    (flaggedCount ? (' — <b style="color:var(--c-rust)">' + flaggedCount + ' flagged</b>') : (reviewedCount ? ' — all clear' : '')) +
+    '.</div>'
+  ) : '';
+
+  var rows = docs.map(function(d,i){
     var statusBadge = d.status==="received" ? '<span class="badge badge-forest">Received</span>' : '<span class="badge badge-slate">Requested</span>';
-    return '<div class="doc-row"><div><div>' + esc(d.name) + '</div>' +
-      '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):"")) : "Awaiting borrower") + '</div></div>' +
-      '<div style="display:flex;gap:8px;align-items:center">' + statusBadge +
-      (d.status!=="received" ? ('<button class="btn btn-sm" data-action="mark-doc-received" data-lead="' + lead.id + '" data-idx="' + i + '">Mark Received</button>') : '') +
-      '</div></div>';
+    var aiBadge = "", aiNote = "";
+    if (d.aiReview){
+      aiBadge = d.aiReview.status === "clear"
+        ? '<span class="badge badge-forest">AI: Clear</span>'
+        : '<span class="badge badge-rust">AI: Flagged</span>';
+      aiNote = '<div class="cell-sub" style="margin-top:4px;max-width:360px">' + esc(d.aiReview.note) + '</div>';
+    }
+    var reviewBtn = d.status==="received"
+      ? ('<button class="btn btn-sm" data-action="ai-review-doc" data-lead="' + lead.id + '" data-idx="' + i + '">' + (d.aiReview ? "Re-run AI Review" : "Run AI Review") + '</button>')
+      : ('<button class="btn btn-sm" data-action="mark-doc-received" data-lead="' + lead.id + '" data-idx="' + i + '">Mark Received</button>');
+    return '<div class="doc-row" style="align-items:flex-start"><div><div>' + esc(d.name) + '</div>' +
+      '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):"")) : "Awaiting borrower") + '</div>' +
+      aiNote +
+      '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + aiBadge + reviewBtn + '</div></div>';
   }).join("");
-  return (rows || '<div class="empty">No documents requested yet.</div>') +
+  return summary + (rows || '<div class="empty">No documents requested yet.</div>') +
     '<form data-form="request-doc" data-lead="' + lead.id + '" style="display:flex;gap:8px;margin-top:14px">' +
       '<input class="input" name="name" placeholder="Document name (e.g. Bank Statements)" style="flex:1">' +
       '<button class="btn btn-sm" type="submit">Request Document</button>' +
@@ -1749,9 +1882,11 @@ function renderRail(lead){
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<a class="btn btn-sm" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — " + lead.loanType) + '&body=' + encodeURIComponent(defaultOutreachMessage(lead)) + '" data-action="log-email" data-lead="' + lead.id + '">Email</a>' +
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
+        '<button class="btn btn-sm" data-action="open-modal" data-modal="takeApplication" data-lead="' + lead.id + '">Take Application by Phone' + (lead.applicationTakenByPhone ? ' ✓' : '') + '</button>' +
         '<a class="btn btn-sm" href="' + XACTUS_PORTAL_URL + '" target="_blank" rel="noopener" data-action="order-credit" data-lead="' + lead.id + '">Order Credit' + (lead.creditOrderedAt ? ' ✓' : '') + '</a>' +
       '</div>' +
       (lead.applicationSentAt ? ('<div class="footnote" style="padding:6px 0 0">Application sent ' + fmtDate(lead.applicationSentAt) + '</div>') : '') +
+      (lead.applicationTakenByPhone ? ('<div class="footnote" style="padding:2px 0 0">Application taken by phone ' + fmtDate(lead.applicationTakenAt) + '</div>') : '') +
       (lead.creditOrderedAt ? ('<div class="footnote" style="padding:2px 0 0">Credit portal opened ' + fmtDate(lead.creditOrderedAt) + '</div>') : '') +
       '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft)">' +
         '<div class="rail-title" style="margin-bottom:6px">Points Charged</div>' +
@@ -2078,6 +2213,7 @@ function renderModal(){
   if (ui.modal.type === "logCall") return modalLogCall(ui.modal.leadId);
   if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
   if (ui.modal.type === "sendApplication") return modalSendApplication(ui.modal.leadId);
+  if (ui.modal.type === "takeApplication") return modalTakeApplication(ui.modal.leadId);
   if (ui.modal.type === "changePin") return modalChangePin();
   if (ui.modal.type === "dialer") return modalDialer();
   if (ui.modal.type === "sendDocument") return modalSendDocument(ui.modal.leadId, ui.modal.kind);
@@ -2168,6 +2304,49 @@ function modalSendApplication(leadId){
       '</div>' +
     '</div></div>';
 }
+function modalTakeApplication(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return "";
+  var entityOptions = ENTITY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.entityType===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  var exitOptions = EXIT_STRATEGIES.map(function(t){ return '<option value="' + t + '"' + (lead.exitStrategy===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  var v = function(x){ return x===null||x===undefined ? "" : x; };
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1" style="max-width:600px">' +
+      '<div class="modal-head"><h3>Take Application by Phone — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="take-application" data-lead="' + lead.id + '">' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0">Fill this in while you\'re on the call. Saving marks the application complete and advances the loan to Application Completed.</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Entity Type</label><select class="select" name="entityType">' + entityOptions + '</select></div>' +
+          '<div class="form-row"><label>Credit Score</label><input class="input" type="number" name="creditScore" min="300" max="850" value="' + v(lead.creditScore) + '"></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Investing Experience (deals completed)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '"></div>' +
+          '<div class="form-row"><label>Liquidity / Reserves</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
+        '</div>' +
+        '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress" value="' + esc(lead.propertyAddress||"") + '"></div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Property Type</label><select class="select" name="propertyType">' + propTypeOptions + '</select></div>' +
+          '<div class="form-row"><label>Exit Strategy</label><select class="select" name="exitStrategy">' + exitOptions + '</select></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+          '<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>' +
+          '<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Loan Amount Requested</label><input class="input" type="number" name="loanAmount" value="' + v(lead.loanAmount) + '"></div>' +
+          '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save Application</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
 function modalSendText(leadId){
   var lead = leadById(leadId);
   if (!lead) return "";
@@ -2253,6 +2432,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "close-modal"){ ui.modal = null; render(); }
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "ai-review-doc"){ runAiDocReview(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
+  else if (action === "dismiss-ai-flag"){ dismissAiFlag(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
   else if (action === "toggle-processing"){ toggleProcessingAction(t.dataset.lead, t.dataset.kind); }
   else if (action === "mark-notif-read"){ markNotificationRead(t.dataset.id); }
   else if (action === "log-email"){ logEmailSent(t.dataset.lead); }
@@ -2326,6 +2507,24 @@ appEl.addEventListener("submit", function(e){
       loanAmount: fd.get("loanAmount") ? Number(fd.get("loanAmount")) : null,
       propertyAddress: fd.get("propertyAddress")
     });
+  } else if (type === "take-application"){
+    var numOrNull = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
+    submitPhoneApplication(form.dataset.lead, {
+      entityType: fd.get("entityType"),
+      creditScore: numOrNull("creditScore"),
+      experienceDeals: numOrNull("experienceDeals"),
+      liquidity: numOrNull("liquidity"),
+      propertyAddress: fd.get("propertyAddress"),
+      propertyType: fd.get("propertyType"),
+      exitStrategy: fd.get("exitStrategy"),
+      purchasePrice: numOrNull("purchasePrice"),
+      arv: numOrNull("arv"),
+      rehabBudget: numOrNull("rehabBudget"),
+      rentEstimate: numOrNull("rentEstimate"),
+      loanAmount: numOrNull("loanAmount"),
+      termMonths: numOrNull("termMonths")
+    });
+    render();
   } else if (type === "log-call"){
     logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
     ui.modal = null; render();
