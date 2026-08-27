@@ -689,7 +689,7 @@ function closeDialer(){
 function scopedLeads(){
   if (isOwner()) return state.leads;
   if (isProcessor()) return state.leads.filter(function(l){
-    return ["app_completed","docs","processing","underwriting","approved","ctc","closed","postclosing"].indexOf(l.stage) !== -1;
+    return ["processing","underwriting","ctc","closed"].indexOf(l.stage) !== -1;
   });
   if (isLO()) return state.leads.filter(function(l){ return l.assignedTo===ui.viewAs; });
   return state.leads;
@@ -1134,6 +1134,21 @@ function moveStage(leadId, target){
   persist();
 }
 
+function sendBackToLO(leadId, note){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  var oldLabel = stageLabel(lead.stage);
+  lead.stage = "docs";
+  lead.status = "active";
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"stage", text:"Sent back to " + userName(lead.assignedTo) + " (was " + oldLabel + "): " + note, author: currentUser().name });
+  notifyUser(lead.assignedTo, lead.id, "sent-back", currentUser().name + " sent " + lead.name + "'s file back — " + note);
+  ui.modal = null;
+  showToast("Sent back to " + userName(lead.assignedTo));
+  persist();
+}
+
 function addLead(data){
   var id = nextLeadId();
   var d = todayISO();
@@ -1247,7 +1262,10 @@ function requestDoc(leadId, name){
   lead.documents = lead.documents || [];
   lead.documents.push({ name:name, status:"requested" });
   lead.activity = lead.activity || [];
-  lead.activity.push({ date:todayISO(), type:"document", text:"Requested document: " + name, author: currentUser().name });
+  var d = todayISO();
+  lead.activity.push({ date:d, type:"document", text:"Requested document: " + name, author: currentUser().name });
+  lead.activity.push({ date:d, type:"notify", text:"Emailed and texted " + lead.name + " about the new document request — now showing in their borrower portal.", author:"System" });
+  showToast("Requested " + name + " — borrower notified by email & text");
   persist();
 }
 function markDocReceived(leadId, idx){
@@ -1791,10 +1809,11 @@ function renderTabScenario(lead){
 
 function renderTabDocuments(lead){
   var docs = lead.documents||[];
+  var canAiReview = isProcessor() || isOwner();
   var receivedCount = docs.filter(function(d){ return d.status==="received"; }).length;
   var reviewedCount = docs.filter(function(d){ return d.aiReview; }).length;
   var flaggedCount = docs.filter(function(d){ return d.aiReview && d.aiReview.status==="flag" && !d.aiReview.dismissed; }).length;
-  var summary = receivedCount ? (
+  var summary = (canAiReview && receivedCount) ? (
     '<div class="hint" style="margin-bottom:10px">' + reviewedCount + ' of ' + receivedCount + ' received document(s) AI-reviewed' +
     (flaggedCount ? (' — <b style="color:var(--c-rust)">' + flaggedCount + ' flagged</b>') : (reviewedCount ? ' — all clear' : '')) +
     '.</div>'
@@ -1802,16 +1821,18 @@ function renderTabDocuments(lead){
 
   var rows = docs.map(function(d,i){
     var statusBadge = d.status==="received" ? '<span class="badge badge-forest">Received</span>' : '<span class="badge badge-slate">Requested</span>';
-    var aiBadge = "", aiNote = "";
-    if (d.aiReview){
+    var aiBadge = "", aiNote = "", reviewBtn = "";
+    if (canAiReview && d.aiReview){
       aiBadge = d.aiReview.status === "clear"
         ? '<span class="badge badge-forest">AI: Clear</span>'
         : '<span class="badge badge-rust">AI: Flagged</span>';
       aiNote = '<div class="cell-sub" style="margin-top:4px;max-width:360px">' + esc(d.aiReview.note) + '</div>';
     }
-    var reviewBtn = d.status==="received"
-      ? ('<button class="btn btn-sm" data-action="ai-review-doc" data-lead="' + lead.id + '" data-idx="' + i + '">' + (d.aiReview ? "Re-run AI Review" : "Run AI Review") + '</button>')
-      : ('<button class="btn btn-sm" data-action="mark-doc-received" data-lead="' + lead.id + '" data-idx="' + i + '">Mark Received</button>');
+    if (d.status==="received"){
+      if (canAiReview) reviewBtn = '<button class="btn btn-sm" data-action="ai-review-doc" data-lead="' + lead.id + '" data-idx="' + i + '">' + (d.aiReview ? "Re-run AI Review" : "Run AI Review") + '</button>';
+    } else {
+      reviewBtn = '<button class="btn btn-sm" data-action="mark-doc-received" data-lead="' + lead.id + '" data-idx="' + i + '">Mark Received</button>';
+    }
     return '<div class="doc-row" style="align-items:flex-start"><div><div>' + esc(d.name) + '</div>' +
       '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):"")) : "Awaiting borrower") + '</div>' +
       aiNote +
@@ -1881,13 +1902,16 @@ function renderRail(lead){
         '<a class="btn btn-sm" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Call</a>' +
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<a class="btn btn-sm" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — " + lead.loanType) + '&body=' + encodeURIComponent(defaultOutreachMessage(lead)) + '" data-action="log-email" data-lead="' + lead.id + '">Email</a>' +
-        '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
-        '<button class="btn btn-sm" data-action="open-modal" data-modal="takeApplication" data-lead="' + lead.id + '">Take Application by Phone' + (lead.applicationTakenByPhone ? ' ✓' : '') + '</button>' +
-        '<a class="btn btn-sm" href="' + XACTUS_PORTAL_URL + '" target="_blank" rel="noopener" data-action="order-credit" data-lead="' + lead.id + '">Order Credit' + (lead.creditOrderedAt ? ' ✓' : '') + '</a>' +
+        (isProcessor() ? '' :
+          '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
+          '<button class="btn btn-sm" data-action="open-modal" data-modal="takeApplication" data-lead="' + lead.id + '">Take Application by Phone' + (lead.applicationTakenByPhone ? ' ✓' : '') + '</button>' +
+          '<a class="btn btn-sm" href="' + XACTUS_PORTAL_URL + '" target="_blank" rel="noopener" data-action="order-credit" data-lead="' + lead.id + '">Order Credit' + (lead.creditOrderedAt ? ' ✓' : '') + '</a>'
+        ) +
       '</div>' +
       (lead.applicationSentAt ? ('<div class="footnote" style="padding:6px 0 0">Application sent ' + fmtDate(lead.applicationSentAt) + '</div>') : '') +
       (lead.applicationTakenByPhone ? ('<div class="footnote" style="padding:2px 0 0">Application taken by phone ' + fmtDate(lead.applicationTakenAt) + '</div>') : '') +
       (lead.creditOrderedAt ? ('<div class="footnote" style="padding:2px 0 0">Credit portal opened ' + fmtDate(lead.creditOrderedAt) + '</div>') : '') +
+      (isProcessor() ? '' :
       '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft)">' +
         '<div class="rail-title" style="margin-bottom:6px">Points Charged</div>' +
         '<form data-form="set-points" data-lead="' + lead.id + '" class="points-input-row">' +
@@ -1896,8 +1920,9 @@ function renderRail(lead){
           '<button class="btn btn-sm" type="submit">Save</button>' +
         '</form>' +
         (lead.pointsCharged!=null ? ('<div class="footnote" style="padding:6px 0 0">Est. commission to ' + esc(userName(lead.assignedTo)) + ' if this closes: <b>' + fmtUSD(commissionAmount(lead)) + '</b> (50% of ' + lead.pointsCharged + '% × ' + fmtUSD(lead.loanAmount) + ')</div>') : '<div class="footnote" style="padding:6px 0 0">Not set yet — used to calculate the loan officer\'s commission.</div>') +
-      '</div>' +
+      '</div>') +
     '</div>' +
+    (isProcessor() ? '' :
     '<div class="rail-block">' +
       '<div class="rail-title">Send to Borrower</div>' +
       '<div style="display:flex;flex-direction:column;gap:8px">' +
@@ -1906,12 +1931,13 @@ function renderRail(lead){
       '</div>' +
       (lead.preapprovalSentAt ? ('<div class="footnote" style="padding:6px 0 0">Pre-approval sent ' + fmtDate(lead.preapprovalSentAt) + '</div>') : '') +
       (lead.termsheetSentAt ? ('<div class="footnote" style="padding:2px 0 0">Term sheet sent ' + fmtDate(lead.termsheetSentAt) + '</div>') : '') +
-    '</div>' +
+    '</div>') +
     '<div class="rail-block">' +
       '<div class="rail-title">Move Stage</div>' +
       '<select class="select" style="width:100%" data-action="move-stage" data-lead="' + lead.id + '">' + stageOptions + '</select>' +
       (nextStage ? ('<button class="btn btn-sm btn-primary" style="width:100%;margin-top:8px" data-action="move-stage" data-lead="' + lead.id + '" data-target="' + nextStage.key + '">Advance to ' + nextStage.label + ' →</button>') : '') +
       '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">' + statusRow + '</div>' +
+      (isProcessor() ? ('<button class="btn btn-sm btn-danger" style="width:100%;margin-top:8px" data-action="open-modal" data-modal="sendBack" data-lead="' + lead.id + '">Send Back to Loan Officer</button>') : '') +
     '</div>' +
     (idx >= stageIndex("app_completed") ? (
     '<div class="rail-block">' +
@@ -2142,7 +2168,7 @@ function renderNotifications(){
   var mine = isOwner() ? all : all.filter(function(n){ return n.toUserId===ui.viewAs; });
   var rows = mine.map(function(n){
     var lead = leadById(n.leadId);
-    var kindBadge = n.kind==="appraisal" ? '<span class="badge badge-gold">Appraisal</span>' : n.kind==="title" ? '<span class="badge badge-slate">Title</span>' : '<span class="badge badge-neutral">Note</span>';
+    var kindBadge = n.kind==="appraisal" ? '<span class="badge badge-gold">Appraisal</span>' : n.kind==="title" ? '<span class="badge badge-slate">Title</span>' : n.kind==="sent-back" ? '<span class="badge badge-rust">Sent Back</span>' : '<span class="badge badge-neutral">Note</span>';
     return '<div class="queue-card" style="border-left-color:' + (n.read? 'var(--border)':'var(--brand)') + '">' +
       '<div class="queue-main">' +
         '<div class="queue-title">' + kindBadge + ' ' + esc(n.text) + '</div>' +
@@ -2217,7 +2243,23 @@ function renderModal(){
   if (ui.modal.type === "changePin") return modalChangePin();
   if (ui.modal.type === "dialer") return modalDialer();
   if (ui.modal.type === "sendDocument") return modalSendDocument(ui.modal.leadId, ui.modal.kind);
+  if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   return "";
+}
+function modalSendBack(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return "";
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Send Back to Loan Officer — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="send-back" data-lead="' + lead.id + '">' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0">Moves this loan back to Docs Collection and notifies ' + esc(userName(lead.assignedTo)) + ' that something is missing or incomplete.</div>' +
+        '<div class="form-row"><label>What\'s missing or incomplete?</label><textarea class="textarea" name="note" rows="3" placeholder="e.g. Bank statements are missing page 2, purchase contract isn\'t signed…" required></textarea></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Send Back</button></div>' +
+      '</form>' +
+    '</div></div>';
 }
 function modalSendDocument(leadId, kind){
   var lead = leadById(leadId);
@@ -2524,6 +2566,9 @@ appEl.addEventListener("submit", function(e){
       loanAmount: numOrNull("loanAmount"),
       termMonths: numOrNull("termMonths")
     });
+    render();
+  } else if (type === "send-back"){
+    sendBackToLO(form.dataset.lead, fd.get("note"));
     render();
   } else if (type === "log-call"){
     logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
