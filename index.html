@@ -1,0 +1,2371 @@
+<title>Bridgepoint Lending Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ---------------------------------------------------------------------
+   Bridgepoint Lending Desk — design tokens
+--------------------------------------------------------------------- */
+:root{
+  --bg:#faf7f0;
+  --surface:#ffffff;
+  --surface-2:#f2ede1;
+  --border:#e2dbc9;
+  --border-soft:#ece6d7;
+  --ink:#1c1a15;
+  --ink-muted:#726b5a;
+  --ink-faint:#9b937e;
+
+  --brand:#1f3a3d;
+  --brand-strong:#152a2c;
+  --brand-tint:#e7eeed;
+  --brand-ink:#ffffff;
+
+  --c-forest:#2f5d43;      --c-forest-bg:#e3ede4;
+  --c-gold:#8a6412;        --c-gold-bg:#f4e8c8;
+  --c-rust:#9c3f2c;        --c-rust-bg:#f3e0d8;
+  --c-slate:#3b5166;       --c-slate-bg:#e2e9ef;
+  --c-neutral:#5c5748;     --c-neutral-bg:#e9e4d6;
+
+  --danger:#9c3f2c;
+  --danger-bg:#f3e0d8;
+
+  --font-display:'Fraunces', Georgia, serif;
+  --font-body:'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --shadow-card:0 1px 2px rgba(28,26,21,.06), 0 1px 1px rgba(28,26,21,.04);
+  --shadow-modal:0 20px 60px rgba(20,18,14,.35);
+  --radius:10px;
+  --radius-sm:7px;
+}
+
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#171613;
+    --surface:#211f1a;
+    --surface-2:#2a2721;
+    --border:#3a362c;
+    --border-soft:#332f27;
+    --ink:#f1ede2;
+    --ink-muted:#b3ab97;
+    --ink-faint:#7d7666;
+
+    --brand:#7fa79f;
+    --brand-strong:#9dc0b8;
+    --brand-tint:#233230;
+    --brand-ink:#0f1c1a;
+
+    --c-forest:#8fc7a2;   --c-forest-bg:#233b2b;
+    --c-gold:#e0bd6d;     --c-gold-bg:#3c3320;
+    --c-rust:#e29d87;     --c-rust-bg:#402a22;
+    --c-slate:#a9c3da;    --c-slate-bg:#26333f;
+    --c-neutral:#c9c0a9;  --c-neutral-bg:#332f27;
+
+    --danger:#e29d87;
+    --danger-bg:#402a22;
+
+    --shadow-card:0 1px 2px rgba(0,0,0,.4);
+    --shadow-modal:0 20px 60px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#171613;
+  --surface:#211f1a;
+  --surface-2:#2a2721;
+  --border:#3a362c;
+  --border-soft:#332f27;
+  --ink:#f1ede2;
+  --ink-muted:#b3ab97;
+  --ink-faint:#7d7666;
+
+  --brand:#7fa79f;
+  --brand-strong:#9dc0b8;
+  --brand-tint:#233230;
+  --brand-ink:#0f1c1a;
+
+  --c-forest:#8fc7a2;   --c-forest-bg:#233b2b;
+  --c-gold:#e0bd6d;     --c-gold-bg:#3c3320;
+  --c-rust:#e29d87;     --c-rust-bg:#402a22;
+  --c-slate:#a9c3da;    --c-slate-bg:#26333f;
+  --c-neutral:#c9c0a9;  --c-neutral-bg:#332f27;
+
+  --danger:#e29d87;
+  --danger-bg:#402a22;
+
+  --shadow-card:0 1px 2px rgba(0,0,0,.4);
+  --shadow-modal:0 20px 60px rgba(0,0,0,.6);
+}
+
+/* ---------------------------------------------------------------------
+   Base
+--------------------------------------------------------------------- */
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  background:var(--bg) !important;
+  color:var(--ink) !important;
+  font:14px/1.5 var(--font-body) !important;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{margin:0;font-family:var(--font-display);font-weight:600;color:var(--ink);text-wrap:balance}
+h2{font-size:16px}
+h3{font-size:15px}
+a{color:var(--brand)}
+button{font-family:inherit}
+::selection{background:var(--brand-tint)}
+:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.num,.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+
+#app{display:flex;min-height:100vh;align-items:stretch}
+
+/* ---------------------------------------------------------------------
+   Sidebar
+--------------------------------------------------------------------- */
+.sidebar{
+  width:236px;flex:0 0 236px;background:var(--brand);color:var(--brand-ink);
+  display:flex;flex-direction:column;padding:20px 14px;gap:18px;
+  position:sticky;top:0;height:100vh;overflow-y:auto;
+}
+.brand{display:flex;align-items:center;gap:10px;padding:0 6px}
+.brand-mark{width:30px;height:30px;flex:0 0 30px;border-radius:8px;background:var(--brand-ink);color:var(--brand);display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:700;font-size:15px}
+.brand-word{font-family:var(--font-display);font-weight:600;font-size:16px;line-height:1.15;color:var(--brand-ink)}
+.brand-tag{font-size:11px;color:rgba(255,255,255,.6);letter-spacing:.02em}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav-item{
+  display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border:0;border-radius:var(--radius-sm);
+  background:transparent;color:rgba(255,255,255,.78);font-size:13.5px;text-align:left;cursor:pointer;
+}
+.nav-item .ic{width:18px;text-align:center;flex:0 0 18px;opacity:.9}
+.nav-item span:nth-child(2){flex:1}
+.nav-item:hover{background:rgba(255,255,255,.08);color:#fff}
+.nav-item.active{background:rgba(255,255,255,.14);color:#fff}
+.nav-item .count{
+  background:rgba(255,255,255,.9);color:var(--brand-strong);font-family:var(--font-mono);font-size:11px;
+  font-weight:600;border-radius:999px;padding:1px 7px;min-width:18px;text-align:center;
+}
+.sidebar-foot{margin-top:auto;display:flex;flex-direction:column}
+.role-box{background:rgba(255,255,255,.08);border-radius:var(--radius-sm);padding:12px;font-size:12.5px;color:rgba(255,255,255,.85)}
+.role-box b{color:#fff;font-size:13.5px}
+.footnote{font-size:11px;color:rgba(255,255,255,.45);line-height:1.5}
+.sidebar .btn{background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.18)}
+.sidebar .btn:hover{background:rgba(255,255,255,.18)}
+.sidebar .btn-ghost{background:transparent}
+
+/* ---------------------------------------------------------------------
+   Main / topbar / content
+--------------------------------------------------------------------- */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{
+  display:flex;align-items:flex-start;gap:16px;padding:22px 28px;background:var(--surface);
+  border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5;
+}
+.view-title{font-size:22px}
+.view-sub{color:var(--ink-muted);font-size:13px;margin-top:3px}
+.topbar-spacer{flex:1}
+.content{padding:24px 28px 48px;display:flex;flex-direction:column;gap:20px;max-width:1320px}
+
+/* ---------------------------------------------------------------------
+   Buttons / inputs
+--------------------------------------------------------------------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  padding:8px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);
+  background:var(--surface);color:var(--ink);font-size:13px;font-weight:500;
+  cursor:pointer;text-decoration:none;white-space:nowrap;line-height:1.3;
+  transition:background .12s ease, border-color .12s ease;
+}
+.btn:hover{background:var(--surface-2);border-color:var(--ink-faint)}
+.btn-sm{padding:5px 10px;font-size:12px;border-radius:6px}
+.btn-primary{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.btn-primary:hover{background:var(--brand-strong);border-color:var(--brand-strong)}
+.btn-ghost{background:transparent;border-color:transparent}
+.btn-ghost:hover{background:var(--surface-2)}
+.btn-danger{background:var(--danger-bg);border-color:var(--danger-bg);color:var(--danger)}
+.btn-danger:hover{filter:brightness(.95)}
+
+.input,.select,.textarea{
+  width:auto;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);
+  background:var(--surface);color:var(--ink);font:13px var(--font-body);
+}
+.textarea{width:100%;resize:vertical;min-height:64px;font-family:var(--font-body)}
+.input:focus,.select:focus,.textarea:focus{outline:2px solid var(--brand);outline-offset:0;border-color:var(--brand)}
+.login-pin-input{letter-spacing:.3em;font-family:var(--font-mono)}
+
+/* ---------------------------------------------------------------------
+   KPIs / sections / panels
+--------------------------------------------------------------------- */
+.kpi-row{display:flex;gap:14px;flex-wrap:wrap}
+.kpi{flex:1;min-width:180px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow-card)}
+.kpi-label{font-size:12px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.04em}
+.kpi-value{font-size:28px;font-weight:600;margin-top:4px}
+.kpi-sub{font-size:12px;color:var(--ink-faint);margin-top:4px}
+
+.section,.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-card)}
+.section{padding:18px 20px}
+.panel-pad{padding:18px 20px}
+.section-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:12px}
+.hint{font-size:12px;color:var(--ink-faint)}
+.empty{padding:28px;text-align:center;color:var(--ink-faint);font-size:13px}
+
+/* ---------------------------------------------------------------------
+   Tables
+--------------------------------------------------------------------- */
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius)}
+table{width:100%;border-collapse:collapse;font-size:13px;background:var(--surface)}
+th{
+  text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-muted);
+  padding:10px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);white-space:nowrap;
+}
+td{padding:10px 14px;border-bottom:1px solid var(--border-soft);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr[data-action]{cursor:pointer}
+tbody tr[data-action]:hover{background:var(--surface-2)}
+td.num,th.num{text-align:right;font-family:var(--font-mono)}
+.cell-name{font-weight:500}
+.cell-sub{font-size:12px;color:var(--ink-faint);margin-top:1px}
+
+.filters{display:flex;flex-wrap:wrap;gap:8px}
+
+/* ---------------------------------------------------------------------
+   Badges
+--------------------------------------------------------------------- */
+.badge-wrap{display:flex;flex-wrap:wrap;gap:6px}
+.badge{
+  display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;
+  font-size:11.5px;font-weight:600;letter-spacing:.01em;white-space:nowrap;
+}
+.badge-forest{background:var(--c-forest-bg);color:var(--c-forest)}
+.badge-gold{background:var(--c-gold-bg);color:var(--c-gold)}
+.badge-rust{background:var(--c-rust-bg);color:var(--c-rust)}
+.badge-slate{background:var(--c-slate-bg);color:var(--c-slate)}
+.badge-neutral{background:var(--c-neutral-bg);color:var(--c-neutral)}
+
+/* ---------------------------------------------------------------------
+   Pipeline board
+--------------------------------------------------------------------- */
+.board{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;align-items:flex-start}
+.col{flex:0 0 240px;background:var(--surface-2);border:1px solid var(--border-soft);border-radius:var(--radius);display:flex;flex-direction:column;max-height:calc(100vh - 190px)}
+.col-head{display:flex;align-items:center;justify-content:space-between;padding:12px 12px 8px;font-size:12.5px;font-weight:600;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.03em}
+.col-head .n{font-weight:600;color:var(--ink-faint);text-transform:none}
+.col-cards{display:flex;flex-direction:column;gap:8px;padding:0 10px 10px;overflow-y:auto}
+.pcard{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-card)}
+.pcard:hover{border-color:var(--ink-faint)}
+.pcard .nm{font-weight:600;font-size:13px}
+.pcard .ty{font-size:12px;color:var(--ink-muted);margin-top:2px}
+.pcard .amt{font-family:var(--font-mono);font-size:12.5px;margin-top:5px}
+.pcard .lo{font-size:11.5px;color:var(--ink-faint);margin-top:3px}
+
+/* ---------------------------------------------------------------------
+   Tabs (lead detail)
+--------------------------------------------------------------------- */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px}
+.tab{padding:9px 4px;margin-right:18px;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--ink-muted);font-size:13.5px;font-weight:500;cursor:pointer}
+.tab:hover{color:var(--ink)}
+.tab.active{color:var(--brand);border-bottom-color:var(--brand)}
+
+/* ---------------------------------------------------------------------
+   Lead detail layout / rail
+--------------------------------------------------------------------- */
+.detail-grid{display:grid;grid-template-columns:1fr 300px;gap:20px;align-items:flex-start}
+.rail-block{padding:14px 16px;border-bottom:1px solid var(--border-soft)}
+.rail-block:last-child{border-bottom:0}
+.rail-title{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);margin-bottom:6px}
+.rail-name{font-family:var(--font-display);font-weight:600;font-size:17px}
+.stage-line{margin-top:8px}
+.contact-row{display:flex;flex-wrap:wrap;gap:6px}
+.points-input-row{display:flex;align-items:center;gap:6px}
+.points-input-row .input{width:80px}
+.commission-box{background:var(--brand-tint);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
+.commission-row{display:flex;gap:16px;flex-wrap:wrap;margin-top:6px}
+.commission-label{font-size:12px;color:var(--ink-muted)}
+.commission-stat{font-family:var(--font-mono);font-size:18px;font-weight:600}
+
+.field-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+.field{display:flex;flex-direction:column;gap:2px}
+.field .rail-title{margin-bottom:0}
+.form-row{display:flex;flex-direction:column;gap:4px}
+.form-row label{font-size:12px;color:var(--ink-muted)}
+.form-row .input,.form-row .select,.form-row .textarea{width:100%}
+.form-two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* ---------------------------------------------------------------------
+   Activity feed
+--------------------------------------------------------------------- */
+.activity-item{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-soft)}
+.activity-item:last-child{border-bottom:0}
+.activity-dot{width:7px;height:7px;border-radius:50%;background:var(--brand);flex:0 0 7px;margin-top:6px}
+.activity-date{font-size:11px;color:var(--ink-faint);white-space:nowrap;flex:0 0 auto}
+.activity-text{font-size:13px;flex:1}
+
+/* ---------------------------------------------------------------------
+   Today's queue
+--------------------------------------------------------------------- */
+.queue-card{
+  display:flex;align-items:center;gap:14px;justify-content:space-between;flex-wrap:wrap;
+  background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--c-slate);
+  border-radius:var(--radius-sm);padding:12px 14px;
+}
+.queue-card.type-rate-drop{border-left-color:var(--c-gold)}
+.queue-card.type-winback{border-left-color:var(--c-rust)}
+.queue-title{font-weight:600;font-size:13.5px}
+.queue-reason{font-size:12.5px;color:var(--ink-muted);margin-top:2px}
+.queue-meta{display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-faint);margin-top:4px}
+.queue-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ---------------------------------------------------------------------
+   Documents / third parties
+--------------------------------------------------------------------- */
+.doc-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-soft)}
+.doc-row:last-child{border-bottom:0}
+.doc-preview{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-top:8px}
+.doc-preview-text{white-space:pre-wrap;font-size:12.5px;color:var(--ink-muted)}
+.tp-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--border-soft)}
+.tp-row:last-child{border-bottom:0}
+.role-box.tp-select{padding:0}
+.signature{font-family:var(--font-display);font-style:italic;font-size:16px;margin-top:10px}
+
+/* ---------------------------------------------------------------------
+   Modals
+--------------------------------------------------------------------- */
+.modal-backdrop{
+  position:fixed;inset:0;background:rgba(20,18,14,.45);display:flex;align-items:center;justify-content:center;
+  padding:20px;z-index:50;
+}
+.modal{background:var(--surface);border-radius:var(--radius);width:100%;max-width:440px;max-height:88vh;
+  display:flex;flex-direction:column;box-shadow:var(--shadow-modal);overflow:hidden}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border)}
+.modal-body{padding:18px;overflow-y:auto;display:flex;flex-direction:column;gap:12px}
+.modal-foot{display:flex;gap:8px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--border)}
+
+/* ---------------------------------------------------------------------
+   Login
+--------------------------------------------------------------------- */
+.login-screen{min-height:100vh;width:100%;display:flex;align-items:center;justify-content:center;background:var(--brand);padding:20px}
+.login-card{background:var(--surface);border-radius:14px;padding:32px 30px;width:100%;max-width:360px;box-shadow:var(--shadow-modal)}
+.login-brand{display:flex;align-items:center;gap:10px;margin-bottom:22px}
+.login-title{font-size:20px;margin-top:4px}
+.login-sub{font-size:12.5px;color:var(--ink-muted);margin:6px 0 18px;line-height:1.5}
+.login-form{display:flex;flex-direction:column}
+.login-error{background:var(--c-rust-bg);color:var(--c-rust);font-size:12.5px;padding:8px 10px;border-radius:6px;margin-top:10px}
+
+/* ---------------------------------------------------------------------
+   Borrower portal preview
+--------------------------------------------------------------------- */
+.portal{max-width:640px}
+.portal-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:22px;box-shadow:var(--shadow-card)}
+.portal-progress{display:flex;gap:4px;margin:16px 0}
+.portal-step{flex:1;height:6px;border-radius:3px;background:var(--border)}
+.portal-step.done{background:var(--brand)}
+
+/* ---------------------------------------------------------------------
+   Toast
+--------------------------------------------------------------------- */
+.toast{
+  position:fixed;bottom:20px;right:20px;background:var(--ink);color:var(--bg);padding:10px 16px;
+  border-radius:8px;font-size:13px;box-shadow:var(--shadow-modal);z-index:80;
+}
+
+@media (max-width:860px){
+  .sidebar{position:static;height:auto;width:100%;flex:0 0 auto}
+  #app{flex-direction:column}
+  .detail-grid{grid-template-columns:1fr}
+  .board{max-height:none}
+}
+</style>
+<div id="app"></div>
+<script id="state-json" type="application/json">{"company":{"name":"Bridgepoint Lending","tagline":"Real Estate Financing Solutions"},"marketRates":{"dscr":{"label":"DSCR","previous":7.85,"current":7.375,"updatedAt":"2026-08-24"},"fixFlip":{"label":"Fix & Flip","previous":11.25,"current":11.25,"updatedAt":"2026-06-01"},"groundUp":{"label":"Ground Up Construction","previous":11.75,"current":11.75,"updatedAt":"2026-06-01"},"portfolio":{"label":"Portfolio / Blanket","previous":9.5,"current":9.5,"updatedAt":"2026-06-01"},"bridge":{"label":"Bridge","previous":10.5,"current":10.5,"updatedAt":"2026-06-01"},"mixedUse":{"label":"Mixed-Use","previous":9.75,"current":9.75,"updatedAt":"2026-06-01"}},"users":[{"id":"owner","name":"Joe","role":"owner","title":"Owner / Principal","phone":"(813) 555-0100","pin":"1010","username":"joe","email":"joe@bplending.com"},{"id":"lo-maria","name":"Maria Delgado","role":"loan_officer","title":"Senior Loan Officer","phone":"(813) 555-0142","pin":"2020","username":"maria","email":"maria@bplending.com"},{"id":"lo-devon","name":"Devon Marsh","role":"loan_officer","title":"Loan Officer","phone":"(813) 555-0158","pin":"2030","username":"devon","email":"devon@bplending.com"},{"id":"lo-priya","name":"Priya Anand","role":"loan_officer","title":"Loan Officer","phone":"(813) 555-0163","pin":"2040","username":"priya","email":"priya@bplending.com"},{"id":"lo-blake","name":"Blake Ferro","role":"loan_officer","title":"Loan Officer","phone":"(813) 555-0171","pin":"2050","username":"blake","email":"blake@bplending.com"},{"id":"lo-nina","name":"Nina Osei","role":"loan_officer","title":"Loan Officer","phone":"(813) 555-0186","pin":"2060","username":"nina","email":"nina@bplending.com"},{"id":"proc-erika","name":"Erika","role":"processor","title":"Loan Processor","phone":"(813) 555-0199","email":"Erika@bplending.com","pin":"3030","username":"erika"}],"notifications":[{"id":"N1000","toUserId":"proc-erika","leadId":"L011","kind":"appraisal","text":"Appraisal ordered for Ken Whitfield — 77 Grove Path, Lakeland, FL","date":"2026-08-14","read":true},{"id":"N1001","toUserId":"proc-erika","leadId":"L012","kind":"title","text":"Preliminary Title ordered for Patricia Lin — 512 Citrus Bend, Winter Garden, FL","date":"2026-08-18","read":false}],"leads":[{"id":"L001","name":"Marcus Webb","email":"marcus.webb@example.com","phone":"(727) 555-0110","source":"Meta Ads","loanType":"Fix & Flip","stage":"new","status":"active","assignedTo":"lo-maria","createdAt":"2026-08-25","entityType":"LLC","creditScore":706,"experienceDeals":3,"liquidity":45000,"propertyAddress":"1142 Palmetto Ave, Tampa, FL","propertyType":"SFR","purchasePrice":185000,"arv":285000,"rehabBudget":52000,"rentEstimate":null,"loanAmount":195000,"ltv":78,"rate":null,"termMonths":12,"exitStrategy":"Sell","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[],"activity":[{"date":"2026-08-25","type":"note","text":"Lead created via Meta Ads","author":"System"}],"documents":[{"name":"Government ID","status":"requested"},{"name":"Purchase Contract","status":"requested"}],"thirdParties":[],"createdAtTs":"2026-08-25T09:15:00.000Z","firstAttemptAt":null},{"id":"L002","name":"Renee Alston","email":"renee.alston@example.com","phone":"(813) 555-0121","source":"Meta Ads","loanType":"DSCR","stage":"new","status":"active","assignedTo":"lo-devon","createdAt":"2026-08-24","entityType":"LLC","creditScore":742,"experienceDeals":1,"liquidity":38000,"propertyAddress":"88 Coral Way, St. Petersburg, FL","propertyType":"SFR","purchasePrice":265000,"arv":null,"rehabBudget":null,"rentEstimate":2350,"loanAmount":198750,"ltv":75,"rate":null,"termMonths":360,"exitStrategy":"Hold/Rent","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-08-25","outcome":"no-answer","notes":""}],"activity":[{"date":"2026-08-24","type":"note","text":"Lead created via Meta Ads","author":"System"},{"date":"2026-08-25","type":"call","text":"Call logged — No answer","author":"Devon Marsh"},{"date":"2026-08-27","type":"note","text":"Points charged set to 3%","author":"Joe"}],"documents":[{"name":"Government ID","status":"requested"}],"thirdParties":[],"createdAtTs":"2026-08-24T09:15:00.000Z","firstAttemptAt":"2026-08-24T09:39:00.000Z","pointsCharged":3},{"id":"L003","name":"Tyler Kwan","email":"tyler.kwan@example.com","phone":"(407) 555-0133","source":"Connected Investors","loanType":"Ground Up Construction","stage":"attempting","status":"active","assignedTo":"lo-priya","createdAt":"2026-08-20","entityType":"LLC","creditScore":718,"experienceDeals":6,"liquidity":120000,"propertyAddress":"402 Sunview Ct, Orlando, FL","propertyType":"SFR","purchasePrice":95000,"arv":410000,"rehabBudget":260000,"rentEstimate":null,"loanAmount":292000,"ltv":82,"rate":null,"termMonths":18,"exitStrategy":"Sell","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-08-21","outcome":"no-answer","notes":""},{"date":"2026-08-22","outcome":"left-voicemail","notes":""},{"date":"2026-08-24","outcome":"no-answer","notes":""}],"activity":[{"date":"2026-08-20","type":"note","text":"Lead created via Connected Investors","author":"System"}],"documents":[{"name":"Government ID","status":"requested"},{"name":"Land Contract","status":"requested"},{"name":"Scope of Work / Budget","status":"requested"}],"thirdParties":[],"createdAtTs":"2026-08-20T09:15:00.000Z","firstAttemptAt":"2026-08-21T03:15:00.000Z"},{"id":"L004","name":"Sophia Grant","email":"sophia.grant@example.com","phone":"(941) 555-0144","source":"Connected Investors","loanType":"Fix & Flip","stage":"attempting","status":"active","assignedTo":"lo-blake","createdAt":"2026-08-18","entityType":"Individual","creditScore":664,"experienceDeals":0,"liquidity":22000,"propertyAddress":"27 Bayshore Ln, Sarasota, FL","propertyType":"2-4 Unit","purchasePrice":210000,"arv":320000,"rehabBudget":61000,"rentEstimate":null,"loanAmount":229000,"ltv":80,"rate":null,"termMonths":12,"exitStrategy":"Sell","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-08-19","outcome":"no-answer","notes":""},{"date":"2026-08-20","outcome":"no-answer","notes":""},{"date":"2026-08-22","outcome":"left-voicemail","notes":""},{"date":"2026-08-23","outcome":"no-answer","notes":""}],"activity":[{"date":"2026-08-18","type":"note","text":"Lead created via Connected Investors","author":"System"}],"documents":[{"name":"Government ID","status":"requested"}],"thirdParties":[],"createdAtTs":"2026-08-18T09:15:00.000Z","firstAttemptAt":"2026-08-18T12:45:00.000Z"},{"id":"L005","name":"Owen Kessler","email":"owen.kessler@example.com","phone":"(561) 555-0155","source":"Website","loanType":"Portfolio/Blanket","stage":"new","status":"active","assignedTo":"lo-nina","createdAt":"2026-08-23","entityType":"LLC","creditScore":731,"experienceDeals":9,"liquidity":210000,"propertyAddress":"6-property SFR portfolio, Jacksonville, FL","propertyType":"Multifamily 5+","purchasePrice":890000,"arv":null,"rehabBudget":null,"rentEstimate":9800,"loanAmount":668000,"ltv":75,"rate":null,"termMonths":360,"exitStrategy":"Hold/Rent","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[],"activity":[{"date":"2026-08-23","type":"note","text":"Lead created via Website","author":"System"}],"documents":[{"name":"Government ID","status":"requested"},{"name":"Entity Docs (Operating Agreement)","status":"requested"},{"name":"Rent Roll","status":"requested"}],"thirdParties":[],"createdAtTs":"2026-08-23T09:15:00.000Z","firstAttemptAt":null},{"id":"L006","name":"Dana Ruiz","email":"dana.ruiz@example.com","phone":"(305) 555-0166","source":"Referral","loanType":"Bridge","stage":"qualifying","status":"active","assignedTo":"lo-maria","createdAt":"2026-08-15","entityType":"LLC","creditScore":699,"experienceDeals":4,"liquidity":61000,"propertyAddress":"310 Harbor Dr, Fort Myers, FL","propertyType":"Condo","purchasePrice":340000,"arv":null,"rehabBudget":null,"rentEstimate":null,"loanAmount":238000,"ltv":70,"rate":null,"termMonths":12,"exitStrategy":"Refinance to DSCR","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-08-16","outcome":"no-answer","notes":""},{"date":"2026-08-17","outcome":"left-voicemail","notes":""},{"date":"2026-08-18","outcome":"connected","notes":"Discussed bridge terms, sending app link"}],"activity":[{"date":"2026-08-15","type":"note","text":"Lead created via Referral (past client)","author":"System"},{"date":"2026-08-18","type":"call","text":"Call logged — Connected: Discussed bridge terms, sending app link","author":"Maria Delgado"}],"documents":[{"name":"Government ID","status":"requested"},{"name":"Purchase Contract","status":"requested"}],"thirdParties":[],"pointsCharged":2,"createdAtTs":"2026-08-15T09:15:00.000Z","firstAttemptAt":"2026-08-15T10:00:00.000Z"},{"id":"L007","name":"Ismael Torres","email":"ismael.torres@example.com","phone":"(786) 555-0177","source":"Meta Ads","loanType":"Mixed-Use","stage":"new","status":"cold","assignedTo":"lo-devon","createdAt":"2026-08-10","entityType":"LLC","creditScore":651,"experienceDeals":2,"liquidity":30000,"propertyAddress":"915 5th St, Miami, FL","propertyType":"Mixed-Use","purchasePrice":450000,"arv":null,"rehabBudget":40000,"rentEstimate":4200,"loanAmount":337000,"ltv":75,"rate":null,"termMonths":24,"exitStrategy":"Hold/Rent","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-08-11","outcome":"no-answer","notes":""},{"date":"2026-08-12","outcome":"no-answer","notes":""},{"date":"2026-08-13","outcome":"no-answer","notes":""},{"date":"2026-08-14","outcome":"left-voicemail","notes":""},{"date":"2026-08-15","outcome":"no-answer","notes":""}],"activity":[{"date":"2026-08-10","type":"note","text":"Lead created via Meta Ads","author":"System"},{"date":"2026-08-15","type":"system","text":"Auto-marked cold after 5 unanswered attempts","author":"System"}],"documents":[{"name":"Government ID","status":"requested"}],"thirdParties":[],"createdAtTs":"2026-08-10T09:15:00.000Z","firstAttemptAt":"2026-08-12T05:15:00.000Z"},{"id":"L008","name":"Whitney Cole","email":"whitney.cole@example.com","phone":"(813) 555-0188","source":"Connected Investors","loanType":"DSCR","stage":"app_completed","status":"active","assignedTo":"lo-priya","createdAt":"2026-08-05","entityType":"LLC","creditScore":758,"experienceDeals":5,"liquidity":88000,"propertyAddress":"44 Egret Ct, Brandon, FL","propertyType":"SFR","purchasePrice":298000,"arv":null,"rehabBudget":null,"rentEstimate":2600,"loanAmount":223500,"ltv":75,"rate":null,"termMonths":360,"exitStrategy":"Hold/Rent","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-08-06","outcome":"connected","notes":"Qualified, sent application"}],"activity":[{"date":"2026-08-05","type":"note","text":"Lead created via Connected Investors","author":"System"},{"date":"2026-08-09","type":"stage","text":"Stage moved: Contacted / Qualifying → Application Started","author":"Priya Anand"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2026-08-09","fileName":"whitney_id.pdf"},{"name":"Entity Docs (Operating Agreement)","status":"received","receivedAt":"2026-08-10","fileName":"whitney_llc_docs.pdf"},{"name":"Bank Statements (2mo)","status":"requested"},{"name":"Purchase Contract","status":"requested"}],"thirdParties":[{"role":"Realtor","name":"Janice Farrow","phone":"(813) 555-0301","email":"janice@farrowrealty.com","notify":true}],"pointsCharged":2,"createdAtTs":"2026-08-05T09:15:00.000Z","firstAttemptAt":"2026-08-05T10:27:00.000Z"},{"id":"L009","name":"Grant Palowski","email":"grant.palowski@example.com","phone":"(727) 555-0199","source":"Repeat Client","loanType":"DSCR","stage":"docs","status":"active","assignedTo":"lo-blake","createdAt":"2026-07-28","entityType":"LLC","creditScore":771,"experienceDeals":11,"liquidity":150000,"propertyAddress":"230 Windsor Pl, Clearwater, FL","propertyType":"2-4 Unit","purchasePrice":415000,"arv":null,"rehabBudget":null,"rentEstimate":3900,"loanAmount":311250,"ltv":75,"rate":null,"termMonths":360,"exitStrategy":"Hold/Rent","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-07-29","outcome":"connected","notes":"Repeat borrower, fast-tracked"}],"activity":[{"date":"2026-07-28","type":"note","text":"Lead created via Repeat Client outreach","author":"System"},{"date":"2026-08-06","type":"stage","text":"Stage moved: Application Started → Docs Collection","author":"Blake Ferro"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2026-08-01","fileName":"grant_id.pdf"},{"name":"Bank Statements (2mo)","status":"received","receivedAt":"2026-08-04","fileName":"grant_bank.pdf"},{"name":"Lease Agreement","status":"requested"},{"name":"Insurance Binder","status":"requested"}],"thirdParties":[{"role":"Title Company","name":"Suncoast Title & Escrow","phone":"(727) 555-0410","email":"closings@suncoasttitle.com","notify":true}],"pointsCharged":2.5,"createdAtTs":"2026-07-28T09:15:00.000Z","firstAttemptAt":"2026-07-28T09:45:00.000Z"},{"id":"L010","name":"Aaliyah Simmons","email":"aaliyah.simmons@example.com","phone":"(904) 555-0120","source":"Website","loanType":"Fix & Flip","stage":"processing","status":"active","assignedTo":"lo-nina","createdAt":"2026-07-20","entityType":"LLC","creditScore":689,"experienceDeals":2,"liquidity":41000,"propertyAddress":"18 Marlin Way, Jacksonville, FL","propertyType":"SFR","purchasePrice":165000,"arv":268000,"rehabBudget":47000,"rentEstimate":null,"loanAmount":178000,"ltv":80,"rate":11.25,"termMonths":12,"exitStrategy":"Sell","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-07-21","outcome":"connected","notes":""}],"activity":[{"date":"2026-07-20","type":"note","text":"Lead created via Website","author":"System"},{"date":"2026-08-11","type":"stage","text":"Stage moved: Docs Collection → Processing","author":"Nina Osei"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2026-07-25","fileName":"aaliyah_id.pdf"},{"name":"Purchase Contract","status":"received","receivedAt":"2026-07-26","fileName":"aaliyah_contract.pdf"},{"name":"Scope of Work / Budget","status":"received","receivedAt":"2026-07-28","fileName":"aaliyah_sow.pdf"},{"name":"Appraisal","status":"requested"}],"thirdParties":[{"role":"Realtor","name":"Owen Presley","phone":"(904) 555-0512","email":"owen@presleyrealty.com","notify":true}],"pointsCharged":3,"createdAtTs":"2026-07-20T09:15:00.000Z","firstAttemptAt":"2026-07-20T11:15:00.000Z"},{"id":"L011","name":"Ken Whitfield","email":"ken.whitfield@example.com","phone":"(813) 555-0131","source":"Meta Ads","loanType":"Ground Up Construction","stage":"underwriting","status":"active","assignedTo":"lo-maria","createdAt":"2026-07-10","entityType":"LLC","creditScore":712,"experienceDeals":7,"liquidity":175000,"propertyAddress":"77 Grove Path, Lakeland, FL","propertyType":"SFR","purchasePrice":80000,"arv":395000,"rehabBudget":245000,"rentEstimate":null,"loanAmount":279000,"ltv":82,"rate":11.75,"termMonths":18,"exitStrategy":"Sell","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"appraisalOrdered":true,"appraisalOrderedAt":"2026-08-14","callAttempts":[{"date":"2026-07-11","outcome":"connected","notes":""}],"activity":[{"date":"2026-07-10","type":"note","text":"Lead created via Meta Ads","author":"System"},{"date":"2026-08-14","type":"stage","text":"Stage moved: Processing → Underwriting","author":"Maria Delgado"},{"date":"2026-08-14","type":"notify","text":"Notified Realtor Casey Hutton — stage is now Underwriting","author":"System"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2026-07-15","fileName":"ken_id.pdf"},{"name":"Land Contract","status":"received","receivedAt":"2026-07-16","fileName":"ken_land.pdf"},{"name":"Scope of Work / Budget","status":"received","receivedAt":"2026-07-20","fileName":"ken_budget.pdf"},{"name":"Builder's Risk Insurance","status":"requested"}],"thirdParties":[{"role":"Realtor","name":"Casey Hutton","phone":"(813) 555-0620","email":"casey@huttonrealty.com","notify":true}],"pointsCharged":2,"createdAtTs":"2026-07-10T09:15:00.000Z","firstAttemptAt":"2026-07-10T14:15:00.000Z"},{"id":"L012","name":"Patricia Lin","email":"patricia.lin@example.com","phone":"(407) 555-0142","source":"Connected Investors","loanType":"DSCR","stage":"approved","status":"active","assignedTo":"lo-devon","createdAt":"2026-07-05","entityType":"LLC","creditScore":764,"experienceDeals":3,"liquidity":72000,"propertyAddress":"512 Citrus Bend, Winter Garden, FL","propertyType":"SFR","purchasePrice":335000,"arv":null,"rehabBudget":null,"rentEstimate":2950,"loanAmount":251250,"ltv":75,"rate":7.625,"termMonths":360,"exitStrategy":"Hold/Rent","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"titleOrdered":true,"titleOrderedAt":"2026-08-18","callAttempts":[{"date":"2026-07-06","outcome":"connected","notes":""}],"activity":[{"date":"2026-07-05","type":"note","text":"Lead created via Connected Investors","author":"System"},{"date":"2026-08-18","type":"stage","text":"Stage moved: Underwriting → Conditional Approval","author":"Devon Marsh"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2026-07-10","fileName":"patricia_id.pdf"},{"name":"Bank Statements (2mo)","status":"received","receivedAt":"2026-07-12","fileName":"patricia_bank.pdf"},{"name":"Appraisal","status":"received","receivedAt":"2026-08-01","fileName":"patricia_appraisal.pdf"},{"name":"Insurance Binder","status":"requested"}],"thirdParties":[{"role":"Title Company","name":"Orange Blossom Title","phone":"(407) 555-0733","email":"team@obtitle.com","notify":true}],"pointsCharged":2.5,"createdAtTs":"2026-07-05T09:15:00.000Z","firstAttemptAt":"2026-07-05T09:33:00.000Z"},{"id":"L013","name":"Marcus Ojo","email":"marcus.ojo@example.com","phone":"(321) 555-0153","source":"Self-Generated","loanType":"Fix & Flip","stage":"ctc","status":"active","assignedTo":"lo-priya","createdAt":"2026-06-25","entityType":"LLC","creditScore":695,"experienceDeals":4,"liquidity":55000,"propertyAddress":"9 Palmetto Cir, Melbourne, FL","propertyType":"SFR","purchasePrice":142000,"arv":235000,"rehabBudget":39000,"rentEstimate":null,"loanAmount":152000,"ltv":80,"rate":11.25,"termMonths":12,"exitStrategy":"Sell","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-06-26","outcome":"connected","notes":""}],"activity":[{"date":"2026-06-25","type":"note","text":"Lead created via Self-Generated outreach","author":"System"},{"date":"2026-08-21","type":"stage","text":"Stage moved: Conditional Approval → Clear to Close","author":"Priya Anand"},{"date":"2026-08-21","type":"notify","text":"Notified Realtor Dana Okafor — stage is now Clear to Close","author":"System"},{"date":"2026-08-21","type":"notify","text":"Notified Title Company Palm Coast Title — stage is now Clear to Close","author":"System"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2026-06-30","fileName":"marcus_id.pdf"},{"name":"Purchase Contract","status":"received","receivedAt":"2026-07-01","fileName":"marcus_contract.pdf"},{"name":"Insurance Binder","status":"received","receivedAt":"2026-08-15","fileName":"marcus_insurance.pdf"}],"thirdParties":[{"role":"Realtor","name":"Dana Okafor","phone":"(321) 555-0844","email":"dana@okaforrealty.com","notify":true},{"role":"Title Company","name":"Palm Coast Title","phone":"(321) 555-0855","email":"closings@palmcoasttitle.com","notify":true}],"pointsCharged":3,"createdAtTs":"2026-06-25T09:15:00.000Z","firstAttemptAt":"2026-06-26T15:15:00.000Z"},{"id":"L014","name":"Helen Brandt","email":"helen.brandt@example.com","phone":"(813) 555-0164","source":"Repeat Client","loanType":"DSCR","stage":"closed","status":"closed","assignedTo":"lo-maria","createdAt":"2026-06-15","entityType":"LLC","creditScore":782,"experienceDeals":14,"liquidity":240000,"propertyAddress":"301 Bayview Ter, Tampa, FL","propertyType":"SFR","purchasePrice":390000,"arv":null,"rehabBudget":null,"rentEstimate":3100,"loanAmount":292500,"ltv":75,"rate":7.85,"termMonths":360,"exitStrategy":"Hold/Rent","closeDate":"2026-08-20","nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-06-16","outcome":"connected","notes":""}],"activity":[{"date":"2026-06-15","type":"note","text":"Lead created via Repeat Client outreach","author":"System"},{"date":"2026-08-20","type":"stage","text":"Stage moved: Clear to Close → Closed / Funded","author":"Maria Delgado"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2026-06-20","fileName":"helen_id.pdf"},{"name":"Insurance Binder","status":"received","receivedAt":"2026-07-05","fileName":"helen_insurance.pdf"}],"thirdParties":[{"role":"Title Company","name":"Suncoast Title & Escrow","phone":"(727) 555-0410","email":"closings@suncoasttitle.com","notify":true}],"pointsCharged":2.5,"createdAtTs":"2026-06-15T09:15:00.000Z","firstAttemptAt":"2026-06-15T10:15:00.000Z"},{"id":"L015","name":"Victor Nunes","email":"victor.nunes@example.com","phone":"(954) 555-0175","source":"Meta Ads","loanType":"DSCR","stage":"closed","status":"closed","assignedTo":"lo-devon","createdAt":"2026-05-01","entityType":"LLC","creditScore":726,"experienceDeals":5,"liquidity":98000,"propertyAddress":"620 Las Olas Way, Fort Lauderdale, FL","propertyType":"Condo","purchasePrice":305000,"arv":null,"rehabBudget":null,"rentEstimate":2450,"loanAmount":228750,"ltv":75,"rate":7.75,"termMonths":360,"exitStrategy":"Hold/Rent","closeDate":"2026-06-02","nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-05-02","outcome":"connected","notes":""}],"activity":[{"date":"2026-05-01","type":"note","text":"Lead created via Meta Ads","author":"System"},{"date":"2026-06-02","type":"stage","text":"Stage moved: Clear to Close → Closed / Funded","author":"Devon Marsh"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2026-05-10","fileName":"victor_id.pdf"}],"thirdParties":[],"pointsCharged":2,"createdAtTs":"2026-05-01T09:15:00.000Z","firstAttemptAt":"2026-05-01T15:15:00.000Z"},{"id":"L016","name":"Carla Jimenez","email":"carla.jimenez@example.com","phone":"(786) 555-0186","source":"Connected Investors","loanType":"Fix & Flip","stage":"closed","status":"closed","assignedTo":"lo-blake","createdAt":"2025-08-20","entityType":"LLC","creditScore":701,"experienceDeals":8,"liquidity":76000,"propertyAddress":"14 Coconut Row, Hialeah, FL","propertyType":"SFR","purchasePrice":178000,"arv":275000,"rehabBudget":44000,"rentEstimate":null,"loanAmount":186000,"ltv":80,"rate":11.5,"termMonths":12,"exitStrategy":"Sell","closeDate":"2025-09-15","nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2025-08-21","outcome":"connected","notes":""}],"activity":[{"date":"2025-08-20","type":"note","text":"Lead created via Connected Investors","author":"System"},{"date":"2025-09-15","type":"stage","text":"Stage moved: Clear to Close → Closed / Funded","author":"Blake Ferro"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2025-08-25","fileName":"carla_id.pdf"}],"thirdParties":[{"role":"Realtor","name":"Miguel Santos","phone":"(786) 555-0933","email":"miguel@santosrealty.com","notify":true}],"createdAtTs":"2025-08-20T09:15:00.000Z","firstAttemptAt":"2025-08-20T21:15:00.000Z"},{"id":"L017","name":"Derek Palmer","email":"derek.palmer@example.com","phone":"(904) 555-0197","source":"Website","loanType":"Ground Up Construction","stage":"closed","status":"closed","assignedTo":"lo-nina","createdAt":"2025-07-01","entityType":"LLC","creditScore":715,"experienceDeals":6,"liquidity":140000,"propertyAddress":"5 Timberline Dr, Ocala, FL","propertyType":"SFR","purchasePrice":70000,"arv":360000,"rehabBudget":225000,"rentEstimate":null,"loanAmount":253000,"ltv":82,"rate":11.75,"termMonths":12,"exitStrategy":"Sell","closeDate":"2025-10-01","nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2025-07-02","outcome":"connected","notes":""}],"activity":[{"date":"2025-07-01","type":"note","text":"Lead created via Website","author":"System"},{"date":"2025-10-01","type":"stage","text":"Stage moved: Clear to Close → Closed / Funded","author":"Nina Osei"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2025-07-10","fileName":"derek_id.pdf"}],"thirdParties":[],"createdAtTs":"2025-07-01T09:15:00.000Z","firstAttemptAt":"2025-07-02T05:15:00.000Z"},{"id":"L018","name":"Yusuf Rahman","email":"yusuf.rahman@example.com","phone":"(813) 555-0108","source":"Meta Ads","loanType":"Fix & Flip","stage":"lost","status":"lost","assignedTo":"lo-maria","createdAt":"2026-07-15","entityType":"Individual","creditScore":640,"experienceDeals":1,"liquidity":18000,"propertyAddress":"233 Cypress Ave, Tampa, FL","propertyType":"SFR","purchasePrice":155000,"arv":240000,"rehabBudget":40000,"rentEstimate":null,"loanAmount":170000,"ltv":80,"rate":null,"termMonths":12,"exitStrategy":"Sell","closeDate":null,"nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-07-16","outcome":"connected","notes":"Went with another lender — lower rate"}],"activity":[{"date":"2026-07-15","type":"note","text":"Lead created via Meta Ads","author":"System"},{"date":"2026-07-22","type":"stage","text":"Stage moved: Contacted / Qualifying → Lost/Dead","author":"Maria Delgado"}],"documents":[],"thirdParties":[],"createdAtTs":"2026-07-15T09:15:00.000Z","firstAttemptAt":"2026-07-15T09:51:00.000Z"},{"id":"L019","name":"Brianna Wells","email":"brianna.wells@example.com","phone":"(727) 555-0119","source":"Connected Investors","loanType":"DSCR","stage":"qualifying","status":"active","assignedTo":"lo-devon","createdAt":"2026-08-12","entityType":"LLC","creditScore":733,"experienceDeals":2,"liquidity":54000,"propertyAddress":"70 Seagrass Blvd, Largo, FL","propertyType":"SFR","purchasePrice":248000,"arv":null,"rehabBudget":null,"rentEstimate":2150,"loanAmount":186000,"ltv":75,"rate":null,"termMonths":360,"exitStrategy":"Hold/Rent","closeDate":null,"nextFollowUp":"2026-08-26","nextFollowUpNote":"Promised to send bank statements this week — follow up if not received","callAttempts":[{"date":"2026-08-13","outcome":"connected","notes":"Qualified, waiting on docs"}],"activity":[{"date":"2026-08-12","type":"note","text":"Lead created via Connected Investors","author":"System"},{"date":"2026-08-13","type":"call","text":"Call logged — Connected: Qualified, waiting on docs","author":"Devon Marsh"}],"documents":[{"name":"Government ID","status":"requested"},{"name":"Bank Statements (2mo)","status":"requested"}],"thirdParties":[],"pointsCharged":2,"createdAtTs":"2026-08-12T09:15:00.000Z","firstAttemptAt":"2026-08-12T10:45:00.000Z"},{"id":"L020","name":"Cole Abernathy","email":"cole.abernathy@example.com","phone":"(321) 555-0120","source":"Referral","loanType":"Mixed-Use","stage":"postclosing","status":"closed","assignedTo":"lo-priya","createdAt":"2026-01-20","entityType":"LLC","creditScore":748,"experienceDeals":10,"liquidity":165000,"propertyAddress":"812 Harbor Row, Cocoa Beach, FL","propertyType":"Mixed-Use","purchasePrice":520000,"arv":null,"rehabBudget":null,"rentEstimate":5200,"loanAmount":390000,"ltv":75,"rate":9.75,"termMonths":360,"exitStrategy":"Hold/Rent","closeDate":"2026-03-01","nextFollowUp":null,"nextFollowUpNote":null,"callAttempts":[{"date":"2026-01-21","outcome":"connected","notes":""}],"activity":[{"date":"2026-01-20","type":"note","text":"Lead created via Referral","author":"System"},{"date":"2026-03-01","type":"stage","text":"Stage moved: Clear to Close → Closed / Funded","author":"Priya Anand"},{"date":"2026-03-05","type":"stage","text":"Stage moved: Closed / Funded → Post-Closing","author":"Priya Anand"}],"documents":[{"name":"Government ID","status":"received","receivedAt":"2026-01-25","fileName":"cole_id.pdf"}],"thirdParties":[{"role":"Insurance Agent","name":"Faith Runyon","phone":"(321) 555-0399","email":"faith@runyoninsurance.com","notify":true}],"createdAtTs":"2026-01-20T09:15:00.000Z","firstAttemptAt":"2026-01-20T13:15:00.000Z"}]}</script>
+<script id="app-script">(function(){
+"use strict";
+
+/* ---------------------------------------------------------------------
+   Config
+--------------------------------------------------------------------- */
+var STAGES = [
+  { key:"new",         label:"New Lead" },
+  { key:"attempting",  label:"Attempting Contact" },
+  { key:"qualifying",  label:"Contacted / Qualifying" },
+  { key:"app_sent",    label:"Application Sent" },
+  { key:"app_completed", label:"Application Completed" },
+  { key:"docs",        label:"Docs Collection" },
+  { key:"processing",  label:"Processing" },
+  { key:"underwriting",label:"Underwriting" },
+  { key:"approved",    label:"Conditional Approval" },
+  { key:"ctc",         label:"Clear to Close" },
+  { key:"closed",      label:"Closed / Funded" },
+  { key:"postclosing", label:"Post-Closing" }
+];
+var STAGE_MAP = {};
+STAGES.forEach(function(s,i){ STAGE_MAP[s.key] = { label:s.label, index:i }; });
+
+var LOAN_TYPES = ["DSCR","Fix & Flip","Ground Up Construction","Portfolio/Blanket","Bridge","Mixed-Use"];
+var SOURCES = ["Meta Ads","Connected Investors","Referral","Repeat Client","Website","Self-Generated"];
+var ENTITY_TYPES = ["LLC","Individual","Corporation"];
+var PROPERTY_TYPES = ["SFR","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Land"];
+var EXIT_STRATEGIES = ["Sell","Refinance to DSCR","Hold/Rent","1031 Exchange"];
+var TP_ROLES = ["Realtor","Title Company","Escrow Officer","Insurance Agent","Attorney","Appraiser"];
+var CALL_OUTCOMES = [
+  { key:"no-answer", label:"No answer" },
+  { key:"left-voicemail", label:"Left voicemail" },
+  { key:"connected", label:"Connected" },
+  { key:"not-interested", label:"Not interested" },
+  { key:"wrong-number", label:"Wrong number" }
+];
+var RATE_KEY_BY_LOAN_TYPE = {
+  "DSCR":"dscr", "Fix & Flip":"fixFlip", "Ground Up Construction":"groundUp",
+  "Portfolio/Blanket":"portfolio", "Bridge":"bridge", "Mixed-Use":"mixedUse"
+};
+var SHORT_TERM_TYPES = ["Fix & Flip","Ground Up Construction","Bridge"];
+var APPLICATION_FORM_URL = "https://claude.ai/code/artifact/d9ae64b9-b0f5-4487-9fa7-d92fdf4194e6";
+var XACTUS_PORTAL_URL = "https://xactus.com/sign-in/";
+var CADENCE_STAGES = ["new","attempting","qualifying"];
+var CADENCE_MAX = 5;
+
+/* ---------------------------------------------------------------------
+   State
+--------------------------------------------------------------------- */
+var state = JSON.parse(document.getElementById("state-json").textContent);
+
+var ui = {
+  view: "today",
+  viewAs: "owner",
+  loggedIn: false,
+  loginSelectedUser: null,
+  loginError: null,
+  loginUsername: "",
+  dialer: null,
+  selectedLeadId: null,
+  activeTab: "overview",
+  modal: null,
+  portalLeadId: null,
+  leadFilter: { q:"", stage:"", loanType:"", assignedTo:"", status:"active" },
+  commFilter: "",
+  toast: null
+};
+try {
+  var savedRole = localStorage.getItem("bp_view_as");
+  var savedAuthedFor = localStorage.getItem("bp_authed_for");
+  if (savedRole && savedAuthedFor && savedAuthedFor === savedRole){
+    ui.viewAs = savedRole;
+    ui.loggedIn = true;
+  }
+} catch(e){}
+
+/* ---------------------------------------------------------------------
+   Helpers
+--------------------------------------------------------------------- */
+function esc(s){
+  if (s===null || s===undefined) return "";
+  return String(s).replace(/[&<>"']/g, function(c){
+    return { "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c];
+  });
+}
+function fmtUSD(n){
+  if (n===null || n===undefined || isNaN(n)) return "—";
+  return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(n);
+}
+function fmtPct(n){
+  if (n===null || n===undefined) return "—";
+  var s = Number(n).toFixed(3);
+  s = s.replace(/0+$/,"").replace(/\.$/,"");
+  return s + "%";
+}
+function fmtDate(iso){
+  if (!iso) return "—";
+  var d = new Date(iso + "T00:00:00");
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US",{ month:"short", day:"numeric", year:"numeric" });
+}
+function todayISO(){
+  var d = new Date();
+  return d.toISOString().slice(0,10);
+}
+function startOfToday(){
+  var d = new Date(); d.setHours(0,0,0,0); return d;
+}
+function dateOnly(d){
+  var c = new Date(d.getTime()); c.setHours(0,0,0,0); return c;
+}
+function addMonths(date, months){
+  var d = new Date(date.getTime());
+  return new Date(d.getFullYear(), d.getMonth()+months, d.getDate());
+}
+function daysDiff(a,b){ return Math.round((b.getTime()-a.getTime())/86400000); }
+function stageLabel(key){
+  if (key==="cold") return "Cold";
+  if (key==="lost") return "Lost / Dead";
+  return (STAGE_MAP[key] && STAGE_MAP[key].label) || key;
+}
+function stageIndex(key){ return STAGE_MAP[key] ? STAGE_MAP[key].index : -1; }
+function userById(id){ return state.users.filter(function(u){ return u.id===id; })[0] || null; }
+function userName(id){ var u = userById(id); return u ? u.name : "Unassigned"; }
+function loName(id){ return userName(id); }
+function isOwner(){ return ui.viewAs==="owner"; }
+function isProcessor(){ var u = userById(ui.viewAs); return !!(u && u.role==="processor"); }
+function isLO(){ var u = userById(ui.viewAs); return !!(u && u.role==="loan_officer"); }
+function currentUser(){ return userById(ui.viewAs) || { id:"owner", name:"Joe", role:"owner" }; }
+function leadById(id){ return state.leads.filter(function(l){ return l.id===id; })[0] || null; }
+function nextLeadId(){
+  var max = 0;
+  state.leads.forEach(function(l){
+    var m = /^L(\d+)$/.exec(l.id);
+    if (m) max = Math.max(max, parseInt(m[1],10));
+  });
+  return "L" + String(max+1).padStart(3,"0");
+}
+function loanOfficers(){ return state.users.filter(function(u){ return u.role==="loan_officer"; }); }
+
+/* ---------------------------------------------------------------------
+   Login / access
+--------------------------------------------------------------------- */
+function userByUsername(name){
+  var n = String(name||"").trim().toLowerCase();
+  if (!n) return null;
+  return state.users.filter(function(u){ return String(u.username||"").toLowerCase()===n; })[0] || null;
+}
+function attemptLogin(username, pin){
+  ui.loginUsername = username||"";
+  var u = userByUsername(username);
+  if (!u || String(u.pin==null?"":u.pin) !== String(pin==null?"":pin) || !pin){
+    ui.loginError = "Incorrect username or PIN.";
+    render();
+    return;
+  }
+  ui.viewAs = u.id;
+  ui.loggedIn = true;
+  ui.loginError = null;
+  ui.loginSelectedUser = null;
+  ui.loginUsername = "";
+  ui.view = "today";
+  ui.selectedLeadId = null;
+  try { localStorage.setItem("bp_view_as", u.id); localStorage.setItem("bp_authed_for", u.id); } catch(e){}
+  render();
+}
+function logout(){
+  ui.loggedIn = false;
+  ui.loginSelectedUser = null;
+  ui.loginError = null;
+  ui.loginUsername = "";
+  try { localStorage.removeItem("bp_authed_for"); } catch(e){}
+  render();
+}
+function changeMyPin(oldPin, newPin){
+  var u = userById(ui.viewAs);
+  if (!u) return;
+  if (String(u.pin==null?"":u.pin) !== String(oldPin==null?"":oldPin)){ showToast("Current PIN is incorrect"); return; }
+  if (!/^\d{4,6}$/.test(newPin||"")){ showToast("PIN must be 4–6 digits"); return; }
+  u.pin = newPin;
+  ui.modal = null;
+  showToast("PIN updated");
+  persist();
+}
+function resetUserPin(userId, newPin){
+  if (!isOwner()) return;
+  var u = userById(userId);
+  if (!u) return;
+  if (!/^\d{4,6}$/.test(newPin||"")){ showToast("PIN must be 4–6 digits"); return; }
+  u.pin = newPin;
+  showToast("PIN reset for " + u.name);
+  persist();
+}
+
+/* ---------------------------------------------------------------------
+   Commission (points charged)
+--------------------------------------------------------------------- */
+var COMMISSION_SPLIT = 0.5;
+function commissionAmount(lead){
+  if (!lead.pointsCharged || !lead.loanAmount) return 0;
+  return lead.loanAmount * (lead.pointsCharged/100) * COMMISSION_SPLIT;
+}
+function commissionSummaryFor(userId){
+  var today = startOfToday();
+  var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  var mine = state.leads.filter(function(l){ return l.assignedTo===userId; });
+  var closedThisMonth = mine.filter(function(l){
+    return l.status==="closed" && l.closeDate && new Date(l.closeDate+"T00:00:00") >= monthStart;
+  });
+  var earned = closedThisMonth.reduce(function(s,l){ return s + commissionAmount(l); }, 0);
+  var activePipeline = mine.filter(function(l){ return l.status==="active"; });
+  var potential = activePipeline.reduce(function(s,l){ return s + commissionAmount(l); }, 0);
+  return { earned: earned, potential: potential, closedCount: closedThisMonth.length, pipelineCount: activePipeline.length };
+}
+function setPointsCharged(leadId, points){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var n = points===""||points===null||points===undefined ? null : Number(points);
+  if (n !== null && (isNaN(n) || n < 0 || n > 15)){ showToast("Points should be between 0 and 15"); return; }
+  lead.pointsCharged = n;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"note", text: n===null ? "Points charged cleared" : ("Points charged set to " + n + "%"), author: currentUser().name });
+  showToast(n===null ? "Points charged cleared" : "Points charged set to " + n + "%");
+  persist();
+}
+
+/* ---------------------------------------------------------------------
+   Speed to lead
+--------------------------------------------------------------------- */
+function nowTs(){ return new Date().toISOString(); }
+function speedToLeadMs(lead){
+  if (!lead.createdAtTs || !lead.firstAttemptAt) return null;
+  var ms = new Date(lead.firstAttemptAt).getTime() - new Date(lead.createdAtTs).getTime();
+  return isNaN(ms) ? null : ms;
+}
+function fmtDuration(ms){
+  if (ms===null || ms===undefined || isNaN(ms)) return "—";
+  if (ms < 0) ms = 0;
+  var mins = ms/60000;
+  if (mins < 60) return Math.max(1,Math.round(mins)) + " min";
+  var hrs = mins/60;
+  if (hrs < 24) return (Math.round(hrs*10)/10) + " hr";
+  var days = hrs/24;
+  return (Math.round(days*10)/10) + " day" + (days>=1.95?"s":"");
+}
+function speedBadgeClass(ms){
+  if (ms===null) return "badge-neutral";
+  var hrs = ms/3600000;
+  if (hrs <= 1) return "badge-forest";
+  if (hrs <= 24) return "badge-gold";
+  return "badge-rust";
+}
+function speedToLeadStats(leads){
+  var withAttempt = leads.filter(function(l){ return speedToLeadMs(l)!==null; });
+  var uncontacted = leads.filter(function(l){ return !l.firstAttemptAt && l.status==="active"; });
+  var avgMs = withAttempt.length ? withAttempt.reduce(function(s,l){ return s+speedToLeadMs(l); },0) / withAttempt.length : null;
+  var within1hr = withAttempt.filter(function(l){ return speedToLeadMs(l) <= 3600000; }).length;
+  var pctWithin1hr = withAttempt.length ? Math.round((within1hr/withAttempt.length)*100) : null;
+  return { avgMs: avgMs, pctWithin1hr: pctWithin1hr, contactedCount: withAttempt.length, uncontactedCount: uncontacted.length };
+}
+
+/* ---------------------------------------------------------------------
+   Conversion by source
+--------------------------------------------------------------------- */
+function conversionBySource(leads){
+  var bySource = {};
+  SOURCES.forEach(function(s){ bySource[s] = { source:s, total:0, closed:0, active:0, lostCold:0, closedValue:0 }; });
+  leads.forEach(function(l){
+    var b = bySource[l.source];
+    if (!b){ b = bySource[l.source] = { source:l.source||"Other", total:0, closed:0, active:0, lostCold:0, closedValue:0 }; }
+    b.total++;
+    if (l.status==="closed"){ b.closed++; b.closedValue += (l.loanAmount||0); }
+    else if (l.status==="active"){ b.active++; }
+    else { b.lostCold++; }
+  });
+  return Object.keys(bySource).map(function(k){ return bySource[k]; }).filter(function(b){ return b.total>0; })
+    .map(function(b){ b.rate = b.total ? Math.round((b.closed/b.total)*100) : 0; return b; })
+    .sort(function(a,b){ return b.rate - a.rate; });
+}
+
+/* ---------------------------------------------------------------------
+   Power dialer
+--------------------------------------------------------------------- */
+function startDialer(){
+  var ids = computeQueue(ui.viewAs).map(function(i){ return i.leadId; });
+  var seen = {}, uniq = [];
+  ids.forEach(function(id){ if (!seen[id]){ seen[id]=true; uniq.push(id); } });
+  if (!uniq.length){ showToast("No calls queued right now"); return; }
+  ui.dialer = { queueIds: uniq, index: 0 };
+  ui.modal = { type: "dialer" };
+  render();
+}
+function dialerAdvance(){
+  if (!ui.dialer) return;
+  ui.dialer.index++;
+  if (ui.dialer.index >= ui.dialer.queueIds.length){
+    ui.modal = null;
+    ui.dialer = null;
+    showToast("Dialer session complete — nice work");
+  }
+  render();
+}
+function closeDialer(){
+  ui.modal = null;
+  ui.dialer = null;
+  render();
+}
+
+/* ---------------------------------------------------------------------
+   Derived data
+--------------------------------------------------------------------- */
+function scopedLeads(){
+  if (isOwner()) return state.leads;
+  if (isProcessor()) return state.leads.filter(function(l){
+    return ["app_completed","docs","processing","underwriting","approved","ctc","closed","postclosing"].indexOf(l.stage) !== -1;
+  });
+  if (isLO()) return state.leads.filter(function(l){ return l.assignedTo===ui.viewAs; });
+  return state.leads;
+}
+
+function computeQueue(userId){
+  var items = [];
+  var today = startOfToday();
+  var leads = (userId==="owner") ? state.leads : state.leads.filter(function(l){ return l.assignedTo===userId; });
+
+  leads.forEach(function(lead){
+    if (lead.status==="active" && CADENCE_STAGES.indexOf(lead.stage) !== -1){
+      var attempts = lead.callAttempts || [];
+      var connected = attempts.some(function(a){ return a.outcome==="connected"; });
+      if (!connected && attempts.length < CADENCE_MAX){
+        var last = attempts[attempts.length-1];
+        var lastDate = last ? new Date(last.date+"T00:00:00") : null;
+        var due = !lastDate || dateOnly(lastDate) < today;
+        if (due){
+          items.push({
+            type:"cadence", leadId:lead.id,
+            priority: attempts.length===0 ? 2 : 1,
+            label: "Day " + (attempts.length+1) + " of " + CADENCE_MAX + " — new lead follow-up",
+            reason: attempts.length===0 ? "First outreach attempt" : (attempts.length + " attempt(s) so far, no contact yet")
+          });
+        }
+      }
+    }
+
+    var rk = RATE_KEY_BY_LOAN_TYPE[lead.loanType];
+    if (rk && state.marketRates[rk]){
+      var r = state.marketRates[rk];
+      if (r.current < r.previous && (lead.status==="active" || lead.status==="closed")){
+        items.push({
+          type:"rate-drop", leadId:lead.id, priority:3,
+          label: lead.loanType + " rates dropped to " + fmtPct(r.current) + " — call to discuss",
+          reason: "Was " + fmtPct(r.previous) + ", now " + fmtPct(r.current) + " as of " + fmtDate(r.updatedAt)
+        });
+      }
+    }
+
+    if (lead.status==="closed" && SHORT_TERM_TYPES.indexOf(lead.loanType) !== -1 && lead.closeDate && lead.termMonths && lead.termMonths <= 36){
+      var end = addMonths(new Date(lead.closeDate+"T00:00:00"), lead.termMonths);
+      var daysLeft = daysDiff(today, end);
+      if (daysLeft <= 60 && daysLeft >= -30){
+        items.push({
+          type:"refi", leadId:lead.id, priority:2,
+          label: (daysLeft>=0 ? "Term ends in " + daysLeft + " day(s)" : "Term ended " + Math.abs(daysLeft) + " day(s) ago") + " — discuss refi / exit",
+          reason: "Closed " + fmtDate(lead.closeDate) + ", " + lead.termMonths + "-month term"
+        });
+      }
+    }
+
+    if (lead.status==="active" && lead.nextFollowUp){
+      var fu = dateOnly(new Date(lead.nextFollowUp+"T00:00:00"));
+      if (fu <= today){
+        items.push({
+          type:"followup", leadId:lead.id, priority:2,
+          label:"Scheduled follow-up due", reason: lead.nextFollowUpNote || ""
+        });
+      }
+    }
+
+    var wb = winbackInfo(lead, today);
+    if (wb){
+      items.push({
+        type:"winback", leadId:lead.id, priority: wb.priority,
+        label:"Win-back opportunity (" + (lead.status==="cold"?"cold lead":"lost deal") + ")",
+        reason: wb.reasons.join(" · ")
+      });
+    }
+  });
+
+  items.sort(function(a,b){ return b.priority - a.priority; });
+  return items;
+}
+
+function kpisFor(leads){
+  var today = startOfToday();
+  var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  var activeCount = leads.filter(function(l){ return l.status==="active"; }).length;
+  var pipelineValue = leads.filter(function(l){ return l.status==="active"; })
+    .reduce(function(s,l){ return s + (l.loanAmount||0); }, 0);
+  var closedThisMonth = leads.filter(function(l){
+    return l.status==="closed" && l.closeDate && new Date(l.closeDate+"T00:00:00") >= monthStart;
+  });
+  var closedValue = closedThisMonth.reduce(function(s,l){ return s + (l.loanAmount||0); }, 0);
+  var callsDue = computeQueue(ui.viewAs).length;
+  return { activeCount:activeCount, pipelineValue:pipelineValue, closedCount:closedThisMonth.length, closedValue:closedValue, callsDue:callsDue };
+}
+
+/* ---------------------------------------------------------------------
+   Win-back / retargeting
+--------------------------------------------------------------------- */
+function lastTouchDate(lead){
+  var dates = [];
+  (lead.callAttempts||[]).forEach(function(a){ if (a.date) dates.push(a.date); });
+  (lead.activity||[]).forEach(function(a){ if (a.date) dates.push(a.date); });
+  if (lead.createdAt) dates.push(lead.createdAt);
+  if (!dates.length) return null;
+  dates.sort();
+  return new Date(dates[dates.length-1] + "T00:00:00");
+}
+function winbackInfo(lead, today){
+  if (lead.status !== "cold" && lead.status !== "lost") return null;
+  var reasons = [];
+  var priority = 1;
+  var rk = RATE_KEY_BY_LOAN_TYPE[lead.loanType];
+  if (rk && state.marketRates[rk] && state.marketRates[rk].current < state.marketRates[rk].previous){
+    reasons.push(lead.loanType + " rates just dropped to " + fmtPct(state.marketRates[rk].current) + " (was " + fmtPct(state.marketRates[rk].previous) + ")");
+    priority = 3;
+  }
+  var lt = lastTouchDate(lead);
+  var days = lt ? daysDiff(lt, today) : null;
+  var bucket = null;
+  if (days !== null){
+    if (days >= 90) bucket = 90; else if (days >= 60) bucket = 60; else if (days >= 30) bucket = 30;
+  }
+  if (bucket){
+    reasons.push("It's been " + days + " days since last contact — a check-in is due");
+    priority = Math.max(priority, bucket >= 90 ? 2 : 1);
+  }
+  if (!reasons.length) return null;
+  return { reasons:reasons, days:days, priority:priority };
+}
+function applicationLink(lead){
+  var qp = new URLSearchParams();
+  qp.set("lead", lead.id);
+  if (lead.name) qp.set("name", lead.name);
+  if (lead.email) qp.set("email", lead.email);
+  if (lead.phone) qp.set("phone", lead.phone);
+  if (lead.loanType) qp.set("loanType", lead.loanType);
+  if (lead.propertyAddress) qp.set("property", lead.propertyAddress);
+  return APPLICATION_FORM_URL + "?" + qp.toString();
+}
+function defaultOutreachMessage(lead){
+  if (lead.status === "cold" || lead.status === "lost") return suggestedWinbackMessage(lead);
+  var first = (lead.name||"").split(" ")[0];
+  var lo = userName(lead.assignedTo);
+  return "Hi " + first + ", it's " + lo + " with Bridgepoint Lending, following up on your " + lead.loanType + " inquiry" + (lead.propertyAddress ? (" for " + lead.propertyAddress) : "") + ". Let me know a good time to connect.";
+}
+function suggestedWinbackMessage(lead){
+  var first = (lead.name||"").split(" ")[0];
+  var lo = userName(lead.assignedTo);
+  var rk = RATE_KEY_BY_LOAN_TYPE[lead.loanType];
+  var rateNote = "";
+  if (rk && state.marketRates[rk] && state.marketRates[rk].current < state.marketRates[rk].previous){
+    rateNote = lead.loanType + " rates just moved to " + fmtPct(state.marketRates[rk].current) + " — ";
+  }
+  var subject = lead.propertyAddress ? ("financing for " + lead.propertyAddress) : "your next deal";
+  return "Hi " + first + ", it's " + lo + " with Bridgepoint Lending. " + rateNote + "wanted to reconnect on " + subject + ". Still in the market? Happy to run new numbers for you whenever you're ready.";
+}
+
+/* ---------------------------------------------------------------------
+   Pre-Approval / Term Sheet document generation
+--------------------------------------------------------------------- */
+function addDaysISO(dateStr, days){
+  var d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0,10);
+}
+function docLoanOfficer(lead){
+  return userById(lead.assignedTo) || currentUser();
+}
+function loContactLines(lo){
+  var lines = [];
+  lines.push(lo.name || "Loan Officer");
+  lines.push(lo.title || "Loan Officer");
+  lines.push("Bridgepoint Lending — Real Estate Financing Solutions");
+  var contact = [lo.phone, lo.email].filter(Boolean).join("  ·  ");
+  if (contact) lines.push(contact);
+  return lines;
+}
+function buildPreApprovalLetter(lead){
+  var lo = docLoanOfficer(lead);
+  var today = todayISO();
+  var expires = addDaysISO(today, 30);
+  var lines = [];
+  lines.push("BRIDGEPOINT LENDING");
+  lines.push("Real Estate Financing Solutions");
+  lines.push("");
+  lines.push(fmtDate(today));
+  lines.push("");
+  lines.push("Re: Pre-Approval — " + (lead.propertyAddress || "Subject Property TBD"));
+  lines.push("");
+  lines.push("Dear " + (lead.name || "Borrower") + ",");
+  lines.push("");
+  lines.push("Based on the information provided, Bridgepoint Lending is pleased to issue this pre-approval for the loan outlined below, subject to final underwriting, appraisal, title, and satisfactory documentation.");
+  lines.push("");
+  lines.push("Loan Type: " + (lead.loanType || "TBD"));
+  lines.push("Loan Amount: " + fmtUSD(lead.loanAmount));
+  lines.push("Estimated Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
+  lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
+  lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
+  lines.push("Subject Property: " + (lead.propertyAddress || "TBD"));
+  lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
+  lines.push("");
+  lines.push("This pre-approval is valid through " + fmtDate(expires) + " and does not constitute a commitment to lend. Final terms remain subject to underwriting review, appraisal, title, and receipt of all required documentation.");
+  lines.push("");
+  lines.push("Please don't hesitate to reach out with any questions.");
+  lines.push("");
+  lines.push("Sincerely,");
+  lines.push("");
+  lines = lines.concat(loContactLines(lo));
+  return lines.join("\n");
+}
+function buildTermSheet(lead){
+  var lo = docLoanOfficer(lead);
+  var today = todayISO();
+  var expires = addDaysISO(today, 15);
+  var commission = lead.pointsCharged!=null ? (lead.pointsCharged + "%") : "TBD";
+  var lines = [];
+  lines.push("BRIDGEPOINT LENDING — TERM SHEET");
+  lines.push("Real Estate Financing Solutions");
+  lines.push("");
+  lines.push("Prepared for: " + (lead.name || "Borrower"));
+  lines.push("Date: " + fmtDate(today));
+  lines.push("Expires: " + fmtDate(expires));
+  lines.push("");
+  lines.push("LOAN TERMS");
+  lines.push("Loan Type: " + (lead.loanType || "TBD"));
+  lines.push("Loan Amount: " + fmtUSD(lead.loanAmount));
+  lines.push("Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
+  lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
+  lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
+  lines.push("Points Charged: " + commission);
+  lines.push("");
+  lines.push("PROPERTY");
+  lines.push("Address: " + (lead.propertyAddress || "TBD"));
+  lines.push("Property Type: " + (lead.propertyType || "TBD"));
+  lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
+  lines.push("");
+  lines.push("This term sheet is for discussion purposes only, is not a commitment to lend, and is subject to underwriting approval, appraisal, title, and satisfactory documentation. Fees, third-party costs, and final terms will be detailed in your closing disclosure.");
+  lines.push("");
+  lines.push("Prepared by,");
+  lines.push("");
+  lines = lines.concat(loContactLines(lo));
+  return lines.join("\n");
+}
+function docHTMLPreview(lead, kind){
+  var body = kind === "termSheet" ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
+  var linesArr = body.split("\n");
+  var lo = docLoanOfficer(lead);
+  var closingIdx = linesArr.length - loContactLines(lo).length;
+  var beforeSig = linesArr.slice(0, closingIdx).join("\n");
+  return '<div class="doc-preview">' +
+    '<pre class="doc-preview-text">' + esc(beforeSig) + '</pre>' +
+    '<div class="signature">' + esc(lo.name || "") + '</div>' +
+    '<div class="doc-preview-text" style="margin-top:2px">' + esc(lo.title || "Loan Officer") + '<br>Bridgepoint Lending — Real Estate Financing Solutions' +
+      (lo.phone || lo.email ? ('<br>' + esc([lo.phone, lo.email].filter(Boolean).join("  ·  "))) : '') +
+    '</div>' +
+  '</div>';
+}
+
+/* ---------------------------------------------------------------------
+   Actions (mutate state, then persist)
+--------------------------------------------------------------------- */
+var publishTimer = null;
+function persist(){
+  render();
+  if (publishTimer) clearTimeout(publishTimer);
+  publishTimer = setTimeout(doPublish, 500);
+}
+var artifactApiPromise = null;
+function getArtifactApi(){
+  if (!artifactApiPromise){
+    artifactApiPromise = (window.claude && window.claude.use) ? window.claude.use("artifact") : Promise.resolve(null);
+  }
+  return artifactApiPromise;
+}
+function saveLocalFallback(){
+  try { localStorage.setItem("bp_lending_state_backup", JSON.stringify(state)); } catch(e){}
+}
+function doPublish(){
+  getArtifactApi().then(function(api){
+    if (!api){ saveLocalFallback(); return; }
+    var html = buildFullDocument(state);
+    api.publish(html).then(function(){
+      /* view reloads to the new version */
+    }).catch(function(err){
+      if (err && err.code === "conflict") return;
+      saveLocalFallback();
+      showToast("Couldn't save changes — kept locally");
+    });
+  }).catch(function(){ saveLocalFallback(); });
+}
+function buildFullDocument(st){
+  var headHTML = document.head.innerHTML;
+  var scriptSrc = document.getElementById("app-script").textContent;
+  var json = JSON.stringify(st).replace(/</g, "\\u003c");
+  return "<!doctype html>\n<html lang=\"en\">\n<head>\n" + headHTML + "\n</head>\n<body>\n" +
+    "<div id=\"app\"></div>\n" +
+    "<script id=\"state-json\" type=\"application/json\">" + json + "<" + "/script>\n" +
+    "<script id=\"app-script\">" + scriptSrc + "<" + "/script>\n" +
+    "</body>\n</html>";
+}
+var toastTimer = null;
+function showToast(msg){
+  ui.toast = msg;
+  render();
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ ui.toast = null; render(); }, 2600);
+}
+
+function logCall(leadId, outcome, notes){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  if (!lead.firstAttemptAt) lead.firstAttemptAt = nowTs();
+  lead.callAttempts = lead.callAttempts || [];
+  lead.callAttempts.push({ date:d, outcome:outcome, notes:notes||"" });
+  lead.activity = lead.activity || [];
+  var outLabel = (CALL_OUTCOMES.filter(function(o){ return o.key===outcome; })[0] || {}).label || outcome;
+  lead.activity.push({ date:d, type:"call", text:"Call logged — " + outLabel + (notes ? ": " + notes : ""), author: currentUser().name });
+  lead.lastContactAt = d;
+  if (outcome === "connected"){
+    if (lead.status==="cold" || lead.status==="lost"){
+      lead.status = "active";
+      lead.stage = "qualifying";
+      lead.activity.push({ date:d, type:"system", text:"Reactivated via win-back outreach", author: currentUser().name });
+    } else if (lead.stage==="new" || lead.stage==="attempting"){
+      lead.stage = "qualifying";
+    }
+  } else {
+    var unanswered = lead.callAttempts.filter(function(a){ return a.outcome!=="connected"; }).length;
+    if (unanswered >= CADENCE_MAX && lead.status==="active"){
+      lead.status = "cold";
+      lead.activity.push({ date:d, type:"system", text:"Auto-marked cold after " + CADENCE_MAX + " unanswered attempts", author:"System" });
+    }
+  }
+  showToast("Call logged for " + lead.name);
+  persist();
+}
+
+function logTextSent(leadId, message){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  if (!lead.firstAttemptAt) lead.firstAttemptAt = nowTs();
+  lead.callAttempts = lead.callAttempts || [];
+  lead.callAttempts.push({ date:d, outcome:"texted", notes:message||"" });
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"text", text:"Texted: " + (message||""), author: currentUser().name });
+  lead.lastContactAt = d;
+  if (lead.status === "cold" || lead.status === "lost"){
+    lead.status = "active";
+    lead.stage = "qualifying";
+    lead.activity.push({ date:d, type:"system", text:"Reactivated via win-back outreach", author: currentUser().name });
+  }
+  showToast("Logged text to " + lead.name);
+  persist();
+}
+
+function sendApplicationAction(leadId, channel){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  lead.applicationSentAt = d;
+  var idx = stageIndex(lead.stage);
+  if (idx >= 0 && idx < stageIndex("app_sent")) lead.stage = "app_sent";
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"application", text:"Application link sent to " + lead.name + (channel ? (" via " + channel) : ""), author: currentUser().name });
+  showToast("Application marked as sent");
+  persist();
+}
+function sendDocumentAction(leadId, kind, channel){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  var label = kind === "termSheet" ? "Term Sheet" : "Pre-Approval Letter";
+  if (kind === "termSheet") lead.termsheetSentAt = d; else lead.preapprovalSentAt = d;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"application", text: label + " sent to " + lead.name + (channel ? (" via " + channel) : ""), author: currentUser().name });
+  showToast(label + " marked as sent");
+  persist();
+}
+function logCreditOrder(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  lead.creditOrderedAt = d;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"credit", text:"Opened Xactus to order credit for " + lead.name, author: currentUser().name });
+  persist();
+}
+function logEmailSent(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"email", text:"Emailed " + lead.name, author: currentUser().name });
+  lead.lastContactAt = d;
+  persist();
+}
+
+function moveStage(leadId, target){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  lead.activity = lead.activity || [];
+  if (target === "cold"){
+    lead.status = "cold";
+    lead.activity.push({ date:d, type:"system", text:"Marked cold", author: currentUser().name });
+  } else if (target === "lost"){
+    lead.status = "lost"; lead.stage = "lost";
+    lead.activity.push({ date:d, type:"system", text:"Marked lost / dead", author: currentUser().name });
+  } else if (target === "reactivate"){
+    lead.status = "active";
+    lead.activity.push({ date:d, type:"system", text:"Reactivated", author: currentUser().name });
+  } else {
+    var oldLabel = stageLabel(lead.stage);
+    lead.stage = target;
+    lead.status = (target==="closed" || target==="postclosing") ? "closed" : "active";
+    if (target==="closed" && !lead.closeDate) lead.closeDate = d;
+    lead.activity.push({ date:d, type:"stage", text:"Stage moved: " + oldLabel + " → " + stageLabel(target), author: currentUser().name });
+    (lead.thirdParties||[]).forEach(function(tp){
+      if (tp.notify){
+        lead.activity.push({ date:d, type:"notify", text:"Notified " + tp.role + " " + tp.name + " — stage is now " + stageLabel(target), author:"System" });
+      }
+    });
+  }
+  showToast(lead.name + " updated");
+  persist();
+}
+
+function addLead(data){
+  var id = nextLeadId();
+  var d = todayISO();
+  var lead = {
+    id:id, name:data.name, email:data.email, phone:data.phone, source:data.source, loanType:data.loanType,
+    stage:"new", status:"active", assignedTo:data.assignedTo, createdAt:d, createdAtTs:nowTs(), firstAttemptAt:null,
+    entityType:"LLC", creditScore:null, experienceDeals:null, liquidity:null,
+    propertyAddress:data.propertyAddress||"", propertyType:null, purchasePrice:null, arv:null, rehabBudget:null,
+    rentEstimate:null, loanAmount:data.loanAmount||null, ltv:null, rate:null, termMonths:null,
+    exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null, pointsCharged:null,
+    callAttempts:[], documents:[], thirdParties:[],
+    activity:[{ date:d, type:"note", text:"Lead created via " + data.source, author: currentUser().name }]
+  };
+  state.leads.unshift(lead);
+  showToast("Added " + lead.name);
+  ui.modal = null;
+  ui.view = "detail"; ui.selectedLeadId = id; ui.activeTab = "overview";
+  persist();
+}
+
+function updateLeadFields(leadId, patch){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  showToast("Saved");
+  persist();
+}
+
+function addNote(leadId, text){
+  var lead = leadById(leadId);
+  if (!lead || !text) return;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:todayISO(), type:"note-manual", text:text, author: currentUser().name });
+  persist();
+}
+
+function setFollowUp(leadId, date, note){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  lead.nextFollowUp = date || null;
+  lead.nextFollowUpNote = note || null;
+  showToast("Follow-up saved");
+  persist();
+}
+
+function addThirdParty(leadId, tp){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  lead.thirdParties = lead.thirdParties || [];
+  lead.thirdParties.push(tp);
+  showToast("Added " + tp.role);
+  ui.modal = null;
+  persist();
+}
+function toggleNotify(leadId, idx){
+  var lead = leadById(leadId);
+  if (!lead || !lead.thirdParties[idx]) return;
+  lead.thirdParties[idx].notify = !lead.thirdParties[idx].notify;
+  persist();
+}
+
+/* ---------------------------------------------------------------------
+   In-app notifications (stands in for real email/SMS delivery, which
+   this hosted page cannot send on its own)
+--------------------------------------------------------------------- */
+function notifyUser(userId, leadId, kind, text){
+  state.notifications = state.notifications || [];
+  state.notifications.unshift({
+    id: "N" + Date.now().toString(36) + Math.floor(Math.random()*1000),
+    toUserId:userId, leadId:leadId, kind:kind, text:text, date: todayISO(), read:false
+  });
+}
+function markNotificationRead(id){
+  var n = (state.notifications||[]).filter(function(x){ return x.id===id; })[0];
+  if (!n) return;
+  n.read = true;
+  persist();
+}
+function unreadNotifCount(userId){
+  return (state.notifications||[]).filter(function(n){ return n.toUserId===userId && !n.read; }).length;
+}
+
+function toggleProcessingAction(leadId, kind){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  var orderedKey = kind + "Ordered";
+  var atKey = kind + "OrderedAt";
+  var label = kind === "appraisal" ? "Appraisal" : "Preliminary Title";
+  lead.activity = lead.activity || [];
+  lead[orderedKey] = !lead[orderedKey];
+  if (lead[orderedKey]){
+    lead[atKey] = d;
+    lead.activity.push({ date:d, type:"notify", text: label + " ordered — notified Erika (Processor)", author: currentUser().name });
+    var processor = state.users.filter(function(u){ return u.role==="processor"; })[0];
+    if (processor){
+      notifyUser(processor.id, leadId, kind, label + " ordered for " + lead.name + " — " + (lead.propertyAddress||""));
+    }
+    showToast(label + " ordered — Erika notified");
+  } else {
+    lead[atKey] = null;
+    lead.activity.push({ date:d, type:"system", text: label + " order cancelled", author: currentUser().name });
+    showToast(label + " order cancelled");
+  }
+  persist();
+}
+
+function requestDoc(leadId, name){
+  var lead = leadById(leadId);
+  if (!lead || !name) return;
+  lead.documents = lead.documents || [];
+  lead.documents.push({ name:name, status:"requested" });
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:todayISO(), type:"document", text:"Requested document: " + name, author: currentUser().name });
+  persist();
+}
+function markDocReceived(leadId, idx){
+  var lead = leadById(leadId);
+  if (!lead || !lead.documents[idx]) return;
+  var doc = lead.documents[idx];
+  doc.status = "received"; doc.receivedAt = todayISO();
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:todayISO(), type:"document", text:"Received document: " + doc.name, author: currentUser().name });
+  persist();
+}
+function borrowerUploadDoc(leadId, idx, fileName){
+  var lead = leadById(leadId);
+  if (!lead || !lead.documents[idx]) return;
+  var doc = lead.documents[idx];
+  doc.status = "received"; doc.receivedAt = todayISO(); doc.fileName = fileName;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:todayISO(), type:"document", text:"Borrower uploaded: " + doc.name + " (" + fileName + ")", author: lead.name });
+  showToast("Uploaded " + doc.name);
+  persist();
+}
+
+function updateMarketRate(key, newVal){
+  var r = state.marketRates[key];
+  if (!r || isNaN(newVal)) return;
+  if (newVal === r.current) return;
+  r.previous = r.current;
+  r.current = newVal;
+  r.updatedAt = todayISO();
+  showToast(r.label + " rate updated to " + fmtPct(newVal));
+  persist();
+}
+
+/* ---------------------------------------------------------------------
+   Rendering
+--------------------------------------------------------------------- */
+var BRAND_MARK = '<svg class="brand-mark" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+  '<circle cx="20" cy="20" r="19" fill="var(--navy)" stroke="var(--brand)" stroke-width="1.6"/>' +
+  '<path d="M9 24c2-4 5-6 11-6s9 2 11 6" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round"/>' +
+  '<path d="M12 24v-6M16 24v-8M24 24v-8M28 24v-6" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>' +
+  '<path d="M20 8l1.3 3.2L24.5 12l-3.2 1.3L20 16.5l-1.3-3.2L15.5 12l3.2-.8z" fill="var(--brand)"/>' +
+  '</svg>';
+
+function render(){
+  var app = document.getElementById("app");
+  if (!ui.loggedIn){
+    app.innerHTML = renderLogin();
+    var toastHost0 = document.getElementById("toast-host");
+    var toastHTML0 = ui.toast ? ('<div class="toast" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+    app.insertAdjacentHTML("beforeend", toastHTML0);
+    return;
+  }
+  if (ui.view === "portal"){
+    app.innerHTML = renderPortal();
+  } else {
+    app.innerHTML = renderShell();
+  }
+  var modalHost = document.getElementById("modal-host");
+  if (modalHost) modalHost.outerHTML = renderModal();
+  else {
+    var mm = renderModal();
+    if (mm) app.insertAdjacentHTML("beforeend", mm);
+  }
+  var toastHost = document.getElementById("toast-host");
+  var toastHTML = ui.toast ? ('<div class="toast" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+  app.insertAdjacentHTML("beforeend", toastHTML);
+}
+
+function renderLogin(){
+  var brandBlock = '<div class="login-brand">' + BRAND_MARK + '<div><div class="brand-word">Bridgepoint</div><div class="brand-tag">Lending Desk</div></div></div>';
+  return '<div class="login-screen"><div class="login-card">' + brandBlock +
+    '<h1 class="login-title">Log In</h1>' +
+    '<div class="login-sub">Your own username and PIN — your dashboard shows your own production.</div>' +
+    '<form class="login-form" data-form="login">' +
+      '<div class="form-row"><label>Username</label><input class="input" type="text" name="username" autocomplete="username" autofocus placeholder="e.g. maria" value="' + esc(ui.loginUsername||"") + '"></div>' +
+      '<div class="form-row" style="margin-top:10px"><label>PIN</label><input class="input login-pin-input" type="password" inputmode="numeric" pattern="[0-9]*" name="pin" maxlength="6" autocomplete="current-password" placeholder="••••"></div>' +
+      (ui.loginError ? ('<div class="login-error">' + esc(ui.loginError) + '</div>') : '') +
+      '<button class="btn btn-primary" style="width:100%;margin-top:14px" type="submit">Log In</button>' +
+    '</form>' +
+  '</div></div>';
+}
+
+function navItem(view, icon, label, count){
+  var cls = "nav-item" + (ui.view===view ? " active" : "");
+  var countHTML = (count!==undefined && count!==null) ? ('<span class="count">' + count + '</span>') : "";
+  return '<button class="' + cls + '" data-action="nav" data-view="' + view + '">' +
+    '<span class="ic">' + icon + '</span><span>' + label + '</span>' + countHTML + '</button>';
+}
+
+function renderShell(){
+  var leads = scopedLeads();
+  var callsDue = computeQueue(ui.viewAs).length;
+  var today = startOfToday();
+  var winbackCount = (isOwner() ? state.leads : leads).filter(function(l){ return winbackInfo(l, today); }).length;
+  var notifCount = unreadNotifCount(ui.viewAs);
+  var sidebar =
+    '<aside class="sidebar">' +
+      '<div class="brand">' + BRAND_MARK +
+        '<div><div class="brand-word">Bridgepoint</div><div class="brand-tag">Lending Desk</div></div>' +
+      '</div>' +
+      '<nav class="nav">' +
+        navItem("today","☎","Today", callsDue||null) +
+        navItem("pipeline","▤","Pipeline") +
+        navItem("leads","☰","Leads & Loans", leads.length) +
+        navItem("comms","✉","Communications") +
+        navItem("performance","⚡","Speed & Conversion") +
+        navItem("retargeting","↺","Retargeting", winbackCount||null) +
+        navItem("notifications","🔔","Notifications", notifCount||null) +
+        (isOwner() ? navItem("market","%","Market Conditions") : "") +
+        (isOwner() ? navItem("team","◈","Team") : "") +
+        navItem("portal","⌂","Borrower Portal Preview") +
+      '</nav>' +
+      '<div class="sidebar-foot">' +
+        '<div class="role-box">' +
+          '<b>' + esc(currentUser().name) + '</b><br>' +
+          (isOwner() ? "Owner" : isProcessor() ? "Processor" : "Loan Officer") +
+          '<div style="display:flex;gap:6px;margin-top:8px">' +
+            '<button class="btn btn-sm" style="flex:1" data-action="open-modal" data-modal="changePin">Change PIN</button>' +
+            '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="logout">Log Out</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="footnote" style="padding:10px 0 0">Prototype workspace — demo data. Notifications &amp; document uploads are simulated.</div>' +
+      '</div>' +
+    '</aside>';
+
+  var body = "";
+  if (ui.view === "today") body = renderToday();
+  else if (ui.view === "pipeline") body = renderPipeline();
+  else if (ui.view === "leads") body = renderLeadsTable();
+  else if (ui.view === "detail") body = renderLeadDetail();
+  else if (ui.view === "market") body = renderMarket();
+  else if (ui.view === "team") body = renderTeam();
+  else if (ui.view === "comms") body = renderCommunications();
+  else if (ui.view === "performance") body = renderPerformance();
+  else if (ui.view === "retargeting") body = renderRetargeting();
+  else if (ui.view === "notifications") body = renderNotifications();
+  else body = renderToday();
+
+  return sidebar + '<div class="main">' + body + '</div>';
+}
+
+function topbar(title, sub, actionsHTML){
+  return '<div class="topbar">' +
+    '<div><h1 class="view-title">' + title + '</h1>' + (sub ? ('<div class="view-sub">' + sub + '</div>') : '') + '</div>' +
+    '<div class="topbar-spacer"></div>' + (actionsHTML||"") +
+  '</div>';
+}
+
+function badgeForStage(lead){
+  if (lead.status==="cold") return '<span class="badge badge-rust">Cold</span>';
+  if (lead.status==="lost") return '<span class="badge badge-neutral">Lost</span>';
+  if (lead.status==="closed") return '<span class="badge badge-forest">' + esc(stageLabel(lead.stage)) + '</span>';
+  return '<span class="badge badge-slate">' + esc(stageLabel(lead.stage)) + '</span>';
+}
+
+function renderProcessingTodo(){
+  var items = (state.notifications||[]).filter(function(n){
+    return !n.read && (isOwner() || n.toUserId===ui.viewAs) && n.kind !== "review";
+  });
+  if (!items.length) return '<div class="empty">Nothing waiting on processing right now.</div>';
+  return items.map(function(n){
+    var lead = leadById(n.leadId);
+    if (!lead) return "";
+    var lo = userById(lead.assignedTo) || {};
+    var actionLabel = n.kind === "appraisal" ? "Order appraisal for " + (lead.propertyAddress || "the subject property")
+      : n.kind === "title" ? "Order preliminary title for " + (lead.propertyAddress || "the subject property")
+      : n.text;
+    return '<div class="queue-card type-rate-drop">' +
+      '<div class="queue-main">' +
+        '<div class="queue-title">' + esc(actionLabel) + '</div>' +
+        '<div class="queue-reason">' + esc(lead.name) + ' · ' + esc(lead.loanType) + ' · ' + fmtUSD(lead.loanAmount) + '</div>' +
+        '<div class="queue-meta"><span>LO: ' + esc(lo.name||"—") + (lo.phone ? (" · " + esc(lo.phone)) : "") + '</span><span>Stage: ' + esc(stageLabel(lead.stage)) + '</span><span>Requested ' + fmtDate(n.date) + '</span></div>' +
+      '</div>' +
+      '<div class="queue-actions">' +
+        '<button class="btn btn-sm btn-primary" data-action="mark-notif-read" data-id="' + n.id + '">Mark Done</button>' +
+        '<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View Loan</button>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+}
+
+var STAGE_GROUPS = [
+  { key:"preapp", label:"New / Contacting", stages:["new","attempting","qualifying"] },
+  { key:"application", label:"Application", stages:["app_sent","app_completed"] },
+  { key:"processing", label:"In Processing", stages:["docs","processing","underwriting","approved","ctc"] },
+  { key:"postclose", label:"Closed / Post-Close", stages:["closed","postclosing"] }
+];
+function renderTeamSnapshot(){
+  var today = startOfToday();
+  var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  var rows = loanOfficers().map(function(u){
+    var mine = state.leads.filter(function(l){ return l.assignedTo===u.id && l.status!=="lost" && l.status!=="cold"; });
+    var groupCounts = STAGE_GROUPS.map(function(g){
+      return mine.filter(function(l){ return g.stages.indexOf(l.stage)!==-1; }).length;
+    });
+    var closedThisMonth = mine.filter(function(l){ return l.status==="closed" && l.closeDate && new Date(l.closeDate+"T00:00:00")>=monthStart; }).length;
+    var due = computeQueue(u.id).length;
+    var s = speedToLeadStats(state.leads.filter(function(l){ return l.assignedTo===u.id; }));
+    return '<tr data-action="filter-lo-jump" data-lo="' + u.id + '" style="cursor:pointer">' +
+      '<td><b>' + esc(u.name) + '</b></td>' +
+      groupCounts.map(function(c){ return '<td class="num">' + (c||0) + '</td>'; }).join("") +
+      '<td class="num">' + closedThisMonth + '</td>' +
+      '<td class="num">' + (due ? ('<span class="badge badge-gold">' + due + '</span>') : "0") + '</td>' +
+      '<td class="num">' + fmtDuration(s.avgMs) + '</td>' +
+    '</tr>';
+  }).join("");
+  return '<div class="section"><div class="section-head"><h2>Team Snapshot</h2><span class="hint">Live counts across everyone\'s pipeline</span></div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Loan Officer</th>' +
+      STAGE_GROUPS.map(function(g){ return '<th>' + g.label + '</th>'; }).join("") +
+      '<th>Closed (mo.)</th><th>Calls Due</th><th>Avg. Speed to Lead</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+  '</div>';
+}
+
+function renderToday(){
+  var leads = scopedLeads();
+  var k = kpisFor(leads);
+  var queue = computeQueue(ui.viewAs);
+  var who = isOwner() ? "the whole team" : currentUser().name;
+
+  var kpis = '<div class="kpi-row">' +
+    '<div class="kpi"><div class="kpi-label">Calls due today</div><div class="kpi-value num">' + k.callsDue + '</div><div class="kpi-sub">Across ' + (isOwner()?"all loan officers":"your desk") + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Active pipeline</div><div class="kpi-value num">' + k.activeCount + '</div><div class="kpi-sub">' + fmtUSD(k.pipelineValue) + ' in requested volume</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Closed this month</div><div class="kpi-value num">' + k.closedCount + '</div><div class="kpi-sub">' + fmtUSD(k.closedValue) + ' funded</div></div>' +
+  '</div>';
+
+  if (isProcessor()){
+    return topbar("Today", "Your processing to-do list — everything an LO has ordered or routed to you.", "") +
+      '<div class="content">' + kpis +
+        '<div class="section"><div class="section-head"><h2>Processing to-do</h2></div>' + renderProcessingTodo() + '</div>' +
+      '</div>';
+  }
+
+  var teamSnapshotHTML = "";
+  if (isOwner()){
+    teamSnapshotHTML = renderTeamSnapshot();
+  }
+
+  var commissionHTML = "";
+  if (isLO()){
+    var cs = commissionSummaryFor(ui.viewAs);
+    commissionHTML = '<div class="commission-box">' +
+      '<div class="kpi-label">My Commission (50% of points charged)</div>' +
+      '<div class="commission-row">' +
+        '<div class="commission-stat"><div class="num">' + fmtUSD(cs.earned) + '</div><div class="commission-label">Earned this month · ' + cs.closedCount + ' closed</div></div>' +
+        '<div class="commission-stat"><div class="num">' + fmtUSD(cs.potential) + '</div><div class="commission-label">Potential · ' + cs.pipelineCount + ' active loan(s)</div></div>' +
+      '</div>' +
+      '<div class="footnote" style="padding:6px 0 0">Potential assumes every active loan in your pipeline closes at its current points-charged rate — set points on each loan\'s Contact panel.</div>' +
+    '</div>';
+  }
+
+  var list = "";
+  if (queue.length === 0){
+    list = '<div class="empty">Nothing on ' + esc(who==="the whole team"?"the team's":who+"'s") + ' call list right now. New leads and rate-driven opportunities will show up here automatically.</div>';
+  } else {
+    list = queue.map(function(item){
+      var lead = leadById(item.leadId);
+      if (!lead) return "";
+      var typeCls = "type-" + item.type;
+      var typeBadge = item.type==="rate-drop" ? '<span class="badge badge-gold">Rate Alert</span>'
+        : item.type==="refi" ? '<span class="badge badge-forest">Refi Radar</span>'
+        : item.type==="followup" ? '<span class="badge badge-rust">Follow-up</span>'
+        : '<span class="badge badge-slate">New Lead Cadence</span>';
+      return '<div class="queue-card ' + typeCls + '">' +
+        '<div class="badge-wrap">' + typeBadge + '</div>' +
+        '<div class="queue-main">' +
+          '<div class="queue-title">' + esc(lead.name) + ' — ' + esc(item.label) + '</div>' +
+          '<div class="queue-reason">' + esc(item.reason) + '</div>' +
+          '<div class="queue-meta"><span>' + esc(lead.loanType) + '</span><span>' + esc(lead.phone) + '</span>' +
+            (isOwner() ? ('<span>LO: ' + esc(userName(lead.assignedTo)) + '</span>') : '') + '</div>' +
+        '</div>' +
+        '<div class="queue-actions">' +
+          '<button class="btn btn-sm btn-primary" data-action="open-modal" data-modal="logCall" data-lead="' + lead.id + '">Log Call</button>' +
+          '<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View</button>' +
+        '</div>' +
+      '</div>';
+    }).join("");
+  }
+
+  var dialerBtn = queue.length ? '<button class="btn btn-sm btn-primary" data-action="start-dialer">▶ Start Power Dialer</button>' : '';
+  return topbar("Today", "Call list generated from new-lead cadence, market rate moves, and refinance timing.", "") +
+    '<div class="content">' + kpis + teamSnapshotHTML + commissionHTML +
+      '<div class="section"><div class="section-head"><h2>Priority call list</h2>' +
+        '<div style="display:flex;align-items:center;gap:10px"><span class="hint">' + queue.length + ' item(s)</span>' + dialerBtn + '</div>' +
+      '</div>' + list + '</div>' +
+    '</div>';
+}
+
+function renderPipeline(){
+  var leads = scopedLeads();
+  var cols = STAGES.map(function(s){
+    var inStage = leads.filter(function(l){ return l.stage===s.key && l.status!=="cold" && l.status!=="lost"; });
+    var cards = inStage.map(function(l){
+      return '<div class="pcard" data-action="select-lead" data-lead="' + l.id + '">' +
+        '<div class="nm">' + esc(l.name) + '</div>' +
+        '<div class="ty">' + esc(l.loanType) + '</div>' +
+        '<div class="amt">' + fmtUSD(l.loanAmount) + '</div>' +
+        '<div class="lo">' + esc(userName(l.assignedTo)) + '</div>' +
+      '</div>';
+    }).join("");
+    return '<div class="col"><div class="col-head"><span class="name">' + s.label + '</span><span class="n num">' + inStage.length + '</span></div>' +
+      '<div class="col-cards">' + (cards || '') + '</div></div>';
+  }).join("");
+
+  var coldLost = leads.filter(function(l){ return l.status==="cold" || l.status==="lost"; });
+  var coldCards = coldLost.map(function(l){
+    return '<div class="pcard" data-action="select-lead" data-lead="' + l.id + '">' +
+      '<div class="nm">' + esc(l.name) + '</div>' +
+      '<div class="ty">' + esc(l.loanType) + '</div>' +
+      badgeForStage(l) +
+    '</div>';
+  }).join("");
+  cols += '<div class="col" style="background:var(--c-rust-bg)"><div class="col-head"><span class="name">Cold / Lost</span><span class="n num">' + coldLost.length + '</span></div><div class="col-cards">' + (coldCards||'') + '</div></div>';
+
+  return topbar("Pipeline", "Lead intake through post-closing, in one board.", "") +
+    '<div class="content"><div class="board">' + cols + '</div></div>';
+}
+
+function renderLeadsTable(){
+  var f = ui.leadFilter;
+  var leads = scopedLeads().filter(function(l){
+    if (f.status && l.status!==f.status) return false;
+    if (f.stage && l.stage!==f.stage) return false;
+    if (f.loanType && l.loanType!==f.loanType) return false;
+    if (f.assignedTo && l.assignedTo!==f.assignedTo) return false;
+    if (f.q){
+      var q = f.q.toLowerCase();
+      if (l.name.toLowerCase().indexOf(q)===-1 && (l.propertyAddress||"").toLowerCase().indexOf(q)===-1) return false;
+    }
+    return true;
+  });
+
+  var loOptions = loanOfficers().map(function(u){ return '<option value="' + u.id + '"' + (f.assignedTo===u.id?" selected":"") + '>' + esc(u.name) + '</option>'; }).join("");
+  var stageOptions = STAGES.map(function(s){ return '<option value="' + s.key + '"' + (f.stage===s.key?" selected":"") + '>' + s.label + '</option>'; }).join("");
+  var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '"' + (f.loanType===t?" selected":"") + '>' + t + '</option>'; }).join("");
+
+  var filters = '<div class="filters">' +
+    '<input class="input" placeholder="Search name or address…" value="' + esc(f.q) + '" data-action="filter" data-key="q" style="min-width:220px">' +
+    '<select class="select" data-action="filter" data-key="status">' +
+      '<option value="active"' + (f.status==="active"?" selected":"") + '>Active</option>' +
+      '<option value="closed"' + (f.status==="closed"?" selected":"") + '>Closed</option>' +
+      '<option value="cold"' + (f.status==="cold"?" selected":"") + '>Cold</option>' +
+      '<option value="lost"' + (f.status==="lost"?" selected":"") + '>Lost</option>' +
+      '<option value=""' + (f.status===""?" selected":"") + '>All</option>' +
+    '</select>' +
+    '<select class="select" data-action="filter" data-key="stage"><option value="">Any stage</option>' + stageOptions + '</select>' +
+    '<select class="select" data-action="filter" data-key="loanType"><option value="">Any loan type</option>' + typeOptions + '</select>' +
+    (isOwner() ? ('<select class="select" data-action="filter" data-key="assignedTo"><option value="">Any officer</option>' + loOptions + '</select>') : '') +
+  '</div>';
+
+  var rows = leads.map(function(l){
+    return '<tr data-action="select-lead" data-lead="' + l.id + '">' +
+      '<td><div class="cell-name">' + esc(l.name) + '</div><div class="cell-sub">' + esc(l.propertyAddress||"") + '</div></td>' +
+      '<td>' + esc(l.loanType) + '</td>' +
+      '<td>' + badgeForStage(l) + '</td>' +
+      '<td class="num">' + fmtUSD(l.loanAmount) + '</td>' +
+      '<td>' + esc(l.source) + '</td>' +
+      '<td>' + esc(userName(l.assignedTo)) + '</td>' +
+      '<td>' + fmtDate(l.createdAt) + '</td>' +
+    '</tr>';
+  }).join("");
+
+  var table = leads.length ? (
+    '<div class="table-wrap"><table><thead><tr><th>Borrower</th><th>Loan Type</th><th>Stage</th><th>Amount</th><th>Source</th><th>Loan Officer</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+  ) : '<div class="empty">No leads match these filters.</div>';
+
+  var actions = '<button class="btn btn-primary" data-action="open-modal" data-modal="addLead">+ New Lead</button>';
+
+  return topbar("Leads & Loans", leads.length + " record(s)", actions) +
+    '<div class="content">' + filters + table + '</div>';
+}
+
+function tabBtn(key, label){
+  return '<button class="tab' + (ui.activeTab===key?" active":"") + '" data-action="set-tab" data-tab="' + key + '">' + label + '</button>';
+}
+
+function renderLeadDetail(){
+  var lead = leadById(ui.selectedLeadId);
+  if (!lead){
+    return topbar("Lead not found","","") + '<div class="content"><div class="empty">Select a lead from Leads &amp; Loans or Pipeline.</div></div>';
+  }
+  var tabs = '<div class="tabs">' +
+    tabBtn("overview","Overview") + tabBtn("scenario","Loan Scenario") + tabBtn("documents","Documents") +
+    tabBtn("activity","Activity &amp; Calls") + tabBtn("thirdparties","Third Parties") +
+  '</div>';
+
+  var tabContent = "";
+  if (ui.activeTab === "scenario") tabContent = renderTabScenario(lead);
+  else if (ui.activeTab === "documents") tabContent = renderTabDocuments(lead);
+  else if (ui.activeTab === "activity") tabContent = renderTabActivity(lead);
+  else if (ui.activeTab === "thirdparties") tabContent = renderTabThirdParties(lead);
+  else tabContent = renderTabOverview(lead);
+
+  var main = '<div class="panel">' + tabs + '<div class="panel-pad">' + tabContent + '</div></div>';
+  var rail = renderRail(lead);
+
+  var actions = '<button class="btn btn-ghost" data-action="nav" data-view="leads">← Back</button>';
+
+  return topbar(esc(lead.name), esc(lead.loanType) + " · " + esc(lead.propertyAddress||""), actions) +
+    '<div class="content"><div class="detail-grid">' + main + rail + '</div></div>';
+}
+
+function field(label, value, mono){
+  return '<div class="field"><label>' + label + '</label><div class="val' + (mono?" mono":"") + '">' + value + '</div></div>';
+}
+
+function renderTabOverview(lead){
+  var fu = '<div class="field-grid" style="margin-top:16px">' +
+    '<div class="field" style="grid-column:1/-1"><label>Next follow-up</label>' +
+      '<form data-form="follow-up" data-lead="' + lead.id + '" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:4px">' +
+        '<input class="input" type="date" name="date" value="' + (lead.nextFollowUp||"") + '">' +
+        '<input class="input" type="text" name="note" placeholder="What to follow up on…" value="' + esc(lead.nextFollowUpNote||"") + '" style="flex:1;min-width:180px">' +
+        '<button class="btn btn-sm" type="submit">Save</button>' +
+      '</form>' +
+    '</div></div>';
+
+  return '<div class="field-grid">' +
+    field("Borrower", esc(lead.name)) +
+    field("Entity Type", esc(lead.entityType||"—")) +
+    field("Email", '<a href="mailto:' + esc(lead.email) + '">' + esc(lead.email) + '</a>') +
+    field("Phone", '<a href="tel:' + esc(lead.phone) + '">' + esc(lead.phone) + '</a>') +
+    field("Source", esc(lead.source)) +
+    field("Loan Officer", esc(userName(lead.assignedTo))) +
+    field("Credit Score", lead.creditScore ? lead.creditScore : "—", true) +
+    field("Investing Experience", lead.experienceDeals!==null && lead.experienceDeals!==undefined ? (lead.experienceDeals + " deal(s) completed") : "—") +
+    field("Liquidity / Reserves", fmtUSD(lead.liquidity), true) +
+    field("Created", fmtDate(lead.createdAt)) +
+  '</div>' + fu;
+}
+
+function renderTabScenario(lead){
+  return '<div class="field-grid">' +
+    field("Property Address", esc(lead.propertyAddress||"—")) +
+    field("Property Type", esc(lead.propertyType||"—")) +
+    field("Purchase Price", fmtUSD(lead.purchasePrice), true) +
+    field("After-Repair Value (ARV)", fmtUSD(lead.arv), true) +
+    field("Rehab / Construction Budget", fmtUSD(lead.rehabBudget), true) +
+    field("Monthly Rent Estimate", fmtUSD(lead.rentEstimate), true) +
+    field("Loan Amount Requested", fmtUSD(lead.loanAmount), true) +
+    field("LTV / LTC", lead.ltv ? lead.ltv + "%" : "—", true) +
+    field("Rate", fmtPct(lead.rate), true) +
+    field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
+    field("Exit Strategy", esc(lead.exitStrategy||"—")) +
+    field("Target Close Date", fmtDate(lead.closeDate)) +
+  '</div>';
+}
+
+function renderTabDocuments(lead){
+  var rows = (lead.documents||[]).map(function(d,i){
+    var statusBadge = d.status==="received" ? '<span class="badge badge-forest">Received</span>' : '<span class="badge badge-slate">Requested</span>';
+    return '<div class="doc-row"><div><div>' + esc(d.name) + '</div>' +
+      '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):"")) : "Awaiting borrower") + '</div></div>' +
+      '<div style="display:flex;gap:8px;align-items:center">' + statusBadge +
+      (d.status!=="received" ? ('<button class="btn btn-sm" data-action="mark-doc-received" data-lead="' + lead.id + '" data-idx="' + i + '">Mark Received</button>') : '') +
+      '</div></div>';
+  }).join("");
+  return (rows || '<div class="empty">No documents requested yet.</div>') +
+    '<form data-form="request-doc" data-lead="' + lead.id + '" style="display:flex;gap:8px;margin-top:14px">' +
+      '<input class="input" name="name" placeholder="Document name (e.g. Bank Statements)" style="flex:1">' +
+      '<button class="btn btn-sm" type="submit">Request Document</button>' +
+    '</form>';
+}
+
+var ACTIVITY_ICON_CLASS = { call:"call", stage:"stage", notify:"notify", document:"document", text:"text", email:"email", application:"application", credit:"credit" };
+function renderTabActivity(lead){
+  var items = (lead.activity||[]).slice().reverse().map(function(a){
+    var cls = ACTIVITY_ICON_CLASS[a.type] || "";
+    return '<div class="activity-item ' + cls + '"><div class="activity-dot"></div>' +
+      '<div class="activity-text">' + esc(a.text) + '<div class="activity-date">' + fmtDate(a.date) + (a.author ? (" · " + esc(a.author)) : "") + '</div></div></div>';
+  }).join("");
+  return '<div>' + (items || '<div class="empty">No activity yet.</div>') + '</div>' +
+    '<form data-form="add-note" data-lead="' + lead.id + '" style="margin-top:14px">' +
+      '<textarea class="textarea" name="note" placeholder="Add a note…"></textarea>' +
+      '<button class="btn btn-sm" type="submit" style="margin-top:8px">Add Note</button>' +
+    '</form>';
+}
+
+function renderTabThirdParties(lead){
+  var rows = (lead.thirdParties||[]).map(function(tp, i){
+    return '<div class="tp-row"><div class="r">' + esc(tp.role) + '</div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+        '<div><b>' + esc(tp.name) + '</b><div class="cell-sub">' + esc(tp.phone||"") + (tp.email?(" · " + esc(tp.email)):"") + '</div></div>' +
+        '<label style="display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--text-muted)"><input type="checkbox" data-action="toggle-notify" data-lead="' + lead.id + '" data-idx="' + i + '"' + (tp.notify?" checked":"") + '> Notify on stage change</label>' +
+      '</div></div>';
+  }).join("");
+  var roleOptions = TP_ROLES.map(function(r){ return '<option value="' + r + '">' + r + '</option>'; }).join("");
+  return (rows || '<div class="empty">No third parties linked yet.</div>') +
+    '<form data-form="add-third-party" data-lead="' + lead.id + '" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">' +
+      '<select class="select" name="role">' + roleOptions + '</select>' +
+      '<input class="input" name="name" placeholder="Name" required>' +
+      '<input class="input" name="phone" placeholder="Phone">' +
+      '<input class="input" name="email" placeholder="Email">' +
+      '<button class="btn btn-sm" type="submit">Add</button>' +
+    '</form>';
+}
+
+function renderRail(lead){
+  var idx = stageIndex(lead.stage);
+  var nextStage = (idx>=0 && idx<STAGES.length-1 && lead.status==="active") ? STAGES[idx+1] : null;
+  var stageOptions = STAGES.map(function(s){ return '<option value="' + s.key + '"' + (s.key===lead.stage?" selected":"") + '>' + s.label + '</option>'; }).join("");
+
+  var statusRow = "";
+  if (lead.status === "cold") statusRow = '<button class="btn btn-sm" data-action="move-stage" data-lead="' + lead.id + '" data-target="reactivate">Reactivate</button>';
+  else if (lead.status === "lost") statusRow = '<span class="badge badge-neutral">Lost / Dead</span>';
+  else statusRow = '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="cold">Mark Cold</button>' +
+      '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="lost">Mark Lost</button>';
+
+  return '<div class="panel" style="align-self:flex-start">' +
+    '<div class="rail-block">' +
+      '<div class="rail-title">Borrower</div>' +
+      '<div class="rail-name">' + esc(lead.name) + '</div>' +
+      '<div class="stage-line">' + badgeForStage(lead) + '</div>' +
+    '</div>' +
+    '<div class="rail-block">' +
+      '<div class="rail-title">Contact</div>' +
+      '<div class="contact-row">' +
+        '<a class="btn btn-sm" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Call</a>' +
+        '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
+        '<a class="btn btn-sm" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — " + lead.loanType) + '&body=' + encodeURIComponent(defaultOutreachMessage(lead)) + '" data-action="log-email" data-lead="' + lead.id + '">Email</a>' +
+        '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
+        '<a class="btn btn-sm" href="' + XACTUS_PORTAL_URL + '" target="_blank" rel="noopener" data-action="order-credit" data-lead="' + lead.id + '">Order Credit' + (lead.creditOrderedAt ? ' ✓' : '') + '</a>' +
+      '</div>' +
+      (lead.applicationSentAt ? ('<div class="footnote" style="padding:6px 0 0">Application sent ' + fmtDate(lead.applicationSentAt) + '</div>') : '') +
+      (lead.creditOrderedAt ? ('<div class="footnote" style="padding:2px 0 0">Credit portal opened ' + fmtDate(lead.creditOrderedAt) + '</div>') : '') +
+      '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft)">' +
+        '<div class="rail-title" style="margin-bottom:6px">Points Charged</div>' +
+        '<form data-form="set-points" data-lead="' + lead.id + '" class="points-input-row">' +
+          '<input class="input" type="number" step="0.125" min="0" max="15" name="points" placeholder="e.g. 2.5" value="' + (lead.pointsCharged!=null?lead.pointsCharged:"") + '">' +
+          '<span>%</span>' +
+          '<button class="btn btn-sm" type="submit">Save</button>' +
+        '</form>' +
+        (lead.pointsCharged!=null ? ('<div class="footnote" style="padding:6px 0 0">Est. commission to ' + esc(userName(lead.assignedTo)) + ' if this closes: <b>' + fmtUSD(commissionAmount(lead)) + '</b> (50% of ' + lead.pointsCharged + '% × ' + fmtUSD(lead.loanAmount) + ')</div>') : '<div class="footnote" style="padding:6px 0 0">Not set yet — used to calculate the loan officer\'s commission.</div>') +
+      '</div>' +
+    '</div>' +
+    '<div class="rail-block">' +
+      '<div class="rail-title">Send to Borrower</div>' +
+      '<div style="display:flex;flex-direction:column;gap:8px">' +
+        '<button class="btn btn-sm" data-action="open-modal" data-modal="sendDocument" data-kind="preapproval" data-lead="' + lead.id + '">Send Pre-Approval' + (lead.preapprovalSentAt ? ' ✓' : '') + '</button>' +
+        '<button class="btn btn-sm" data-action="open-modal" data-modal="sendDocument" data-kind="termSheet" data-lead="' + lead.id + '">Send Term Sheet' + (lead.termsheetSentAt ? ' ✓' : '') + '</button>' +
+      '</div>' +
+      (lead.preapprovalSentAt ? ('<div class="footnote" style="padding:6px 0 0">Pre-approval sent ' + fmtDate(lead.preapprovalSentAt) + '</div>') : '') +
+      (lead.termsheetSentAt ? ('<div class="footnote" style="padding:2px 0 0">Term sheet sent ' + fmtDate(lead.termsheetSentAt) + '</div>') : '') +
+    '</div>' +
+    '<div class="rail-block">' +
+      '<div class="rail-title">Move Stage</div>' +
+      '<select class="select" style="width:100%" data-action="move-stage" data-lead="' + lead.id + '">' + stageOptions + '</select>' +
+      (nextStage ? ('<button class="btn btn-sm btn-primary" style="width:100%;margin-top:8px" data-action="move-stage" data-lead="' + lead.id + '" data-target="' + nextStage.key + '">Advance to ' + nextStage.label + ' →</button>') : '') +
+      '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">' + statusRow + '</div>' +
+    '</div>' +
+    (idx >= stageIndex("app_completed") ? (
+    '<div class="rail-block">' +
+      '<div class="rail-title">Processing Actions</div>' +
+      '<div style="display:flex;flex-direction:column;gap:8px">' +
+        (lead.appraisalOrdered ?
+          ('<div style="display:flex;justify-content:space-between;align-items:center"><span class="badge badge-forest">Appraisal Ordered · ' + fmtDate(lead.appraisalOrderedAt) + '</span><button class="btn btn-sm btn-ghost" data-action="toggle-processing" data-lead="' + lead.id + '" data-kind="appraisal">Undo</button></div>')
+          : ('<button class="btn btn-sm" data-action="toggle-processing" data-lead="' + lead.id + '" data-kind="appraisal">Order Appraisal</button>')) +
+        (lead.titleOrdered ?
+          ('<div style="display:flex;justify-content:space-between;align-items:center"><span class="badge badge-forest">Title Ordered · ' + fmtDate(lead.titleOrderedAt) + '</span><button class="btn btn-sm btn-ghost" data-action="toggle-processing" data-lead="' + lead.id + '" data-kind="title">Undo</button></div>')
+          : ('<button class="btn btn-sm" data-action="toggle-processing" data-lead="' + lead.id + '" data-kind="title">Order Preliminary Title</button>')) +
+      '</div>' +
+      '<div class="footnote" style="padding:8px 0 0">Notifies Erika (Processor) in-app.</div>' +
+    '</div>'
+    ) : "") +
+    '<div class="rail-block">' +
+      '<div class="rail-title">Loan Snapshot</div>' +
+      '<div class="field-grid" style="grid-template-columns:1fr">' +
+        field("Amount Requested", fmtUSD(lead.loanAmount), true) +
+        field("Rate", fmtPct(lead.rate), true) +
+      '</div>' +
+    '</div>' +
+    '<div class="rail-block">' +
+      '<button class="btn" style="width:100%" data-action="open-modal" data-modal="logCall" data-lead="' + lead.id + '">Log a Call</button>' +
+    '</div>' +
+  '</div>';
+}
+
+function renderMarket(){
+  var rows = Object.keys(state.marketRates).map(function(key){
+    var r = state.marketRates[key];
+    var dropped = r.current < r.previous;
+    return '<tr>' +
+      '<td><b>' + esc(r.label) + '</b></td>' +
+      '<td class="num">' + fmtPct(r.previous) + '</td>' +
+      '<td class="num">' + fmtPct(r.current) + (dropped ? ' <span class="badge badge-gold">Dropped</span>' : '') + '</td>' +
+      '<td>' + fmtDate(r.updatedAt) + '</td>' +
+      '<td>' + (isOwner() ?
+        ('<form data-form="rate" data-key="' + key + '" style="display:flex;gap:6px"><input class="input" style="width:90px" type="number" step="0.001" name="rate" placeholder="New %" required><button class="btn btn-sm" type="submit">Update</button></form>')
+        : '<span class="cell-sub">Owner only</span>') + '</td>' +
+    '</tr>';
+  }).join("");
+
+  return topbar("Market Conditions", "When a rate drops, everyone who inquired about or closed that loan type is added to the call list.", "") +
+    '<div class="content"><div class="table-wrap"><table><thead><tr><th>Loan Type</th><th>Previous</th><th>Current</th><th>Updated</th><th>Update Rate</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+}
+
+function renderTeam(){
+  var rows = loanOfficers().map(function(u){
+    var mine = state.leads.filter(function(l){ return l.assignedTo===u.id; });
+    var active = mine.filter(function(l){ return l.status==="active"; });
+    var closed = mine.filter(function(l){ return l.status==="closed"; });
+    var value = active.reduce(function(s,l){ return s + (l.loanAmount||0); }, 0);
+    var due = computeQueue(u.id).length;
+    var cs = commissionSummaryFor(u.id);
+    return '<tr><td><b>' + esc(u.name) + '</b><div class="cell-sub">' + esc(u.title||"") + '</div></td>' +
+      '<td class="num">' + active.length + '</td><td class="num">' + due + '</td><td class="num">' + fmtUSD(value) + '</td><td class="num">' + closed.length + '</td>' +
+      '<td class="num">' + fmtUSD(cs.earned) + '</td><td class="num">' + fmtUSD(cs.potential) + '</td></tr>';
+  }).join("");
+
+  var accessRows = state.users.filter(function(u){ return u.role !== "owner"; }).map(function(u){
+    var roleLabel = u.role==="processor" ? "Processor" : "Loan Officer";
+    return '<tr><td><b>' + esc(u.name) + '</b></td><td>' + roleLabel + '</td>' +
+      '<td><form data-form="reset-pin" data-user="' + u.id + '" style="display:flex;gap:6px;align-items:center">' +
+        '<input class="input" style="width:100px" type="text" inputmode="numeric" pattern="[0-9]*" name="pin" placeholder="New PIN" maxlength="6" required>' +
+        '<button class="btn btn-sm" type="submit">Reset PIN</button>' +
+      '</form></td></tr>';
+  }).join("");
+
+  return topbar("Team", "Workload, commission, and login access across the team.", "") +
+    '<div class="content">' +
+      '<div class="table-wrap"><table><thead><tr><th>Loan Officer</th><th>Active Leads</th><th>Calls Due</th><th>Pipeline Value</th><th>Closed</th><th>Earned (mo.)</th><th>Potential (mo.)</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div class="section-head" style="margin-top:24px"><h2>Login Access</h2></div>' +
+      '<div class="footnote" style="padding:0 0 10px">Each teammate logs in with their own PIN. Reset one here if someone forgets theirs.</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Reset PIN</th></tr></thead><tbody>' + accessRows + '</tbody></table></div>' +
+    '</div>';
+}
+
+var COMM_TYPES = ["call","text","email","notify"];
+var COMM_LABEL = { call:"Call", text:"Text", email:"Email", notify:"Notification" };
+function renderCommunications(){
+  var leads = scopedLeads();
+  var items = [];
+  leads.forEach(function(l){
+    (l.activity||[]).forEach(function(a){
+      if (COMM_TYPES.indexOf(a.type) !== -1){
+        items.push({ leadId:l.id, leadName:l.name, assignedTo:l.assignedTo, date:a.date, type:a.type, text:a.text, author:a.author });
+      }
+    });
+  });
+  if (ui.commFilter) items = items.filter(function(i){ return i.type===ui.commFilter; });
+  items.sort(function(a,b){ return b.date.localeCompare(a.date); });
+
+  var filters = '<div class="filters">' +
+    '<select class="select" data-action="filter-comm"><option value="">All types</option>' +
+    COMM_TYPES.map(function(t){ return '<option value="' + t + '"' + (ui.commFilter===t?" selected":"") + '>' + COMM_LABEL[t] + '</option>'; }).join("") +
+    '</select></div>';
+
+  var rows = items.map(function(i){
+    var badge = i.type==="call" ? '<span class="badge badge-gold">Call</span>' : i.type==="text" ? '<span class="badge badge-forest">Text</span>' : i.type==="email" ? '<span class="badge badge-slate">Email</span>' : '<span class="badge badge-rust">Notify</span>';
+    return '<div class="queue-card" style="border-left-color:var(--border)">' +
+      '<div class="queue-main">' +
+        '<div class="queue-title">' + badge + ' <span data-action="select-lead" data-lead="' + i.leadId + '" style="cursor:pointer;text-decoration:underline;text-underline-offset:2px">' + esc(i.leadName) + '</span></div>' +
+        '<div class="queue-reason">' + esc(i.text) + '</div>' +
+        '<div class="queue-meta"><span>' + fmtDate(i.date) + '</span>' + (i.author ? ('<span>' + esc(i.author) + '</span>') : '') + (isOwner() ? ('<span>LO: ' + esc(userName(i.assignedTo)) + '</span>') : '') + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+
+  return topbar("Communications", "Every call, text, and email logged across " + (isOwner() ? "the team" : "your leads") + ", newest first.", "") +
+    '<div class="content">' + filters + (rows || '<div class="empty">No communications logged yet.</div>') + '</div>';
+}
+
+function renderPerformance(){
+  var leads = scopedLeads();
+  var stl = speedToLeadStats(leads);
+
+  var stlRows = leads.slice().sort(function(a,b){
+    var da = a.createdAtTs || (a.createdAt+"T00:00:00Z"), db = b.createdAtTs || (b.createdAt+"T00:00:00Z");
+    return db.localeCompare(da);
+  }).map(function(l){
+    var ms = speedToLeadMs(l);
+    var statusCell;
+    if (ms !== null){
+      statusCell = '<span class="badge ' + speedBadgeClass(ms) + '">' + fmtDuration(ms) + '</span>';
+    } else if (l.status==="active"){
+      var elapsed = l.createdAtTs ? (Date.now() - new Date(l.createdAtTs).getTime()) : null;
+      statusCell = '<span class="badge badge-rust">Still waiting' + (elapsed!==null ? (" · " + fmtDuration(elapsed)) : "") + '</span>';
+    } else {
+      statusCell = '<span class="badge badge-neutral">No attempt logged</span>';
+    }
+    return '<tr data-action="select-lead" data-lead="' + l.id + '" style="cursor:pointer">' +
+      '<td><b>' + esc(l.name) + '</b></td>' +
+      (isOwner() ? ('<td>' + esc(userName(l.assignedTo)) + '</td>') : '') +
+      '<td>' + esc(l.source) + '</td>' +
+      '<td>' + fmtDate(l.createdAt) + '</td>' +
+      '<td>' + statusCell + '</td>' +
+    '</tr>';
+  }).join("");
+
+  var loRankingHTML = "";
+  if (isOwner()){
+    var ranking = loanOfficers().map(function(u){
+      var mine = state.leads.filter(function(l){ return l.assignedTo===u.id; });
+      var s = speedToLeadStats(mine);
+      return { name:u.name, avgMs:s.avgMs, pctWithin1hr:s.pctWithin1hr, uncontacted:s.uncontactedCount };
+    }).sort(function(a,b){
+      if (a.avgMs===null) return 1; if (b.avgMs===null) return -1;
+      return a.avgMs - b.avgMs;
+    });
+    loRankingHTML = '<div class="section"><div class="section-head"><h2>Speed to Lead — by Loan Officer</h2></div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Loan Officer</th><th>Avg. Speed to Lead</th><th>% Contacted Within 1 Hr</th><th>Still Waiting</th></tr></thead><tbody>' +
+      ranking.map(function(r){
+        return '<tr><td><b>' + esc(r.name) + '</b></td><td class="num">' + fmtDuration(r.avgMs) + '</td>' +
+          '<td class="num">' + (r.pctWithin1hr===null ? "—" : r.pctWithin1hr+"%") + '</td>' +
+          '<td class="num">' + (r.uncontacted ? ('<span class="badge badge-rust">' + r.uncontacted + '</span>') : "0") + '</td></tr>';
+      }).join("") +
+      '</tbody></table></div></div>';
+  }
+
+  var convRows = conversionBySource(leads);
+  var convHTML = '<div class="table-wrap"><table><thead><tr><th>Source</th><th>Total Leads</th><th>Closed</th><th>Conversion Rate</th><th>Active</th><th>Lost / Cold</th><th>Closed Volume</th></tr></thead><tbody>' +
+    (convRows.length ? convRows.map(function(b){
+      return '<tr><td><b>' + esc(b.source) + '</b></td><td class="num">' + b.total + '</td><td class="num">' + b.closed + '</td>' +
+        '<td class="num"><b>' + b.rate + '%</b></td><td class="num">' + b.active + '</td><td class="num">' + b.lostCold + '</td>' +
+        '<td class="num">' + fmtUSD(b.closedValue) + '</td></tr>';
+    }).join("") : '<tr><td colspan="7" class="cell-sub">No leads yet.</td></tr>') +
+    '</tbody></table></div>';
+
+  return topbar("Speed & Conversion", "How fast leads get their first call, and which sources actually convert — " + (isOwner() ? "across the whole team." : "for your own leads."), "") +
+    '<div class="content">' +
+      '<div class="kpi-row">' +
+        '<div class="kpi"><div class="kpi-label">Avg. Speed to Lead</div><div class="kpi-value num">' + fmtDuration(stl.avgMs) + '</div><div class="kpi-sub">' + stl.contactedCount + ' lead(s) contacted</div></div>' +
+        '<div class="kpi"><div class="kpi-label">Contacted Within 1 Hr</div><div class="kpi-value num">' + (stl.pctWithin1hr===null?"—":stl.pctWithin1hr+"%") + '</div><div class="kpi-sub">Fast follow-up sets the odds of a call-back</div></div>' +
+        '<div class="kpi"><div class="kpi-label">Still Waiting</div><div class="kpi-value num">' + stl.uncontactedCount + '</div><div class="kpi-sub">Active leads with no attempt logged yet</div></div>' +
+      '</div>' +
+      loRankingHTML +
+      '<div class="section"><div class="section-head"><h2>Speed to Lead — by Lead</h2><span class="hint">First call/text attempt after creation</span></div>' +
+        '<div class="table-wrap"><table><thead><tr><th>Lead</th>' + (isOwner() ? '<th>Loan Officer</th>' : '') + '<th>Source</th><th>Created</th><th>Speed to Lead</th></tr></thead><tbody>' + stlRows + '</tbody></table></div>' +
+      '</div>' +
+      '<div class="section"><div class="section-head"><h2>Conversion by Marketing Source</h2><span class="hint">Includes Self-Generated leads</span></div>' + convHTML + '</div>' +
+    '</div>';
+}
+
+function renderRetargeting(){
+  var today = startOfToday();
+  var pool = isOwner() ? state.leads : state.leads.filter(function(l){ return l.assignedTo===ui.viewAs; });
+  var eligible = pool.filter(function(l){ return !!winbackInfo(l, today); });
+  var notYet = pool.filter(function(l){ return (l.status==="cold" || l.status==="lost") && !winbackInfo(l, today); });
+
+  eligible.sort(function(a,b){ return winbackInfo(b,today).priority - winbackInfo(a,today).priority; });
+
+  var cards = eligible.map(function(l){
+    var wb = winbackInfo(l, today);
+    var msg = suggestedWinbackMessage(l);
+    return '<div class="queue-card type-winback" style="border-left-color:var(--c-forest)">' +
+      '<div class="queue-main">' +
+        '<div class="queue-title">' + esc(l.name) + ' <span class="badge ' + (l.status==="cold"?"badge-rust":"badge-neutral") + '">' + (l.status==="cold"?"Cold":"Lost") + '</span></div>' +
+        '<div class="queue-reason">' + esc(wb.reasons.join(" · ")) + '</div>' +
+        '<div class="queue-meta"><span>' + esc(l.loanType) + '</span><span>' + esc(l.phone) + '</span>' + (isOwner()?('<span>LO: ' + esc(userName(l.assignedTo)) + '</span>'):'') + '</div>' +
+        '<textarea class="textarea" readonly style="margin-top:8px;font-size:.78rem" rows="2">' + esc(msg) + '</textarea>' +
+      '</div>' +
+      '<div class="queue-actions">' +
+        '<a class="btn btn-sm" href="tel:' + esc((l.phone||"").replace(/[^0-9+]/g,"")) + '">Call</a>' +
+        '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + l.id + '">Text</button>' +
+        '<button class="btn btn-sm btn-primary" data-action="open-modal" data-modal="logCall" data-lead="' + l.id + '">Log Outreach</button>' +
+        '<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + l.id + '">View</button>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+
+  var notYetHTML = notYet.length ? (
+    '<div class="section-head" style="margin-top:24px"><h2>Not due yet</h2><span class="hint">' + notYet.length + '</span></div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Loan Type</th><th>Status</th><th>Loan Officer</th></tr></thead><tbody>' +
+    notYet.map(function(l){ return '<tr data-action="select-lead" data-lead="' + l.id + '"><td>' + esc(l.name) + '</td><td>' + esc(l.loanType) + '</td><td>' + badgeForStage(l) + '</td><td>' + esc(userName(l.assignedTo)) + '</td></tr>'; }).join("") +
+    '</tbody></table></div>'
+  ) : "";
+
+  return topbar("Retargeting", "Cold and lost leads worth another touch — resurfaced when rates move in their favor or enough time has passed.", "") +
+    '<div class="content">' +
+      (cards || '<div class="empty">No win-back opportunities right now. Cold and lost leads reappear here after 30+ days, or the moment their loan type’s rate drops.</div>') +
+      notYetHTML +
+    '</div>';
+}
+
+function renderNotifications(){
+  var all = state.notifications || [];
+  var mine = isOwner() ? all : all.filter(function(n){ return n.toUserId===ui.viewAs; });
+  var rows = mine.map(function(n){
+    var lead = leadById(n.leadId);
+    var kindBadge = n.kind==="appraisal" ? '<span class="badge badge-gold">Appraisal</span>' : n.kind==="title" ? '<span class="badge badge-slate">Title</span>' : '<span class="badge badge-neutral">Note</span>';
+    return '<div class="queue-card" style="border-left-color:' + (n.read? 'var(--border)':'var(--brand)') + '">' +
+      '<div class="queue-main">' +
+        '<div class="queue-title">' + kindBadge + ' ' + esc(n.text) + '</div>' +
+        '<div class="queue-meta"><span>' + fmtDate(n.date) + '</span>' + (isOwner()?('<span>To: ' + esc(userName(n.toUserId)) + '</span>'):'') + '</div>' +
+      '</div>' +
+      '<div class="queue-actions">' +
+        (lead ? ('<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View Loan</button>') : '') +
+        (!n.read ? ('<button class="btn btn-sm" data-action="mark-notif-read" data-id="' + n.id + '">Mark Read</button>') : '<span class="badge badge-neutral">Read</span>') +
+      '</div>' +
+    '</div>';
+  }).join("");
+  return topbar("Notifications", "Appraisal and title orders, and anything else routed to you.", "") +
+    '<div class="content">' + (rows || '<div class="empty">No notifications yet.</div>') + '</div>';
+}
+
+/* ---------------------------------------------------------------------
+   Borrower portal
+--------------------------------------------------------------------- */
+function renderPortal(){
+  var options = state.leads.map(function(l){ return '<option value="' + l.id + '"' + (ui.portalLeadId===l.id?" selected":"") + '>' + esc(l.name) + ' — ' + esc(l.loanType) + '</option>'; }).join("");
+  var lead = leadById(ui.portalLeadId) || state.leads[0];
+  if (!ui.portalLeadId && lead) ui.portalLeadId = lead.id;
+
+  var body = "";
+  if (lead){
+    var idx = Math.max(stageIndex(lead.stage), 0);
+    var steps = STAGES.map(function(s,i){
+      var cls = i < idx ? "done" : (i===idx ? "now" : "");
+      return '<div class="portal-step ' + cls + '" title="' + s.label + '"></div>';
+    }).join("");
+
+    var docs = (lead.documents||[]).map(function(d,i){
+      var received = d.status==="received";
+      return '<div class="doc-row"><div><div>' + esc(d.name) + '</div><div class="cell-sub">' + (received ? ("Received " + fmtDate(d.receivedAt)) : "Needed to move forward") + '</div></div>' +
+        (received ? '<span class="badge badge-forest">Received</span>' :
+          '<label class="btn btn-sm btn-primary" style="cursor:pointer">Upload<input type="file" style="display:none" data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label>') +
+        '</div>';
+    }).join("");
+
+    body = '<div class="panel panel-pad portal-card">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start">' +
+        '<div>' + BRAND_MARK + '</div>' +
+        '<select class="select" data-action="portal-select">' + options + '</select>' +
+      '</div>' +
+      '<h2 class="font-display" style="margin:18px 0 2px">Welcome back, ' + esc(lead.name.split(" ")[0]) + '</h2>' +
+      '<div class="view-sub">' + esc(lead.loanType) + ' · ' + esc(lead.propertyAddress||"") + '</div>' +
+      '<div class="portal-progress">' + steps + '</div>' +
+      '<div class="view-sub" style="margin-bottom:18px">Current status: <b>' + esc(stageLabel(lead.stage)) + '</b></div>' +
+      '<div class="rail-title" style="margin-top:10px">Your loan officer</div>' +
+      '<div style="margin:6px 0 18px">' + esc(userName(lead.assignedTo)) + ' · ' + esc((userById(lead.assignedTo)||{}).phone||"") + '</div>' +
+      '<div class="rail-title">Document checklist</div>' +
+      (docs || '<div class="empty">No documents requested yet.</div>') +
+    '</div>';
+  } else {
+    body = '<div class="empty">No borrowers yet.</div>';
+  }
+
+  return '<div class="portal">' + body + '</div>' +
+    '<div style="position:fixed;top:14px;left:14px"><button class="btn btn-ghost" data-action="nav" data-view="today">← Exit preview</button></div>';
+}
+
+/* ---------------------------------------------------------------------
+   Modals
+--------------------------------------------------------------------- */
+function renderModal(){
+  if (!ui.modal) return "";
+  if (ui.modal.type === "addLead") return modalAddLead();
+  if (ui.modal.type === "logCall") return modalLogCall(ui.modal.leadId);
+  if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
+  if (ui.modal.type === "sendApplication") return modalSendApplication(ui.modal.leadId);
+  if (ui.modal.type === "changePin") return modalChangePin();
+  if (ui.modal.type === "dialer") return modalDialer();
+  if (ui.modal.type === "sendDocument") return modalSendDocument(ui.modal.leadId, ui.modal.kind);
+  return "";
+}
+function modalSendDocument(leadId, kind){
+  var lead = leadById(leadId);
+  if (!lead) return "";
+  var isTerm = kind === "termSheet";
+  var label = isTerm ? "Term Sheet" : "Pre-Approval Letter";
+  var body = isTerm ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
+  var lo = docLoanOfficer(lead);
+  var smsMsg = "Hi " + (lead.name||"").split(" ")[0] + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your " + label.toLowerCase() + ". Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!";
+  var digits = (lead.phone||"").replace(/[^0-9+]/g,"");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1" style="max-width:560px">' +
+      '<div class="modal-head"><h3>Send ' + label + ' — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        docHTMLPreview(lead, kind) +
+        '<div class="footnote" style="padding:0">Includes ' + esc(lo.name||"the loan officer") + '\'s name, title, and contact info, with a typed signature. Emails the full letter; texts a short heads-up pointing to the borrower\'s inbox.</div>' +
+      '</div>' +
+      '<div class="modal-foot" style="flex-wrap:wrap">' +
+        '<a class="btn" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — Your " + label) + '&body=' + encodeURIComponent(body) + '" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="email">Email It</a>' +
+        '<a class="btn" href="sms:' + esc(digits) + '?&body=' + encodeURIComponent(smsMsg) + '" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="text">Text It</a>' +
+        '<button class="btn btn-primary" type="button" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="manually">Mark as Sent</button>' +
+      '</div>' +
+    '</div></div>';
+}
+function modalChangePin(){
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Change My PIN</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="change-pin">' +
+      '<div class="modal-body">' +
+        '<div class="form-row"><label>Current PIN</label><input class="input" type="password" inputmode="numeric" name="oldPin" required></div>' +
+        '<div class="form-row"><label>New PIN (4–6 digits)</label><input class="input" type="password" inputmode="numeric" name="newPin" required></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Update PIN</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+function modalDialer(){
+  if (!ui.dialer) return "";
+  var id = ui.dialer.queueIds[ui.dialer.index];
+  var lead = leadById(id);
+  if (!lead){ return '<div class="modal-backdrop" id="modal-host" data-action="backdrop"><div class="modal" data-stop="1">' +
+    '<div class="modal-head"><h3>Power Dialer</h3><button class="btn btn-ghost btn-sm" data-action="close-dialer">✕</button></div>' +
+    '<div class="modal-body"><div class="empty">That lead is no longer available.</div></div>' +
+    '<div class="modal-foot"><button class="btn btn-primary" type="button" data-action="dialer-skip">Next →</button></div>' +
+  '</div></div>'; }
+  var digits = (lead.phone||"").replace(/[^0-9+]/g,"");
+  var pos = (ui.dialer.index+1) + " of " + ui.dialer.queueIds.length;
+  var outOptions = CALL_OUTCOMES.map(function(o){ return '<option value="' + o.key + '">' + o.label + '</option>'; }).join("");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Power Dialer — ' + pos + '</h3><button class="btn btn-ghost btn-sm" data-action="close-dialer">✕</button></div>' +
+      '<form data-form="dialer-log" data-lead="' + lead.id + '">' +
+      '<div class="modal-body">' +
+        '<div class="rail-name" style="font-size:1.15rem">' + esc(lead.name) + '</div>' +
+        '<div class="footnote" style="padding:0">' + esc(lead.loanType) + ' · ' + fmtUSD(lead.loanAmount) + '</div>' +
+        '<a class="btn btn-primary" style="width:100%;justify-content:center;font-size:1.05rem;padding:13px" href="tel:' + esc(digits) + '">📞 Call ' + esc(lead.phone||"") + '</a>' +
+        '<div class="form-row"><label>Outcome</label><select class="select" name="outcome">' + outOptions + '</select></div>' +
+        '<div class="form-row"><label>Notes</label><textarea class="textarea" name="notes" rows="2" placeholder="What did you discuss?"></textarea></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="dialer-skip">Skip</button><button class="btn btn-primary" type="submit">Save &amp; Next →</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+function modalSendApplication(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return "";
+  var link = applicationLink(lead);
+  var msg = "Hi " + (lead.name||"").split(" ")[0] + ", please complete your Bridgepoint Lending application here: " + link + " — takes about 5 minutes.";
+  var digits = (lead.phone||"").replace(/[^0-9+]/g,"");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Send Application — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="form-row"><label>Application link</label><input class="input mono" id="app-link-box" readonly value="' + esc(link) + '"></div>' +
+        '<div class="form-row"><label>Message</label><textarea class="textarea" id="app-message-box" rows="3">' + esc(msg) + '</textarea></div>' +
+        '<div class="footnote" style="padding:0">Opens as a plain web page — no login, no PDF to print. They submit it and it emails straight to your applications inbox.</div>' +
+      '</div>' +
+      '<div class="modal-foot" style="flex-wrap:wrap">' +
+        '<button class="btn" type="button" data-action="copy-app-link">Copy Link</button>' +
+        '<a class="btn" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — Complete Your Application") + '&body=' + encodeURIComponent(msg) + '" data-action="send-application" data-lead="' + lead.id + '" data-channel="email">Email It</a>' +
+        '<a class="btn" href="sms:' + esc(digits) + '?&body=' + encodeURIComponent(msg) + '" data-action="send-application" data-lead="' + lead.id + '" data-channel="text">Text It</a>' +
+        '<button class="btn btn-primary" type="button" data-action="send-application" data-lead="' + lead.id + '" data-channel="manually">Mark as Sent</button>' +
+      '</div>' +
+    '</div></div>';
+}
+function modalSendText(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return "";
+  var msg = defaultOutreachMessage(lead);
+  var digits = (lead.phone||"").replace(/[^0-9+]/g,"");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Text — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="form-row"><label>To</label><div class="val mono">' + esc(lead.phone) + '</div></div>' +
+        '<div class="form-row"><label>Message</label><textarea class="textarea" id="text-message-box" rows="4">' + esc(msg) + '</textarea></div>' +
+        '<div class="footnote" style="padding:0">Opens your phone/Quo app with this message, or copy it. Logging it here adds it to this lead’s activity and counts as an outreach attempt.</div>' +
+      '</div>' +
+      '<div class="modal-foot" style="flex-wrap:wrap">' +
+        '<a class="btn" href="sms:' + esc(digits) + '">Open in Messages</a>' +
+        '<button class="btn" type="button" data-action="copy-message">Copy Message</button>' +
+        '<form data-form="send-text" data-lead="' + lead.id + '" style="display:inline"><button class="btn btn-primary" type="submit">Log as Sent</button></form>' +
+      '</div>' +
+    '</div></div>';
+}
+function modalAddLead(){
+  var loOptions = loanOfficers().map(function(u){ return '<option value="' + u.id + '">' + esc(u.name) + '</option>'; }).join("");
+  var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
+  var srcOptions = SOURCES.map(function(s){ return '<option value="' + s + '">' + s + '</option>'; }).join("");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>New Lead</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="add-lead">' +
+      '<div class="modal-body">' +
+        '<div class="form-row"><label>Name</label><input class="input" name="name" required></div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Email</label><input class="input" type="email" name="email"></div>' +
+          '<div class="form-row"><label>Phone</label><input class="input" name="phone" required></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Source</label><select class="select" name="source">' + srcOptions + '</select></div>' +
+          '<div class="form-row"><label>Loan Type</label><select class="select" name="loanType">' + typeOptions + '</select></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Assign to</label><select class="select" name="assignedTo">' + loOptions + '</select></div>' +
+          '<div class="form-row"><label>Loan Amount (est.)</label><input class="input" type="number" name="loanAmount"></div>' +
+        '</div>' +
+        '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress"></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add Lead</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+function modalLogCall(leadId){
+  var lead = leadById(leadId);
+  var outOptions = CALL_OUTCOMES.map(function(o){ return '<option value="' + o.key + '">' + o.label + '</option>'; }).join("");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Log Call — ' + esc(lead?lead.name:"") + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="log-call" data-lead="' + leadId + '">' +
+      '<div class="modal-body">' +
+        '<div class="form-row"><label>Outcome</label><select class="select" name="outcome">' + outOptions + '</select></div>' +
+        '<div class="form-row"><label>Notes</label><textarea class="textarea" name="notes" placeholder="What did you discuss?"></textarea></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save Call</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+
+/* ---------------------------------------------------------------------
+   Event delegation
+--------------------------------------------------------------------- */
+var appEl = document.getElementById("app");
+
+appEl.addEventListener("click", function(e){
+  var backdrop = e.target.closest && e.target.closest("[data-action='backdrop']");
+  if (backdrop && e.target === backdrop){ ui.modal = null; ui.dialer = null; render(); return; }
+
+  var t = e.target.closest && e.target.closest("[data-action]");
+  if (!t) return;
+  var action = t.dataset.action;
+
+  if (action === "nav"){ ui.view = t.dataset.view; if (ui.view!=="detail") ui.selectedLeadId=null; render(); }
+  else if (action === "select-lead"){ ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); }
+  else if (action === "filter-lo-jump"){ ui.view="leads"; ui.leadFilter.assignedTo=t.dataset.lo; ui.leadFilter.status=""; render(); }
+  else if (action === "set-tab"){ ui.activeTab = t.dataset.tab; render(); }
+  else if (action === "open-modal"){ ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null }; render(); }
+  else if (action === "close-modal"){ ui.modal = null; render(); }
+  else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
+  else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "toggle-processing"){ toggleProcessingAction(t.dataset.lead, t.dataset.kind); }
+  else if (action === "mark-notif-read"){ markNotificationRead(t.dataset.id); }
+  else if (action === "log-email"){ logEmailSent(t.dataset.lead); }
+  else if (action === "send-application"){
+    sendApplicationAction(t.dataset.lead, t.dataset.channel);
+    if (t.dataset.channel === "manually"){ ui.modal = null; render(); }
+  }
+  else if (action === "send-document"){
+    sendDocumentAction(t.dataset.lead, t.dataset.kind, t.dataset.channel);
+    if (t.dataset.channel === "manually"){ ui.modal = null; render(); }
+  }
+  else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
+  else if (action === "logout"){ logout(); }
+  else if (action === "start-dialer"){ startDialer(); }
+  else if (action === "dialer-skip"){ dialerAdvance(); }
+  else if (action === "close-dialer"){ closeDialer(); }
+  else if (action === "copy-app-link"){
+    var linkBox = document.getElementById("app-link-box");
+    if (linkBox){
+      var lnk = linkBox.value;
+      var okFn = function(){ showToast("Link copied"); };
+      var failFn = function(){ linkBox.focus(); linkBox.select(); showToast("Couldn't auto-copy — link is selected, press Ctrl/Cmd+C"); };
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(lnk).then(okFn).catch(failFn);
+      } else { failFn(); }
+    }
+  }
+  else if (action === "copy-message"){
+    var box = document.getElementById("text-message-box");
+    if (box){
+      var text = box.value;
+      var done = function(){ showToast("Message copied"); };
+      var fail = function(){ box.focus(); box.select(); showToast("Couldn't auto-copy — text is selected, press Ctrl/Cmd+C"); };
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(done).catch(fail);
+      } else { fail(); }
+    }
+  }
+});
+
+appEl.addEventListener("change", function(e){
+  var t = e.target;
+  if (!t.dataset) return;
+  var action = t.dataset.action;
+  if (action === "filter"){
+    ui.leadFilter[t.dataset.key] = t.value; render();
+  } else if (action === "filter-comm"){
+    ui.commFilter = t.value; render();
+  } else if (action === "move-stage" && t.tagName==="SELECT"){
+    moveStage(t.dataset.lead, t.value);
+  } else if (action === "toggle-notify"){
+    toggleNotify(t.dataset.lead, parseInt(t.dataset.idx,10));
+  } else if (action === "portal-select"){
+    ui.portalLeadId = t.value; render();
+  } else if (action === "upload-doc"){
+    var file = t.files && t.files[0];
+    if (file) borrowerUploadDoc(t.dataset.lead, parseInt(t.dataset.idx,10), file.name);
+  }
+});
+
+appEl.addEventListener("submit", function(e){
+  var form = e.target;
+  if (!form.dataset || !form.dataset.form) return;
+  e.preventDefault();
+  var type = form.dataset.form;
+  var fd = new FormData(form);
+  if (type === "add-lead"){
+    addLead({
+      name: fd.get("name"), email: fd.get("email"), phone: fd.get("phone"),
+      source: fd.get("source"), loanType: fd.get("loanType"), assignedTo: fd.get("assignedTo"),
+      loanAmount: fd.get("loanAmount") ? Number(fd.get("loanAmount")) : null,
+      propertyAddress: fd.get("propertyAddress")
+    });
+  } else if (type === "log-call"){
+    logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
+    ui.modal = null; render();
+  } else if (type === "add-third-party"){
+    addThirdParty(form.dataset.lead, { role:fd.get("role"), name:fd.get("name"), phone:fd.get("phone"), email:fd.get("email"), notify:true });
+  } else if (type === "add-note"){
+    addNote(form.dataset.lead, fd.get("note"));
+    form.reset();
+  } else if (type === "request-doc"){
+    requestDoc(form.dataset.lead, fd.get("name"));
+    form.reset();
+  } else if (type === "follow-up"){
+    setFollowUp(form.dataset.lead, fd.get("date"), fd.get("note"));
+  } else if (type === "rate"){
+    updateMarketRate(form.dataset.key, Number(fd.get("rate")));
+    form.reset();
+  } else if (type === "send-text"){
+    var box = document.getElementById("text-message-box");
+    logTextSent(form.dataset.lead, box ? box.value : "");
+    ui.modal = null; render();
+  } else if (type === "login"){
+    attemptLogin(fd.get("username"), fd.get("pin"));
+  } else if (type === "change-pin"){
+    changeMyPin(fd.get("oldPin"), fd.get("newPin"));
+  } else if (type === "reset-pin"){
+    resetUserPin(form.dataset.user, fd.get("pin"));
+    form.reset();
+  } else if (type === "set-points"){
+    setPointsCharged(form.dataset.lead, fd.get("points"));
+  } else if (type === "dialer-log"){
+    logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
+    dialerAdvance();
+  }
+});
+
+/* ---------------------------------------------------------------------
+   Init
+--------------------------------------------------------------------- */
+render();
+
+})();
+</script>
+</body>
