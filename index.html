@@ -563,6 +563,7 @@ function attemptLogin(username, pin){
     sb.rpc("list_users").then(function(res2){
       if (res2.data){ res2.data.forEach(upsertLocalUser); render(); }
     });
+    hydrateFromSupabase();
   });
 }
 function logout(){
@@ -998,11 +999,93 @@ function docHTMLPreview(lead, kind){
 /* ---------------------------------------------------------------------
    Actions (mutate state, then persist)
 --------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------
+   Supabase sync — leads / notifications / market rates
+--------------------------------------------------------------------- */
+function leadToRow(l){
+  return {
+    id: l.id, name: l.name, email: l.email, phone: l.phone, source: l.source,
+    loan_type: l.loanType, stage: l.stage, status: l.status, assigned_to: l.assignedTo, created_at: l.createdAt,
+    entity_type: l.entityType, credit_score: l.creditScore, experience_deals: l.experienceDeals, liquidity: l.liquidity,
+    property_address: l.propertyAddress, property_type: l.propertyType,
+    purchase_price: l.purchasePrice, arv: l.arv, rehab_budget: l.rehabBudget, rent_estimate: l.rentEstimate,
+    loan_amount: l.loanAmount, ltv: l.ltv, rate: l.rate, term_months: l.termMonths,
+    exit_strategy: l.exitStrategy, close_date: l.closeDate, next_follow_up: l.nextFollowUp, next_follow_up_note: l.nextFollowUpNote,
+    points_charged: l.pointsCharged, created_at_ts: l.createdAtTs, first_attempt_at: l.firstAttemptAt,
+    application_sent_at: l.applicationSentAt, application_taken_by_phone: !!l.applicationTakenByPhone, application_taken_at: l.applicationTakenAt,
+    appraisal_ordered: !!l.appraisalOrdered, appraisal_ordered_at: l.appraisalOrderedAt,
+    title_ordered: !!l.titleOrdered, title_ordered_at: l.titleOrderedAt,
+    preapproval_sent_at: l.preapprovalSentAt, termsheet_sent_at: l.termsheetSentAt, credit_ordered_at: l.creditOrderedAt,
+    last_contact_at: l.lastContactAt,
+    call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
+  };
+}
+function rowToLead(r){
+  return {
+    id: r.id, name: r.name, email: r.email, phone: r.phone, source: r.source,
+    loanType: r.loan_type, stage: r.stage, status: r.status, assignedTo: r.assigned_to, createdAt: r.created_at,
+    entityType: r.entity_type, creditScore: r.credit_score, experienceDeals: r.experience_deals, liquidity: r.liquidity,
+    propertyAddress: r.property_address, propertyType: r.property_type,
+    purchasePrice: r.purchase_price, arv: r.arv, rehabBudget: r.rehab_budget, rentEstimate: r.rent_estimate,
+    loanAmount: r.loan_amount, ltv: r.ltv, rate: r.rate, termMonths: r.term_months,
+    exitStrategy: r.exit_strategy, closeDate: r.close_date, nextFollowUp: r.next_follow_up, nextFollowUpNote: r.next_follow_up_note,
+    pointsCharged: r.points_charged, createdAtTs: r.created_at_ts, firstAttemptAt: r.first_attempt_at,
+    applicationSentAt: r.application_sent_at, applicationTakenByPhone: r.application_taken_by_phone, applicationTakenAt: r.application_taken_at,
+    appraisalOrdered: r.appraisal_ordered, appraisalOrderedAt: r.appraisal_ordered_at,
+    titleOrdered: r.title_ordered, titleOrderedAt: r.title_ordered_at,
+    preapprovalSentAt: r.preapproval_sent_at, termsheetSentAt: r.termsheet_sent_at, creditOrderedAt: r.credit_ordered_at,
+    lastContactAt: r.last_contact_at,
+    callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
+  };
+}
+function notifToRow(n){
+  return { id: n.id, to_user_id: n.toUserId, lead_id: n.leadId, kind: n.kind, text: n.text, date: n.date, read: !!n.read };
+}
+function rowToNotif(r){
+  return { id: r.id, toUserId: r.to_user_id, leadId: r.lead_id, kind: r.kind, text: r.text, date: r.date, read: r.read };
+}
+function hydrateFromSupabase(){
+  if (!sb) return;
+  sb.from("leads").select("*").then(function(res){
+    if (res.error){ console.error("lead fetch error", res.error); return; }
+    if (res.data){ state.leads = res.data.map(rowToLead); render(); }
+  });
+  sb.from("notifications").select("*").then(function(res){
+    if (res.error){ console.error("notification fetch error", res.error); return; }
+    if (res.data){ state.notifications = res.data.map(rowToNotif); render(); }
+  });
+  sb.from("market_rates").select("*").then(function(res){
+    if (res.error){ console.error("market rate fetch error", res.error); return; }
+    if (res.data){
+      var mr = {};
+      res.data.forEach(function(r){ mr[r.key] = { label:r.label, previous:r.previous, current:r.current, updatedAt:r.updated_at }; });
+      state.marketRates = mr;
+      render();
+    }
+  });
+}
+var syncTimer = null;
+function scheduleSync(){
+  if (!sb) return;
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncToSupabase, 600);
+}
+function syncToSupabase(){
+  if (!sb) return;
+  if (state.leads && state.leads.length){
+    sb.from("leads").upsert(state.leads.map(leadToRow)).then(function(res){ if (res.error) console.error("lead sync error", res.error); });
+  }
+  if (state.notifications && state.notifications.length){
+    sb.from("notifications").upsert(state.notifications.map(notifToRow)).then(function(res){ if (res.error) console.error("notification sync error", res.error); });
+  }
+}
+
 var publishTimer = null;
 function persist(){
   render();
   if (publishTimer) clearTimeout(publishTimer);
   publishTimer = setTimeout(doPublish, 500);
+  scheduleSync();
 }
 var artifactApiPromise = null;
 function getArtifactApi(){
