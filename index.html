@@ -615,6 +615,26 @@ function resetUserPin(userId, newPin){
     render();
   });
 }
+function addTeamMember(data){
+  if (!isOwner() || !sb) return;
+  if (!/^\d{4,6}$/.test(data.pin||"")){ ui.teamMemberError = "PIN must be 4–6 digits"; render(); return; }
+  sb.rpc("create_user", {
+    p_name: data.name, p_role: data.role, p_title: data.title||"", p_phone: data.phone||"",
+    p_email: data.email||"", p_username: data.username||"", p_pin: data.pin
+  }).then(function(res){
+    if (res.error){
+      var msg = (res.error.message||"").indexOf("username_taken") !== -1 ? "That username is already taken." : "Couldn't add them — try again.";
+      ui.teamMemberError = msg;
+      render();
+      return;
+    }
+    upsertLocalUser(res.data);
+    ui.modal = null;
+    ui.teamMemberError = null;
+    showToast("Added " + data.name);
+    render();
+  });
+}
 
 /* ---------------------------------------------------------------------
    Commission (points charged)
@@ -2225,7 +2245,8 @@ function renderTeam(){
       '</form></td></tr>';
   }).join("");
 
-  return topbar("Team", "Workload, commission, and login access across the team.", "") +
+  var actions = isOwner() ? '<button class="btn btn-primary" data-action="open-modal" data-modal="addTeamMember">+ Add Team Member</button>' : '';
+  return topbar("Team", "Workload, commission, and login access across the team.", actions) +
     '<div class="content">' +
       '<div class="table-wrap"><table><thead><tr><th>Loan Officer</th><th>Active Leads</th><th>Calls Due</th><th>Pipeline Value</th><th>Closed</th><th>Earned (mo.)</th><th>Potential (mo.)</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
       '<div class="section-head" style="margin-top:24px"><h2>Login Access</h2></div>' +
@@ -2460,6 +2481,7 @@ function renderModal(){
   if (ui.modal.type === "takeApplication") return modalTakeApplication(ui.modal.leadId);
   if (ui.modal.type === "changePin") return modalChangePin();
   if (ui.modal.type === "editSignature") return modalEditSignature();
+  if (ui.modal.type === "addTeamMember") return modalAddTeamMember();
   if (ui.modal.type === "dialer") return modalDialer();
   if (ui.modal.type === "sendDocument") return modalSendDocument(ui.modal.leadId, ui.modal.kind);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
@@ -2529,6 +2551,35 @@ function modalEditSignature(){
         '<div class="form-row"><label>Text message sign-off</label><input class="input" name="textSignoff" value="' + esc(u.textSignoff || defaultText) + '"></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+function modalAddTeamMember(){
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Add Team Member</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="add-team-member">' +
+      '<div class="modal-body">' +
+        (ui.teamMemberError ? ('<div class="login-error">' + esc(ui.teamMemberError) + '</div>') : '') +
+        '<div class="form-row"><label>Name</label><input class="input" name="name" required></div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Role</label><select class="select" name="role">' +
+            '<option value="loan_officer">Loan Officer</option>' +
+            '<option value="processor">Processor</option>' +
+          '</select></div>' +
+          '<div class="form-row"><label>Title</label><input class="input" name="title" placeholder="e.g. Loan Officer"></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Phone</label><input class="input" name="phone" placeholder="(813) 555-0100"></div>' +
+          '<div class="form-row"><label>Email</label><input class="input" type="email" name="email"></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Username</label><input class="input" name="username" placeholder="e.g. carlos" required></div>' +
+          '<div class="form-row"><label>Initial PIN (4–6 digits)</label><input class="input" type="text" inputmode="numeric" pattern="[0-9]*" name="pin" maxlength="6" required></div>' +
+        '</div>' +
+        '<div class="footnote" style="padding:0">They\'ll be walked through setting up their own signature and a short tour the first time they log in.</div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add</button></div>' +
       '</form>' +
     '</div></div>';
 }
@@ -2705,7 +2756,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "select-lead"){ ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); }
   else if (action === "filter-lo-jump"){ ui.view="leads"; ui.leadFilter.assignedTo=t.dataset.lo; ui.leadFilter.status=""; render(); }
   else if (action === "set-tab"){ ui.activeTab = t.dataset.tab; render(); }
-  else if (action === "open-modal"){ ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null }; render(); }
+  else if (action === "open-modal"){ ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null }; ui.teamMemberError = null; render(); }
   else if (action === "close-modal"){ ui.modal = null; render(); }
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
@@ -2838,6 +2889,11 @@ appEl.addEventListener("submit", function(e){
     changeMyPin(fd.get("oldPin"), fd.get("newPin"));
   } else if (type === "reset-pin"){
     resetUserPin(form.dataset.user, fd.get("pin"));
+  } else if (type === "add-team-member"){
+    addTeamMember({
+      name: fd.get("name"), role: fd.get("role"), title: fd.get("title"),
+      phone: fd.get("phone"), email: fd.get("email"), username: fd.get("username"), pin: fd.get("pin")
+    });
     form.reset();
   } else if (type === "set-points"){
     setPointsCharged(form.dataset.lead, fd.get("points"));
