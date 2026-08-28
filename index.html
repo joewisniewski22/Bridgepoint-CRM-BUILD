@@ -467,9 +467,14 @@ function evaluateGuidelines(lead){
     if (lead.rentEstimate && lead.loanAmount && lead.rate){
       var pi = monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths||360);
       if (pi){
-        var estPitia = pi * 1.2;
-        var dscr = lead.rentEstimate / estPitia;
-        check("Estimated DSCR", dscr >= 1.0, dscr.toFixed(2) + "x (rough estimate — includes a 20% padding for taxes/insurance, which aren't tracked yet)");
+        var hasRealExpenses = lead.monthlyTaxes!=null || lead.monthlyInsurance!=null;
+        var pitia = hasRealExpenses
+          ? pi + (lead.monthlyTaxes||0) + (lead.monthlyInsurance||0) + (lead.monthlyHoa||0)
+          : pi * 1.2;
+        var dscr = lead.rentEstimate / pitia;
+        check("DSCR", dscr >= 1.0, dscr.toFixed(2) + "x" + (hasRealExpenses
+          ? " (P&I " + fmtUSD(pi) + " + taxes/insurance/HOA " + fmtUSD(pitia-pi) + ")"
+          : " — estimated, add monthly tax/insurance for an exact number"));
       }
     }
   } else if (type === "Fix & Flip" || type === "Bridge"){
@@ -488,6 +493,11 @@ function evaluateGuidelines(lead){
           check("LTC", bridgeLtc <= limits.ltc, bridgeLtc.toFixed(0) + "% — max " + limits.ltc + "% for " + tierName + " bridge");
         }
       } else {
+        if (lead.purchasePrice && lead.loanAmount){
+          var initialAdvance = lead.loanAmount - (lead.rehabBudget||0);
+          var initialLtc = initialAdvance / lead.purchasePrice * 100;
+          check("Initial LTC (at closing)", initialLtc <= limits.iltc, initialLtc.toFixed(0) + "% — max " + limits.iltc + "% for " + tierName + " " + rClass + " (loan amount minus rehab budget, since rehab funds are drawn over time)");
+        }
         if (lead.purchasePrice && lead.rehabBudget && lead.loanAmount){
           var totalLtc = lead.loanAmount / (lead.purchasePrice + lead.rehabBudget) * 100;
           check("Total LTC", totalLtc <= limits.ltc, totalLtc.toFixed(0) + "% — max " + limits.ltc + "% for " + tierName + " " + rClass);
@@ -507,6 +517,11 @@ function evaluateGuidelines(lead){
     check("Experience", !!guLimits,
       (lead.experienceDeals||0) + " deal(s) (" + guTierName + ") — ground-up isn't eligible under 3 completed deals");
     if (guLimits){
+      if (lead.purchasePrice && lead.loanAmount){
+        var guInitialAdvance = lead.loanAmount - (lead.rehabBudget||0);
+        var guInitialLtc = guInitialAdvance / lead.purchasePrice * 100;
+        check("Initial LTC (at closing)", guInitialLtc <= guLimits.iltc, guInitialLtc.toFixed(0) + "% — max " + guLimits.iltc + "% for " + guTierName + " (loan amount minus construction budget)");
+      }
       if (lead.purchasePrice && lead.rehabBudget && lead.loanAmount){
         var guTotalLtc = lead.loanAmount / (lead.purchasePrice + lead.rehabBudget) * 100;
         check("Total LTC", guTotalLtc <= guLimits.totalLtc, guTotalLtc.toFixed(0) + "% — max " + guLimits.totalLtc + "% for " + guTierName);
@@ -1191,6 +1206,8 @@ function leadToRow(l){
     title_ordered: !!l.titleOrdered, title_ordered_at: l.titleOrderedAt,
     preapproval_sent_at: l.preapprovalSentAt, termsheet_sent_at: l.termsheetSentAt, credit_ordered_at: l.creditOrderedAt,
     last_contact_at: l.lastContactAt,
+    monthly_taxes: l.monthlyTaxes, monthly_insurance: l.monthlyInsurance, monthly_hoa: l.monthlyHoa,
+    guideline_check: l.guidelineCheck || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1209,6 +1226,8 @@ function rowToLead(r){
     titleOrdered: r.title_ordered, titleOrderedAt: r.title_ordered_at,
     preapprovalSentAt: r.preapproval_sent_at, termsheetSentAt: r.termsheet_sent_at, creditOrderedAt: r.credit_ordered_at,
     lastContactAt: r.last_contact_at,
+    monthlyTaxes: r.monthly_taxes, monthlyInsurance: r.monthly_insurance, monthlyHoa: r.monthly_hoa,
+    guidelineCheck: r.guideline_check || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -2206,6 +2225,9 @@ function renderTabScenario(lead){
     field("After-Repair Value (ARV)", fmtUSD(lead.arv), true) +
     field("Rehab / Construction Budget", fmtUSD(lead.rehabBudget), true) +
     field("Monthly Rent Estimate", fmtUSD(lead.rentEstimate), true) +
+    field("Monthly Property Tax", fmtUSD(lead.monthlyTaxes), true) +
+    field("Monthly Insurance", fmtUSD(lead.monthlyInsurance), true) +
+    field("Monthly HOA / Dues", lead.monthlyHoa ? fmtUSD(lead.monthlyHoa) : "—", true) +
     field("Loan Amount Requested", fmtUSD(lead.loanAmount), true) +
     field("LTV / LTC", lead.ltv ? lead.ltv + "%" : "—", true) +
     field("Rate", fmtPct(lead.rate), true) +
@@ -2846,7 +2868,12 @@ function modalTakeApplication(leadId){
       '<div class="form-two">' +
         '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
         '<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
-      '</div>';
+      '</div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Monthly Property Tax</label><input class="input" type="number" name="monthlyTaxes" value="' + v(lead.monthlyTaxes) + '"></div>' +
+        '<div class="form-row"><label>Monthly Insurance</label><input class="input" type="number" name="monthlyInsurance" value="' + v(lead.monthlyInsurance) + '"></div>' +
+      '</div>' +
+      '<div class="form-row"><label>Monthly HOA / Dues (if any)</label><input class="input" type="number" name="monthlyHoa" value="' + v(lead.monthlyHoa) + '"></div>';
   } else if (isRehabType){
     scenarioFieldsHTML =
       '<div class="form-two">' +
@@ -3085,6 +3112,9 @@ appEl.addEventListener("submit", function(e){
       arv: numOrNull("arv"),
       rehabBudget: numOrNull("rehabBudget"),
       rentEstimate: numOrNull("rentEstimate"),
+      monthlyTaxes: numOrNull("monthlyTaxes"),
+      monthlyInsurance: numOrNull("monthlyInsurance"),
+      monthlyHoa: numOrNull("monthlyHoa"),
       loanAmount: numOrNull("loanAmount"),
       termMonths: numOrNull("termMonths")
     });
