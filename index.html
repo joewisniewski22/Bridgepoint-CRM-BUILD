@@ -408,6 +408,140 @@ var ENTITY_TYPES = ["LLC","Individual","Corporation"];
 var PROPERTY_TYPES = ["SFR","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Land"];
 var EXIT_STRATEGIES = ["Sell","Refinance to DSCR","Hold/Rent","1031 Exchange"];
 var TP_ROLES = ["Realtor","Title Company","Escrow Officer","Insurance Agent","Attorney","Appraiser"];
+
+/* ---------------------------------------------------------------------
+   Lender guideline check — pulled from BPL/Constructive Loans matrices
+   (DSCR Rental Matrix 7.1.26, RTL Matrix 1.1.26, Ground-Up Matrix 1.1.26).
+   This is a preliminary triage tool for the LO/processor/owner only —
+   never shown to the borrower — not a substitute for full underwriting.
+--------------------------------------------------------------------- */
+var RTL_TIERS = {
+  silver:   { bridge:{ltc:75}, light:{iltc:85,ltc:90,ltarv:75}, standard:{iltc:80,ltc:85,ltarv:75}, super:null },
+  gold:     { bridge:{ltc:75}, light:{iltc:85,ltc:90,ltarv:75}, standard:{iltc:85,ltc:90,ltarv:75}, super:{iltc:75,ltc:85,ltarv:70} },
+  platinum: { bridge:{ltc:75}, light:{iltc:85,ltc:90,ltarv:75}, standard:{iltc:85,ltc:90,ltarv:75}, super:{iltc:80,ltc:85,ltarv:75} }
+};
+var GROUNDUP_TIERS = {
+  silver: null,
+  gold:     { iltc:65, totalLtc:85, ltarv:70 },
+  platinum: { iltc:70, totalLtc:90, ltarv:70 }
+};
+var DSCR_LTV_BY_FICO = [
+  { minFico:720, purchase:80, rateTerm:80, cashOut:75 },
+  { minFico:700, purchase:80, rateTerm:80, cashOut:75 },
+  { minFico:680, purchase:80, rateTerm:80, cashOut:75 },
+  { minFico:660, purchase:70, rateTerm:70, cashOut:70 }
+];
+function experienceTier(deals){
+  deals = deals || 0;
+  if (deals >= 5) return "platinum";
+  if (deals >= 3) return "gold";
+  return "silver";
+}
+function rehabClass(lead){
+  if (!lead.rehabBudget || !lead.purchasePrice) return "bridge";
+  var ratio = lead.rehabBudget / lead.purchasePrice;
+  if (ratio < 0.25) return "light";
+  if (ratio < 0.50) return "standard";
+  return "super";
+}
+function monthlyPayment(principal, annualRatePct, termMonths){
+  if (!principal || !annualRatePct || !termMonths) return null;
+  var r = (annualRatePct/100) / 12;
+  return principal * r / (1 - Math.pow(1+r, -termMonths));
+}
+function evaluateGuidelines(lead){
+  var checks = [];
+  function check(label, pass, detail){ checks.push({ label:label, pass:!!pass, detail:detail }); }
+  var type = lead.loanType;
+
+  if (type === "DSCR"){
+    check("Loan amount", lead.loanAmount>=50000 && lead.loanAmount<=2000000,
+      fmtUSD(lead.loanAmount) + " — needs to be $50,000–$2,000,000");
+    check("Credit score", (lead.creditScore||0) >= 660, (lead.creditScore||"—") + " — 660 minimum");
+    if (lead.purchasePrice && lead.loanAmount){
+      var ltv = lead.loanAmount / lead.purchasePrice * 100;
+      var tier = DSCR_LTV_BY_FICO.filter(function(t){ return (lead.creditScore||0) >= t.minFico; })[0];
+      var maxLtv = tier ? tier.purchase : DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length-1].purchase;
+      check("LTV", ltv <= maxLtv, ltv.toFixed(0) + "% — max " + maxLtv + "% for this credit score band");
+    }
+    if (lead.rentEstimate && lead.loanAmount && lead.rate){
+      var pi = monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths||360);
+      if (pi){
+        var estPitia = pi * 1.2;
+        var dscr = lead.rentEstimate / estPitia;
+        check("Estimated DSCR", dscr >= 1.0, dscr.toFixed(2) + "x (rough estimate — includes a 20% padding for taxes/insurance, which aren't tracked yet)");
+      }
+    }
+  } else if (type === "Fix & Flip" || type === "Bridge"){
+    check("Loan amount", lead.loanAmount>=75000 && lead.loanAmount<=2000000,
+      fmtUSD(lead.loanAmount) + " — needs to be $75,000–$2,000,000");
+    check("Credit score", (lead.creditScore||0) >= 680, (lead.creditScore||"—") + " — 680 minimum");
+    var tierName = experienceTier(lead.experienceDeals);
+    var rClass = type === "Bridge" ? "bridge" : rehabClass(lead);
+    var limits = RTL_TIERS[tierName][rClass];
+    check("Experience / rehab scope", !!limits,
+      (lead.experienceDeals||0) + " deal(s) (" + tierName + ") — " + rClass + " rehab" + (limits ? "" : " isn't eligible at this experience level"));
+    if (limits){
+      if (rClass === "bridge"){
+        if (lead.purchasePrice && lead.loanAmount){
+          var bridgeLtc = lead.loanAmount / lead.purchasePrice * 100;
+          check("LTC", bridgeLtc <= limits.ltc, bridgeLtc.toFixed(0) + "% — max " + limits.ltc + "% for " + tierName + " bridge");
+        }
+      } else {
+        if (lead.purchasePrice && lead.rehabBudget && lead.loanAmount){
+          var totalLtc = lead.loanAmount / (lead.purchasePrice + lead.rehabBudget) * 100;
+          check("Total LTC", totalLtc <= limits.ltc, totalLtc.toFixed(0) + "% — max " + limits.ltc + "% for " + tierName + " " + rClass);
+        }
+        if (lead.arv && lead.loanAmount){
+          var ltarv = lead.loanAmount / lead.arv * 100;
+          check("LTARV", ltarv <= limits.ltarv, ltarv.toFixed(0) + "% — max " + limits.ltarv + "% for " + tierName + " " + rClass);
+        }
+      }
+    }
+  } else if (type === "Ground Up Construction"){
+    check("Loan amount", lead.loanAmount>=75000 && lead.loanAmount<=2000000,
+      fmtUSD(lead.loanAmount) + " — needs to be $75,000–$2,000,000");
+    check("Credit score", (lead.creditScore||0) >= 700, (lead.creditScore||"—") + " — 700 minimum");
+    var guTierName = experienceTier(lead.experienceDeals);
+    var guLimits = GROUNDUP_TIERS[guTierName];
+    check("Experience", !!guLimits,
+      (lead.experienceDeals||0) + " deal(s) (" + guTierName + ") — ground-up isn't eligible under 3 completed deals");
+    if (guLimits){
+      if (lead.purchasePrice && lead.rehabBudget && lead.loanAmount){
+        var guTotalLtc = lead.loanAmount / (lead.purchasePrice + lead.rehabBudget) * 100;
+        check("Total LTC", guTotalLtc <= guLimits.totalLtc, guTotalLtc.toFixed(0) + "% — max " + guLimits.totalLtc + "% for " + guTierName);
+      }
+      if (lead.arv && lead.loanAmount){
+        var guLtarv = lead.loanAmount / lead.arv * 100;
+        check("LTARV", guLtarv <= guLimits.ltarv, guLtarv.toFixed(0) + "% — max " + guLimits.ltarv + "% for " + guTierName);
+      }
+    }
+  } else {
+    return null;
+  }
+
+  var allPass = checks.length > 0 && checks.every(function(c){ return c.pass; });
+  return { status: allPass ? "pass" : "review", checks: checks, evaluatedAt: todayISO() };
+}
+function runGuidelineCheck(leadId, opts){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var result = evaluateGuidelines(lead);
+  lead.guidelineCheck = result;
+  if (result && result.status === "review" && !(opts && opts.silent)){
+    var failed = result.checks.filter(function(c){ return !c.pass; }).map(function(c){ return c.label; }).join(", ");
+    var owner = state.users.filter(function(u){ return u.role==="owner"; })[0];
+    if (owner){
+      notifyUser(owner.id, leadId, "review", lead.name + "'s " + lead.loanType + " scenario needs review — " + failed);
+    }
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"system", text:"Guideline check: needs review — " + failed, author:"System" });
+  } else if (result && result.status === "pass" && !(opts && opts.silent)){
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"system", text:"Guideline check: passed", author:"System" });
+  }
+  persist();
+}
 var CALL_OUTCOMES = [
   { key:"no-answer", label:"No answer" },
   { key:"left-voicemail", label:"Left voicemail" },
@@ -1246,7 +1380,7 @@ function submitPhoneApplication(leadId, patch){
   lead.activity.push({ date:d, type:"application", text:"Application taken by phone with " + lead.name, author: currentUser().name });
   ui.modal = null;
   showToast("Application saved for " + lead.name);
-  persist();
+  runGuidelineCheck(leadId);
 }
 function sendDocumentAction(leadId, kind, channel){
   var lead = leadById(leadId);
@@ -2040,6 +2174,30 @@ function renderTabOverview(lead){
   '</div>' + fu;
 }
 
+function renderGuidelineCheck(lead){
+  var gc = lead.guidelineCheck;
+  var btnLabel = gc ? "Re-check Guidelines" : "Check Guidelines";
+  var header = '<div class="section-head" style="margin-top:20px"><h2>Guideline Check</h2>' +
+    '<button class="btn btn-sm" data-action="run-guideline-check" data-lead="' + lead.id + '">' + btnLabel + '</button></div>';
+  if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1){
+    return header + '<div class="hint">No guideline sheet loaded for ' + esc(lead.loanType||"this loan type") + ' yet.</div>';
+  }
+  if (!gc){
+    return header + '<div class="hint">Run a check once purchase price, loan amount, credit score, and (for DSCR) rent are filled in.</div>';
+  }
+  var badge = gc.status === "pass"
+    ? '<span class="badge badge-forest">Pass</span>'
+    : '<span class="badge badge-rust">Needs Review</span>';
+  var rows = gc.checks.map(function(c){
+    var icon = c.pass ? '<span class="badge badge-forest">Pass</span>' : '<span class="badge badge-rust">Review</span>';
+    return '<div class="doc-row"><div><div>' + esc(c.label) + '</div><div class="cell-sub">' + esc(c.detail) + '</div></div>' + icon + '</div>';
+  }).join("");
+  return header +
+    '<div style="margin-bottom:10px">' + badge + ' <span class="hint">as of ' + fmtDate(gc.evaluatedAt) + '</span></div>' +
+    rows +
+    '<div class="footnote" style="padding-top:8px">Preliminary check against BPL/Constructive Loans matrices — not a substitute for full underwriting. Internal use only, never shown to the borrower.</div>';
+}
+var GUIDELINE_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction"];
 function renderTabScenario(lead){
   return '<div class="field-grid">' +
     field("Property Address", esc(lead.propertyAddress||"—")) +
@@ -2054,7 +2212,7 @@ function renderTabScenario(lead){
     field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>';
+  '</div>' + renderGuidelineCheck(lead);
 }
 
 function renderTabDocuments(lead){
@@ -2427,7 +2585,7 @@ function renderNotifications(){
   var mine = isOwner() ? all : all.filter(function(n){ return n.toUserId===ui.viewAs; });
   var rows = mine.map(function(n){
     var lead = leadById(n.leadId);
-    var kindBadge = n.kind==="appraisal" ? '<span class="badge badge-gold">Appraisal</span>' : n.kind==="title" ? '<span class="badge badge-slate">Title</span>' : n.kind==="sent-back" ? '<span class="badge badge-rust">Sent Back</span>' : n.kind==="reassigned" ? '<span class="badge badge-forest">Reassigned</span>' : '<span class="badge badge-neutral">Note</span>';
+    var kindBadge = n.kind==="appraisal" ? '<span class="badge badge-gold">Appraisal</span>' : n.kind==="title" ? '<span class="badge badge-slate">Title</span>' : n.kind==="sent-back" ? '<span class="badge badge-rust">Sent Back</span>' : n.kind==="reassigned" ? '<span class="badge badge-forest">Reassigned</span>' : n.kind==="review" ? '<span class="badge badge-rust">Needs Review</span>' : '<span class="badge badge-neutral">Note</span>';
     return '<div class="queue-card" style="border-left-color:' + (n.read? 'var(--border)':'var(--brand)') + '">' +
       '<div class="queue-main">' +
         '<div class="queue-title">' + kindBadge + ' ' + esc(n.text) + '</div>' +
@@ -2678,6 +2836,35 @@ function modalTakeApplication(leadId){
   var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("");
   var exitOptions = EXIT_STRATEGIES.map(function(t){ return '<option value="' + t + '"' + (lead.exitStrategy===t?" selected":"") + '>' + t + '</option>'; }).join("");
   var v = function(x){ return x===null||x===undefined ? "" : x; };
+  var loanType = lead.loanType;
+  var isDSCR = loanType === "DSCR";
+  var isRehabType = loanType === "Fix & Flip" || loanType === "Ground Up Construction" || loanType === "Bridge";
+  var rehabLabel = loanType === "Ground Up Construction" ? "Construction Budget" : "Rehab Budget";
+  var scenarioFieldsHTML;
+  if (isDSCR){
+    scenarioFieldsHTML =
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+        '<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
+      '</div>';
+  } else if (isRehabType){
+    scenarioFieldsHTML =
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+        '<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
+      '</div>' +
+      '<div class="form-row"><label>' + rehabLabel + '</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>';
+  } else {
+    scenarioFieldsHTML =
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+        '<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
+      '</div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>' +
+        '<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
+      '</div>';
+  }
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
     '<div class="modal" data-stop="1" style="max-width:600px">' +
       '<div class="modal-head"><h3>Take Application by Phone — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
@@ -2697,14 +2884,7 @@ function modalTakeApplication(leadId){
           '<div class="form-row"><label>Property Type</label><select class="select" name="propertyType">' + propTypeOptions + '</select></div>' +
           '<div class="form-row"><label>Exit Strategy</label><select class="select" name="exitStrategy">' + exitOptions + '</select></div>' +
         '</div>' +
-        '<div class="form-two">' +
-          '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
-          '<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
-        '</div>' +
-        '<div class="form-two">' +
-          '<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>' +
-          '<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
-        '</div>' +
+        scenarioFieldsHTML +
         '<div class="form-two">' +
           '<div class="form-row"><label>Loan Amount Requested</label><input class="input" type="number" name="loanAmount" value="' + v(lead.loanAmount) + '"></div>' +
           '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
@@ -2800,6 +2980,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "ai-review-doc"){ runAiDocReview(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
+  else if (action === "run-guideline-check"){ runGuidelineCheck(t.dataset.lead); }
   else if (action === "dismiss-ai-flag"){ dismissAiFlag(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
   else if (action === "toggle-processing"){ toggleProcessingAction(t.dataset.lead, t.dataset.kind); }
   else if (action === "mark-notif-read"){ markNotificationRead(t.dataset.id); }
