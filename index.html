@@ -422,6 +422,7 @@ var RATE_KEY_BY_LOAN_TYPE = {
 var SHORT_TERM_TYPES = ["Fix & Flip","Ground Up Construction","Bridge"];
 var APPLICATION_FORM_URL = "https://claude.ai/code/artifact/d9ae64b9-b0f5-4487-9fa7-d92fdf4194e6";
 var XACTUS_PORTAL_URL = "https://xactus.com/sign-in/";
+var CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 var CADENCE_STAGES = ["new","attempting","qualifying"];
 var CADENCE_MAX = 5;
 
@@ -629,8 +630,8 @@ function addTeamMember(data){
       return;
     }
     upsertLocalUser(res.data);
-    ui.modal = null;
     ui.teamMemberError = null;
+    ui.modal = { type: "sendInvite", user: Object.assign({}, res.data, { pin: data.pin }) };
     showToast("Added " + data.name);
     render();
   });
@@ -895,6 +896,25 @@ function applicationLink(lead){
 function signoffFor(userId){
   var u = userById(userId);
   return (u && u.textSignoff) ? ("\n\n" + u.textSignoff) : "";
+}
+function inviteEmailFor(user){
+  var first = (user.name||"").split(" ")[0];
+  var roleWorkflow = user.role === "processor"
+    ? "try requesting documents, ordering an appraisal or title, and moving a file through processing stages"
+    : "try taking an application, collecting documents, and moving a lead through to processing";
+  var subject = "You're in — Bridgepoint Lending Desk access (early test)";
+  var body = "Hi " + first + ",\n\n" +
+    "You now have access to our new CRM, Bridgepoint Lending Desk. This is still early — I want your feedback on the workflow itself before we finish dialing everything in (loan programs, real integrations, etc.).\n\n" +
+    "A couple things to know before you dig in:\n" +
+    "- Emails and texts sent from the app aren't actually connected yet — nothing will really go out to a borrower. It's there so you can see how the workflow is supposed to feel.\n" +
+    "- The documents and data in there right now are test/demo data, not real files.\n\n" +
+    "What I actually want from you: click around, " + roleWorkflow + ", and see how it feels. Then tell me what's confusing, what's missing, and what you'd want different.\n\n" +
+    "Link: " + CRM_URL + "\n" +
+    "Username: " + user.username + "\n" +
+    "PIN: " + user.pin + "\n\n" +
+    "The first time you log in, it'll walk you through setting up your signature, then give you a quick tour of how things work.\n\n" +
+    "Thanks,\nJoe";
+  return { subject: subject, body: body };
 }
 function defaultOutreachMessage(lead){
   if (lead.status === "cold" || lead.status === "lost") return suggestedWinbackMessage(lead);
@@ -2482,6 +2502,7 @@ function renderModal(){
   if (ui.modal.type === "changePin") return modalChangePin();
   if (ui.modal.type === "editSignature") return modalEditSignature();
   if (ui.modal.type === "addTeamMember") return modalAddTeamMember();
+  if (ui.modal.type === "sendInvite") return modalSendInvite(ui.modal.user);
   if (ui.modal.type === "dialer") return modalDialer();
   if (ui.modal.type === "sendDocument") return modalSendDocument(ui.modal.leadId, ui.modal.kind);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
@@ -2581,6 +2602,24 @@ function modalAddTeamMember(){
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add</button></div>' +
       '</form>' +
+    '</div></div>';
+}
+function modalSendInvite(user){
+  if (!user) return "";
+  var email = inviteEmailFor(user);
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1" style="max-width:560px">' +
+      '<div class="modal-head"><h3>Send Invite — ' + esc(user.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="form-row"><label>To</label><div class="val mono">' + esc(user.email||"") + '</div></div>' +
+        '<div class="form-row"><label>Subject</label><input class="input" id="invite-subject-box" readonly value="' + esc(email.subject) + '"></div>' +
+        '<div class="form-row"><label>Message</label><textarea class="textarea" id="invite-message-box" rows="10" readonly>' + esc(email.body) + '</textarea></div>' +
+        '<div class="footnote" style="padding:0">Opens your own email client with this pre-filled — nothing sends automatically.</div>' +
+      '</div>' +
+      '<div class="modal-foot" style="flex-wrap:wrap">' +
+        '<button class="btn" type="button" data-action="copy-invite">Copy Message</button>' +
+        '<a class="btn btn-primary" href="mailto:' + esc(user.email||"") + '?subject=' + encodeURIComponent(email.subject) + '&body=' + encodeURIComponent(email.body) + '" data-action="close-modal">Email It</a>' +
+      '</div>' +
     '</div></div>';
 }
 function modalDialer(){
@@ -2790,6 +2829,17 @@ appEl.addEventListener("click", function(e){
       if (navigator.clipboard && navigator.clipboard.writeText){
         navigator.clipboard.writeText(lnk).then(okFn).catch(failFn);
       } else { failFn(); }
+    }
+  }
+  else if (action === "copy-invite"){
+    var inviteBox = document.getElementById("invite-message-box");
+    if (inviteBox){
+      var inviteText = inviteBox.value;
+      var inviteDone = function(){ showToast("Message copied"); };
+      var inviteFail = function(){ inviteBox.focus(); inviteBox.select(); showToast("Couldn't auto-copy — text is selected, press Ctrl/Cmd+C"); };
+      if (navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(inviteText).then(inviteDone).catch(inviteFail);
+      } else { inviteFail(); }
     }
   }
   else if (action === "copy-message"){
