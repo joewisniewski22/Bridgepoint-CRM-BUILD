@@ -34,6 +34,10 @@ Deno.serve(async (req: Request) => {
     const text: string = body.text;
     const fromName: string | null = body.fromName || null;
     const fromUserId: string | null = body.fromUserId || null;
+    // Each team member's own @bplending.com address, passed from the CRM
+    // (their Team record's email field) — falls back to the shared address
+    // for system-generated sends with no specific sender.
+    const fromAddress: string = body.fromAddress || FROM_ADDRESS;
 
     if (!to || !subject || !text) {
       return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400, headers: CORS_HEADERS });
@@ -49,7 +53,7 @@ Deno.serve(async (req: Request) => {
         "X-Postmark-Server-Token": POSTMARK_TOKEN,
       },
       body: JSON.stringify({
-        From: fromName ? (fromName + " <" + FROM_ADDRESS + ">") : FROM_ADDRESS,
+        From: fromName ? (fromName + " <" + fromAddress + ">") : fromAddress,
         To: to,
         ReplyTo: replyTo,
         Subject: subject,
@@ -69,7 +73,7 @@ Deno.serve(async (req: Request) => {
       id: emailId,
       lead_id: leadId,
       direction: "outbound",
-      from_address: FROM_ADDRESS,
+      from_address: fromAddress,
       to_address: to,
       subject: subject,
       body: text,
