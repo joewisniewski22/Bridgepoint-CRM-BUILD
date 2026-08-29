@@ -2022,6 +2022,38 @@ function logTextSent(leadId, message){
   persist();
 }
 
+function sendTextViaQuo(leadId, message){
+  var lead = leadById(leadId);
+  if (!lead || !lead.phone) return;
+  if (!message || !message.trim()){ showToast("Write a message first"); return; }
+  if (!sb){ showToast("Text service unavailable"); return; }
+  var lo = currentUser();
+  sb.functions.invoke("send-text", {
+    body: { leadId: lead.id, to: lead.phone, text: message, fromName: lo.name }
+  }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){
+      showToast("Couldn't send the text — try again, or use Copy Message");
+      return;
+    }
+    var d = todayISO();
+    if (!lead.firstAttemptAt) lead.firstAttemptAt = nowTs();
+    lead.callAttempts = lead.callAttempts || [];
+    lead.callAttempts.push({ date:d, outcome:"texted", notes:message });
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date:d, type:"text", text:"Texted (via Quo): " + message, author: lo.name });
+    lead.lastContactAt = d;
+    if (lead.status === "cold" || lead.status === "lost"){
+      lead.status = "active";
+      lead.stage = "qualifying";
+      lead.activity.push({ date:d, type:"system", text:"Reactivated via win-back outreach", author: lo.name });
+    }
+    ui.modal = null;
+    showToast("Text sent to " + lead.name);
+    persist();
+  }).catch(function(){
+    showToast("Couldn't send the text — try again, or use Copy Message");
+  });
+}
 function sendApplicationAction(leadId, channel){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -4305,13 +4337,14 @@ function modalSendText(leadId){
       '<div class="modal-body">' +
         '<div class="form-row"><label>To</label><div class="val mono">' + esc(lead.phone) + '</div></div>' +
         '<div class="form-row"><label>Message</label><textarea class="textarea" id="text-message-box" rows="4">' + esc(msg) + '</textarea></div>' +
-        '<div class="footnote" style="padding:0">Opens your phone/Quo app with this message, or copy it. Logging it here adds it to this lead’s activity and counts as an outreach attempt.</div>' +
+        '<div class="footnote" style="padding:0">Sends instantly through Quo (your business line) and logs it to this lead\'s activity. Or open it in Messages / copy it and log manually.</div>' +
       '</div>' +
       '<div class="modal-foot" style="flex-wrap:wrap">' +
         '<button class="btn" type="button" data-action="ai-draft-text" data-lead="' + lead.id + '">✨ AI Draft</button>' +
         '<a class="btn" href="sms:' + esc(digits) + '">Open in Messages</a>' +
         '<button class="btn" type="button" data-action="copy-message">Copy Message</button>' +
-        '<form data-form="send-text" data-lead="' + lead.id + '" style="display:inline"><button class="btn btn-primary" type="submit">Log as Sent</button></form>' +
+        '<form data-form="send-text" data-lead="' + lead.id + '" style="display:inline"><button class="btn" type="submit">Log as Sent</button></form>' +
+        '<button class="btn btn-primary" type="button" data-action="send-text-quo" data-lead="' + lead.id + '">Send via Quo</button>' +
       '</div>' +
     '</div></div>';
 }
@@ -4451,6 +4484,10 @@ appEl.addEventListener("click", function(e){
   else if (action === "toggle-processing"){ toggleProcessingAction(t.dataset.lead, t.dataset.kind); }
   else if (action === "toggle-language"){ toggleLanguage(t.dataset.lead); }
   else if (action === "request-third-party-doc"){ requestThirdPartyDoc(t.dataset.lead, t.dataset.role); }
+  else if (action === "send-text-quo"){
+    var textBox = document.getElementById("text-message-box");
+    sendTextViaQuo(t.dataset.lead, textBox ? textBox.value : "");
+  }
   else if (action === "mark-notif-read"){ markNotificationRead(t.dataset.id); }
   else if (action === "log-email"){ logEmailSent(t.dataset.lead); }
   else if (action === "send-application"){
