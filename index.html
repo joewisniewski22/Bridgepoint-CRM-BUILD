@@ -966,12 +966,14 @@ var ui = {
   publicApply: null,
   pricerInputs: {}
 };
+var sessionWasRestored = false;
 try {
   var savedRole = localStorage.getItem("bp_view_as");
   var savedAuthedFor = localStorage.getItem("bp_authed_for");
   if (savedRole && savedAuthedFor && savedAuthedFor === savedRole){
     ui.viewAs = savedRole;
     ui.loggedIn = true;
+    sessionWasRestored = true;
   }
 } catch(e){}
 
@@ -982,6 +984,8 @@ try {
   if (applyId && applyToken){
     ui.publicApply = { leadId:applyId, token:applyToken, status:"loading" };
     loadPublicApplication(applyId, applyToken);
+  } else if (sessionWasRestored){
+    hydrateFromSupabase();
   }
 })();
 
