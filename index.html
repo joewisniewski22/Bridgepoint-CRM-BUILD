@@ -495,6 +495,156 @@ var DSCR_LTV_BY_FICO = [
   { minFico:680, purchase:80, rateTerm:80, cashOut:75 },
   { minFico:660, purchase:70, rateTerm:70, cashOut:70 }
 ];
+
+/* ---------------------------------------------------------------------
+   Pricer — from Constructive Capital's live wholesale rate sheets:
+   "Wholesale (Tier 1) - RTL Rate Sheet" (eff. 2/2/2026) for Fix & Flip /
+   Bridge / Ground Up, and "Wholesale (Tier 1) Surge Rate Sheet"
+   (eff. 7/9/2026) for DSCR. Covers the common-path adjustments only —
+   foreign national, 5-8 unit, cross-collateral, IO and short-term
+   rental overlays are not modeled and fall back to "needs manual
+   pricing." Internal use only, never shown to the borrower.
+--------------------------------------------------------------------- */
+var RTL_BASE_RATES = {
+  "1.00": { platinum:8.75, gold:9.49, silver:9.99 },
+  "0.50": { platinum:9.99, gold:10.49, silver:10.99 },
+  "0.00": { platinum:10.99, gold:11.49, silver:11.99 }
+};
+var RTL_FEE_BY_PROJECT = {
+  bridge: 1995, light: 1995, standard: 1995, super: 1995,
+  guc_sfr: 2195, guc_24: 2695
+};
+function evaluateRtlGucPricing(lead, points){
+  var tier = experienceTier(lead.experienceDeals);
+  var base = RTL_BASE_RATES[points] && RTL_BASE_RATES[points][tier];
+  if (base === undefined || base === null) return { ineligible:true, reason:"No pricing for this experience tier at this origination fee." };
+  var rate = base;
+  var notes = [];
+  var isGuc = lead.loanType === "Ground Up Construction";
+  if (isGuc){
+    if (tier === "silver") return { ineligible:true, reason:"Ground Up Construction requires Gold or Platinum experience tier." };
+    rate += 0.75;
+    notes.push("Ground Up add-on +0.75%");
+  }
+  var fee = isGuc
+    ? (lead.propertyType === "2-4 Unit" ? RTL_FEE_BY_PROJECT.guc_24 : RTL_FEE_BY_PROJECT.guc_sfr)
+    : RTL_FEE_BY_PROJECT[rehabClass(lead)];
+  if (lead.termMonths && lead.termMonths > 12){
+    var extraQuarters = Math.ceil((lead.termMonths - 12) / 3);
+    notes.push("+" + (extraQuarters * 0.5).toFixed(2) + " pts origination for the extra " + (lead.termMonths-12) + " month(s) beyond the 12-month base term (max 18 months)");
+  }
+  return { rate: Math.round(rate*100)/100, points: Number(points), fee: fee, tier: tier, notes: notes };
+}
+
+var DSCR_BASE_PAR_RATE = 6.375;
+var DSCR_LTV_BANDS = [55, 60, 65, 70, 75, 80];
+function dscrLtvCol(ltv){
+  for (var i=0;i<DSCR_LTV_BANDS.length;i++){ if (ltv <= DSCR_LTV_BANDS[i]) return i; }
+  return -1;
+}
+var DSCR_FICO_ADJ = [
+  { min:780, adj:[0,0,0,0,0.125,0.500] },
+  { min:760, adj:[0,0,0.125,0.250,0.375,0.625] },
+  { min:740, adj:[0,0.125,0.250,0.375,0.500,0.750] },
+  { min:720, adj:[0,0.250,0.375,0.500,0.625,0.875] },
+  { min:700, adj:[0,0.375,0.500,0.625,0.875,1.000] },
+  { min:680, adj:[0.250,0.375,0.500,0.625,1.000,1.750] },
+  { min:660, adj:[0.625,0.750,0.875,1.000,null,null] }
+];
+var DSCR_BAND_ADJ = [
+  { min:0.75, max:0.95, adj:[1.000,1.125,1.250,null,null,null], requiresNote:"requires FICO ≥ 720 and loan amount > $150,000" },
+  { min:0.95, max:1.00, adj:[0.750,0.750,0.750,null,null,null], requiresNote:"requires FICO ≥ 720 and loan amount > $150,000" },
+  { min:1.00, max:1.15, adj:[0,0,0.125,0.125,0.125,0.250] },
+  { min:1.15, max:Infinity, adj:[0,0,0,0,0,0] }
+];
+var DSCR_PROPERTY_ADJ = {
+  "2-4 Unit": [0.125,0.250,0.250,0.375,0.375,0.500],
+  "Multifamily 5+": [1.000,1.125,1.375,null,null,null]
+};
+var DSCR_TXN_ADJ = {
+  purchase: [-0.125,-0.125,-0.125,-0.125,-0.125,-0.125],
+  ratetermrefi: [0,0,0,0,0,0],
+  cashoutSmall: [0.375,0.375,0.375,0.375,0.500,null],
+  cashoutLarge: [0.250,0.250,0.250,0.250,0.375,null]
+};
+var DSCR_LOAN_AMT_ADJ = [
+  { min:1500000, max:Infinity, adj:0.500 },
+  { min:1000000, max:1499999.99, adj:0.000 },
+  { min:350000, max:999999.99, adj:-0.125 },
+  { min:150000, max:349999.99, adj:0.000 },
+  { min:100000, max:149999.99, adj:0.250 },
+  { min:0, max:99999.99, adj:0.750 }
+];
+var DSCR_PREPAY_ADJ = {
+  "5yr": [0,0,0,0,0,0],
+  "3yr": [0.375,0.375,0.375,0.375,0.375,0.375],
+  "2yr": [0.500,0.500,0.500,0.500,0.500,0.500],
+  "1yr": [0.625,0.625,0.625,0.625,0.625,0.625],
+  "none": [0.875,0.875,0.875,0.875,0.875,0.875]
+};
+var DSCR_BASE_RATE_PRICE = [
+  {rate:7.500, price:102.125},{rate:7.375, price:102.000},{rate:7.250, price:101.875},
+  {rate:7.125, price:101.750},{rate:7.000, price:101.500},{rate:6.875, price:101.250},
+  {rate:6.750, price:101.000},{rate:6.625, price:100.750},{rate:6.500, price:100.375},
+  {rate:6.375, price:100.000}
+];
+function evaluateDscrPricing(lead, inputs){
+  if (!lead.creditScore || !lead.loanAmount || !lead.purchasePrice) return null;
+  var ltv = lead.loanAmount / lead.purchasePrice * 100;
+  var col = dscrLtvCol(ltv);
+  if (col === -1) return { ineligible:true, reason:"LTV of " + ltv.toFixed(0) + "% is above 80%, off this rate sheet." };
+  var notes = [];
+  var ficoRow = DSCR_FICO_ADJ.filter(function(r){ return lead.creditScore >= r.min; })[0];
+  if (!ficoRow) return { ineligible:true, reason:"Credit score below this program's floor." };
+  if (ficoRow.adj[col] === null) return { ineligible:true, reason:"This FICO/LTV combination isn't priced on this sheet — needs manual pricing." };
+  var rate = DSCR_BASE_PAR_RATE + ficoRow.adj[col];
+
+  var assumedRate = lead.rate || rate;
+  var pi = monthlyPayment(lead.loanAmount, assumedRate, lead.termMonths||360);
+  var dscrVal = null;
+  if (pi && lead.rentEstimate){
+    var hasRealExpenses = lead.monthlyTaxes!=null || lead.monthlyInsurance!=null;
+    var pitia = hasRealExpenses ? pi + (lead.monthlyTaxes||0) + (lead.monthlyInsurance||0) + (lead.monthlyHoa||0) : pi * 1.2;
+    dscrVal = lead.rentEstimate / pitia;
+    if (!lead.rate) notes.push("DSCR band estimated using the sheet's par rate since no note rate is locked in yet");
+    var band = DSCR_BAND_ADJ.filter(function(b){ return dscrVal >= b.min && dscrVal < b.max; })[0];
+    if (band){
+      if (band.adj[col] === null) return { ineligible:true, reason:"This DSCR/LTV combination isn't priced on this sheet — needs manual pricing." };
+      rate += band.adj[col];
+      if (band.requiresNote && !(lead.creditScore>720 && lead.loanAmount>150000)) notes.push("Sub-1.00x DSCR pricing " + band.requiresNote);
+    }
+  }
+
+  var propAdj = DSCR_PROPERTY_ADJ[lead.propertyType];
+  if (propAdj){
+    if (propAdj[col] === null) return { ineligible:true, reason:"This property type/LTV combination isn't priced on this sheet — needs manual pricing." };
+    rate += propAdj[col];
+  }
+
+  var txnKey = (inputs && inputs.transactionType) || "purchase";
+  var txnAdj = txnKey === "cashout"
+    ? (lead.loanAmount < 100000 ? DSCR_TXN_ADJ.cashoutSmall : DSCR_TXN_ADJ.cashoutLarge)
+    : (DSCR_TXN_ADJ[txnKey] || DSCR_TXN_ADJ.purchase);
+  if (txnAdj[col] === null) return { ineligible:true, reason:"This transaction type/LTV combination isn't priced on this sheet — needs manual pricing." };
+  rate += txnAdj[col];
+
+  var amtBand = DSCR_LOAN_AMT_ADJ.filter(function(b){ return lead.loanAmount >= b.min && lead.loanAmount <= b.max; })[0];
+  if (amtBand) rate += amtBand.adj;
+
+  var prepayKey = (inputs && inputs.prepayTerm) || "5yr";
+  rate += DSCR_PREPAY_ADJ[prepayKey][col];
+
+  rate = Math.round(rate*1000)/1000;
+  var priceRow = DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate-rate) < 0.001; })[0];
+  return { rate: rate, price: priceRow ? priceRow.price : null, ltv: ltv, dscr: dscrVal, notes: notes };
+}
+function evaluatePricing(lead, inputs){
+  if (lead.loanType === "DSCR") return evaluateDscrPricing(lead, inputs);
+  if (lead.loanType === "Fix & Flip" || lead.loanType === "Ground Up Construction" || lead.loanType === "Bridge"){
+    return evaluateRtlGucPricing(lead, (inputs && inputs.points) || "1.00");
+  }
+  return null;
+}
 function experienceTier(deals){
   deals = deals || 0;
   if (deals >= 5) return "platinum";
@@ -658,7 +808,8 @@ var ui = {
   leadFilter: { q:"", stage:"", loanType:"", assignedTo:"", status:"active" },
   commFilter: "",
   toast: null,
-  publicApply: null
+  publicApply: null,
+  pricerInputs: {}
 };
 try {
   var savedRole = localStorage.getItem("bp_view_as");
@@ -2504,7 +2655,51 @@ function renderTabScenario(lead){
     field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderGuidelineCheck(lead) + renderScopeOfWork(lead);
+  '</div>' + renderGuidelineCheck(lead) + renderPricer(lead) + renderScopeOfWork(lead);
+}
+
+function renderPricer(lead){
+  if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
+  ui.pricerInputs = ui.pricerInputs || {};
+  var inputs = ui.pricerInputs[lead.id] || (ui.pricerInputs[lead.id] = { points:"1.00", transactionType:"purchase", prepayTerm:"5yr" });
+  var isDSCR = lead.loanType === "DSCR";
+  var controls = isDSCR
+    ? ('<div class="form-two">' +
+        '<div class="form-row"><label>Transaction Type</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="transactionType">' +
+          '<option value="purchase"' + (inputs.transactionType==="purchase"?" selected":"") + '>Purchase</option>' +
+          '<option value="ratetermrefi"' + (inputs.transactionType==="ratetermrefi"?" selected":"") + '>Rate/Term Refinance</option>' +
+          '<option value="cashout"' + (inputs.transactionType==="cashout"?" selected":"") + '>Cash-Out Refinance</option>' +
+        '</select></div>' +
+        '<div class="form-row"><label>Prepayment Penalty</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="prepayTerm">' +
+          '<option value="5yr"' + (inputs.prepayTerm==="5yr"?" selected":"") + '>5 Year (base)</option>' +
+          '<option value="3yr"' + (inputs.prepayTerm==="3yr"?" selected":"") + '>3 Year</option>' +
+          '<option value="2yr"' + (inputs.prepayTerm==="2yr"?" selected":"") + '>2 Year</option>' +
+          '<option value="1yr"' + (inputs.prepayTerm==="1yr"?" selected":"") + '>1 Year</option>' +
+          '<option value="none"' + (inputs.prepayTerm==="none"?" selected":"") + '>No Prepay</option>' +
+        '</select></div>' +
+      '</div>')
+    : ('<div class="form-row"><label>Origination Fee (points)</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="points">' +
+        '<option value="1.00"' + (inputs.points==="1.00"?" selected":"") + '>1.00</option>' +
+        '<option value="0.50"' + (inputs.points==="0.50"?" selected":"") + '>0.50</option>' +
+        '<option value="0.00"' + (inputs.points==="0.00"?" selected":"") + '>0.00</option>' +
+      '</select></div>');
+  var result = evaluatePricing(lead, inputs);
+  var output;
+  if (!result){
+    output = '<div class="hint">Fill in credit score, purchase price, and loan amount to see live pricing.</div>';
+  } else if (result.ineligible){
+    output = '<div class="hint" style="color:var(--c-rust)">' + esc(result.reason) + '</div>';
+  } else {
+    var rows = field("Rate", fmtPct(result.rate), true) +
+      (isDSCR ? field("Wholesale Price", result.price ? result.price.toFixed(3) : "—", true) : field("Lender Fee", fmtUSD(result.fee), true)) +
+      (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
+      (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
+    output = '<div class="field-grid">' + rows + '</div>' +
+      (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '');
+  }
+  return '<div class="section-head" style="margin-top:20px"><h2>Pricer</h2></div>' +
+    controls + output +
+    '<div class="footnote" style="padding-top:8px">Live from Constructive Capital\'s current wholesale rate sheets — common-path pricing only (foreign national, 5-8 unit, cross-collateral, IO/STR overlays not modeled). Internal use only, never shown to the borrower.</div>';
 }
 
 function renderScopeOfWork(lead){
@@ -3431,6 +3626,11 @@ appEl.addEventListener("change", function(e){
   } else if (action === "upload-doc"){
     var file = t.files && t.files[0];
     if (file) borrowerUploadDoc(t.dataset.lead, parseInt(t.dataset.idx,10), file.name);
+  } else if (action === "pricer-input"){
+    ui.pricerInputs = ui.pricerInputs || {};
+    ui.pricerInputs[t.dataset.lead] = ui.pricerInputs[t.dataset.lead] || {};
+    ui.pricerInputs[t.dataset.lead][t.dataset.key] = t.value;
+    render();
   }
 });
 
