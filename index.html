@@ -1279,6 +1279,17 @@ function computeQueue(userId){
         reason: wb.reasons.join(" · ")
       });
     }
+
+    if (lead.birthday){
+      var bday = new Date(lead.birthday+"T00:00:00");
+      if (bday.getMonth()===today.getMonth() && bday.getDate()===today.getDate()){
+        items.push({
+          type:"birthday", leadId:lead.id, priority:2,
+          label: "🎂 Birthday today — quick call or text",
+          reason: "Relationship touchpoint"
+        });
+      }
+    }
   });
 
   items.sort(function(a,b){ return b.priority - a.priority; });
@@ -1508,7 +1519,7 @@ function leadToRow(l){
     last_contact_at: l.lastContactAt,
     monthly_taxes: l.monthlyTaxes, monthly_insurance: l.monthlyInsurance, monthly_hoa: l.monthlyHoa,
     guideline_check: l.guidelineCheck || null, scope_of_work: l.scopeOfWork || null, application_token: l.applicationToken || null,
-    property_count: l.propertyCount || null,
+    property_count: l.propertyCount || null, birthday: l.birthday || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1529,7 +1540,7 @@ function rowToLead(r){
     lastContactAt: r.last_contact_at,
     monthlyTaxes: r.monthly_taxes, monthlyInsurance: r.monthly_insurance, monthlyHoa: r.monthly_hoa,
     guidelineCheck: r.guideline_check || null, scopeOfWork: r.scope_of_work || null, applicationToken: r.application_token || null,
-    propertyCount: r.property_count || null,
+    propertyCount: r.property_count || null, birthday: r.birthday || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -1872,6 +1883,13 @@ function setFollowUp(leadId, date, note){
   lead.nextFollowUp = date || null;
   lead.nextFollowUpNote = note || null;
   showToast("Follow-up saved");
+  persist();
+}
+function setBirthday(leadId, birthday){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  lead.birthday = birthday || null;
+  showToast("Birthday saved");
   persist();
 }
 
@@ -2521,6 +2539,8 @@ function renderToday(){
       var typeBadge = item.type==="rate-drop" ? '<span class="badge badge-gold">Rate Alert</span>'
         : item.type==="refi" ? '<span class="badge badge-forest">Refi Radar</span>'
         : item.type==="followup" ? '<span class="badge badge-rust">Follow-up</span>'
+        : item.type==="birthday" ? '<span class="badge badge-gold">🎂 Birthday</span>'
+        : item.type==="winback" ? '<span class="badge badge-rust">Win-back</span>'
         : '<span class="badge badge-slate">New Lead Cadence</span>';
       return '<div class="queue-card ' + typeCls + '">' +
         '<div class="badge-wrap">' + typeBadge + '</div>' +
@@ -2671,6 +2691,12 @@ function renderTabOverview(lead){
       '<form data-form="follow-up" data-lead="' + lead.id + '" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:4px">' +
         '<input class="input" type="date" name="date" value="' + (lead.nextFollowUp||"") + '">' +
         '<input class="input" type="text" name="note" placeholder="What to follow up on…" value="' + esc(lead.nextFollowUpNote||"") + '" style="flex:1;min-width:180px">' +
+        '<button class="btn btn-sm" type="submit">Save</button>' +
+      '</form>' +
+    '</div>' +
+    '<div class="field" style="grid-column:1/-1"><label>Birthday</label>' +
+      '<form data-form="birthday" data-lead="' + lead.id + '" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:4px">' +
+        '<input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '">' +
         '<button class="btn btn-sm" type="submit">Save</button>' +
       '</form>' +
     '</div></div>';
@@ -3807,6 +3833,8 @@ appEl.addEventListener("submit", function(e){
     form.reset();
   } else if (type === "follow-up"){
     setFollowUp(form.dataset.lead, fd.get("date"), fd.get("note"));
+  } else if (type === "birthday"){
+    setBirthday(form.dataset.lead, fd.get("birthday"));
   } else if (type === "rate"){
     updateMarketRate(form.dataset.key, Number(fd.get("rate")));
     form.reset();
