@@ -240,6 +240,10 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .badge-rust{background:var(--c-rust-bg);color:var(--c-rust)}
 .badge-slate{background:var(--c-slate-bg);color:var(--c-slate)}
 .badge-neutral{background:var(--c-neutral-bg);color:var(--c-neutral)}
+.badge-hot{background:var(--c-rust-bg);color:var(--c-rust);animation:pulse-hot 1.8s ease-in-out infinite}
+@keyframes pulse-hot{0%,100%{opacity:1}50%{opacity:.55}}
+@media (prefers-reduced-motion: reduce){.badge-hot{animation:none}}
+.queue-card.type-hot{border-color:var(--c-rust)}
 
 /* ---------------------------------------------------------------------
    Pipeline board
@@ -409,47 +413,36 @@ var PROPERTY_TYPES = ["SFR","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Lan
 var EXIT_STRATEGIES = ["Sell","Refinance to DSCR","Hold/Rent","1031 Exchange"];
 var TP_ROLES = ["Realtor","Title Company","Escrow Officer","Insurance Agent","Attorney","Appraiser"];
 
+var UNIVERSAL_DOCS = [
+  "Government-Issued Photo ID",
+  "2 Months Bank Statements",
+  "Entity Formation Docs & Operating Agreement (if closing in an entity)",
+  "EIN Letter (if closing in an entity)",
+  "Credit Authorization Form",
+  "Voided Check / Wire Instructions"
+];
 var REQUIRED_DOCS_BY_TYPE = {
-  "DSCR": [
-    "Government-Issued Photo ID",
+  "DSCR": UNIVERSAL_DOCS.concat([
     "Purchase Contract (purchase) or Current Mortgage Statement (refinance)",
-    "2 Months Personal or Business Bank Statements",
     "Signed Lease Agreement (or Market Rent Letter if vacant)",
     "Property Tax Bill",
     "Proof of Landlord / Hazard Insurance",
-    "HOA Statement (if applicable)",
-    "Entity Formation Docs & Operating Agreement (if closing in an entity)",
-    "EIN Letter (if closing in an entity)",
-    "Credit Authorization Form",
-    "Voided Check / Wire Instructions"
-  ],
-  "Fix & Flip": [
-    "Government-Issued Photo ID",
+    "HOA Statement (if applicable)"
+  ]),
+  "Fix & Flip": UNIVERSAL_DOCS.concat([
     "Purchase Contract",
     "Scope of Work / Rehab Budget",
     "General Contractor License & Insurance (Standard/Super Rehab)",
     "Proof of Funds for Rehab Reserve",
     "Schedule of Real Estate Owned (Track Record)",
-    "2 Months Bank Statements",
-    "Builder's Risk Insurance Binder",
-    "Entity Formation Docs & Operating Agreement (if closing in an entity)",
-    "EIN Letter (if closing in an entity)",
-    "Credit Authorization Form",
-    "Voided Check / Wire Instructions"
-  ],
-  "Bridge": [
-    "Government-Issued Photo ID",
+    "Builder's Risk Insurance Binder"
+  ]),
+  "Bridge": UNIVERSAL_DOCS.concat([
     "Purchase Contract or Current Mortgage Statement",
-    "2 Months Bank Statements",
     "Schedule of Real Estate Owned (Track Record)",
-    "Proof of Hazard Insurance",
-    "Entity Formation Docs & Operating Agreement (if closing in an entity)",
-    "EIN Letter (if closing in an entity)",
-    "Credit Authorization Form",
-    "Voided Check / Wire Instructions"
-  ],
-  "Ground Up Construction": [
-    "Government-Issued Photo ID",
+    "Proof of Hazard Insurance"
+  ]),
+  "Ground Up Construction": UNIVERSAL_DOCS.concat([
     "Purchase Contract or Land Payoff Statement",
     "Scope of Work / Construction Budget",
     "Stamped & Approved Architectural Plans",
@@ -457,13 +450,8 @@ var REQUIRED_DOCS_BY_TYPE = {
     "General Contractor License, Insurance & Signed Contract",
     "Feasibility Study (if required for experience tier)",
     "Builder's Risk Insurance Binder",
-    "Schedule of Real Estate Owned (Track Record)",
-    "2 Months Bank Statements",
-    "Entity Formation Docs & Operating Agreement (if closing in an entity)",
-    "EIN Letter (if closing in an entity)",
-    "Credit Authorization Form",
-    "Voided Check / Wire Instructions"
-  ]
+    "Schedule of Real Estate Owned (Track Record)"
+  ])
 };
 
 var SOW_CATEGORIES = [
@@ -1227,11 +1215,17 @@ function computeQueue(userId){
         var lastDate = last ? new Date(last.date+"T00:00:00") : null;
         var due = !lastDate || dateOnly(lastDate) < today;
         if (due){
+          var ageMs = lead.createdAtTs ? (Date.now() - new Date(lead.createdAtTs).getTime()) : null;
+          var isHot = attempts.length===0 && ageMs!==null && ageMs <= 30*60000;
           items.push({
-            type:"cadence", leadId:lead.id,
-            priority: attempts.length===0 ? 2 : 1,
-            label: "Day " + (attempts.length+1) + " of " + CADENCE_MAX + " — new lead follow-up",
-            reason: attempts.length===0 ? "First outreach attempt" : (attempts.length + " attempt(s) so far, no contact yet")
+            type: isHot ? "hot" : "cadence", leadId:lead.id,
+            priority: isHot ? 4 : (attempts.length===0 ? 2 : 1),
+            label: isHot
+              ? "🔥 New lead — " + fmtDuration(ageMs) + " old, not yet contacted"
+              : "Day " + (attempts.length+1) + " of " + CADENCE_MAX + " — new lead follow-up",
+            reason: isHot
+              ? "Speed to lead matters — leads contacted within 5 minutes convert far better"
+              : (attempts.length===0 ? "First outreach attempt" : (attempts.length + " attempt(s) so far, no contact yet"))
           });
         }
       }
@@ -1278,6 +1272,42 @@ function computeQueue(userId){
         label:"Win-back opportunity (" + (lead.status==="cold"?"cold lead":"lost deal") + ")",
         reason: wb.reasons.join(" · ")
       });
+    }
+
+    if (lead.status==="active" && lead.applicationSentAt && !lead.applicationTakenByPhone && !lead.applicationTakenAt){
+      var appDays = daysDiff(new Date(lead.applicationSentAt+"T00:00:00"), today);
+      if (appDays >= 3){
+        items.push({
+          type:"stale-app", leadId:lead.id, priority:2,
+          label:"Application sent " + appDays + " day(s) ago, not completed",
+          reason:"Check in — see if they need help finishing it"
+        });
+      }
+    }
+
+    (lead.documents||[]).forEach(function(doc){
+      if (doc.status==="requested" && doc.requestedAt){
+        var docDays = daysDiff(new Date(doc.requestedAt+"T00:00:00"), today);
+        if (docDays >= 5){
+          items.push({
+            type:"stale-docs", leadId:lead.id, priority:1,
+            label:'"' + doc.name + '" requested ' + docDays + " day(s) ago, not received",
+            reason:"Follow up to keep the file moving"
+          });
+        }
+      }
+    });
+
+    if (lead.status==="active" && lead.termsheetSentAt){
+      var tsExpires = addDaysISO(lead.termsheetSentAt, 15);
+      var tsDaysLeft = daysDiff(today, new Date(tsExpires+"T00:00:00"));
+      if (tsDaysLeft <= 3 && tsDaysLeft >= 0 && stageIndex(lead.stage) < stageIndex("ctc")){
+        items.push({
+          type:"expiring", leadId:lead.id, priority:3,
+          label:"Term sheet expires in " + tsDaysLeft + " day(s)",
+          reason:"Sent " + fmtDate(lead.termsheetSentAt) + " — confirm still moving forward or re-issue"
+        });
+      }
     }
 
     if (lead.birthday){
@@ -1983,7 +2013,7 @@ function requestDoc(leadId, name){
   var lead = leadById(leadId);
   if (!lead || !name) return;
   lead.documents = lead.documents || [];
-  lead.documents.push({ name:name, status:"requested" });
+  lead.documents.push({ name:name, status:"requested", requestedAt: todayISO() });
   lead.activity = lead.activity || [];
   var d = todayISO();
   lead.activity.push({ date:d, type:"document", text:"Requested document: " + name, author: currentUser().name });
@@ -2001,7 +2031,7 @@ function applyRequiredDocs(leadId, opts){
   var added = [];
   list.forEach(function(name){
     if (existing.indexOf(name.toLowerCase()) === -1){
-      lead.documents.push({ name:name, status:"requested" });
+      lead.documents.push({ name:name, status:"requested", requestedAt: todayISO() });
       added.push(name);
     }
   });
@@ -2557,7 +2587,8 @@ function renderToday(){
       var lead = leadById(item.leadId);
       if (!lead) return "";
       var typeCls = "type-" + item.type;
-      var typeBadge = item.type==="rate-drop" ? '<span class="badge badge-gold">Rate Alert</span>'
+      var typeBadge = item.type==="hot" ? '<span class="badge badge-hot">🔥 Hot Lead</span>'
+        : item.type==="rate-drop" ? '<span class="badge badge-gold">Rate Alert</span>'
         : item.type==="refi" ? '<span class="badge badge-forest">Refi Radar</span>'
         : item.type==="followup" ? '<span class="badge badge-rust">Follow-up</span>'
         : item.type==="birthday" ? '<span class="badge badge-gold">🎂 Birthday</span>'
