@@ -1571,6 +1571,9 @@ function leadToRow(l){
     guideline_check: l.guidelineCheck || null, scope_of_work: l.scopeOfWork || null, application_token: l.applicationToken || null,
     property_count: l.propertyCount || null, birthday: l.birthday || null,
     title_requested_at: l.titleRequestedAt || null, insurance_requested_at: l.insuranceRequestedAt || null,
+    entity_legal_name: l.entityLegalName || null, guarantor_name: l.guarantorName || null,
+    guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null,
+    guarantor_ownership_pct: l.guarantorOwnershipPct || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1593,6 +1596,9 @@ function rowToLead(r){
     guidelineCheck: r.guideline_check || null, scopeOfWork: r.scope_of_work || null, applicationToken: r.application_token || null,
     propertyCount: r.property_count || null, birthday: r.birthday || null,
     titleRequestedAt: r.title_requested_at || null, insuranceRequestedAt: r.insurance_requested_at || null,
+    entityLegalName: r.entity_legal_name || null, guarantorName: r.guarantor_name || null,
+    guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null,
+    guarantorOwnershipPct: r.guarantor_ownership_pct || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -2849,6 +2855,15 @@ function renderTabOverview(lead){
     field("Investing Experience", lead.experienceDeals!==null && lead.experienceDeals!==undefined ? (lead.experienceDeals + " deal(s) completed") : "—") +
     field("Liquidity / Reserves", fmtUSD(lead.liquidity), true) +
     field("Created", fmtDate(lead.createdAt)) +
+  '</div>' +
+  '<div class="section-head" style="margin-top:20px"><h2>Guarantor & Entity</h2></div>' +
+  '<div class="field-grid">' +
+    field("Guarantor Name", esc(lead.guarantorName||lead.name||"—")) +
+    field("Guarantor DOB", fmtDate(lead.birthday)) +
+    field("Guarantor Phone", esc(lead.guarantorPhone||lead.phone||"—")) +
+    field("Guarantor Email", esc(lead.guarantorEmail||lead.email||"—")) +
+    field("Entity Legal Name", esc(lead.entityLegalName||"—")) +
+    field("Guarantor Ownership %", lead.guarantorOwnershipPct!=null ? (lead.guarantorOwnershipPct + "%") : "—", true) +
   '</div>' + fu;
 }
 
@@ -3663,6 +3678,18 @@ function buildApplicationFieldsHTML(lead){
   var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("");
   var exitOptions = EXIT_STRATEGIES.map(function(t){ return '<option value="' + t + '"' + (lead.exitStrategy===t?" selected":"") + '>' + t + '</option>'; }).join("");
   return '<div class="form-two">' +
+      '<div class="form-row"><label>Guarantor Full Name</label><input class="input" name="guarantorName" value="' + esc(lead.guarantorName||lead.name||"") + '"></div>' +
+      '<div class="form-row"><label>Guarantor Date of Birth</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Guarantor Phone</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||lead.phone||"") + '"></div>' +
+      '<div class="form-row"><label>Guarantor Email</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||lead.email||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Entity Legal Name (if closing in an entity)</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
+      '<div class="form-row"><label>Guarantor Ownership %</label><input class="input" type="number" min="0" max="100" name="guarantorOwnershipPct" value="' + v(lead.guarantorOwnershipPct) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
       '<div class="form-row"><label>Entity Type</label><select class="select" name="entityType">' + entityOptions + '</select></div>' +
       '<div class="form-row"><label>Credit Score</label><input class="input" type="number" name="creditScore" min="300" max="850" value="' + v(lead.creditScore) + '"></div>' +
     '</div>' +
@@ -4004,7 +4031,13 @@ appEl.addEventListener("submit", function(e){
       monthlyHoa: numOrNull("monthlyHoa"),
       loanAmount: numOrNull("loanAmount"),
       termMonths: numOrNull("termMonths"),
-      propertyCount: numOrNull("propertyCount")
+      propertyCount: numOrNull("propertyCount"),
+      guarantorName: fd.get("guarantorName"),
+      guarantorPhone: fd.get("guarantorPhone"),
+      guarantorEmail: fd.get("guarantorEmail"),
+      birthday: fd.get("birthday"),
+      guarantorOwnershipPct: numOrNull("guarantorOwnershipPct"),
+      entityLegalName: fd.get("entityLegalName")
     });
     var sowPatch = extractScopeOfWorkFromForm(fd);
     if (sowPatch) saveScopeOfWork(form.dataset.lead, sowPatch.items, sowPatch.notes);
@@ -4028,7 +4061,13 @@ appEl.addEventListener("submit", function(e){
       monthlyHoa: numOrNullPub("monthlyHoa"),
       loanAmount: numOrNullPub("loanAmount"),
       termMonths: numOrNullPub("termMonths"),
-      propertyCount: numOrNullPub("propertyCount")
+      propertyCount: numOrNullPub("propertyCount"),
+      guarantorName: fd.get("guarantorName"),
+      guarantorPhone: fd.get("guarantorPhone"),
+      guarantorEmail: fd.get("guarantorEmail"),
+      birthday: fd.get("birthday"),
+      guarantorOwnershipPct: numOrNullPub("guarantorOwnershipPct"),
+      entityLegalName: fd.get("entityLegalName")
     });
     var sowPatchPub = extractScopeOfWorkFromForm(fd);
     if (sowPatchPub) saveScopeOfWork(form.dataset.lead, sowPatchPub.items, sowPatchPub.notes);
