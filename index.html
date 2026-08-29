@@ -1416,8 +1416,8 @@ function inviteEmailFor(user){
   var body = "Hi " + first + ",\n\n" +
     "You now have access to our new CRM, Bridgepoint Lending Desk. This is still early — I want your feedback on the workflow itself before we finish dialing everything in (loan programs, real integrations, etc.).\n\n" +
     "A couple things to know before you dig in:\n" +
-    "- Emails and texts sent from the app aren't actually connected yet — nothing will really go out to a borrower. It's there so you can see how the workflow is supposed to feel.\n" +
-    "- The documents and data in there right now are test/demo data, not real files.\n\n" +
+    "- Emails sent from the app are real and actually go out — be careful what you send and to whom while you're testing. Texts still just open your phone's messages app.\n" +
+    "- Most of the leads in there right now are test/demo data, not real borrowers.\n\n" +
     "What I actually want from you: click around, " + roleWorkflow + ", and see how it feels. Then tell me what's confusing, what's missing, and what you'd want different.\n\n" +
     "Link: " + CRM_URL + "\n" +
     "Username: " + user.username + "\n" +
@@ -2446,23 +2446,27 @@ function renderOnboardingSignature(){
 
 function tourStepsForRole(){
   if (isProcessor()) return [
-    { title:"Today = your processing queue", body:"No calls or leads here — just what needs processing: appraisal and title requests from loan officers, plus anything AI flags for follow-up." },
+    { title:"Today = your processing queue", body:"No cold-calling here — just what needs processing: appraisal/title requests from loan officers, files flagged for review, and anything else routed to you." },
     { title:"You only see processing-stage loans", body:"Leads & Loans and Pipeline only show loans in Processing, Underwriting, Clear to Close, and Closed. Everything earlier stays with the loan officer until it's ready for you." },
-    { title:"Documents & AI Review", body:"On any loan's Documents tab, request what's missing, mark items received, and run AI Review on anything received to catch issues before they slow things down." },
-    { title:"Send Back to Loan Officer", body:"Something missing or incomplete? Send it back with a note — it notifies the loan officer and moves the loan to Docs Collection automatically." },
-    { title:"Move Stage", body:"Advance the loan — Processing → Underwriting → Clear to Close → Closed — as each step is done." }
+    { title:"Guideline Check + Explain to LO", body:"When a file comes back \"Needs Review,\" click ✨ Explain to LO — it turns the numbers (like LTC or DSCR) into a plain-English message you can send straight to the loan officer explaining exactly what needs to change." },
+    { title:"Documents", body:"The required checklist loads automatically the moment you open the tab. Upload anything a client emails you directly, click View File to open what's on file, and run AI Review to catch issues on anything received." },
+    { title:"Request Title & Insurance in one click", body:"Once a Title Company or Insurance Agent contact is on the file, one button emails them directly. When they reply, their attachment files itself onto the loan automatically — no manual saving." },
+    { title:"Send Back / Move Stage", body:"Something missing or incomplete? Send it back to the loan officer with a note. Otherwise, advance the loan — Processing → Underwriting → Clear to Close → Closed — as each step is done." }
   ];
   if (isOwner()) return [
-    { title:"Today", body:"Your daily queue — calls due, new leads to work, and anything routed to you." },
+    { title:"Today", body:"Everyone's queue in one place — 🔥 hot leads that just came in, calls due, stalled applications/docs, birthdays, and rate-driven opportunities, ranked by urgency." },
     { title:"Pipeline & Leads & Loans", body:"Every active loan, laid out by stage or as a searchable list. Click any card or row to jump straight in." },
+    { title:"The Pricer", body:"Every DSCR, Fix & Flip, Bridge, Ground Up, and Portfolio loan has a live Pricer on its Loan Scenario tab — real rate, lender fee, and (for DSCR) yield spread and the LO's commission split, pulled from your current wholesale rate sheets. One click sends a term sheet at that rate." },
+    { title:"AI tools (✨)", body:"Look for the ✨ buttons throughout — AI Draft writes a personalized win-back or birthday text, Explain to LO translates a guideline flag into plain English, and Market Conditions has a Social Post Ideas generator." },
     { title:"Team & Market", body:"Team shows workload and commission across everyone. Market Conditions is where you update rates — a drop automatically queues win-back calls for the team." },
     { title:"Reassigning leads", body:"On any loan's page, only you can change the Lead Owner. Automations, texts, and emails all follow the new owner immediately — handy when you're covering someone or need a Spanish-speaking officer on a lead." }
   ];
   return [
-    { title:"Today", body:"Your call queue — new leads, rate-drop alerts, and win-back opportunities on cold or lost deals." },
-    { title:"The workflow: take it, then collect docs", body:"Take the application — send the borrower a link, or take it yourself over the phone if you're already talking. Then collect documents on the Documents tab and move the loan to Docs Collection." },
-    { title:"Once the application's complete", body:"Run credit, order preliminary title, and order the appraisal right from the loan's page — no need to wait for anyone else." },
-    { title:"Ordering title or an appraisal notifies processing", body:"The moment you click Order Appraisal or Order Preliminary Title, Erika (and any other processor) gets notified with everything needed to place the order: borrower contact, property, loan amount, and LTV." },
+    { title:"Today", body:"Your call queue, ranked by urgency — 🔥 hot leads that just came in (speed matters most here), rate-drop alerts, stalled applications or document requests, birthdays, and win-back opportunities on cold or lost deals." },
+    { title:"Take the application", body:"Send the borrower a link, or take it yourself over the phone if you're already talking — either way it lands in the same file. The required document checklist loads automatically, no extra step." },
+    { title:"Check the Pricer", body:"On the Loan Scenario tab, the Pricer shows a live rate, lender fee, and (for DSCR) yield spread — pulled from the actual current wholesale rate sheets, not a guess. One click sends a term sheet at that exact rate." },
+    { title:"Real email & text, plus AI Draft", body:"The Email and Text buttons on a lead actually send now — and for a cold lead or a birthday, the ✨ AI Draft button writes something personalized instead of a generic template, ready for you to review and send." },
+    { title:"Once the application's complete", body:"Run credit, and request title/insurance right from the loan's page — the request goes out by email, and their reply files itself onto the loan automatically." },
     { title:"Power Dialer", body:"Start it from Today to burn through your call list one lead at a time, logging outcomes as you go." }
   ];
 }
@@ -2525,7 +2529,7 @@ function renderShell(){
             '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="logout">Log Out</button>' +
           '</div>' +
         '</div>' +
-        '<div class="footnote" style="padding:10px 0 0">Prototype workspace — demo data. Notifications &amp; document uploads are simulated.</div>' +
+        '<div class="footnote" style="padding:10px 0 0">Early testing — emails and document uploads are real. In-app notifications only for now (no push/SMS alerts yet). We\'re actively taking feedback.</div>' +
       '</div>' +
     '</aside>';
 
