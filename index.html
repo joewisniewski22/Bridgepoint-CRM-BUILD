@@ -582,6 +582,11 @@ var DSCR_PREPAY_ADJ = {
   "1yr": [0.625,0.625,0.625,0.625,0.625,0.625],
   "none": [0.875,0.875,0.875,0.875,0.875,0.875]
 };
+var DSCR_FEE_BY_PROPERTY = {
+  "SFR": 1995, "Condo": 1995, "Mixed-Use": 1995, "Land": 1995,
+  "2-4 Unit": 2495,
+  "Multifamily 5+": 3995
+};
 var DSCR_BASE_RATE_PRICE = [
   {rate:7.500, price:102.125},{rate:7.375, price:102.000},{rate:7.250, price:101.875},
   {rate:7.125, price:101.750},{rate:7.000, price:101.500},{rate:6.875, price:101.250},
@@ -636,7 +641,8 @@ function evaluateDscrPricing(lead, inputs){
 
   rate = Math.round(rate*1000)/1000;
   var priceRow = DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate-rate) < 0.001; })[0];
-  return { rate: rate, price: priceRow ? priceRow.price : null, ltv: ltv, dscr: dscrVal, notes: notes };
+  var fee = DSCR_FEE_BY_PROPERTY[lead.propertyType] || DSCR_FEE_BY_PROPERTY["SFR"];
+  return { rate: rate, price: priceRow ? priceRow.price : null, fee: fee, ltv: ltv, dscr: dscrVal, notes: notes };
 }
 function evaluatePricing(lead, inputs){
   if (lead.loanType === "DSCR") return evaluateDscrPricing(lead, inputs);
@@ -644,6 +650,18 @@ function evaluatePricing(lead, inputs){
     return evaluateRtlGucPricing(lead, (inputs && inputs.points) || "1.00");
   }
   return null;
+}
+function applyPricerRateAndSendTermSheet(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var inputs = (ui.pricerInputs && ui.pricerInputs[leadId]) || {};
+  var result = evaluatePricing(lead, inputs);
+  if (!result || result.ineligible){ showToast("Fix the pricing inputs before sending a term sheet"); return; }
+  lead.rate = result.rate;
+  if (lead.purchasePrice && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/lead.purchasePrice)*1000)/10;
+  persist();
+  ui.modal = { type:"sendDocument", leadId:leadId, kind:"termSheet" };
+  render();
 }
 function experienceTier(deals){
   deals = deals || 0;
@@ -2691,11 +2709,13 @@ function renderPricer(lead){
     output = '<div class="hint" style="color:var(--c-rust)">' + esc(result.reason) + '</div>';
   } else {
     var rows = field("Rate", fmtPct(result.rate), true) +
-      (isDSCR ? field("Wholesale Price", result.price ? result.price.toFixed(3) : "—", true) : field("Lender Fee", fmtUSD(result.fee), true)) +
+      field("Lender Fee", fmtUSD(result.fee), true) +
+      (isDSCR ? field("Wholesale Price", result.price ? result.price.toFixed(3) : "—", true) : "") +
       (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
       (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
     output = '<div class="field-grid">' + rows + '</div>' +
-      (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '');
+      (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
+      (canEditApplication(lead) ? ('<div style="margin-top:10px"><button class="btn btn-sm" type="button" data-action="send-term-sheet-from-pricer" data-lead="' + lead.id + '">Send Term Sheet at This Rate</button></div>') : '');
   }
   return '<div class="section-head" style="margin-top:20px"><h2>Pricer</h2></div>' +
     controls + output +
@@ -3565,6 +3585,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "load-required-docs"){ applyRequiredDocs(t.dataset.lead); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
+  else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }
   else if (action === "logout"){ logout(); }
   else if (action === "tour-next"){ ui.tourStep = (ui.tourStep||0)+1; render(); }
   else if (action === "tour-back"){ ui.tourStep = Math.max((ui.tourStep||0)-1,0); render(); }
