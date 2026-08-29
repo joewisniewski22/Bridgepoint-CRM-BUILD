@@ -18,8 +18,10 @@ const SYSTEM_PROMPT = "You are a copywriting assistant for Bridgepoint Lending, 
   "No emojis unless asked for. No hashtags unless asked for. Keep it concise. Output only the requested text, nothing else -- no preamble, no quotation marks around it, no \"Here's a draft:\".";
 
 function buildPrompt(kind: string, context: Record<string, unknown>): string | null {
+  const lang = (context.language as string) || "English";
+  const langNote = lang !== "English" ? " Write the entire message in " + lang + ", natural and fluent, not a literal word-for-word translation." : "";
   if (kind === "winback") {
-    return "Write a short (2-4 sentence) text or email opener to re-engage a lead who has gone quiet. " +
+    return "Write a short (2-4 sentence) text or email opener to re-engage a lead who has gone quiet." + langNote + " " +
       "Borrower: " + (context.name || "the borrower") + ". Loan type: " + (context.loanType || "unknown") + ". " +
       "Property: " + (context.propertyAddress || "not specified") + ". " +
       "Days since last contact: " + (context.daysSinceContact ?? "unknown") + ". " +
@@ -29,7 +31,7 @@ function buildPrompt(kind: string, context: Record<string, unknown>): string | n
       "Make it specific to their situation, not generic. Give a natural reason to reach back out now.";
   }
   if (kind === "birthday") {
-    return "Write a short, warm birthday message (2-3 sentences) from a loan officer to a client. " +
+    return "Write a short, warm birthday message (2-3 sentences) from a loan officer to a client." + langNote + " " +
       "Client name: " + (context.name || "the client") + ". Loan type: " + (context.loanType || "unknown") + ". " +
       "Property: " + (context.propertyAddress || "not specified") + ". " +
       "Loan officer's name to sign as: " + (context.loName || "the loan officer") + ". " +

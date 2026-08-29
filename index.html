@@ -414,6 +414,91 @@ var SOURCES = ["Meta Ads","Connected Investors","Referral","Repeat Client","Webs
 var ENTITY_TYPES = ["LLC","Individual","Corporation"];
 var PROPERTY_TYPES = ["SFR","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Land"];
 var EXIT_STRATEGIES = ["Sell","Refinance to DSCR","Hold/Rent","1031 Exchange"];
+
+/* ---------------------------------------------------------------------
+   Spanish translations for client-facing content only. Internal/staff
+   views (Take Application by Phone, etc.) always call tr() with "en",
+   or don't call it at all, so staff always sees English regardless of
+   a lead's language preference.
+--------------------------------------------------------------------- */
+var ES_DICT = {
+  "Guarantor First Name":"Nombre del Garante", "Middle Name":"Segundo Nombre", "Last Name":"Apellido",
+  "Guarantor Date of Birth":"Fecha de Nacimiento del Garante", "Guarantor Ownership %":"% de Propiedad del Garante",
+  "Guarantor Phone":"Teléfono del Garante", "Guarantor Email":"Correo Electrónico del Garante",
+  "Entity Legal Name (if closing in an entity)":"Nombre Legal de la Entidad (si cierra a nombre de una entidad)",
+  "Entity Type":"Tipo de Entidad", "Credit Score":"Puntaje de Crédito",
+  "Investing Experience (deals completed)":"Experiencia de Inversión (proyectos completados)",
+  "Liquidity / Reserves":"Liquidez / Reservas", "Property Address":"Dirección de la Propiedad",
+  "Property Type":"Tipo de Propiedad", "Exit Strategy":"Estrategia de Salida",
+  "Purchase Price":"Precio de Compra", "Monthly Rent Estimate":"Renta Mensual Estimada",
+  "Monthly Property Tax":"Impuesto Predial Mensual", "Monthly Insurance":"Seguro Mensual",
+  "Monthly HOA / Dues (if any)":"Cuota Mensual de HOA (si aplica)",
+  "After-Repair Value (ARV)":"Valor Después de Reparación (ARV)",
+  "Rehab / Construction Budget":"Presupuesto de Remodelación / Construcción",
+  "Rehab Budget":"Presupuesto de Remodelación", "Construction Budget":"Presupuesto de Construcción",
+  "Loan Amount Requested":"Monto de Préstamo Solicitado", "Term (months)":"Plazo (meses)",
+  "Number of Properties":"Número de Propiedades", "Total Purchase Price / Value":"Precio / Valor Total de Compra",
+  "Total Monthly Rent Estimate":"Renta Mensual Total Estimada",
+  "Total Monthly Tax + Insurance + HOA":"Impuesto + Seguro + HOA Mensual Total",
+  "Track Record":"Historial de Proyectos",
+  "One row per completed project — updates automatically based on Investing Experience above.":"Una fila por proyecto completado — se actualiza automáticamente según la Experiencia de Inversión indicada arriba.",
+  "Enter a number above for Investing Experience to add project rows.":"Ingrese un número en Experiencia de Inversión para agregar filas de proyectos.",
+  "Prior Project #":"Proyecto Anterior #", "Purchase Date":"Fecha de Compra", "Exit Type":"Tipo de Salida",
+  "Exit Date":"Fecha de Salida", "Exit Value (sale price or new loan amount)":"Valor de Salida (precio de venta o nuevo monto de préstamo)",
+  "Sold":"Vendido", "Refinanced":"Refinanciado", "Still Own":"Todavía es Propietario",
+  "Scope of Work":"Alcance del Trabajo",
+  "Enter a budget for each category that applies. Leave the rest blank.":"Ingrese un presupuesto para cada categoría que aplique. Deje el resto en blanco.",
+  "Scope Notes (timeline, details)":"Notas del Alcance (cronograma, detalles)",
+  "Site Work / Excavation":"Trabajo de Sitio / Excavación", "Foundation / Structural":"Cimentación / Estructural",
+  "Framing":"Estructura de Madera", "Roof":"Techo",
+  "Exterior (Siding, Paint, Windows, Doors)":"Exterior (Revestimiento, Pintura, Ventanas, Puertas)",
+  "Electrical":"Eléctrico", "Plumbing":"Plomería", "HVAC":"Aire Acondicionado y Calefacción",
+  "Kitchen":"Cocina", "Bathrooms":"Baños", "Flooring":"Pisos",
+  "Interior Paint / Drywall":"Pintura Interior / Tablaroca", "Permits & Fees":"Permisos y Cuotas",
+  "Contingency / Other":"Contingencia / Otro",
+  "LLC":"LLC", "Individual":"Individual", "Corporation":"Corporación",
+  "SFR":"Casa Unifamiliar", "2-4 Unit":"2-4 Unidades", "Multifamily 5+":"Multifamiliar 5+",
+  "Mixed-Use":"Uso Mixto", "Condo":"Condominio", "Land":"Terreno",
+  "Sell":"Vender", "Refinance to DSCR":"Refinanciar a DSCR", "Hold/Rent":"Retener/Rentar", "1031 Exchange":"Intercambio 1031",
+  "DSCR":"DSCR", "Fix & Flip":"Compra y Venta (Fix & Flip)", "Bridge":"Préstamo Puente", "Ground Up Construction":"Construcción desde Cero", "Portfolio/Blanket":"Portafolio/Global", "Mixed-Use":"Uso Mixto",
+  "Government-Issued Photo ID":"Identificación con Fotografía Emitida por el Gobierno",
+  "2 Months Bank Statements":"Estados de Cuenta Bancarios de 2 Meses",
+  "2 Months Personal or Business Bank Statements":"Estados de Cuenta Bancarios Personales o Comerciales de 2 Meses",
+  "Entity Formation Docs & Operating Agreement (if closing in an entity)":"Documentos de Constitución y Acuerdo Operativo de la Entidad (si cierra a nombre de una entidad)",
+  "EIN Letter (if closing in an entity)":"Carta EIN (si cierra a nombre de una entidad)",
+  "Credit Authorization Form":"Formulario de Autorización de Crédito",
+  "Voided Check / Wire Instructions":"Cheque Cancelado / Instrucciones de Transferencia Bancaria",
+  "Purchase Contract (purchase) or Current Mortgage Statement (refinance)":"Contrato de Compra (compra) o Estado de Cuenta de la Hipoteca Actual (refinanciamiento)",
+  "Signed Lease Agreement (or Market Rent Letter if vacant)":"Contrato de Arrendamiento Firmado (o Carta de Renta de Mercado si está vacante)",
+  "Property Tax Bill":"Recibo del Impuesto Predial",
+  "Proof of Landlord / Hazard Insurance":"Comprobante de Seguro de Propietario / Seguro contra Riesgos",
+  "HOA Statement (if applicable)":"Estado de Cuenta de HOA (si aplica)",
+  "Purchase Contract":"Contrato de Compra",
+  "Scope of Work / Rehab Budget":"Alcance del Trabajo / Presupuesto de Remodelación",
+  "General Contractor License & Insurance (Standard/Super Rehab)":"Licencia y Seguro del Contratista General (Remodelación Estándar/Súper)",
+  "Proof of Funds for Rehab Reserve":"Comprobante de Fondos para la Reserva de Remodelación",
+  "Schedule of Real Estate Owned (Track Record)":"Historial de Bienes Raíces en Propiedad (Historial de Proyectos)",
+  "Builder's Risk Insurance Binder":"Póliza de Seguro de Riesgo del Constructor",
+  "Purchase Contract or Current Mortgage Statement":"Contrato de Compra o Estado de Cuenta de la Hipoteca Actual",
+  "Proof of Hazard Insurance":"Comprobante de Seguro contra Riesgos",
+  "Purchase Contract or Land Payoff Statement":"Contrato de Compra o Estado de Liquidación del Terreno",
+  "Scope of Work / Construction Budget":"Alcance del Trabajo / Presupuesto de Construcción",
+  "Stamped & Approved Architectural Plans":"Planos Arquitectónicos Sellados y Aprobados",
+  "Permits (or Permit-Readiness Letter)":"Permisos (o Carta de Disponibilidad de Permisos)",
+  "General Contractor License, Insurance & Signed Contract":"Licencia, Seguro y Contrato Firmado del Contratista General",
+  "Feasibility Study (if required for experience tier)":"Estudio de Viabilidad (si se requiere según el nivel de experiencia)",
+  "Welcome back":"Bienvenido de nuevo", "Current status:":"Estado actual:", "Your loan officer":"Su oficial de préstamos",
+  "Document checklist":"Lista de documentos", "No documents requested yet.":"Aún no se han solicitado documentos.",
+  "Received":"Recibido", "Needed to move forward":"Necesario para continuar", "Upload":"Subir archivo",
+  "New Lead":"Nuevo Cliente Potencial", "Attempting Contact":"Intentando Contacto", "Contacted / Qualifying":"Contactado / Calificando",
+  "Application Sent":"Solicitud Enviada", "Application Completed":"Solicitud Completada", "Docs Collection":"Recolección de Documentos",
+  "Processing":"Procesamiento", "Underwriting":"Suscripción", "Conditional Approval":"Aprobación Condicional",
+  "Clear to Close":"Listo para Cerrar", "Closed / Funded":"Cerrado / Fondeado", "Post-Closing":"Post-Cierre"
+};
+function tr(text, lang){
+  if (lang !== "es") return text;
+  return ES_DICT[text] || text;
+}
 var TP_ROLES = ["Realtor","Title Company","Escrow Officer","Insurance Agent","Attorney","Appraiser"];
 
 var UNIVERSAL_DOCS = [
@@ -1436,15 +1521,25 @@ function defaultOutreachMessage(lead){
   if (lead.status === "cold" || lead.status === "lost") return suggestedWinbackMessage(lead);
   var first = (lead.name||"").split(" ")[0];
   var lo = userName(lead.assignedTo);
+  if ((lead.preferredLanguage||"en") === "es"){
+    return "Hola " + first + ", soy " + lo + " de Bridgepoint Lending, dándole seguimiento a su consulta de " + tr(lead.loanType,"es") + (lead.propertyAddress ? (" para " + lead.propertyAddress) : "") + ". Avíseme cuándo sería un buen momento para hablar." + signoffFor(lead.assignedTo);
+  }
   return "Hi " + first + ", it's " + lo + " with Bridgepoint Lending, following up on your " + lead.loanType + " inquiry" + (lead.propertyAddress ? (" for " + lead.propertyAddress) : "") + ". Let me know a good time to connect." + signoffFor(lead.assignedTo);
 }
 function suggestedWinbackMessage(lead){
   var first = (lead.name||"").split(" ")[0];
   var lo = userName(lead.assignedTo);
   var rk = RATE_KEY_BY_LOAN_TYPE[lead.loanType];
+  var isEs = (lead.preferredLanguage||"en") === "es";
   var rateNote = "";
   if (rk && state.marketRates[rk] && state.marketRates[rk].current < state.marketRates[rk].previous){
-    rateNote = lead.loanType + " rates just moved to " + fmtPct(state.marketRates[rk].current) + " — ";
+    rateNote = isEs
+      ? ("las tasas de " + tr(lead.loanType,"es") + " bajaron a " + fmtPct(state.marketRates[rk].current) + " — ")
+      : (lead.loanType + " rates just moved to " + fmtPct(state.marketRates[rk].current) + " — ");
+  }
+  if (isEs){
+    var subjectEs = lead.propertyAddress ? ("el financiamiento para " + lead.propertyAddress) : "su próximo proyecto";
+    return "Hola " + first + ", soy " + lo + " de Bridgepoint Lending. " + rateNote + "quería retomar contacto sobre " + subjectEs + ". ¿Sigue buscando financiamiento? Con gusto le preparo números nuevos cuando guste." + signoffFor(lead.assignedTo);
   }
   var subject = lead.propertyAddress ? ("financing for " + lead.propertyAddress) : "your next deal";
   return "Hi " + first + ", it's " + lo + " with Bridgepoint Lending. " + rateNote + "wanted to reconnect on " + subject + ". Still in the market? Happy to run new numbers for you whenever you're ready." + signoffFor(lead.assignedTo);
@@ -1461,12 +1556,13 @@ function addDaysISO(dateStr, days){
 function docLoanOfficer(lead){
   return userById(lead.assignedTo) || currentUser();
 }
-function loContactLines(lo){
+function loContactLines(lo, lang){
   if (lo.emailSignature) return lo.emailSignature.split("\n");
+  var isEs = lang === "es";
   var lines = [];
-  lines.push(lo.name || "Loan Officer");
-  lines.push(lo.title || "Loan Officer");
-  lines.push("Bridgepoint Lending — Real Estate Financing Solutions");
+  lines.push(lo.name || (isEs ? "Oficial de Préstamos" : "Loan Officer"));
+  lines.push(lo.title || (isEs ? "Oficial de Préstamos" : "Loan Officer"));
+  lines.push("Bridgepoint Lending — " + (isEs ? "Soluciones de Financiamiento Inmobiliario" : "Real Estate Financing Solutions"));
   var contact = [lo.phone, lo.email].filter(Boolean).join("  ·  ");
   if (contact) lines.push(contact);
   return lines;
@@ -1475,78 +1571,136 @@ function buildPreApprovalLetter(lead){
   var lo = docLoanOfficer(lead);
   var today = todayISO();
   var expires = addDaysISO(today, 30);
+  var lang = lead.preferredLanguage || "en";
   var lines = [];
-  lines.push("BRIDGEPOINT LENDING");
-  lines.push("Real Estate Financing Solutions");
-  lines.push("");
-  lines.push(fmtDate(today));
-  lines.push("");
-  lines.push("Re: Pre-Approval — " + (lead.propertyAddress || "Subject Property TBD"));
-  lines.push("");
-  lines.push("Dear " + (lead.name || "Borrower") + ",");
-  lines.push("");
-  lines.push("Based on the information provided, Bridgepoint Lending is pleased to issue this pre-approval for the loan outlined below, subject to final underwriting, appraisal, title, and satisfactory documentation.");
-  lines.push("");
-  lines.push("Loan Type: " + (lead.loanType || "TBD"));
-  lines.push("Loan Amount: " + fmtUSD(lead.loanAmount));
-  lines.push("Estimated Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
-  lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
-  lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
-  lines.push("Subject Property: " + (lead.propertyAddress || "TBD"));
-  lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
-  lines.push("");
-  lines.push("This pre-approval is valid through " + fmtDate(expires) + " and does not constitute a commitment to lend. Final terms remain subject to underwriting review, appraisal, title, and receipt of all required documentation.");
-  lines.push("");
-  lines.push("Please don't hesitate to reach out with any questions.");
-  lines.push("");
-  lines.push("Sincerely,");
-  lines.push("");
-  lines = lines.concat(loContactLines(lo));
+  if (lang === "es"){
+    lines.push("BRIDGEPOINT LENDING");
+    lines.push("Soluciones de Financiamiento Inmobiliario");
+    lines.push("");
+    lines.push(fmtDate(today));
+    lines.push("");
+    lines.push("Re: Preaprobación — " + (lead.propertyAddress || "Propiedad por determinar"));
+    lines.push("");
+    lines.push("Estimado(a) " + (lead.name || "Cliente") + ",");
+    lines.push("");
+    lines.push("Con base en la información proporcionada, Bridgepoint Lending se complace en emitir esta preaprobación para el préstamo detallado a continuación, sujeta a la suscripción final, avalúo, título y documentación satisfactoria.");
+    lines.push("");
+    lines.push("Tipo de Préstamo: " + (tr(lead.loanType, "es") || "Por determinar"));
+    lines.push("Monto del Préstamo: " + fmtUSD(lead.loanAmount));
+    lines.push("Tasa Estimada: " + (lead.rate ? fmtPct(lead.rate) : "Por determinar — sujeta a bloqueo de tasa"));
+    lines.push("Plazo: " + (lead.termMonths ? (lead.termMonths + " meses") : "Por determinar"));
+    lines.push("Relación Préstamo-Valor: " + (lead.ltv ? (lead.ltv + "%") : "Por determinar"));
+    lines.push("Propiedad en Cuestión: " + (lead.propertyAddress || "Por determinar"));
+    lines.push("Estrategia de Salida: " + (tr(lead.exitStrategy, "es") || "Por determinar"));
+    lines.push("");
+    lines.push("Esta preaprobación es válida hasta el " + fmtDate(expires) + " y no constituye un compromiso de préstamo. Los términos finales están sujetos a revisión de suscripción, avalúo, título y recepción de toda la documentación requerida.");
+    lines.push("");
+    lines.push("No dude en comunicarse con nosotros si tiene alguna pregunta.");
+    lines.push("");
+    lines.push("Atentamente,");
+    lines.push("");
+  } else {
+    lines.push("BRIDGEPOINT LENDING");
+    lines.push("Real Estate Financing Solutions");
+    lines.push("");
+    lines.push(fmtDate(today));
+    lines.push("");
+    lines.push("Re: Pre-Approval — " + (lead.propertyAddress || "Subject Property TBD"));
+    lines.push("");
+    lines.push("Dear " + (lead.name || "Borrower") + ",");
+    lines.push("");
+    lines.push("Based on the information provided, Bridgepoint Lending is pleased to issue this pre-approval for the loan outlined below, subject to final underwriting, appraisal, title, and satisfactory documentation.");
+    lines.push("");
+    lines.push("Loan Type: " + (lead.loanType || "TBD"));
+    lines.push("Loan Amount: " + fmtUSD(lead.loanAmount));
+    lines.push("Estimated Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
+    lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
+    lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
+    lines.push("Subject Property: " + (lead.propertyAddress || "TBD"));
+    lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
+    lines.push("");
+    lines.push("This pre-approval is valid through " + fmtDate(expires) + " and does not constitute a commitment to lend. Final terms remain subject to underwriting review, appraisal, title, and receipt of all required documentation.");
+    lines.push("");
+    lines.push("Please don't hesitate to reach out with any questions.");
+    lines.push("");
+    lines.push("Sincerely,");
+    lines.push("");
+  }
+  lines = lines.concat(loContactLines(lo, lang));
   return lines.join("\n");
 }
 function buildTermSheet(lead){
   var lo = docLoanOfficer(lead);
   var today = todayISO();
   var expires = addDaysISO(today, 15);
-  var commission = lead.pointsCharged!=null ? (lead.pointsCharged + "%") : "TBD";
+  var lang = lead.preferredLanguage || "en";
+  var commission = lead.pointsCharged!=null ? (lead.pointsCharged + "%") : (lang==="es" ? "Por determinar" : "TBD");
   var lines = [];
-  lines.push("BRIDGEPOINT LENDING — TERM SHEET");
-  lines.push("Real Estate Financing Solutions");
-  lines.push("");
-  lines.push("Prepared for: " + (lead.name || "Borrower"));
-  lines.push("Date: " + fmtDate(today));
-  lines.push("Expires: " + fmtDate(expires));
-  lines.push("");
-  lines.push("LOAN TERMS");
-  lines.push("Loan Type: " + (lead.loanType || "TBD"));
-  lines.push("Loan Amount: " + fmtUSD(lead.loanAmount));
-  lines.push("Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
-  lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
-  lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
-  lines.push("Points Charged: " + commission);
-  lines.push("");
-  lines.push("PROPERTY");
-  lines.push("Address: " + (lead.propertyAddress || "TBD"));
-  lines.push("Property Type: " + (lead.propertyType || "TBD"));
-  lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
-  lines.push("");
-  lines.push("This term sheet is for discussion purposes only, is not a commitment to lend, and is subject to underwriting approval, appraisal, title, and satisfactory documentation. Fees, third-party costs, and final terms will be detailed in your closing disclosure.");
-  lines.push("");
-  lines.push("Prepared by,");
-  lines.push("");
-  lines = lines.concat(loContactLines(lo));
+  if (lang === "es"){
+    lines.push("BRIDGEPOINT LENDING — HOJA DE TÉRMINOS");
+    lines.push("Soluciones de Financiamiento Inmobiliario");
+    lines.push("");
+    lines.push("Preparado para: " + (lead.name || "Cliente"));
+    lines.push("Fecha: " + fmtDate(today));
+    lines.push("Vence: " + fmtDate(expires));
+    lines.push("");
+    lines.push("TÉRMINOS DEL PRÉSTAMO");
+    lines.push("Tipo de Préstamo: " + (tr(lead.loanType, "es") || "Por determinar"));
+    lines.push("Monto del Préstamo: " + fmtUSD(lead.loanAmount));
+    lines.push("Tasa: " + (lead.rate ? fmtPct(lead.rate) : "Por determinar — sujeta a bloqueo de tasa"));
+    lines.push("Plazo: " + (lead.termMonths ? (lead.termMonths + " meses") : "Por determinar"));
+    lines.push("Relación Préstamo-Valor: " + (lead.ltv ? (lead.ltv + "%") : "Por determinar"));
+    lines.push("Puntos Cobrados: " + commission);
+    lines.push("");
+    lines.push("PROPIEDAD");
+    lines.push("Dirección: " + (lead.propertyAddress || "Por determinar"));
+    lines.push("Tipo de Propiedad: " + (tr(lead.propertyType, "es") || "Por determinar"));
+    lines.push("Estrategia de Salida: " + (tr(lead.exitStrategy, "es") || "Por determinar"));
+    lines.push("");
+    lines.push("Esta hoja de términos es solo para fines de discusión, no constituye un compromiso de préstamo, y está sujeta a la aprobación de suscripción, avalúo, título y documentación satisfactoria. Las tarifas, costos de terceros y términos finales se detallarán en su divulgación de cierre.");
+    lines.push("");
+    lines.push("Preparado por,");
+    lines.push("");
+  } else {
+    lines.push("BRIDGEPOINT LENDING — TERM SHEET");
+    lines.push("Real Estate Financing Solutions");
+    lines.push("");
+    lines.push("Prepared for: " + (lead.name || "Borrower"));
+    lines.push("Date: " + fmtDate(today));
+    lines.push("Expires: " + fmtDate(expires));
+    lines.push("");
+    lines.push("LOAN TERMS");
+    lines.push("Loan Type: " + (lead.loanType || "TBD"));
+    lines.push("Loan Amount: " + fmtUSD(lead.loanAmount));
+    lines.push("Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
+    lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
+    lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
+    lines.push("Points Charged: " + commission);
+    lines.push("");
+    lines.push("PROPERTY");
+    lines.push("Address: " + (lead.propertyAddress || "TBD"));
+    lines.push("Property Type: " + (lead.propertyType || "TBD"));
+    lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
+    lines.push("");
+    lines.push("This term sheet is for discussion purposes only, is not a commitment to lend, and is subject to underwriting approval, appraisal, title, and satisfactory documentation. Fees, third-party costs, and final terms will be detailed in your closing disclosure.");
+    lines.push("");
+    lines.push("Prepared by,");
+    lines.push("");
+  }
+  lines = lines.concat(loContactLines(lo, lang));
   return lines.join("\n");
 }
 function docHTMLPreview(lead, kind){
   var body = kind === "termSheet" ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
   var linesArr = body.split("\n");
   var lo = docLoanOfficer(lead);
-  var closingIdx = linesArr.length - loContactLines(lo).length;
+  var isEs = (lead.preferredLanguage||"en") === "es";
+  var closingIdx = linesArr.length - loContactLines(lo, isEs ? "es" : "en").length;
   var beforeSig = linesArr.slice(0, closingIdx).join("\n");
   return '<div class="doc-preview">' +
     '<pre class="doc-preview-text">' + esc(beforeSig) + '</pre>' +
     '<div class="signature">' + esc(lo.name || "") + '</div>' +
-    '<div class="doc-preview-text" style="margin-top:2px">' + esc(lo.title || "Loan Officer") + '<br>Bridgepoint Lending — Real Estate Financing Solutions' +
+    '<div class="doc-preview-text" style="margin-top:2px">' + esc(lo.title || (isEs ? "Oficial de Préstamos" : "Loan Officer")) + '<br>Bridgepoint Lending — ' + (isEs ? "Soluciones de Financiamiento Inmobiliario" : "Real Estate Financing Solutions") +
       (lo.phone || lo.email ? ('<br>' + esc([lo.phone, lo.email].filter(Boolean).join("  ·  "))) : '') +
     '</div>' +
   '</div>';
@@ -1581,6 +1735,7 @@ function leadToRow(l){
     guarantor_first_name: l.guarantorFirstName || null, guarantor_middle_name: l.guarantorMiddleName || null, guarantor_last_name: l.guarantorLastName || null,
     guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null,
     guarantor_ownership_pct: l.guarantorOwnershipPct || null, track_record: l.trackRecord || [],
+    preferred_language: l.preferredLanguage || "en",
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1607,6 +1762,7 @@ function rowToLead(r){
     guarantorFirstName: r.guarantor_first_name || null, guarantorMiddleName: r.guarantor_middle_name || null, guarantorLastName: r.guarantor_last_name || null,
     guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null,
     guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [],
+    preferredLanguage: r.preferred_language || "en",
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -1977,6 +2133,15 @@ function setBirthday(leadId, birthday){
   if (!lead) return;
   lead.birthday = birthday || null;
   showToast("Birthday saved");
+  persist();
+}
+function toggleLanguage(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  lead.preferredLanguage = lead.preferredLanguage === "es" ? "en" : "es";
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text: lead.preferredLanguage === "es" ? "Marked as Spanish speaking — application, portal, and documents will go out in Spanish" : "Switched back to English", author: currentUser().name });
+  showToast(lead.preferredLanguage === "es" ? "Client-facing content now in Spanish" : "Client-facing content now in English");
   persist();
 }
 
@@ -2404,20 +2569,27 @@ function renderPublicApply(){
     return wrap('<h1 class="login-title">Link not found</h1><div class="login-sub">This application link is invalid or has expired. Please contact your loan officer for a new link.</div>');
   }
   var lead = state.leads[0];
+  var lang = lead.preferredLanguage || "en";
   if (pa.status === "submitted"){
-    return wrap('<h1 class="login-title">Thank you, ' + esc((lead.name||"").split(" ")[0]) + '!</h1>' +
-      '<div class="login-sub">Your application has been received. ' + esc(userName(lead.assignedTo)) + ' will follow up with you shortly.</div>');
+    return wrap(lang === "es"
+      ? ('<h1 class="login-title">¡Gracias, ' + esc((lead.name||"").split(" ")[0]) + '!</h1>' +
+         '<div class="login-sub">Su solicitud ha sido recibida. ' + esc(userName(lead.assignedTo)) + ' se pondrá en contacto con usted pronto.</div>')
+      : ('<h1 class="login-title">Thank you, ' + esc((lead.name||"").split(" ")[0]) + '!</h1>' +
+         '<div class="login-sub">Your application has been received. ' + esc(userName(lead.assignedTo)) + ' will follow up with you shortly.</div>'));
   }
   if (stageIndex(lead.stage) >= stageIndex("processing")){
-    return wrap('<h1 class="login-title">Application locked</h1>' +
-      '<div class="login-sub">Your file is already in processing, so this link is now read-only. For any changes, please contact ' + esc(userName(lead.assignedTo)) + '.</div>');
+    return wrap(lang === "es"
+      ? ('<h1 class="login-title">Solicitud bloqueada</h1>' +
+         '<div class="login-sub">Su expediente ya está en procesamiento, por lo que este enlace ahora es de solo lectura. Para cualquier cambio, comuníquese con ' + esc(userName(lead.assignedTo)) + '.</div>')
+      : ('<h1 class="login-title">Application locked</h1>' +
+         '<div class="login-sub">Your file is already in processing, so this link is now read-only. For any changes, please contact ' + esc(userName(lead.assignedTo)) + '.</div>'));
   }
   return wrap(
-    '<h1 class="login-title">Loan Application</h1>' +
-    '<div class="login-sub">' + esc(lead.name) + ' · ' + esc(lead.loanType) + (lead.propertyAddress ? (' · ' + esc(lead.propertyAddress)) : '') + '</div>' +
+    '<h1 class="login-title">' + (lang==="es" ? "Solicitud de Préstamo" : "Loan Application") + '</h1>' +
+    '<div class="login-sub">' + esc(lead.name) + ' · ' + esc(tr(lead.loanType, lang)) + (lead.propertyAddress ? (' · ' + esc(lead.propertyAddress)) : '') + '</div>' +
     '<form data-form="public-application" data-lead="' + lead.id + '" style="margin-top:18px">' +
-      buildApplicationFieldsHTML(lead) +
-      '<button class="btn btn-primary" style="width:100%;margin-top:14px" type="submit">Submit Application</button>' +
+      buildApplicationFieldsHTML(lead, lang) +
+      '<button class="btn btn-primary" style="width:100%;margin-top:14px" type="submit">' + (lang==="es" ? "Enviar Solicitud" : "Submit Application") + '</button>' +
     '</form>'
   );
 }
@@ -3093,6 +3265,9 @@ function renderRail(lead){
       '<div class="rail-title">Borrower</div>' +
       '<div class="rail-name">' + esc(lead.name) + '</div>' +
       '<div class="stage-line">' + badgeForStage(lead) + '</div>' +
+      '<button class="btn btn-sm' + (lead.preferredLanguage==="es" ? " btn-primary" : "") + '" style="width:100%;margin-top:8px" data-action="toggle-language" data-lead="' + lead.id + '">' +
+        (lead.preferredLanguage==="es" ? "🇪🇸 Spanish Speaking — everything they see is in Spanish" : "🇺🇸 English — click to switch client-facing content to Spanish") +
+      '</button>' +
     '</div>' +
     '<div class="rail-block">' +
       '<div class="rail-title">Lead Owner</div>' +
@@ -3424,17 +3599,19 @@ function renderPortal(){
 
   var body = "";
   if (lead){
+    var lang = lead.preferredLanguage || "en";
+    var L = function(s){ return esc(tr(s, lang)); };
     var idx = Math.max(stageIndex(lead.stage), 0);
     var steps = STAGES.map(function(s,i){
       var cls = i < idx ? "done" : (i===idx ? "now" : "");
-      return '<div class="portal-step ' + cls + '" title="' + s.label + '"></div>';
+      return '<div class="portal-step ' + cls + '" title="' + esc(tr(s.label, lang)) + '"></div>';
     }).join("");
 
     var docs = (lead.documents||[]).map(function(d,i){
       var received = d.status==="received";
-      return '<div class="doc-row"><div><div>' + esc(d.name) + '</div><div class="cell-sub">' + (received ? ("Received " + fmtDate(d.receivedAt)) : "Needed to move forward") + '</div></div>' +
-        (received ? '<span class="badge badge-forest">Received</span>' :
-          '<label class="btn btn-sm btn-primary" style="cursor:pointer">Upload<input type="file" style="display:none" data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label>') +
+      return '<div class="doc-row"><div><div>' + L(d.name) + '</div><div class="cell-sub">' + (received ? (L("Received") + " " + fmtDate(d.receivedAt)) : L("Needed to move forward")) + '</div></div>' +
+        (received ? '<span class="badge badge-forest">' + L("Received") + '</span>' :
+          '<label class="btn btn-sm btn-primary" style="cursor:pointer">' + L("Upload") + '<input type="file" style="display:none" data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label>') +
         '</div>';
     }).join("");
 
@@ -3443,14 +3620,14 @@ function renderPortal(){
         '<div>' + BRAND_MARK + '</div>' +
         '<select class="select" data-action="portal-select">' + options + '</select>' +
       '</div>' +
-      '<h2 class="font-display" style="margin:18px 0 2px">Welcome back, ' + esc(lead.name.split(" ")[0]) + '</h2>' +
-      '<div class="view-sub">' + esc(lead.loanType) + ' · ' + esc(lead.propertyAddress||"") + '</div>' +
+      '<h2 class="font-display" style="margin:18px 0 2px">' + L("Welcome back") + ', ' + esc(lead.name.split(" ")[0]) + '</h2>' +
+      '<div class="view-sub">' + L(lead.loanType) + ' · ' + esc(lead.propertyAddress||"") + '</div>' +
       '<div class="portal-progress">' + steps + '</div>' +
-      '<div class="view-sub" style="margin-bottom:18px">Current status: <b>' + esc(stageLabel(lead.stage)) + '</b></div>' +
-      '<div class="rail-title" style="margin-top:10px">Your loan officer</div>' +
+      '<div class="view-sub" style="margin-bottom:18px">' + L("Current status:") + ' <b>' + esc(tr(stageLabel(lead.stage), lang)) + '</b></div>' +
+      '<div class="rail-title" style="margin-top:10px">' + L("Your loan officer") + '</div>' +
       '<div style="margin:6px 0 18px">' + esc(userName(lead.assignedTo)) + ' · ' + esc((userById(lead.assignedTo)||{}).phone||"") + '</div>' +
-      '<div class="rail-title">Document checklist</div>' +
-      (docs || '<div class="empty">No documents requested yet.</div>') +
+      '<div class="rail-title">' + L("Document checklist") + '</div>' +
+      (docs || '<div class="empty">' + L("No documents requested yet.") + '</div>') +
     '</div>';
   } else {
     body = '<div class="empty">No borrowers yet.</div>';
@@ -3643,123 +3820,131 @@ function modalSendApplication(leadId){
       '</div>' +
     '</div></div>';
 }
-function buildScenarioFieldsHTML(lead){
+function buildScenarioFieldsHTML(lead, lang){
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
   var v = function(x){ return x===null||x===undefined ? "" : x; };
   var loanType = lead.loanType;
   var isDSCR = loanType === "DSCR";
   var isRehabType = loanType === "Fix & Flip" || loanType === "Ground Up Construction" || loanType === "Bridge";
-  var rehabLabel = loanType === "Ground Up Construction" ? "Construction Budget" : "Rehab Budget";
+  var rehabLabel = L(loanType === "Ground Up Construction" ? "Construction Budget" : "Rehab Budget");
   if (isDSCR){
     return '<div class="form-two">' +
-        '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
-        '<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
+        '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+        '<div class="form-row"><label>' + L("Monthly Rent Estimate") + '</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
       '</div>' +
       '<div class="form-two">' +
-        '<div class="form-row"><label>Monthly Property Tax</label><input class="input" type="number" name="monthlyTaxes" value="' + v(lead.monthlyTaxes) + '"></div>' +
-        '<div class="form-row"><label>Monthly Insurance</label><input class="input" type="number" name="monthlyInsurance" value="' + v(lead.monthlyInsurance) + '"></div>' +
+        '<div class="form-row"><label>' + L("Monthly Property Tax") + '</label><input class="input" type="number" name="monthlyTaxes" value="' + v(lead.monthlyTaxes) + '"></div>' +
+        '<div class="form-row"><label>' + L("Monthly Insurance") + '</label><input class="input" type="number" name="monthlyInsurance" value="' + v(lead.monthlyInsurance) + '"></div>' +
       '</div>' +
-      '<div class="form-row"><label>Monthly HOA / Dues (if any)</label><input class="input" type="number" name="monthlyHoa" value="' + v(lead.monthlyHoa) + '"></div>';
+      '<div class="form-row"><label>' + L("Monthly HOA / Dues (if any)") + '</label><input class="input" type="number" name="monthlyHoa" value="' + v(lead.monthlyHoa) + '"></div>';
   } else if (isRehabType){
     return '<div class="form-two">' +
-        '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
-        '<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
+        '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+        '<div class="form-row"><label>' + L("After-Repair Value (ARV)") + '</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
       '</div>' +
       '<div class="form-row"><label>' + rehabLabel + '</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>';
   } else if (loanType === "Portfolio/Blanket"){
     return '<div class="form-two">' +
-        '<div class="form-row"><label>Number of Properties</label><input class="input" type="number" min="1" name="propertyCount" value="' + v(lead.propertyCount) + '"></div>' +
-        '<div class="form-row"><label>Total Purchase Price / Value</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+        '<div class="form-row"><label>' + L("Number of Properties") + '</label><input class="input" type="number" min="1" name="propertyCount" value="' + v(lead.propertyCount) + '"></div>' +
+        '<div class="form-row"><label>' + L("Total Purchase Price / Value") + '</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
       '</div>' +
       '<div class="form-two">' +
-        '<div class="form-row"><label>Total Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
-        '<div class="form-row"><label>Total Monthly Tax + Insurance + HOA</label><input class="input" type="number" name="monthlyTaxes" value="' + v(lead.monthlyTaxes) + '"></div>' +
+        '<div class="form-row"><label>' + L("Total Monthly Rent Estimate") + '</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
+        '<div class="form-row"><label>' + L("Total Monthly Tax + Insurance + HOA") + '</label><input class="input" type="number" name="monthlyTaxes" value="' + v(lead.monthlyTaxes) + '"></div>' +
       '</div>';
   }
   return '<div class="form-two">' +
-      '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
-      '<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
+      '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+      '<div class="form-row"><label>' + L("After-Repair Value (ARV)") + '</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>' +
-      '<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
+      '<div class="form-row"><label>' + L("Rehab / Construction Budget") + '</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>' +
+      '<div class="form-row"><label>' + L("Monthly Rent Estimate") + '</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
     '</div>';
 }
-function buildApplicationFieldsHTML(lead){
+function buildApplicationFieldsHTML(lead, lang){
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
   var v = function(x){ return x===null||x===undefined ? "" : x; };
-  var entityOptions = ENTITY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.entityType===t?" selected":"") + '>' + t + '</option>'; }).join("");
-  var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("");
-  var exitOptions = EXIT_STRATEGIES.map(function(t){ return '<option value="' + t + '"' + (lead.exitStrategy===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  var entityOptions = ENTITY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.entityType===t?" selected":"") + '>' + L(t) + '</option>'; }).join("");
+  var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.propertyType===t?" selected":"") + '>' + L(t) + '</option>'; }).join("");
+  var exitOptions = EXIT_STRATEGIES.map(function(t){ return '<option value="' + t + '"' + (lead.exitStrategy===t?" selected":"") + '>' + L(t) + '</option>'; }).join("");
   var nameParts = (lead.guarantorFirstName || lead.guarantorLastName) ? null : (lead.name||"").split(" ");
   var defFirst = lead.guarantorFirstName || (nameParts ? nameParts[0] : "") || "";
   var defLast = lead.guarantorLastName || (nameParts && nameParts.length>1 ? nameParts[nameParts.length-1] : "") || "";
   return '<div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
-      '<div><label>Guarantor First Name</label><input class="input" name="guarantorFirstName" value="' + esc(defFirst) + '"></div>' +
-      '<div><label>Middle Name</label><input class="input" name="guarantorMiddleName" value="' + esc(lead.guarantorMiddleName||"") + '"></div>' +
-      '<div><label>Last Name</label><input class="input" name="guarantorLastName" value="' + esc(defLast) + '"></div>' +
+      '<div><label>' + L("Guarantor First Name") + '</label><input class="input" name="guarantorFirstName" value="' + esc(defFirst) + '"></div>' +
+      '<div><label>' + L("Middle Name") + '</label><input class="input" name="guarantorMiddleName" value="' + esc(lead.guarantorMiddleName||"") + '"></div>' +
+      '<div><label>' + L("Last Name") + '</label><input class="input" name="guarantorLastName" value="' + esc(defLast) + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Guarantor Date of Birth</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
-      '<div class="form-row"><label>Guarantor Ownership %</label><input class="input" type="number" min="0" max="100" name="guarantorOwnershipPct" value="' + v(lead.guarantorOwnershipPct) + '"></div>' +
+      '<div class="form-row"><label>' + L("Guarantor Date of Birth") + '</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Guarantor Ownership %") + '</label><input class="input" type="number" min="0" max="100" name="guarantorOwnershipPct" value="' + v(lead.guarantorOwnershipPct) + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Guarantor Phone</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||lead.phone||"") + '"></div>' +
-      '<div class="form-row"><label>Guarantor Email</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||lead.email||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Guarantor Phone") + '</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||lead.phone||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Guarantor Email") + '</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||lead.email||"") + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>Entity Legal Name (if closing in an entity)</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
+    '<div class="form-row"><label>' + L("Entity Legal Name (if closing in an entity)") + '</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Entity Type</label><select class="select" name="entityType">' + entityOptions + '</select></div>' +
-      '<div class="form-row"><label>Credit Score</label><input class="input" type="number" name="creditScore" min="300" max="850" value="' + v(lead.creditScore) + '"></div>' +
+      '<div class="form-row"><label>' + L("Entity Type") + '</label><select class="select" name="entityType">' + entityOptions + '</select></div>' +
+      '<div class="form-row"><label>' + L("Credit Score") + '</label><input class="input" type="number" name="creditScore" min="300" max="850" value="' + v(lead.creditScore) + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Investing Experience (deals completed)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '" data-action="update-track-record-count"></div>' +
-      '<div class="form-row"><label>Liquidity / Reserves</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
+      '<div class="form-row"><label>' + L("Investing Experience (deals completed)") + '</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '" data-action="update-track-record-count" data-lang="' + lang + '"></div>' +
+      '<div class="form-row"><label>' + L("Liquidity / Reserves") + '</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress" value="' + esc(lead.propertyAddress||"") + '"></div>' +
+    '<div class="form-row"><label>' + L("Property Address") + '</label><input class="input" name="propertyAddress" value="' + esc(lead.propertyAddress||"") + '"></div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Property Type</label><select class="select" name="propertyType">' + propTypeOptions + '</select></div>' +
-      '<div class="form-row"><label>Exit Strategy</label><select class="select" name="exitStrategy">' + exitOptions + '</select></div>' +
+      '<div class="form-row"><label>' + L("Property Type") + '</label><select class="select" name="propertyType">' + propTypeOptions + '</select></div>' +
+      '<div class="form-row"><label>' + L("Exit Strategy") + '</label><select class="select" name="exitStrategy">' + exitOptions + '</select></div>' +
     '</div>' +
-    buildScenarioFieldsHTML(lead) +
+    buildScenarioFieldsHTML(lead, lang) +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Loan Amount Requested</label><input class="input" type="number" name="loanAmount" value="' + v(lead.loanAmount) + '"></div>' +
-      '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
+      '<div class="form-row"><label>' + L("Loan Amount Requested") + '</label><input class="input" type="number" name="loanAmount" value="' + v(lead.loanAmount) + '"></div>' +
+      '<div class="form-row"><label>' + L("Term (months)") + '</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
     '</div>' +
-    buildTrackRecordSectionHTML(lead) +
-    buildScopeOfWorkFieldsHTML(lead);
+    buildTrackRecordSectionHTML(lead, lang) +
+    buildScopeOfWorkFieldsHTML(lead, lang);
 }
 var TRACK_EXIT_TYPES = ["Sold","Refinanced","Still Own"];
-function buildTrackRecordRowHTML(i, row){
+function buildTrackRecordRowHTML(i, row, lang){
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
   row = row || {};
-  var exitOptions = TRACK_EXIT_TYPES.map(function(t){ return '<option value="' + t + '"' + (row.exitType===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  var exitOptions = TRACK_EXIT_TYPES.map(function(t){ return '<option value="' + t + '"' + (row.exitType===t?" selected":"") + '>' + L(t) + '</option>'; }).join("");
   var v2 = function(x){ return x===null||x===undefined ? "" : x; };
   return '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">' +
-    '<div class="hint" style="margin-bottom:6px">Prior Project #' + (i+1) + '</div>' +
-    '<div class="form-row"><label>Property Address</label><input class="input" name="trackAddress_' + i + '" value="' + esc(row.address||"") + '"></div>' +
+    '<div class="hint" style="margin-bottom:6px">' + L("Prior Project #") + (i+1) + '</div>' +
+    '<div class="form-row"><label>' + L("Property Address") + '</label><input class="input" name="trackAddress_' + i + '" value="' + esc(row.address||"") + '"></div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Purchase Date</label><input class="input" type="date" name="trackPurchaseDate_' + i + '" value="' + (row.purchaseDate||"") + '"></div>' +
-      '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="trackPurchasePrice_' + i + '" value="' + v2(row.purchasePrice) + '"></div>' +
+      '<div class="form-row"><label>' + L("Purchase Date") + '</label><input class="input" type="date" name="trackPurchaseDate_' + i + '" value="' + (row.purchaseDate||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="trackPurchasePrice_' + i + '" value="' + v2(row.purchasePrice) + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="trackRehabBudget_' + i + '" value="' + v2(row.rehabBudget) + '"></div>' +
-      '<div class="form-row"><label>Exit Type</label><select class="select" name="trackExitType_' + i + '">' + exitOptions + '</select></div>' +
+      '<div class="form-row"><label>' + L("Rehab / Construction Budget") + '</label><input class="input" type="number" name="trackRehabBudget_' + i + '" value="' + v2(row.rehabBudget) + '"></div>' +
+      '<div class="form-row"><label>' + L("Exit Type") + '</label><select class="select" name="trackExitType_' + i + '">' + exitOptions + '</select></div>' +
     '</div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Exit Date</label><input class="input" type="date" name="trackExitDate_' + i + '" value="' + (row.exitDate||"") + '"></div>' +
-      '<div class="form-row"><label>Exit Value (sale price or new loan amount)</label><input class="input" type="number" name="trackExitValue_' + i + '" value="' + v2(row.exitValue) + '"></div>' +
+      '<div class="form-row"><label>' + L("Exit Date") + '</label><input class="input" type="date" name="trackExitDate_' + i + '" value="' + (row.exitDate||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Exit Value (sale price or new loan amount)") + '</label><input class="input" type="number" name="trackExitValue_' + i + '" value="' + v2(row.exitValue) + '"></div>' +
     '</div>' +
   '</div>';
 }
-function buildTrackRecordRowsHTML(count, existingRows){
+function buildTrackRecordRowsHTML(count, existingRows, lang){
   var rows = [];
-  for (var i=0;i<count;i++){ rows.push(buildTrackRecordRowHTML(i, (existingRows||[])[i])); }
+  for (var i=0;i<count;i++){ rows.push(buildTrackRecordRowHTML(i, (existingRows||[])[i], lang)); }
   return rows.join("");
 }
-function buildTrackRecordSectionHTML(lead){
+function buildTrackRecordSectionHTML(lead, lang){
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
   if (lead.loanType !== "Fix & Flip" && lead.loanType !== "Ground Up Construction") return "";
   var count = Math.min(lead.experienceDeals||0, 20);
-  return '<div class="section-head" style="margin-top:20px"><h2>Track Record</h2></div>' +
-    '<div class="footnote" style="padding:0 0 10px">One row per completed project — updates automatically based on Investing Experience above.</div>' +
-    '<div id="track-record-rows">' + (count ? buildTrackRecordRowsHTML(count, lead.trackRecord) : '<div class="empty">Enter a number above for Investing Experience to add project rows.</div>') + '</div>';
+  return '<div class="section-head" style="margin-top:20px"><h2>' + L("Track Record") + '</h2></div>' +
+    '<div class="footnote" style="padding:0 0 10px">' + L("One row per completed project — updates automatically based on Investing Experience above.") + '</div>' +
+    '<div id="track-record-rows" data-lang="' + lang + '">' + (count ? buildTrackRecordRowsHTML(count, lead.trackRecord, lang) : '<div class="empty">' + L("Enter a number above for Investing Experience to add project rows.") + '</div>') + '</div>';
 }
 function collectTrackRecordRowsFromDOM(container){
   var rows = [];
@@ -3797,7 +3982,9 @@ function extractTrackRecordFromForm(fd){
   }
   return rows;
 }
-function buildScopeOfWorkFieldsHTML(lead){
+function buildScopeOfWorkFieldsHTML(lead, lang){
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
   if (lead.loanType !== "Fix & Flip" && lead.loanType !== "Ground Up Construction") return "";
   var label = lead.loanType === "Ground Up Construction" ? "Construction Budget" : "Scope of Work";
   var existing = {};
@@ -3805,17 +3992,17 @@ function buildScopeOfWorkFieldsHTML(lead){
   var rows = SOW_CATEGORIES.map(function(cat, i){
     var val = existing[cat];
     return '<div class="form-row" style="display:flex;align-items:center;gap:10px;margin-bottom:4px">' +
-      '<label style="flex:1;margin:0">' + esc(cat) + '</label>' +
+      '<label style="flex:1;margin:0">' + L(cat) + '</label>' +
       '<input class="input" type="number" min="0" name="cost_' + i + '" data-cat="' + esc(cat) + '" value="' + (val ? val : "") + '" style="width:150px" placeholder="$0">' +
       '</div>';
   }).join("");
   return '<div class="section-head" style="margin-top:20px">' +
-      '<h2 style="font-size:1rem">' + esc(label) + '</h2>' +
+      '<h2 style="font-size:1rem">' + L(label) + '</h2>' +
       '<button class="btn btn-sm" type="button" data-action="preview-scope-of-work" data-lead="' + lead.id + '">Export PDF</button>' +
     '</div>' +
-    '<div class="footnote" style="padding:0 0 8px">Enter a budget for each category that applies. Leave the rest blank.</div>' +
+    '<div class="footnote" style="padding:0 0 8px">' + L("Enter a budget for each category that applies. Leave the rest blank.") + '</div>' +
     rows +
-    '<div class="form-row" style="margin-top:10px"><label>Scope Notes (timeline, details)</label><textarea class="textarea" name="notes" rows="3">' + esc((lead.scopeOfWork && lead.scopeOfWork.notes)||"") + '</textarea></div>';
+    '<div class="form-row" style="margin-top:10px"><label>' + L("Scope Notes (timeline, details)") + '</label><textarea class="textarea" name="notes" rows="3">' + esc((lead.scopeOfWork && lead.scopeOfWork.notes)||"") + '</textarea></div>';
 }
 function modalTakeApplication(leadId){
   var lead = leadById(leadId);
@@ -3956,6 +4143,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "run-guideline-check"){ runGuidelineCheck(t.dataset.lead); }
   else if (action === "dismiss-ai-flag"){ dismissAiFlag(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
   else if (action === "toggle-processing"){ toggleProcessingAction(t.dataset.lead, t.dataset.kind); }
+  else if (action === "toggle-language"){ toggleLanguage(t.dataset.lead); }
   else if (action === "request-third-party-doc"){ requestThirdPartyDoc(t.dataset.lead, t.dataset.role); }
   else if (action === "mark-notif-read"){ markNotificationRead(t.dataset.id); }
   else if (action === "log-email"){ logEmailSent(t.dataset.lead); }
@@ -4050,7 +4238,8 @@ appEl.addEventListener("click", function(e){
       daysSinceContact: wbInfo ? wbInfo.days : null,
       reason: wbInfo ? wbInfo.reasons.join("; ") : "",
       marketContext: marketContext,
-      loName: userName(draftLead.assignedTo)
+      loName: userName(draftLead.assignedTo),
+      language: draftLead.preferredLanguage === "es" ? "Spanish" : "English"
     }, function(suggestion){
       if (draftBox) draftBox.value = suggestion || defaultOutreachMessage(draftLead);
     });
@@ -4083,9 +4272,10 @@ appEl.addEventListener("change", function(e){
   } else if (action === "update-track-record-count"){
     var trContainer = document.getElementById("track-record-rows");
     if (trContainer){
+      var trLang = t.dataset.lang || "en";
       var trExisting = collectTrackRecordRowsFromDOM(trContainer);
       var trCount = Math.max(0, Math.min(parseInt(t.value,10)||0, 20));
-      trContainer.innerHTML = trCount ? buildTrackRecordRowsHTML(trCount, trExisting) : '<div class="empty">Enter a number above for Investing Experience to add project rows.</div>';
+      trContainer.innerHTML = trCount ? buildTrackRecordRowsHTML(trCount, trExisting, trLang) : '<div class="empty">' + esc(tr("Enter a number above for Investing Experience to add project rows.", trLang)) + '</div>';
     }
   } else if (action === "pricer-input"){
     ui.pricerInputs = ui.pricerInputs || {};
