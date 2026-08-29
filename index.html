@@ -1069,8 +1069,25 @@ function addTeamMember(data){
     }
     upsertLocalUser(res.data);
     ui.teamMemberError = null;
-    ui.modal = { type: "sendInvite", user: Object.assign({}, res.data, { pin: data.pin }) };
-    showToast("Added " + data.name);
+    var newUser = Object.assign({}, res.data, { pin: data.pin });
+    var inviteEmail = inviteEmailFor(newUser);
+    var inviter = currentUser();
+    if (newUser.email){
+      sb.functions.invoke("send-email", {
+        body: { to: newUser.email, subject: inviteEmail.subject, text: inviteEmail.body, fromName: inviter.name, fromAddress: inviter.email, fromUserId: inviter.id }
+      }).then(function(res2){
+        showToast((res2.error || !res2.data || !res2.data.ok)
+          ? ("Added " + data.name + " — couldn't auto-send the invite, use the buttons below")
+          : ("Added " + data.name + " — invite emailed to " + newUser.email));
+        render();
+      }).catch(function(){
+        showToast("Added " + data.name + " — couldn't auto-send the invite, use the buttons below");
+        render();
+      });
+    } else {
+      showToast("Added " + data.name);
+    }
+    ui.modal = { type: "sendInvite", user: newUser };
     render();
   });
 }
@@ -3521,11 +3538,11 @@ function modalSendInvite(user){
         '<div class="form-row"><label>To</label><div class="val mono">' + esc(user.email||"") + '</div></div>' +
         '<div class="form-row"><label>Subject</label><input class="input" id="invite-subject-box" readonly value="' + esc(email.subject) + '"></div>' +
         '<div class="form-row"><label>Message</label><textarea class="textarea" id="invite-message-box" rows="10" readonly>' + esc(email.body) + '</textarea></div>' +
-        '<div class="footnote" style="padding:0">Opens your own email client with this pre-filled — nothing sends automatically.</div>' +
+        '<div class="footnote" style="padding:0">This was just emailed to them automatically. Use the buttons below only if you need to resend or share it a different way.</div>' +
       '</div>' +
       '<div class="modal-foot" style="flex-wrap:wrap">' +
         '<button class="btn" type="button" data-action="copy-invite">Copy Message</button>' +
-        '<a class="btn btn-primary" href="mailto:' + esc(user.email||"") + '?subject=' + encodeURIComponent(email.subject) + '&body=' + encodeURIComponent(email.body) + '" data-action="close-modal">Email It</a>' +
+        '<a class="btn btn-primary" href="mailto:' + esc(user.email||"") + '?subject=' + encodeURIComponent(email.subject) + '&body=' + encodeURIComponent(email.body) + '" data-action="close-modal">Resend via My Email Client</a>' +
       '</div>' +
     '</div></div>';
 }
