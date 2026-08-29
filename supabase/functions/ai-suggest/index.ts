@@ -17,6 +17,8 @@ const SYSTEM_PROMPT = "You are a copywriting assistant for Bridgepoint Lending, 
   "Write in a warm, direct, non-corporate voice -- like a loan officer who actually knows the client, not a marketing bot. " +
   "No emojis unless asked for. No hashtags unless asked for. Keep it concise. Output only the requested text, nothing else -- no preamble, no quotation marks around it, no \"Here's a draft:\".";
 
+const JSON_SYSTEM_PROMPT = "You are a precise data-mapping assistant. Output ONLY valid JSON matching exactly what's requested -- no markdown code fences, no commentary, no preamble.";
+
 function buildPrompt(kind: string, context: Record<string, unknown>): string | null {
   const lang = (context.language as string) || "English";
   const langNote = lang !== "English" ? " Write the entire message in " + lang + ", natural and fluent, not a literal word-for-word translation." : "";
@@ -54,6 +56,21 @@ function buildPrompt(kind: string, context: Record<string, unknown>): string | n
       "Rate context: " + (context.rateContext || "no specific rate change to highlight") + ". " +
       "Target audience: real estate investors. Make each idea distinct in angle (e.g. one urgency-driven, one educational, one social-proof style). No hashtags, no emojis.";
   }
+  if (kind === "map-csv-columns") {
+    const headers = Array.isArray(context.headers) ? context.headers as string[] : [];
+    const sampleRows = Array.isArray(context.sampleRows) ? context.sampleRows as string[][] : [];
+    const headerList = headers.map(function(h, i) { return i + ": " + h; }).join("\n");
+    const sampleBlock = sampleRows.map(function(r, ri) {
+      return "Row " + (ri + 1) + ": " + r.map(function(v, i) { return headers[i] + "=" + JSON.stringify(v); }).join(", ");
+    }).join("\n");
+    return "You are mapping columns from an imported contact list (likely exported from a CRM like GoHighLevel) to a fixed set of target fields.\n\n" +
+      "Columns (index: header name):\n" + headerList + "\n\n" +
+      "Sample data rows:\n" + sampleBlock + "\n\n" +
+      "Target fields to map: firstName, lastName, fullName (a single combined name column, use ONLY if there's no separate first/last), email, phone, address.\n\n" +
+      "Respond with ONLY a JSON object (no markdown fences, no explanation) with these exact keys: firstName, lastName, fullName, email, phone, address. " +
+      "Each value must be the column INDEX (integer) that best matches that field, or null if no column matches. " +
+      "Use the sample data values, not just header names, to judge fit (e.g. a column with values like \"john@example.com\" is email even if its header is oddly named).";
+  }
   return null;
 }
 
@@ -72,6 +89,7 @@ Deno.serve(async (req: Request) => {
     if (!prompt) {
       return new Response(JSON.stringify({ error: "unknown_kind" }), { status: 400, headers: CORS_HEADERS });
     }
+    const isJsonKind = kind === "map-csv-columns";
 
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -82,8 +100,8 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 400,
-        system: SYSTEM_PROMPT,
+        max_tokens: isJsonKind ? 300 : 400,
+        system: isJsonKind ? JSON_SYSTEM_PROMPT : SYSTEM_PROMPT,
         messages: [{ role: "user", content: prompt }],
       }),
     });

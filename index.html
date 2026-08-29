@@ -2164,6 +2164,123 @@ function addLead(data){
   persist();
 }
 
+function parseCSV(text){
+  var rows = []; var row = []; var field = ""; var inQuotes = false;
+  for (var i=0;i<text.length;i++){
+    var c = text[i];
+    if (inQuotes){
+      if (c === '"'){ if (text[i+1] === '"'){ field += '"'; i++; } else { inQuotes = false; } }
+      else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ','){ row.push(field); field = ""; }
+      else if (c === '\n'){ row.push(field); rows.push(row); row = []; field = ""; }
+      else if (c === '\r'){ /* skip -- \n follows */ }
+      else field += c;
+    }
+  }
+  if (field.length || row.length){ row.push(field); rows.push(row); }
+  rows = rows.filter(function(r){ return r.some(function(v){ return (v||"").trim()!==""; }); });
+  if (!rows.length) return { headers:[], rows:[] };
+  return { headers: rows[0], rows: rows.slice(1) };
+}
+function guessImportMapping(headers){
+  var norm = headers.map(function(h){ return (h||"").toLowerCase().replace(/[^a-z0-9]/g,""); });
+  function find(matcher){
+    for (var i=0;i<norm.length;i++){ if (matcher(norm[i])) return i; }
+    return -1;
+  }
+  var firstName = find(function(h){ return h.indexOf("firstname")!==-1; });
+  var lastName = find(function(h){ return h.indexOf("lastname")!==-1; });
+  var fullName = (firstName===-1) ? find(function(h){ return h==="name" || h.indexOf("fullname")!==-1 || h.indexOf("contactname")!==-1; }) : -1;
+  return {
+    firstName: firstName, lastName: lastName, fullName: fullName,
+    email: find(function(h){ return h.indexOf("email")!==-1; }),
+    phone: find(function(h){ return h.indexOf("phone")!==-1 || h.indexOf("mobile")!==-1 || h.indexOf("cell")!==-1; }),
+    address: find(function(h){ return h.indexOf("address")!==-1; })
+  };
+}
+function startImportParse(text){
+  var parsed = parseCSV(text);
+  if (!parsed.headers.length){ showToast("Couldn't find any rows in that file"); return; }
+  ui.importState = { headers: parsed.headers, rows: parsed.rows, mapping: guessImportMapping(parsed.headers), aiStatus: "checking" };
+  render();
+  requestAiColumnMapping();
+}
+function requestAiColumnMapping(){
+  var st = ui.importState;
+  if (!st) return;
+  aiSuggest("map-csv-columns", { headers: st.headers, sampleRows: st.rows.slice(0,3) }, function(suggestion){
+    if (!ui.importState) return; // modal closed/reset before this returned
+    ui.importState.aiStatus = "done";
+    if (!suggestion){ render(); return; }
+    try {
+      var cleaned = suggestion.replace(/```json/gi,"").replace(/```/g,"").trim();
+      var parsed = JSON.parse(cleaned);
+      var n = ui.importState.headers.length;
+      var validIdx = function(v){ return typeof v === "number" && v>=0 && v<n; };
+      var m = ui.importState.mapping;
+      ["firstName","lastName","fullName","email","phone","address"].forEach(function(k){
+        if (validIdx(parsed[k])) m[k] = parsed[k];
+      });
+      ui.importState.aiStatus = "applied";
+    } catch(e){ /* keep the heuristic guess */ }
+    render();
+  });
+}
+function runImport(fd){
+  var st = ui.importState;
+  if (!st) return;
+  var idx = function(name){ var v = fd.get(name); return (v===null||v==="") ? -1 : parseInt(v,10); };
+  var mFirst = idx("map_firstName"), mLast = idx("map_lastName"), mFull = idx("map_fullName"),
+      mEmail = idx("map_email"), mPhone = idx("map_phone"), mAddress = idx("map_address");
+  var loanType = fd.get("loanType") || LOAN_TYPES[0];
+  var assignedTo = fd.get("assignedTo") || currentUser().id;
+  var existingEmails = {}, existingPhones = {};
+  state.leads.forEach(function(l){
+    if (l.email) existingEmails[l.email.toLowerCase().trim()] = true;
+    if (l.phone) existingPhones[l.phone.replace(/\D/g,"")] = true;
+  });
+  var nextNum = 1;
+  state.leads.forEach(function(l){ var m = /^L(\d+)$/.exec(l.id); if (m) nextNum = Math.max(nextNum, parseInt(m[1],10)+1); });
+  var d = todayISO();
+  var added = 0, skippedDupe = 0, skippedBlank = 0;
+  var newLeads = [];
+  st.rows.forEach(function(row){
+    var get = function(i){ return i>=0 && row[i]!=null ? row[i].trim() : ""; };
+    var name = (mFirst>=0 || mLast>=0) ? [get(mFirst), get(mLast)].filter(Boolean).join(" ") : get(mFull);
+    var email = get(mEmail);
+    var phone = get(mPhone);
+    if (!name && !email && !phone){ skippedBlank++; return; }
+    if (!name) name = email || phone || "Unnamed Contact";
+    var emailKey = email.toLowerCase().trim();
+    var phoneKey = phone.replace(/\D/g,"");
+    if ((emailKey && existingEmails[emailKey]) || (phoneKey && existingPhones[phoneKey])){ skippedDupe++; return; }
+    if (emailKey) existingEmails[emailKey] = true;
+    if (phoneKey) existingPhones[phoneKey] = true;
+    var id = "L" + String(nextNum++).padStart(3,"0");
+    newLeads.push({
+      id:id, name:name, email:email||null, phone:phone||null, source:"Imported", loanType:loanType,
+      stage:"new", status:"active", assignedTo:assignedTo, createdAt:d, createdAtTs:nowTs(), firstAttemptAt:null,
+      entityType:"LLC", creditScore:null, experienceDeals:null, liquidity:null,
+      propertyAddress: mAddress>=0 ? get(mAddress) : "", propertyType:null, purchasePrice:null, arv:null, rehabBudget:null,
+      rentEstimate:null, loanAmount:null, ltv:null, rate:null, termMonths:null,
+      exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null, pointsCharged:null,
+      callAttempts:[], documents:[], thirdParties:[], applicationToken: randomToken(),
+      activity:[{ date:d, type:"note", text:"Imported by " + currentUser().name, author: currentUser().name }]
+    });
+    added++;
+  });
+  state.leads = newLeads.concat(state.leads);
+  ui.importState = null;
+  ui.modal = null;
+  var msg = "Imported " + added + " contact(s)";
+  if (skippedDupe) msg += ", skipped " + skippedDupe + " duplicate(s)";
+  if (skippedBlank) msg += ", skipped " + skippedBlank + " blank row(s)";
+  showToast(msg);
+  ui.view = "leads";
+  persist();
+}
 function updateLeadFields(leadId, patch){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -3059,7 +3176,8 @@ function renderLeadsTable(){
     '<div class="table-wrap"><table><thead><tr><th>Borrower</th><th>Loan Type</th><th>Stage</th><th>Amount</th><th>Source</th><th>Loan Officer</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
   ) : '<div class="empty">No leads match these filters.</div>';
 
-  var actions = '<button class="btn btn-primary" data-action="open-modal" data-modal="addLead">+ New Lead</button>';
+  var actions = '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLeads">⬆ Import</button>' +
+    '<button class="btn btn-primary" data-action="open-modal" data-modal="addLead">+ New Lead</button>';
 
   return topbar("Leads & Loans", leads.length + " record(s)", actions) +
     '<div class="content">' + filters + table + '</div>';
@@ -3756,6 +3874,7 @@ function renderPortal(){
 function renderModal(){
   if (!ui.modal) return "";
   if (ui.modal.type === "addLead") return modalAddLead();
+  if (ui.modal.type === "importLeads") return modalImportLeads();
   if (ui.modal.type === "logCall") return modalLogCall(ui.modal.leadId);
   if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
   if (ui.modal.type === "sendApplication") return modalSendApplication(ui.modal.leadId);
@@ -4224,6 +4343,64 @@ function modalAddLead(){
       '</form>' +
     '</div></div>';
 }
+function modalImportLeads(){
+  var st = ui.importState;
+  var body, foot;
+  if (!st){
+    body =
+      '<div class="footnote" style="padding:0 0 10px">Export your contacts from HighLevel (or any CRM/spreadsheet) as a CSV file, then upload or paste it here. Every employee can use this — imported contacts land in Leads &amp; Loans like any other.</div>' +
+      '<form data-form="import-parse" id="import-parse-form">' +
+        '<div class="form-row"><label>Upload CSV file</label><input class="input" type="file" name="csvFile" accept=".csv,text/csv"></div>' +
+        '<div class="hint" style="margin:6px 0">— or —</div>' +
+        '<div class="form-row"><label>Paste CSV text</label><textarea class="textarea" name="csvText" rows="8" placeholder="Name,Email,Phone,Address&#10;Jane Doe,jane@example.com,(813) 555-0100,123 Main St"></textarea></div>' +
+      '</form>';
+    foot = '<button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button>' +
+      '<button class="btn btn-primary" type="submit" form="import-parse-form">Continue</button>';
+  } else {
+    var headerOptions = function(selected){
+      var opts = '<option value=""' + (selected===-1||selected==null?" selected":"") + '>— none —</option>';
+      st.headers.forEach(function(h,i){ opts += '<option value="' + i + '"' + (selected===i?" selected":"") + '>' + esc(h||("Column " + (i+1))) + '</option>'; });
+      return opts;
+    };
+    var m = st.mapping;
+    var aiNote = st.aiStatus === "checking"
+      ? '<div class="hint">✨ Asking AI to double-check this mapping…</div>'
+      : (st.aiStatus === "applied" ? '<div class="hint" style="color:var(--c-forest)">✨ AI reviewed and adjusted the mapping below.</div>' : "");
+    var loOptions = loanOfficers().map(function(u){ return '<option value="' + u.id + '">' + esc(u.name) + '</option>'; }).join("");
+    var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
+    var previewRows = st.rows.slice(0,5).map(function(r){ return '<tr>' + st.headers.map(function(h,i){ return '<td>' + esc((r[i]||"").toString().slice(0,40)) + '</td>'; }).join("") + '</tr>'; }).join("");
+    var previewHead = '<tr>' + st.headers.map(function(h){ return '<th>' + esc(h) + '</th>'; }).join("") + '</tr>';
+    body =
+      '<div class="footnote" style="padding:0 0 10px">' + st.rows.length + ' row(s) found. Confirm which column is which — we guessed based on the headers and sample data.</div>' +
+      aiNote +
+      '<form data-form="import-confirm" id="import-confirm-form">' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>First Name column</label><select class="select" name="map_firstName">' + headerOptions(m.firstName) + '</select></div>' +
+          '<div class="form-row"><label>Last Name column</label><select class="select" name="map_lastName">' + headerOptions(m.lastName) + '</select></div>' +
+        '</div>' +
+        '<div class="form-row"><label>OR: single Full Name column (used only if First/Last above are both "none")</label><select class="select" name="map_fullName">' + headerOptions(m.fullName) + '</select></div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Email column</label><select class="select" name="map_email">' + headerOptions(m.email) + '</select></div>' +
+          '<div class="form-row"><label>Phone column</label><select class="select" name="map_phone">' + headerOptions(m.phone) + '</select></div>' +
+        '</div>' +
+        '<div class="form-row"><label>Property Address column (optional)</label><select class="select" name="map_address">' + headerOptions(m.address) + '</select></div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Loan Type for all imported contacts</label><select class="select" name="loanType">' + typeOptions + '</select></div>' +
+          '<div class="form-row"><label>Assign all to</label><select class="select" name="assignedTo">' + loOptions + '</select></div>' +
+        '</div>' +
+        '<div class="hint" style="margin:10px 0 4px">Preview (first 5 rows):</div>' +
+        '<div class="table-wrap" style="max-height:180px;overflow:auto"><table><thead>' + previewHead + '</thead><tbody>' + previewRows + '</tbody></table></div>' +
+      '</form>';
+    foot = '<button class="btn btn-ghost" type="button" data-action="import-back">← Back</button>' +
+      '<button class="btn btn-primary" type="submit" form="import-confirm-form">Import ' + st.rows.length + ' Contact(s)</button>';
+  }
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1" style="max-width:640px">' +
+      '<div class="modal-head"><h3>Import Contacts</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' + body + '</div>' +
+      '<div class="modal-foot">' + foot + '</div>' +
+    '</div></div>';
+}
 function modalLogCall(leadId){
   var lead = leadById(leadId);
   var outOptions = CALL_OUTCOMES.map(function(o){ return '<option value="' + o.key + '">' + o.label + '</option>'; }).join("");
@@ -4262,8 +4439,9 @@ appEl.addEventListener("click", function(e){
     if (t.dataset.tab === "scenario" && ui.selectedLeadId) syncPricerRateToLead(ui.selectedLeadId);
     render();
   }
-  else if (action === "open-modal"){ ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null }; ui.teamMemberError = null; render(); }
-  else if (action === "close-modal"){ ui.modal = null; render(); }
+  else if (action === "open-modal"){ ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null }; ui.teamMemberError = null; if (t.dataset.modal === "importLeads") ui.importState = null; render(); }
+  else if (action === "close-modal"){ ui.modal = null; ui.importState = null; render(); }
+  else if (action === "import-back"){ ui.importState = null; render(); }
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
@@ -4526,6 +4704,21 @@ appEl.addEventListener("submit", function(e){
     var sowPatchPub = extractScopeOfWorkFromForm(fd);
     if (sowPatchPub) saveScopeOfWork(form.dataset.lead, sowPatchPub.items, sowPatchPub.notes);
     render();
+  } else if (type === "import-parse"){
+    var csvFileInput = form.querySelector('[name="csvFile"]');
+    var csvFile = csvFileInput && csvFileInput.files && csvFileInput.files[0];
+    var csvPasted = fd.get("csvText") || "";
+    if (csvFile){
+      var csvReader = new FileReader();
+      csvReader.onload = function(){ startImportParse(String(csvReader.result||"")); };
+      csvReader.readAsText(csvFile);
+    } else if (csvPasted.trim()){
+      startImportParse(csvPasted);
+    } else {
+      showToast("Choose a CSV file or paste CSV text first");
+    }
+  } else if (type === "import-confirm"){
+    runImport(fd);
   } else if (type === "send-back"){
     sendBackToLO(form.dataset.lead, fd.get("note"));
     render();
