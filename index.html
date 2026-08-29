@@ -2109,6 +2109,15 @@ function applyRequiredDocs(leadId, opts){
   persist();
   return added;
 }
+function viewLeadDocument(leadId, idx){
+  var lead = leadById(leadId);
+  var doc = lead && lead.documents[idx];
+  if (!doc || !doc.storagePath || !sb) return;
+  sb.storage.from("lead-documents").createSignedUrl(doc.storagePath, 3600).then(function(res){
+    if (res.error || !res.data){ showToast("Couldn't open the file — try again"); return; }
+    window.open(res.data.signedUrl, "_blank");
+  });
+}
 function markDocReceived(leadId, idx){
   var lead = leadById(leadId);
   if (!lead || !lead.documents[idx]) return;
@@ -2975,7 +2984,9 @@ function renderTabDocuments(lead){
         : '<span class="badge badge-rust">AI: Flagged</span>';
       aiNote = '<div class="cell-sub" style="margin-top:4px;max-width:360px">' + esc(d.aiReview.note) + '</div>';
     }
+    var viewBtn = "";
     if (d.status==="received"){
+      if (d.storagePath) viewBtn = '<button class="btn btn-sm" data-action="view-lead-document" data-lead="' + lead.id + '" data-idx="' + i + '">View File</button>';
       if (canAiReview) reviewBtn = '<button class="btn btn-sm" data-action="ai-review-doc" data-lead="' + lead.id + '" data-idx="' + i + '">' + (d.aiReview ? "Re-run AI Review" : "Run AI Review") + '</button>';
     } else {
       reviewBtn = '<button class="btn btn-sm" data-action="mark-doc-received" data-lead="' + lead.id + '" data-idx="' + i + '">Mark Received</button>';
@@ -2984,7 +2995,7 @@ function renderTabDocuments(lead){
       '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):"")) : "Awaiting borrower") + '</div>' +
       aiNote +
       '</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + aiBadge + reviewBtn + '</div></div>';
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + aiBadge + viewBtn + reviewBtn + '</div></div>';
   }).join("");
   var requiredBtn = REQUIRED_DOCS_BY_TYPE[lead.loanType]
     ? ('<div style="margin-bottom:12px"><button class="btn btn-sm" data-action="load-required-docs" data-lead="' + lead.id + '">Load Required Documents for ' + esc(lead.loanType) + '</button></div>')
@@ -3810,6 +3821,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "close-modal"){ ui.modal = null; render(); }
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "ai-review-doc"){ runAiDocReview(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
   else if (action === "run-guideline-check"){ runGuidelineCheck(t.dataset.lead); }
   else if (action === "dismiss-ai-flag"){ dismissAiFlag(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
