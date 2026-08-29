@@ -2202,7 +2202,11 @@ function setRuralStatus(leadId, isRural){
   if (lead.ruralStatus === newStatus) return;
   lead.ruralStatus = newStatus;
   lead.ruralCheckedAt = todayISO();
-  persist();
+  /* Deliberately not persist() -- this fires while a form may still have
+     unsaved input (e.g. mid-typing an address), and persist() re-renders
+     the whole page, wiping anything not yet saved. Sync quietly instead;
+     the banner picks up next time this lead's tab renders normally. */
+  scheduleSync();
 }
 function setLoanDetails(leadId, loanAmount, rate, termMonths){
   var lead = leadById(leadId);
