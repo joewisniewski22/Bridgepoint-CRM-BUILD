@@ -531,7 +531,7 @@ function evaluateRtlGucPricing(lead, points){
     : RTL_FEE_BY_PROJECT[rehabClass(lead)];
   if (lead.termMonths && lead.termMonths > 12){
     var extraQuarters = Math.ceil((lead.termMonths - 12) / 3);
-    notes.push("+" + (extraQuarters * 0.5).toFixed(2) + " pts origination for the extra " + (lead.termMonths-12) + " month(s) beyond the 12-month base term (max 18 months)");
+    notes.push("+" + (extraQuarters * 0.5).toFixed(2) + " pts rate buy down for the extra " + (lead.termMonths-12) + " month(s) beyond the 12-month base term (max 18 months)");
   }
   return { rate: Math.round(rate*100)/100, points: Number(points), fee: fee, tier: tier, notes: notes };
 }
@@ -2696,7 +2696,7 @@ function renderPricer(lead){
           '<option value="none"' + (inputs.prepayTerm==="none"?" selected":"") + '>No Prepay</option>' +
         '</select></div>' +
       '</div>')
-    : ('<div class="form-row"><label>Origination Fee (points)</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="points">' +
+    : ('<div class="form-row"><label>Rate Buy Down (points)</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="points">' +
         '<option value="1.00"' + (inputs.points==="1.00"?" selected":"") + '>1.00</option>' +
         '<option value="0.50"' + (inputs.points==="0.50"?" selected":"") + '>0.50</option>' +
         '<option value="0.00"' + (inputs.points==="0.00"?" selected":"") + '>0.00</option>' +
