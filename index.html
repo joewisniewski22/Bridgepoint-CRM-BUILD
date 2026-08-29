@@ -409,6 +409,70 @@ var PROPERTY_TYPES = ["SFR","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Lan
 var EXIT_STRATEGIES = ["Sell","Refinance to DSCR","Hold/Rent","1031 Exchange"];
 var TP_ROLES = ["Realtor","Title Company","Escrow Officer","Insurance Agent","Attorney","Appraiser"];
 
+var REQUIRED_DOCS_BY_TYPE = {
+  "DSCR": [
+    "Government-Issued Photo ID",
+    "Purchase Contract (purchase) or Current Mortgage Statement (refinance)",
+    "2 Months Personal or Business Bank Statements",
+    "Signed Lease Agreement (or Market Rent Letter if vacant)",
+    "Property Tax Bill",
+    "Proof of Landlord / Hazard Insurance",
+    "HOA Statement (if applicable)",
+    "Entity Formation Docs & Operating Agreement (if closing in an entity)",
+    "EIN Letter (if closing in an entity)",
+    "Credit Authorization Form",
+    "Voided Check / Wire Instructions"
+  ],
+  "Fix & Flip": [
+    "Government-Issued Photo ID",
+    "Purchase Contract",
+    "Scope of Work / Rehab Budget",
+    "General Contractor License & Insurance (Standard/Super Rehab)",
+    "Proof of Funds for Rehab Reserve",
+    "Schedule of Real Estate Owned (Track Record)",
+    "2 Months Bank Statements",
+    "Builder's Risk Insurance Binder",
+    "Entity Formation Docs & Operating Agreement (if closing in an entity)",
+    "EIN Letter (if closing in an entity)",
+    "Credit Authorization Form",
+    "Voided Check / Wire Instructions"
+  ],
+  "Bridge": [
+    "Government-Issued Photo ID",
+    "Purchase Contract or Current Mortgage Statement",
+    "2 Months Bank Statements",
+    "Schedule of Real Estate Owned (Track Record)",
+    "Proof of Hazard Insurance",
+    "Entity Formation Docs & Operating Agreement (if closing in an entity)",
+    "EIN Letter (if closing in an entity)",
+    "Credit Authorization Form",
+    "Voided Check / Wire Instructions"
+  ],
+  "Ground Up Construction": [
+    "Government-Issued Photo ID",
+    "Purchase Contract or Land Payoff Statement",
+    "Scope of Work / Construction Budget",
+    "Stamped & Approved Architectural Plans",
+    "Permits (or Permit-Readiness Letter)",
+    "General Contractor License, Insurance & Signed Contract",
+    "Feasibility Study (if required for experience tier)",
+    "Builder's Risk Insurance Binder",
+    "Schedule of Real Estate Owned (Track Record)",
+    "2 Months Bank Statements",
+    "Entity Formation Docs & Operating Agreement (if closing in an entity)",
+    "EIN Letter (if closing in an entity)",
+    "Credit Authorization Form",
+    "Voided Check / Wire Instructions"
+  ]
+};
+
+var SOW_CATEGORIES = [
+  "Site Work / Excavation","Foundation / Structural","Framing","Roof",
+  "Exterior (Siding, Paint, Windows, Doors)","Electrical","Plumbing","HVAC",
+  "Kitchen","Bathrooms","Flooring","Interior Paint / Drywall",
+  "Permits & Fees","Contingency / Other"
+];
+
 /* ---------------------------------------------------------------------
    Lender guideline check — pulled from BPL/Constructive Loans matrices
    (DSCR Rental Matrix 7.1.26, RTL Matrix 1.1.26, Ground-Up Matrix 1.1.26).
@@ -1207,7 +1271,7 @@ function leadToRow(l){
     preapproval_sent_at: l.preapprovalSentAt, termsheet_sent_at: l.termsheetSentAt, credit_ordered_at: l.creditOrderedAt,
     last_contact_at: l.lastContactAt,
     monthly_taxes: l.monthlyTaxes, monthly_insurance: l.monthlyInsurance, monthly_hoa: l.monthlyHoa,
-    guideline_check: l.guidelineCheck || null,
+    guideline_check: l.guidelineCheck || null, scope_of_work: l.scopeOfWork || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1227,7 +1291,7 @@ function rowToLead(r){
     preapprovalSentAt: r.preapproval_sent_at, termsheetSentAt: r.termsheet_sent_at, creditOrderedAt: r.credit_ordered_at,
     lastContactAt: r.last_contact_at,
     monthlyTaxes: r.monthly_taxes, monthlyInsurance: r.monthly_insurance, monthlyHoa: r.monthly_hoa,
-    guidelineCheck: r.guideline_check || null,
+    guidelineCheck: r.guideline_check || null, scopeOfWork: r.scope_of_work || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -1610,6 +1674,28 @@ function requestDoc(leadId, name){
   showToast("Requested " + name + " — borrower notified by email & text");
   persist();
 }
+function applyRequiredDocs(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var list = REQUIRED_DOCS_BY_TYPE[lead.loanType];
+  if (!list || !list.length) return;
+  lead.documents = lead.documents || [];
+  var existing = lead.documents.map(function(d){ return (d.name||"").toLowerCase(); });
+  var added = [];
+  list.forEach(function(name){
+    if (existing.indexOf(name.toLowerCase()) === -1){
+      lead.documents.push({ name:name, status:"requested" });
+      added.push(name);
+    }
+  });
+  if (!added.length){ showToast("All required documents already requested"); return; }
+  lead.activity = lead.activity || [];
+  var d = todayISO();
+  lead.activity.push({ date:d, type:"document", text:"Requested required document checklist (" + added.length + " item(s)) for " + lead.loanType, author: currentUser().name });
+  lead.activity.push({ date:d, type:"notify", text:"Emailed and texted " + lead.name + " the full document checklist — now showing in their borrower portal.", author:"System" });
+  showToast("Requested " + added.length + " required document(s)");
+  persist();
+}
 function markDocReceived(leadId, idx){
   var lead = leadById(leadId);
   if (!lead || !lead.documents[idx]) return;
@@ -1628,6 +1714,64 @@ function borrowerUploadDoc(leadId, idx, fileName){
   lead.activity.push({ date:todayISO(), type:"document", text:"Borrower uploaded: " + doc.name + " (" + fileName + ")", author: lead.name });
   showToast("Uploaded " + doc.name);
   persist();
+}
+
+function saveScopeOfWork(leadId, items, notes){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var cleanItems = items.filter(function(it){ return it.cost !== null && it.cost !== undefined && it.cost !== 0; });
+  var total = items.reduce(function(sum, it){ return sum + (it.cost||0); }, 0);
+  lead.scopeOfWork = {
+    items: items,
+    total: total,
+    notes: notes||"",
+    preparedBy: currentUser().name,
+    preparedAt: todayISO()
+  };
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"document", text:"Scope of work saved — " + fmtUSD(total) + " across " + cleanItems.length + " line item(s)", author: currentUser().name });
+  showToast("Scope of work saved");
+  ui.modal = null;
+  persist();
+}
+
+function printScopeOfWork(leadId){
+  var lead = leadById(leadId);
+  if (!lead || !lead.scopeOfWork) return;
+  var sow = lead.scopeOfWork;
+  var rows = sow.items.filter(function(it){ return it.cost; }).map(function(it){
+    return '<tr><td>' + esc(it.category) + '</td><td style="text-align:right">' + fmtUSD(it.cost) + '</td></tr>';
+  }).join("");
+  var label = lead.loanType === "Ground Up Construction" ? "Construction Budget" : "Scope of Work";
+  var html = '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(label) + ' — ' + esc(lead.name) + '</title>' +
+    '<style>' +
+      'body{font-family:Georgia,serif;color:#1a1a1a;max-width:720px;margin:40px auto;padding:0 20px}' +
+      'h1{font-size:1.4rem;margin-bottom:0}' +
+      '.sub{color:#555;margin-top:4px;margin-bottom:28px}' +
+      'table{width:100%;border-collapse:collapse;margin-top:10px}' +
+      'td,th{padding:8px 6px;border-bottom:1px solid #ddd;font-size:.95rem}' +
+      'th{text-align:left;color:#555;font-weight:600}' +
+      'tfoot td{font-weight:700;border-top:2px solid #1a1a1a;border-bottom:none}' +
+      '.meta{display:flex;justify-content:space-between;margin-top:30px;font-size:.85rem;color:#555}' +
+      '.notes{margin-top:24px;white-space:pre-wrap;font-size:.9rem}' +
+      '@media print{ body{margin:0;padding:20px} }' +
+    '</style></head><body>' +
+    '<h1>Bridgepoint Lending — ' + esc(label) + '</h1>' +
+    '<div class="sub">' + esc(lead.name) + ' · ' + esc(lead.propertyAddress||"Property address TBD") + ' · ' + esc(lead.loanType||"") + '</div>' +
+    '<table><thead><tr><th>Category</th><th style="text-align:right">Budget</th></tr></thead><tbody>' +
+    (rows || '<tr><td colspan="2">No line items entered.</td></tr>') +
+    '</tbody><tfoot><tr><td>Total</td><td style="text-align:right">' + fmtUSD(sow.total) + '</td></tr></tfoot></table>' +
+    (sow.notes ? ('<div class="notes"><b>Notes:</b><br>' + esc(sow.notes) + '</div>') : '') +
+    '<div class="meta"><span>Prepared by ' + esc(sow.preparedBy||"") + '</span><span>' + fmtDate(sow.preparedAt) + '</span></div>' +
+    '</body></html>';
+  var win = window.open("", "_blank");
+  if (!win){ showToast("Pop-up blocked — allow pop-ups to export the PDF"); return; }
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  win.onload = function(){ win.print(); };
+  setTimeout(function(){ win.print(); }, 300);
 }
 
 /* ---------------------------------------------------------------------
@@ -2234,7 +2378,26 @@ function renderTabScenario(lead){
     field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderGuidelineCheck(lead);
+  '</div>' + renderGuidelineCheck(lead) + renderScopeOfWork(lead);
+}
+
+function renderScopeOfWork(lead){
+  if (lead.loanType !== "Fix & Flip" && lead.loanType !== "Ground Up Construction") return "";
+  var label = lead.loanType === "Ground Up Construction" ? "Construction Budget" : "Scope of Work";
+  var sow = lead.scopeOfWork;
+  var header = '<div class="section-head" style="margin-top:20px"><h2>' + label + '</h2>' +
+    '<div style="display:flex;gap:8px">' +
+    '<button class="btn btn-sm" data-action="open-modal" data-modal="scopeOfWork" data-lead="' + lead.id + '">' + (sow ? "Edit" : "Create") + ' ' + label + '</button>' +
+    (sow ? ('<button class="btn btn-sm" data-action="print-scope-of-work" data-lead="' + lead.id + '">Export PDF</button>') : '') +
+    '</div></div>';
+  if (!sow) return header + '<div class="hint">No ' + label.toLowerCase() + ' on file yet.</div>';
+  var rows = sow.items.filter(function(it){ return it.cost; }).map(function(it){
+    return '<div class="doc-row"><div>' + esc(it.category) + '</div><div>' + fmtUSD(it.cost) + '</div></div>';
+  }).join("");
+  return header +
+    (rows || '<div class="empty">No line items entered.</div>') +
+    '<div class="doc-row" style="font-weight:700;border-top:2px solid var(--border)"><div>Total</div><div>' + fmtUSD(sow.total) + '</div></div>' +
+    '<div class="footnote" style="padding-top:8px">Prepared by ' + esc(sow.preparedBy||"") + ' on ' + fmtDate(sow.preparedAt) + '</div>';
 }
 
 function renderTabDocuments(lead){
@@ -2269,7 +2432,10 @@ function renderTabDocuments(lead){
       '</div>' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + aiBadge + reviewBtn + '</div></div>';
   }).join("");
-  return summary + (rows || '<div class="empty">No documents requested yet.</div>') +
+  var requiredBtn = REQUIRED_DOCS_BY_TYPE[lead.loanType]
+    ? ('<div style="margin-bottom:12px"><button class="btn btn-sm" data-action="load-required-docs" data-lead="' + lead.id + '">Load Required Documents for ' + esc(lead.loanType) + '</button></div>')
+    : '';
+  return requiredBtn + summary + (rows || '<div class="empty">No documents requested yet.</div>') +
     '<form data-form="request-doc" data-lead="' + lead.id + '" style="display:flex;gap:8px;margin-top:14px">' +
       '<input class="input" name="name" placeholder="Document name (e.g. Bank Statements)" style="flex:1">' +
       '<button class="btn btn-sm" type="submit">Request Document</button>' +
@@ -2685,6 +2851,7 @@ function renderModal(){
   if (ui.modal.type === "sendInvite") return modalSendInvite(ui.modal.user);
   if (ui.modal.type === "dialer") return modalDialer();
   if (ui.modal.type === "sendDocument") return modalSendDocument(ui.modal.leadId, ui.modal.kind);
+  if (ui.modal.type === "scopeOfWork") return modalScopeOfWork(ui.modal.leadId);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   return "";
 }
@@ -2921,6 +3088,34 @@ function modalTakeApplication(leadId){
       '</form>' +
     '</div></div>';
 }
+function modalScopeOfWork(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return "";
+  var label = lead.loanType === "Ground Up Construction" ? "Construction Budget" : "Scope of Work";
+  var existing = {};
+  if (lead.scopeOfWork){
+    lead.scopeOfWork.items.forEach(function(it){ existing[it.category] = it.cost; });
+  }
+  var rows = SOW_CATEGORIES.map(function(cat, i){
+    var val = existing[cat];
+    return '<div class="form-row" style="display:flex;align-items:center;gap:10px;margin-bottom:4px">' +
+      '<label style="flex:1;margin:0">' + esc(cat) + '</label>' +
+      '<input class="input" type="number" min="0" name="cost_' + i + '" data-cat="' + esc(cat) + '" value="' + (val ? val : "") + '" style="width:150px" placeholder="$0">' +
+      '</div>';
+  }).join("");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1" style="max-width:600px">' +
+      '<div class="modal-head"><h3>' + esc(label) + ' — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="scope-of-work" data-lead="' + lead.id + '">' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0 0 10px">Enter a budget for each category that applies. Leave the rest blank.</div>' +
+        rows +
+        '<div class="form-row" style="margin-top:10px"><label>Notes (timeline, scope details)</label><textarea class="textarea" name="notes" rows="3">' + esc((lead.scopeOfWork && lead.scopeOfWork.notes)||"") + '</textarea></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save ' + esc(label) + '</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
 function modalSendText(leadId){
   var lead = leadById(leadId);
   if (!lead) return "";
@@ -3021,6 +3216,8 @@ appEl.addEventListener("click", function(e){
     if (t.dataset.channel === "manually"){ ui.modal = null; render(); }
   }
   else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
+  else if (action === "load-required-docs"){ applyRequiredDocs(t.dataset.lead); }
+  else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
   else if (action === "logout"){ logout(); }
   else if (action === "tour-next"){ ui.tourStep = (ui.tourStep||0)+1; render(); }
   else if (action === "tour-back"){ ui.tourStep = Math.max((ui.tourStep||0)-1,0); render(); }
@@ -3161,6 +3358,13 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "dialer-log"){
     logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
     dialerAdvance();
+  } else if (type === "scope-of-work"){
+    var items = SOW_CATEGORIES.map(function(cat, i){
+      var raw = fd.get("cost_" + i);
+      return { category: cat, cost: (raw===null||raw==="") ? null : Number(raw) };
+    });
+    saveScopeOfWork(form.dataset.lead, items, fd.get("notes"));
+    render();
   }
 });
 
