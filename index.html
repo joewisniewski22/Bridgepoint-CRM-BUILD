@@ -667,15 +667,21 @@ function evaluatePricing(lead, inputs){
   }
   return null;
 }
-function applyPricerRateAndSendTermSheet(leadId){
+function syncPricerRateToLead(leadId){
   var lead = leadById(leadId);
-  if (!lead) return;
+  if (!lead || !canEditApplication(lead)) return null;
   var inputs = (ui.pricerInputs && ui.pricerInputs[leadId]) || {};
   var result = evaluatePricing(lead, inputs);
-  if (!result || result.ineligible){ showToast("Fix the pricing inputs before sending a term sheet"); return; }
+  if (!result || result.ineligible) return null;
+  if (lead.rate === result.rate) { render(); return result; }
   lead.rate = result.rate;
   if (lead.purchasePrice && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/lead.purchasePrice)*1000)/10;
   persist();
+  return result;
+}
+function applyPricerRateAndSendTermSheet(leadId){
+  var result = syncPricerRateToLead(leadId);
+  if (!result){ showToast("Fix the pricing inputs before sending a term sheet"); return; }
   ui.modal = { type:"sendDocument", leadId:leadId, kind:"termSheet" };
   render();
 }
@@ -3938,6 +3944,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "set-tab"){
     ui.activeTab = t.dataset.tab;
     if (t.dataset.tab === "documents" && ui.selectedLeadId) applyRequiredDocs(ui.selectedLeadId, { silent:true });
+    if (t.dataset.tab === "scenario" && ui.selectedLeadId) syncPricerRateToLead(ui.selectedLeadId);
     render();
   }
   else if (action === "open-modal"){ ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null }; ui.teamMemberError = null; render(); }
@@ -4084,7 +4091,7 @@ appEl.addEventListener("change", function(e){
     ui.pricerInputs = ui.pricerInputs || {};
     ui.pricerInputs[t.dataset.lead] = ui.pricerInputs[t.dataset.lead] || {};
     ui.pricerInputs[t.dataset.lead][t.dataset.key] = t.value;
-    render();
+    syncPricerRateToLead(t.dataset.lead);
   }
 });
 
