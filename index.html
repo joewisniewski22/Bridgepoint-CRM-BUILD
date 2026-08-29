@@ -643,9 +643,11 @@ function evaluateDscrPricing(lead, inputs){
   var priceRow = DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate-rate) < 0.001; })[0];
   var fee = DSCR_FEE_BY_PROPERTY[lead.propertyType] || DSCR_FEE_BY_PROPERTY["SFR"];
   var price = priceRow ? priceRow.price : null;
-  var ysp = price ? Math.round((price - 100) * 1000) / 1000 : null;
+  var noYspAllowed = prepayKey === "none" || lead.propertyType === "Multifamily 5+";
+  if (noYspAllowed && price) notes.push("No YSP available" + (prepayKey === "none" ? " on a No Prepay option" : " on 5-8 unit properties"));
+  var ysp = (price && !noYspAllowed) ? Math.round((price - 100) * 1000) / 1000 : null;
   var yspDollar = (ysp && lead.loanAmount) ? lead.loanAmount * (ysp / 100) : null;
-  return { rate: rate, price: price, ysp: ysp, yspDollar: yspDollar, fee: fee, ltv: ltv, dscr: dscrVal, notes: notes };
+  return { rate: rate, price: price, ysp: ysp, yspDollar: yspDollar, noYspAllowed: noYspAllowed, fee: fee, ltv: ltv, dscr: dscrVal, notes: notes };
 }
 function evaluatePricing(lead, inputs){
   if (lead.loanType === "DSCR") return evaluateDscrPricing(lead, inputs);
@@ -2714,10 +2716,11 @@ function renderPricer(lead){
     var rows = field("Rate", fmtPct(result.rate), true) +
       field("Lender Fee", fmtUSD(result.fee), true) +
       (isDSCR ? field("Wholesale Price", result.price ? result.price.toFixed(3) : "—", true) : "") +
-      (isDSCR ? field("Yield Spread (YSP)", result.ysp ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : "None (par or better)", true) : "") +
+      (isDSCR ? field("Yield Spread (YSP)", result.ysp ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : (result.noYspAllowed ? "Not available" : "None (par or better)"), true) : "") +
       (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
       (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
     output = '<div class="field-grid">' + rows + '</div>' +
+      (isDSCR && result.yspDollar ? ('<div class="footnote" style="padding-top:8px">Est. YSP commission to ' + esc(userName(lead.assignedTo)) + ' if this closes: <b>' + fmtUSD(result.yspDollar * COMMISSION_SPLIT) + '</b> (50% of ' + fmtPct(result.ysp) + ' × ' + fmtUSD(lead.loanAmount) + ')</div>') : '') +
       (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
       (canEditApplication(lead) ? ('<div style="margin-top:10px"><button class="btn btn-sm" type="button" data-action="send-term-sheet-from-pricer" data-lead="' + lead.id + '">Send Term Sheet at This Rate</button></div>') : '');
   }
