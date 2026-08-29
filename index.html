@@ -642,7 +642,10 @@ function evaluateDscrPricing(lead, inputs){
   rate = Math.round(rate*1000)/1000;
   var priceRow = DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate-rate) < 0.001; })[0];
   var fee = DSCR_FEE_BY_PROPERTY[lead.propertyType] || DSCR_FEE_BY_PROPERTY["SFR"];
-  return { rate: rate, price: priceRow ? priceRow.price : null, fee: fee, ltv: ltv, dscr: dscrVal, notes: notes };
+  var price = priceRow ? priceRow.price : null;
+  var ysp = price ? Math.round((price - 100) * 1000) / 1000 : null;
+  var yspDollar = (ysp && lead.loanAmount) ? lead.loanAmount * (ysp / 100) : null;
+  return { rate: rate, price: price, ysp: ysp, yspDollar: yspDollar, fee: fee, ltv: ltv, dscr: dscrVal, notes: notes };
 }
 function evaluatePricing(lead, inputs){
   if (lead.loanType === "DSCR") return evaluateDscrPricing(lead, inputs);
@@ -2711,6 +2714,7 @@ function renderPricer(lead){
     var rows = field("Rate", fmtPct(result.rate), true) +
       field("Lender Fee", fmtUSD(result.fee), true) +
       (isDSCR ? field("Wholesale Price", result.price ? result.price.toFixed(3) : "—", true) : "") +
+      (isDSCR ? field("Yield Spread (YSP)", result.ysp ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : "None (par or better)", true) : "") +
       (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
       (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
     output = '<div class="field-grid">' + rows + '</div>' +
