@@ -514,7 +514,7 @@ var RTL_FEE_BY_PROJECT = {
   bridge: 1995, light: 1995, standard: 1995, super: 1995,
   guc_sfr: 2195, guc_24: 2695
 };
-function evaluateRtlGucPricing(lead, points){
+function evaluateRtlGucPricing(lead, points, propertyType){
   var tier = experienceTier(lead.experienceDeals);
   var base = RTL_BASE_RATES[points] && RTL_BASE_RATES[points][tier];
   if (base === undefined || base === null) return { ineligible:true, reason:"No pricing for this experience tier at this origination fee." };
@@ -527,7 +527,7 @@ function evaluateRtlGucPricing(lead, points){
     notes.push("Ground Up add-on +0.75%");
   }
   var fee = isGuc
-    ? (lead.propertyType === "2-4 Unit" ? RTL_FEE_BY_PROJECT.guc_24 : RTL_FEE_BY_PROJECT.guc_sfr)
+    ? (propertyType === "2-4 Unit" ? RTL_FEE_BY_PROJECT.guc_24 : RTL_FEE_BY_PROJECT.guc_sfr)
     : RTL_FEE_BY_PROJECT[rehabClass(lead)];
   if (lead.termMonths && lead.termMonths > 12){
     var extraQuarters = Math.ceil((lead.termMonths - 12) / 3);
@@ -595,6 +595,7 @@ var DSCR_BASE_RATE_PRICE = [
 ];
 function evaluateDscrPricing(lead, inputs){
   if (!lead.creditScore || !lead.loanAmount || !lead.purchasePrice) return null;
+  var propertyType = (inputs && inputs.propertyType) || lead.propertyType;
   var ltv = lead.loanAmount / lead.purchasePrice * 100;
   var col = dscrLtvCol(ltv);
   if (col === -1) return { ineligible:true, reason:"LTV of " + ltv.toFixed(0) + "% is above 80%, off this rate sheet." };
@@ -620,7 +621,7 @@ function evaluateDscrPricing(lead, inputs){
     }
   }
 
-  var propAdj = DSCR_PROPERTY_ADJ[lead.propertyType];
+  var propAdj = DSCR_PROPERTY_ADJ[propertyType];
   if (propAdj){
     if (propAdj[col] === null) return { ineligible:true, reason:"This property type/LTV combination isn't priced on this sheet — needs manual pricing." };
     rate += propAdj[col];
@@ -641,18 +642,37 @@ function evaluateDscrPricing(lead, inputs){
 
   rate = Math.round(rate*1000)/1000;
   var priceRow = DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate-rate) < 0.001; })[0];
-  var fee = DSCR_FEE_BY_PROPERTY[lead.propertyType] || DSCR_FEE_BY_PROPERTY["SFR"];
+  var fee = DSCR_FEE_BY_PROPERTY[propertyType] || DSCR_FEE_BY_PROPERTY["SFR"];
   var price = priceRow ? priceRow.price : null;
-  var noYspAllowed = prepayKey === "none" || lead.propertyType === "Multifamily 5+";
+  var noYspAllowed = prepayKey === "none" || propertyType === "Multifamily 5+";
   if (noYspAllowed && price) notes.push("No YSP available" + (prepayKey === "none" ? " on a No Prepay option" : " on 5-8 unit properties"));
   var ysp = (price && !noYspAllowed) ? Math.round((price - 100) * 1000) / 1000 : null;
   var yspDollar = (ysp && lead.loanAmount) ? lead.loanAmount * (ysp / 100) : null;
   return { rate: rate, price: price, ysp: ysp, yspDollar: yspDollar, noYspAllowed: noYspAllowed, fee: fee, ltv: ltv, dscr: dscrVal, notes: notes };
 }
+var DSCR_MULTIPACK_FEE = { "3-4": 1745, "5+": 1495 };
+function evaluatePortfolioPricing(lead, inputs){
+  var count = lead.propertyCount || 0;
+  var totalLoan = lead.loanAmount || 0;
+  if (count < 3 && totalLoan < 500000){
+    return { ineligible:true, reason:"Cross-collateral/blanket pricing requires at least 3 properties or a $500,000+ total loan amount." };
+  }
+  var base = evaluateDscrPricing(lead, inputs);
+  if (!base || base.ineligible) return base;
+  if (count < 3){
+    base.notes = (base.notes||[]).concat(["Under 3 properties — priced as a single asset, not multipack. Confirm per-property fee manually."]);
+    return base;
+  }
+  var perPropertyFee = count >= 5 ? DSCR_MULTIPACK_FEE["5+"] : DSCR_MULTIPACK_FEE["3-4"];
+  base.fee = perPropertyFee * count;
+  base.notes = (base.notes||[]).concat([perPropertyFee === DSCR_MULTIPACK_FEE["5+"] ? "5+ property multipack fee" : "3-4 property multipack fee", fmtUSD(perPropertyFee) + "/property × " + count + " properties"]);
+  return base;
+}
 function evaluatePricing(lead, inputs){
   if (lead.loanType === "DSCR") return evaluateDscrPricing(lead, inputs);
+  if (lead.loanType === "Portfolio/Blanket") return evaluatePortfolioPricing(lead, inputs);
   if (lead.loanType === "Fix & Flip" || lead.loanType === "Ground Up Construction" || lead.loanType === "Bridge"){
-    return evaluateRtlGucPricing(lead, (inputs && inputs.points) || "1.00");
+    return evaluateRtlGucPricing(lead, (inputs && inputs.points) || "1.00", (inputs && inputs.propertyType) || lead.propertyType);
   }
   return null;
 }
@@ -712,6 +732,36 @@ function evaluateGuidelines(lead){
         check("DSCR", dscr >= 1.0, dscr.toFixed(2) + "x" + (hasRealExpenses
           ? " (P&I " + fmtUSD(pi) + " + taxes/insurance/HOA " + fmtUSD(pitia-pi) + ")"
           : " — estimated, add monthly tax/insurance for an exact number"));
+      }
+    }
+  } else if (type === "Portfolio/Blanket"){
+    var propCount = lead.propertyCount || 0;
+    check("Cross-collateral eligibility", propCount>=3 || lead.loanAmount>=500000,
+      propCount + " propert" + (propCount===1?"y":"ies") + ", " + fmtUSD(lead.loanAmount) + " total — needs 3+ properties or a $500,000+ total loan");
+    check("Loan amount", lead.loanAmount>=250000 && lead.loanAmount<=2000000,
+      fmtUSD(lead.loanAmount) + " — needs to be $250,000–$2,000,000 total");
+    if (propCount) check("Per-property loan amount", (lead.loanAmount/propCount) >= 55000,
+      fmtUSD(lead.loanAmount/propCount) + " avg per property — needs to be $55,000+ per property");
+    check("Credit score", (lead.creditScore||0) >= 680, (lead.creditScore||"—") + " — 680 minimum");
+    if (lead.purchasePrice && lead.loanAmount){
+      var pfLtv = lead.loanAmount / lead.purchasePrice * 100;
+      var pfMaxLtv = (lead.creditScore||0) >= 700 ? 80 : 75;
+      check("LTV", pfLtv <= pfMaxLtv, pfLtv.toFixed(0) + "% — max " + pfMaxLtv + "% for this credit score band");
+    }
+    if (lead.purchasePrice && propCount){
+      var avgValue = lead.purchasePrice / propCount;
+      check("Average property value", avgValue >= 100000, fmtUSD(avgValue) + " avg — 100,000 minimum");
+    }
+    if (lead.rentEstimate && lead.loanAmount && lead.rate){
+      var pfPi = monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths||360);
+      if (pfPi){
+        var pfHasRealExpenses = lead.monthlyTaxes!=null || lead.monthlyInsurance!=null;
+        var pfPitia = pfHasRealExpenses
+          ? pfPi + (lead.monthlyTaxes||0) + (lead.monthlyInsurance||0) + (lead.monthlyHoa||0)
+          : pfPi * 1.2;
+        var pfDscr = lead.rentEstimate / pfPitia;
+        var pfMinDscr = (lead.creditScore||0) >= 720 ? 1.00 : 1.20;
+        check("DSCR", pfDscr >= pfMinDscr, pfDscr.toFixed(2) + "x — " + pfMinDscr.toFixed(2) + "x minimum for this credit score band" + (pfHasRealExpenses ? "" : " (estimated, add monthly tax/insurance for an exact number)"));
       }
     }
   } else if (type === "Fix & Flip" || type === "Bridge"){
@@ -1458,6 +1508,7 @@ function leadToRow(l){
     last_contact_at: l.lastContactAt,
     monthly_taxes: l.monthlyTaxes, monthly_insurance: l.monthlyInsurance, monthly_hoa: l.monthlyHoa,
     guideline_check: l.guidelineCheck || null, scope_of_work: l.scopeOfWork || null, application_token: l.applicationToken || null,
+    property_count: l.propertyCount || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1478,6 +1529,7 @@ function rowToLead(r){
     lastContactAt: r.last_contact_at,
     monthlyTaxes: r.monthly_taxes, monthlyInsurance: r.monthly_insurance, monthlyHoa: r.monthly_hoa,
     guidelineCheck: r.guideline_check || null, scopeOfWork: r.scope_of_work || null, applicationToken: r.application_token || null,
+    propertyCount: r.property_count || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -2660,11 +2712,12 @@ function renderGuidelineCheck(lead){
     rows +
     '<div class="footnote" style="padding-top:8px">Preliminary check against BPL/Constructive Loans matrices — not a substitute for full underwriting. Internal use only, never shown to the borrower.</div>';
 }
-var GUIDELINE_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction"];
+var GUIDELINE_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction","Portfolio/Blanket"];
 function renderTabScenario(lead){
   return '<div class="field-grid">' +
     field("Property Address", esc(lead.propertyAddress||"—")) +
     field("Property Type", esc(lead.propertyType||"—")) +
+    (lead.loanType === "Portfolio/Blanket" ? field("Number of Properties", lead.propertyCount||"—", true) : "") +
     field("Purchase Price", fmtUSD(lead.purchasePrice), true) +
     field("After-Repair Value (ARV)", fmtUSD(lead.arv), true) +
     field("Rehab / Construction Budget", fmtUSD(lead.rehabBudget), true) +
@@ -2684,8 +2737,11 @@ function renderTabScenario(lead){
 function renderPricer(lead){
   if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
   ui.pricerInputs = ui.pricerInputs || {};
-  var inputs = ui.pricerInputs[lead.id] || (ui.pricerInputs[lead.id] = { points:"1.00", transactionType:"purchase", prepayTerm:"5yr" });
-  var isDSCR = lead.loanType === "DSCR";
+  var inputs = ui.pricerInputs[lead.id] || (ui.pricerInputs[lead.id] = { points:"1.00", transactionType:"purchase", prepayTerm:"5yr", propertyType: lead.propertyType||"SFR" });
+  var isDSCR = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
+  var propertyTypeSelect = '<div class="form-row"><label>Property Type</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="propertyType">' +
+      PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (inputs.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("") +
+    '</select></div>';
   var controls = isDSCR
     ? ('<div class="form-two">' +
         '<div class="form-row"><label>Transaction Type</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="transactionType">' +
@@ -2700,12 +2756,15 @@ function renderPricer(lead){
           '<option value="1yr"' + (inputs.prepayTerm==="1yr"?" selected":"") + '>1 Year</option>' +
           '<option value="none"' + (inputs.prepayTerm==="none"?" selected":"") + '>No Prepay</option>' +
         '</select></div>' +
-      '</div>')
-    : ('<div class="form-row"><label>Rate Buy Down (points)</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="points">' +
-        '<option value="1.00"' + (inputs.points==="1.00"?" selected":"") + '>1.00</option>' +
-        '<option value="0.50"' + (inputs.points==="0.50"?" selected":"") + '>0.50</option>' +
-        '<option value="0.00"' + (inputs.points==="0.00"?" selected":"") + '>0.00</option>' +
-      '</select></div>');
+      '</div>' + propertyTypeSelect)
+    : ('<div class="form-two">' +
+        '<div class="form-row"><label>Rate Buy Down (points)</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="points">' +
+          '<option value="1.00"' + (inputs.points==="1.00"?" selected":"") + '>1.00</option>' +
+          '<option value="0.50"' + (inputs.points==="0.50"?" selected":"") + '>0.50</option>' +
+          '<option value="0.00"' + (inputs.points==="0.00"?" selected":"") + '>0.00</option>' +
+        '</select></div>' +
+        propertyTypeSelect +
+      '</div>');
   var result = evaluatePricing(lead, inputs);
   var output;
   if (!result){
@@ -2726,7 +2785,7 @@ function renderPricer(lead){
   }
   return '<div class="section-head" style="margin-top:20px"><h2>Pricer</h2></div>' +
     controls + output +
-    '<div class="footnote" style="padding-top:8px">Live from Constructive Capital\'s current wholesale rate sheets — common-path pricing only (foreign national, 5-8 unit, cross-collateral, IO/STR overlays not modeled). Internal use only, never shown to the borrower.</div>';
+    '<div class="footnote" style="padding-top:8px">Live from Constructive Capital\'s current wholesale rate sheets — common-path pricing only (foreign national, IO/STR overlays not modeled). Internal use only, never shown to the borrower.</div>';
 }
 
 function renderScopeOfWork(lead){
@@ -3391,6 +3450,15 @@ function buildScenarioFieldsHTML(lead){
         '<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
       '</div>' +
       '<div class="form-row"><label>' + rehabLabel + '</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>';
+  } else if (loanType === "Portfolio/Blanket"){
+    return '<div class="form-two">' +
+        '<div class="form-row"><label>Number of Properties</label><input class="input" type="number" min="1" name="propertyCount" value="' + v(lead.propertyCount) + '"></div>' +
+        '<div class="form-row"><label>Total Purchase Price / Value</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+      '</div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Total Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
+        '<div class="form-row"><label>Total Monthly Tax + Insurance + HOA</label><input class="input" type="number" name="monthlyTaxes" value="' + v(lead.monthlyTaxes) + '"></div>' +
+      '</div>';
   }
   return '<div class="form-two">' +
       '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
@@ -3693,7 +3761,8 @@ appEl.addEventListener("submit", function(e){
       monthlyInsurance: numOrNull("monthlyInsurance"),
       monthlyHoa: numOrNull("monthlyHoa"),
       loanAmount: numOrNull("loanAmount"),
-      termMonths: numOrNull("termMonths")
+      termMonths: numOrNull("termMonths"),
+      propertyCount: numOrNull("propertyCount")
     });
     var sowPatch = extractScopeOfWorkFromForm(fd);
     if (sowPatch) saveScopeOfWork(form.dataset.lead, sowPatch.items, sowPatch.notes);
@@ -3716,7 +3785,8 @@ appEl.addEventListener("submit", function(e){
       monthlyInsurance: numOrNullPub("monthlyInsurance"),
       monthlyHoa: numOrNullPub("monthlyHoa"),
       loanAmount: numOrNullPub("loanAmount"),
-      termMonths: numOrNullPub("termMonths")
+      termMonths: numOrNullPub("termMonths"),
+      propertyCount: numOrNullPub("propertyCount")
     });
     var sowPatchPub = extractScopeOfWorkFromForm(fd);
     if (sowPatchPub) saveScopeOfWork(form.dataset.lead, sowPatchPub.items, sowPatchPub.notes);
