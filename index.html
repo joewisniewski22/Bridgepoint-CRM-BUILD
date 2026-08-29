@@ -1550,6 +1550,7 @@ function leadToRow(l){
     monthly_taxes: l.monthlyTaxes, monthly_insurance: l.monthlyInsurance, monthly_hoa: l.monthlyHoa,
     guideline_check: l.guidelineCheck || null, scope_of_work: l.scopeOfWork || null, application_token: l.applicationToken || null,
     property_count: l.propertyCount || null, birthday: l.birthday || null,
+    title_requested_at: l.titleRequestedAt || null, insurance_requested_at: l.insuranceRequestedAt || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1571,6 +1572,7 @@ function rowToLead(r){
     monthlyTaxes: r.monthly_taxes, monthlyInsurance: r.monthly_insurance, monthlyHoa: r.monthly_hoa,
     guidelineCheck: r.guideline_check || null, scopeOfWork: r.scope_of_work || null, applicationToken: r.application_token || null,
     propertyCount: r.property_count || null, birthday: r.birthday || null,
+    titleRequestedAt: r.title_requested_at || null, insuranceRequestedAt: r.insurance_requested_at || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -1944,6 +1946,9 @@ function setBirthday(leadId, birthday){
   persist();
 }
 
+function thirdPartyByRole(lead, role){
+  return (lead.thirdParties||[]).filter(function(t){ return t.role===role && t.email; })[0] || null;
+}
 function addThirdParty(leadId, tp){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -2009,6 +2014,48 @@ function toggleProcessingAction(leadId, kind){
   persist();
 }
 
+function requestThirdPartyDoc(leadId, role){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var tp = (lead.thirdParties||[]).filter(function(t){ return t.role===role; })[0];
+  if (!tp || !tp.email){ showToast("Add a " + role + " contact (with email) first"); return; }
+  var isTitle = role === "Title Company";
+  var docLabel = isTitle ? "title commitment" : "insurance policy";
+  var lo = currentUser();
+  var subject = "Bridgepoint Lending — " + (isTitle ? "Title Commitment" : "Insurance Policy") + " Request — " + (lead.propertyAddress || lead.name);
+  var bodyLines = [
+    "Hi " + (tp.name||"").split(" ")[0] + ",",
+    "",
+    "Could you send over the " + docLabel + " for the file below when it's ready?",
+    "",
+    "Borrower: " + lead.name,
+    "Property: " + (lead.propertyAddress || "TBD"),
+    "Loan Amount: " + fmtUSD(lead.loanAmount),
+    "Loan Type: " + lead.loanType
+  ];
+  if (!isTitle && lead.loanType === "DSCR"){
+    bodyLines.push("", "Coverage requirements: full replacement cost, coverage equal to the lesser of 100% of insurable value or unpaid principal balance, plus 6 months of rent-loss coverage.");
+  }
+  bodyLines.push("", "Thanks,", lo.name);
+  var text = bodyLines.join("\n");
+
+  if (!sb){ showToast("Email service unavailable"); return; }
+  sb.functions.invoke("send-email", {
+    body: { leadId: lead.id, to: tp.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id }
+  }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){
+      showToast("Couldn't send the request — try again");
+      return;
+    }
+    if (isTitle) lead.titleRequestedAt = todayISO(); else lead.insuranceRequestedAt = todayISO();
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"notify", text: (isTitle?"Title commitment":"Insurance policy") + " requested from " + tp.name, author: lo.name });
+    showToast((isTitle?"Title commitment":"Insurance policy") + " request sent to " + tp.name);
+    persist();
+  }).catch(function(){
+    showToast("Couldn't send the request — try again");
+  });
+}
 function requestDoc(leadId, name){
   var lead = leadById(leadId);
   if (!lead || !name) return;
@@ -3047,6 +3094,18 @@ function renderRail(lead){
           : ('<button class="btn btn-sm" data-action="toggle-processing" data-lead="' + lead.id + '" data-kind="title">Order Preliminary Title</button>')) +
       '</div>' +
       '<div class="footnote" style="padding:8px 0 0">Notifies Erika (Processor) in-app.</div>' +
+      '<div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">' +
+        (thirdPartyByRole(lead,"Title Company") ?
+          (lead.titleRequestedAt
+            ? ('<div style="display:flex;justify-content:space-between;align-items:center"><span class="badge badge-forest">Title Requested · ' + fmtDate(lead.titleRequestedAt) + '</span><button class="btn btn-sm btn-ghost" data-action="request-third-party-doc" data-lead="' + lead.id + '" data-role="Title Company">Resend</button></div>')
+            : ('<button class="btn btn-sm" data-action="request-third-party-doc" data-lead="' + lead.id + '" data-role="Title Company">Request Title Commitment</button>'))
+          : '<div class="footnote" style="padding:0">Add a Title Company contact to request a commitment.</div>') +
+        (thirdPartyByRole(lead,"Insurance Agent") ?
+          (lead.insuranceRequestedAt
+            ? ('<div style="display:flex;justify-content:space-between;align-items:center"><span class="badge badge-forest">Insurance Requested · ' + fmtDate(lead.insuranceRequestedAt) + '</span><button class="btn btn-sm btn-ghost" data-action="request-third-party-doc" data-lead="' + lead.id + '" data-role="Insurance Agent">Resend</button></div>')
+            : ('<button class="btn btn-sm" data-action="request-third-party-doc" data-lead="' + lead.id + '" data-role="Insurance Agent">Request Insurance Policy</button>'))
+          : '<div class="footnote" style="padding:0">Add an Insurance Agent contact to request a policy.</div>') +
+      '</div>' +
     '</div>'
     ) : "") +
     '<div class="rail-block">' +
@@ -3738,6 +3797,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "run-guideline-check"){ runGuidelineCheck(t.dataset.lead); }
   else if (action === "dismiss-ai-flag"){ dismissAiFlag(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
   else if (action === "toggle-processing"){ toggleProcessingAction(t.dataset.lead, t.dataset.kind); }
+  else if (action === "request-third-party-doc"){ requestThirdPartyDoc(t.dataset.lead, t.dataset.role); }
   else if (action === "mark-notif-read"){ markNotificationRead(t.dataset.id); }
   else if (action === "log-email"){ logEmailSent(t.dataset.lead); }
   else if (action === "send-application"){
