@@ -409,11 +409,42 @@ var STAGES = [
 var STAGE_MAP = {};
 STAGES.forEach(function(s,i){ STAGE_MAP[s.key] = { label:s.label, index:i }; });
 
+/* Borrower-facing collapse of the internal pipeline stages. Borrowers never
+   see internal stage names ("New Lead", "Attempting Contact", etc.) or the
+   word "lead" at all -- the portal only ever shows one of these six. */
+var BORROWER_STAGE_GROUPS = [
+  { key:"started",      label:"Application Started", stages:["new","attempting","qualifying","app_sent","app_completed"] },
+  { key:"docs",         label:"Doc Collection",       stages:["docs"] },
+  { key:"processing",   label:"Processing",           stages:["processing"] },
+  { key:"underwriting", label:"Underwriting",         stages:["underwriting"] },
+  { key:"ctc",          label:"Cleared to Close",     stages:["approved","ctc"] },
+  { key:"closed",       label:"Closed",               stages:["closed","postclosing"] }
+];
+function borrowerStageGroupIndex(stageKey){
+  for (var i=0;i<BORROWER_STAGE_GROUPS.length;i++){
+    if (BORROWER_STAGE_GROUPS[i].stages.indexOf(stageKey) !== -1) return i;
+  }
+  return 0;
+}
+function borrowerStageLabel(stageKey){
+  return BORROWER_STAGE_GROUPS[borrowerStageGroupIndex(stageKey)].label;
+}
+
 var LOAN_TYPES = ["DSCR","Fix & Flip","Ground Up Construction","Portfolio/Blanket","Bridge","Mixed-Use"];
 var SOURCES = ["Meta Ads","Connected Investors","Referral","Repeat Client","Website","Self-Generated"];
 var ENTITY_TYPES = ["LLC","Individual","Corporation"];
 var PROPERTY_TYPES = ["SFR","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Land"];
 var EXIT_STRATEGIES = ["Sell","Refinance to DSCR","Hold/Rent","1031 Exchange"];
+var CITIZENSHIP_STATUSES = ["US Citizen","Permanent Resident","Foreign National","ITIN"];
+var TRANSACTION_TYPES = [
+  { key:"purchase", label:"Purchase" },
+  { key:"ratetermrefi", label:"Rate/Term Refinance" },
+  { key:"cashout", label:"Cash-Out Refinance" }
+];
+var PREPAY_TERMS = [
+  { key:"5yr", label:"5 Year (base)" }, { key:"3yr", label:"3 Year" },
+  { key:"2yr", label:"2 Year" }, { key:"1yr", label:"1 Year" }, { key:"none", label:"No Prepay" }
+];
 
 /* ---------------------------------------------------------------------
    Spanish translations for client-facing content only. Internal/staff
@@ -493,7 +524,16 @@ var ES_DICT = {
   "New Lead":"Nuevo Cliente Potencial", "Attempting Contact":"Intentando Contacto", "Contacted / Qualifying":"Contactado / Calificando",
   "Application Sent":"Solicitud Enviada", "Application Completed":"Solicitud Completada", "Docs Collection":"Recolección de Documentos",
   "Processing":"Procesamiento", "Underwriting":"Suscripción", "Conditional Approval":"Aprobación Condicional",
-  "Clear to Close":"Listo para Cerrar", "Closed / Funded":"Cerrado / Fondeado", "Post-Closing":"Post-Cierre"
+  "Clear to Close":"Listo para Cerrar", "Closed / Funded":"Cerrado / Fondeado", "Post-Closing":"Post-Cierre",
+  "Application Started":"Solicitud Iniciada", "Doc Collection":"Recolección de Documentos",
+  "Cleared to Close":"Listo para Cerrar", "Closed":"Cerrado",
+  "Your Loan Details":"Detalles de su Préstamo", "Preliminary — subject to change":"Preliminar — sujeto a cambios",
+  "Property":"Propiedad", "Loan Amount":"Monto del Préstamo", "Term":"Plazo", "months":"meses",
+  "Citizenship Status":"Estatus Migratorio", "US Citizen":"Ciudadano de EE. UU.", "Permanent Resident":"Residente Permanente",
+  "Foreign National":"Extranjero No Residente", "ITIN":"ITIN",
+  "Transaction Type":"Tipo de Transacción", "Purchase":"Compra", "Rate/Term Refinance":"Refinanciamiento de Tasa/Plazo",
+  "Cash-Out Refinance":"Refinanciamiento con Retiro de Efectivo", "Prepayment Penalty":"Penalización por Pago Anticipado",
+  "5 Year (base)":"5 Años (base)", "3 Year":"3 Años", "2 Year":"2 Años", "1 Year":"1 Año", "No Prepay":"Sin Penalización"
 };
 function tr(text, lang){
   if (lang !== "es") return text;
@@ -591,6 +631,9 @@ var RTL_FEE_BY_PROJECT = {
   guc_sfr: 2195, guc_24: 2695
 };
 function evaluateRtlGucPricing(lead, points, propertyType){
+  if (lead.citizenshipStatus === "Foreign National" || lead.citizenshipStatus === "ITIN"){
+    return { ineligible:true, reason: (lead.citizenshipStatus) + " pricing isn't modeled on this sheet — needs manual pricing from underwriting." };
+  }
   var tier = experienceTier(lead.experienceDeals);
   var base = RTL_BASE_RATES[points] && RTL_BASE_RATES[points][tier];
   if (base === undefined || base === null) return { ineligible:true, reason:"No pricing for this experience tier at this origination fee." };
@@ -671,6 +714,9 @@ var DSCR_BASE_RATE_PRICE = [
 ];
 function evaluateDscrPricing(lead, inputs){
   if (!lead.creditScore || !lead.loanAmount || !lead.purchasePrice) return null;
+  if (lead.citizenshipStatus === "Foreign National" || lead.citizenshipStatus === "ITIN"){
+    return { ineligible:true, reason: (lead.citizenshipStatus) + " pricing isn't modeled on this sheet — needs manual pricing from underwriting." };
+  }
   var propertyType = (inputs && inputs.propertyType) || lead.propertyType;
   var ltv = lead.loanAmount / lead.purchasePrice * 100;
   var col = dscrLtvCol(ltv);
@@ -1740,6 +1786,8 @@ function leadToRow(l){
     guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null,
     guarantor_ownership_pct: l.guarantorOwnershipPct || null, track_record: l.trackRecord || [],
     preferred_language: l.preferredLanguage || "en",
+    citizenship_status: l.citizenshipStatus || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
+    rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1767,6 +1815,8 @@ function rowToLead(r){
     guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null,
     guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [],
     preferredLanguage: r.preferred_language || "en",
+    citizenshipStatus: r.citizenship_status || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
+    ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -1852,6 +1902,12 @@ function aiSuggest(kind, context, onDone){
     showToast("Couldn't generate a suggestion — try again");
     onDone(null);
   });
+}
+function geocodeAddress(address, onDone){
+  if (!sb){ onDone(null); return; }
+  sb.functions.invoke("geocode-address", { body: { address: address } }).then(function(res){
+    onDone((res.data && res.data.ok) ? res.data : null);
+  }).catch(function(){ onDone(null); });
 }
 function isBirthdayToday(lead){
   if (!lead.birthday) return false;
@@ -2137,6 +2193,29 @@ function setBirthday(leadId, birthday){
   if (!lead) return;
   lead.birthday = birthday || null;
   showToast("Birthday saved");
+  persist();
+}
+function setRuralStatus(leadId, isRural){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var newStatus = isRural ? "rural" : "urban";
+  if (lead.ruralStatus === newStatus) return;
+  lead.ruralStatus = newStatus;
+  lead.ruralCheckedAt = todayISO();
+  persist();
+}
+function setLoanDetails(leadId, loanAmount, rate, termMonths){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var changed = [];
+  if (loanAmount!=null && loanAmount !== lead.loanAmount){ lead.loanAmount = loanAmount; changed.push("loan amount to " + fmtUSD(loanAmount)); }
+  if (rate!=null && rate !== lead.rate){ lead.rate = rate; changed.push("rate to " + fmtPct(rate)); }
+  if (termMonths!=null && termMonths !== lead.termMonths){ lead.termMonths = termMonths; changed.push("term to " + termMonths + " months"); }
+  if (lead.purchasePrice && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/lead.purchasePrice)*1000)/10;
+  if (!changed.length) return;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text:"Loan terms updated — " + changed.join(", "), author: currentUser().name });
+  showToast("Loan details updated");
   persist();
 }
 function toggleLanguage(leadId){
@@ -3083,11 +3162,25 @@ function renderGuidelineCheck(lead){
     '<div class="footnote" style="padding-top:8px">Preliminary check against BPL/Constructive Loans matrices — not a substitute for full underwriting. Internal use only, never shown to the borrower.</div>';
 }
 var GUIDELINE_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction","Portfolio/Blanket"];
+function renderLoanDetailsEditor(lead){
+  return '<div class="section-head" style="margin-top:20px"><h2>Loan Details</h2></div>' +
+    '<div class="footnote" style="padding:0 0 8px">Editable any time — terms sometimes change for unforeseen reasons after the fact. Updates the term sheet and the borrower portal.</div>' +
+    '<form data-form="loan-details" data-lead="' + lead.id + '" class="form-two" style="align-items:flex-end">' +
+      '<div class="form-row"><label>Loan Amount</label><input class="input" type="number" name="loanAmount" value="' + (lead.loanAmount!=null?lead.loanAmount:"") + '"></div>' +
+      '<div class="form-row"><label>Rate (%)</label><input class="input" type="number" step="0.001" name="rate" value="' + (lead.rate!=null?lead.rate:"") + '"></div>' +
+      '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" value="' + (lead.termMonths!=null?lead.termMonths:"") + '"></div>' +
+      '<div class="form-row"><button class="btn btn-sm btn-primary" type="submit">Save Terms</button></div>' +
+    '</form>';
+}
 function renderTabScenario(lead){
-  return '<div class="field-grid">' +
+  var ruralBanner = lead.ruralStatus === "rural"
+    ? '<div class="hint" style="color:var(--c-rust);margin-bottom:12px">⚠️ This property appears to be in a rural area (checked ' + fmtDate(lead.ruralCheckedAt) + ') — confirm eligibility and any overlay pricing with underwriting before quoting.</div>'
+    : "";
+  return ruralBanner + '<div class="field-grid">' +
     field("Property Address", esc(lead.propertyAddress||"—")) +
     field("Property Type", esc(lead.propertyType||"—")) +
     (lead.loanType === "Portfolio/Blanket" ? field("Number of Properties", lead.propertyCount||"—", true) : "") +
+    field("Citizenship Status", esc(lead.citizenshipStatus||"—")) +
     field("Purchase Price", fmtUSD(lead.purchasePrice), true) +
     field("After-Repair Value (ARV)", fmtUSD(lead.arv), true) +
     field("Rehab / Construction Budget", fmtUSD(lead.rehabBudget), true) +
@@ -3101,13 +3194,13 @@ function renderTabScenario(lead){
     field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderGuidelineCheck(lead) + renderPricer(lead) + renderScopeOfWork(lead);
+  '</div>' + renderLoanDetailsEditor(lead) + renderGuidelineCheck(lead) + renderPricer(lead) + renderScopeOfWork(lead);
 }
 
 function renderPricer(lead){
   if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
   ui.pricerInputs = ui.pricerInputs || {};
-  var inputs = ui.pricerInputs[lead.id] || (ui.pricerInputs[lead.id] = { points:"1.00", transactionType:"purchase", prepayTerm:"5yr", propertyType: lead.propertyType||"SFR" });
+  var inputs = ui.pricerInputs[lead.id] || (ui.pricerInputs[lead.id] = { points:"1.00", transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", propertyType: lead.propertyType||"SFR" });
   var isDSCR = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
   var propertyTypeSelect = '<div class="form-row"><label>Property Type</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="propertyType">' +
       PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (inputs.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("") +
@@ -3269,8 +3362,8 @@ function renderRail(lead){
       '<div class="rail-title">Borrower</div>' +
       '<div class="rail-name">' + esc(lead.name) + '</div>' +
       '<div class="stage-line">' + badgeForStage(lead) + '</div>' +
-      '<button class="btn btn-sm' + (lead.preferredLanguage==="es" ? " btn-primary" : "") + '" style="width:100%;margin-top:8px" data-action="toggle-language" data-lead="' + lead.id + '">' +
-        (lead.preferredLanguage==="es" ? "🇪🇸 Spanish Speaking — everything they see is in Spanish" : "🇺🇸 English — click to switch client-facing content to Spanish") +
+      '<button class="btn btn-sm' + (lead.preferredLanguage==="es" ? " btn-primary" : "") + '" style="width:100%;margin-top:8px" data-action="toggle-language" data-lead="' + lead.id + '" title="' + (lead.preferredLanguage==="es" ? "Spanish — click to switch back to English" : "English — click to switch to Spanish") + '">' +
+        (lead.preferredLanguage==="es" ? "🇪🇸" : "🇺🇸") + ' Spanish Speaking' +
       '</button>' +
     '</div>' +
     '<div class="rail-block">' +
@@ -3605,11 +3698,22 @@ function renderPortal(){
   if (lead){
     var lang = lead.preferredLanguage || "en";
     var L = function(s){ return esc(tr(s, lang)); };
-    var idx = Math.max(stageIndex(lead.stage), 0);
-    var steps = STAGES.map(function(s,i){
+    var idx = borrowerStageGroupIndex(lead.stage);
+    var steps = BORROWER_STAGE_GROUPS.map(function(s,i){
       var cls = i < idx ? "done" : (i===idx ? "now" : "");
       return '<div class="portal-step ' + cls + '" title="' + esc(tr(s.label, lang)) + '"></div>';
     }).join("");
+
+    var termsCard = (lead.loanAmount || lead.rate) ? (
+      '<div class="rail-title" style="margin-top:10px">' + L("Your Loan Details") + '</div>' +
+      '<div class="footnote" style="padding:2px 0 8px">' + L("Preliminary — subject to change") + '</div>' +
+      '<div class="field-grid" style="margin-bottom:18px">' +
+        (lead.propertyAddress ? field(L("Property"), esc(lead.propertyAddress)) : "") +
+        (lead.loanAmount ? field(L("Loan Amount"), fmtUSD(lead.loanAmount), true) : "") +
+        (lead.rate ? field(L("Rate"), fmtPct(lead.rate), true) : "") +
+        (lead.termMonths ? field(L("Term"), lead.termMonths + " " + L("months"), true) : "") +
+      '</div>'
+    ) : "";
 
     var docs = (lead.documents||[]).map(function(d,i){
       var received = d.status==="received";
@@ -3627,7 +3731,8 @@ function renderPortal(){
       '<h2 class="font-display" style="margin:18px 0 2px">' + L("Welcome back") + ', ' + esc(lead.name.split(" ")[0]) + '</h2>' +
       '<div class="view-sub">' + L(lead.loanType) + ' · ' + esc(lead.propertyAddress||"") + '</div>' +
       '<div class="portal-progress">' + steps + '</div>' +
-      '<div class="view-sub" style="margin-bottom:18px">' + L("Current status:") + ' <b>' + esc(tr(stageLabel(lead.stage), lang)) + '</b></div>' +
+      '<div class="view-sub" style="margin-bottom:18px">' + L("Current status:") + ' <b>' + esc(tr(borrowerStageLabel(lead.stage), lang)) + '</b></div>' +
+      termsCard +
       '<div class="rail-title" style="margin-top:10px">' + L("Your loan officer") + '</div>' +
       '<div style="margin:6px 0 18px">' + esc(userName(lead.assignedTo)) + ' · ' + esc((userById(lead.assignedTo)||{}).phone||"") + '</div>' +
       '<div class="rail-title">' + L("Document checklist") + '</div>' +
@@ -3832,6 +3937,12 @@ function buildScenarioFieldsHTML(lead, lang){
   var isDSCR = loanType === "DSCR";
   var isRehabType = loanType === "Fix & Flip" || loanType === "Ground Up Construction" || loanType === "Bridge";
   var rehabLabel = L(loanType === "Ground Up Construction" ? "Construction Budget" : "Rehab Budget");
+  var txnOptions = TRANSACTION_TYPES.map(function(t){ return '<option value="' + t.key + '"' + ((lead.transactionType||"purchase")===t.key?" selected":"") + '>' + L(t.label) + '</option>'; }).join("");
+  var prepayOptions = PREPAY_TERMS.map(function(t){ return '<option value="' + t.key + '"' + ((lead.prepayTerm||"5yr")===t.key?" selected":"") + '>' + L(t.label) + '</option>'; }).join("");
+  var dscrPricingInputs = '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Transaction Type") + '</label><select class="select" name="transactionType">' + txnOptions + '</select></div>' +
+      '<div class="form-row"><label>' + L("Prepayment Penalty") + '</label><select class="select" name="prepayTerm">' + prepayOptions + '</select></div>' +
+    '</div>';
   if (isDSCR){
     return '<div class="form-two">' +
         '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
@@ -3841,7 +3952,8 @@ function buildScenarioFieldsHTML(lead, lang){
         '<div class="form-row"><label>' + L("Monthly Property Tax") + '</label><input class="input" type="number" name="monthlyTaxes" value="' + v(lead.monthlyTaxes) + '"></div>' +
         '<div class="form-row"><label>' + L("Monthly Insurance") + '</label><input class="input" type="number" name="monthlyInsurance" value="' + v(lead.monthlyInsurance) + '"></div>' +
       '</div>' +
-      '<div class="form-row"><label>' + L("Monthly HOA / Dues (if any)") + '</label><input class="input" type="number" name="monthlyHoa" value="' + v(lead.monthlyHoa) + '"></div>';
+      '<div class="form-row"><label>' + L("Monthly HOA / Dues (if any)") + '</label><input class="input" type="number" name="monthlyHoa" value="' + v(lead.monthlyHoa) + '"></div>' +
+      dscrPricingInputs;
   } else if (isRehabType){
     return '<div class="form-two">' +
         '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
@@ -3856,7 +3968,8 @@ function buildScenarioFieldsHTML(lead, lang){
       '<div class="form-two">' +
         '<div class="form-row"><label>' + L("Total Monthly Rent Estimate") + '</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
         '<div class="form-row"><label>' + L("Total Monthly Tax + Insurance + HOA") + '</label><input class="input" type="number" name="monthlyTaxes" value="' + v(lead.monthlyTaxes) + '"></div>' +
-      '</div>';
+      '</div>' +
+      dscrPricingInputs;
   }
   return '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
@@ -3896,10 +4009,17 @@ function buildApplicationFieldsHTML(lead, lang){
       '<div class="form-row"><label>' + L("Credit Score") + '</label><input class="input" type="number" name="creditScore" min="300" max="850" value="' + v(lead.creditScore) + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Citizenship Status") + '</label><select class="select" name="citizenshipStatus">' +
+        CITIZENSHIP_STATUSES.map(function(t){ return '<option value="' + t + '"' + (lead.citizenshipStatus===t?" selected":"") + '>' + L(t) + '</option>'; }).join("") +
+      '</select></div>' +
       '<div class="form-row"><label>' + L("Investing Experience (deals completed)") + '</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '" data-action="update-track-record-count" data-lang="' + lang + '"></div>' +
-      '<div class="form-row"><label>' + L("Liquidity / Reserves") + '</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>' + L("Property Address") + '</label><input class="input" name="propertyAddress" value="' + esc(lead.propertyAddress||"") + '"></div>' +
+    '<div class="form-row"><label>' + L("Liquidity / Reserves") + '</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
+    '<div class="form-row"><label>' + L("Property Address") + '</label>' +
+      '<input class="input" name="propertyAddress" value="' + esc(lead.propertyAddress||"") + '" list="address-suggest-' + lead.id + '" autocomplete="off" data-action="address-lookup" data-lead="' + lead.id + '">' +
+      '<datalist id="address-suggest-' + lead.id + '"></datalist>' +
+      '<div id="rural-alert-' + lead.id + '"></div>' +
+    '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Property Type") + '</label><select class="select" name="propertyType">' + propTypeOptions + '</select></div>' +
       '<div class="form-row"><label>' + L("Exit Strategy") + '</label><select class="select" name="exitStrategy">' + exitOptions + '</select></div>' +
@@ -4289,6 +4409,34 @@ appEl.addEventListener("change", function(e){
   }
 });
 
+var addressLookupTimer = null;
+appEl.addEventListener("input", function(e){
+  var t = e.target;
+  if (!t.dataset || t.dataset.action !== "address-lookup") return;
+  var leadIdForLookup = t.dataset.lead;
+  var query = t.value;
+  var ruralBox = document.getElementById("rural-alert-" + leadIdForLookup);
+  var datalist = document.getElementById("address-suggest-" + leadIdForLookup);
+  if (ruralBox) ruralBox.innerHTML = "";
+  if (addressLookupTimer) clearTimeout(addressLookupTimer);
+  if (!query || query.length < 8) return;
+  addressLookupTimer = setTimeout(function(){
+    geocodeAddress(query, function(result){
+      if (!result) return;
+      if (datalist && result.matched && result.matchedAddress){
+        var titleCased = result.matchedAddress.replace(/\w\S*/g, function(w){ return w.charAt(0).toUpperCase() + w.substr(1).toLowerCase(); });
+        datalist.innerHTML = '<option value="' + esc(titleCased) + '"></option>';
+      }
+      if (ruralBox && result.matched){
+        setRuralStatus(leadIdForLookup, result.rural);
+        ruralBox.innerHTML = result.rural
+          ? '<div class="hint" style="color:var(--c-rust);margin-top:6px">⚠️ This property appears to be in a rural area — confirm eligibility and any overlay pricing with underwriting before quoting.</div>'
+          : "";
+      }
+    });
+  }, 700);
+});
+
 appEl.addEventListener("submit", function(e){
   var form = e.target;
   if (!form.dataset || !form.dataset.form) return;
@@ -4330,6 +4478,9 @@ appEl.addEventListener("submit", function(e){
       birthday: fd.get("birthday"),
       guarantorOwnershipPct: numOrNull("guarantorOwnershipPct"),
       entityLegalName: fd.get("entityLegalName"),
+      citizenshipStatus: fd.get("citizenshipStatus"),
+      transactionType: fd.get("transactionType"),
+      prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
     });
     var sowPatch = extractScopeOfWorkFromForm(fd);
@@ -4363,6 +4514,9 @@ appEl.addEventListener("submit", function(e){
       birthday: fd.get("birthday"),
       guarantorOwnershipPct: numOrNullPub("guarantorOwnershipPct"),
       entityLegalName: fd.get("entityLegalName"),
+      citizenshipStatus: fd.get("citizenshipStatus"),
+      transactionType: fd.get("transactionType"),
+      prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
     });
     var sowPatchPub = extractScopeOfWorkFromForm(fd);
@@ -4386,6 +4540,11 @@ appEl.addEventListener("submit", function(e){
     setFollowUp(form.dataset.lead, fd.get("date"), fd.get("note"));
   } else if (type === "birthday"){
     setBirthday(form.dataset.lead, fd.get("birthday"));
+  } else if (type === "loan-details"){
+    var ldLoanAmount = fd.get("loanAmount") ? Number(fd.get("loanAmount")) : null;
+    var ldRate = fd.get("rate") ? Number(fd.get("rate")) : null;
+    var ldTerm = fd.get("termMonths") ? Number(fd.get("termMonths")) : null;
+    setLoanDetails(form.dataset.lead, ldLoanAmount, ldRate, ldTerm);
   } else if (type === "rate"){
     updateMarketRate(form.dataset.key, Number(fd.get("rate")));
     form.reset();
