@@ -1571,9 +1571,10 @@ function leadToRow(l){
     guideline_check: l.guidelineCheck || null, scope_of_work: l.scopeOfWork || null, application_token: l.applicationToken || null,
     property_count: l.propertyCount || null, birthday: l.birthday || null,
     title_requested_at: l.titleRequestedAt || null, insurance_requested_at: l.insuranceRequestedAt || null,
-    entity_legal_name: l.entityLegalName || null, guarantor_name: l.guarantorName || null,
+    entity_legal_name: l.entityLegalName || null,
+    guarantor_first_name: l.guarantorFirstName || null, guarantor_middle_name: l.guarantorMiddleName || null, guarantor_last_name: l.guarantorLastName || null,
     guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null,
-    guarantor_ownership_pct: l.guarantorOwnershipPct || null,
+    guarantor_ownership_pct: l.guarantorOwnershipPct || null, track_record: l.trackRecord || [],
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1596,9 +1597,10 @@ function rowToLead(r){
     guidelineCheck: r.guideline_check || null, scopeOfWork: r.scope_of_work || null, applicationToken: r.application_token || null,
     propertyCount: r.property_count || null, birthday: r.birthday || null,
     titleRequestedAt: r.title_requested_at || null, insuranceRequestedAt: r.insurance_requested_at || null,
-    entityLegalName: r.entity_legal_name || null, guarantorName: r.guarantor_name || null,
+    entityLegalName: r.entity_legal_name || null,
+    guarantorFirstName: r.guarantor_first_name || null, guarantorMiddleName: r.guarantor_middle_name || null, guarantorLastName: r.guarantor_last_name || null,
     guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null,
-    guarantorOwnershipPct: r.guarantor_ownership_pct || null,
+    guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [],
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -2858,7 +2860,7 @@ function renderTabOverview(lead){
   '</div>' +
   '<div class="section-head" style="margin-top:20px"><h2>Guarantor & Entity</h2></div>' +
   '<div class="field-grid">' +
-    field("Guarantor Name", esc(lead.guarantorName||lead.name||"—")) +
+    field("Guarantor Name", esc([lead.guarantorFirstName, lead.guarantorMiddleName, lead.guarantorLastName].filter(Boolean).join(" ") || lead.name || "—")) +
     field("Guarantor DOB", fmtDate(lead.birthday)) +
     field("Guarantor Phone", esc(lead.guarantorPhone||lead.phone||"—")) +
     field("Guarantor Email", esc(lead.guarantorEmail||lead.email||"—")) +
@@ -3677,24 +3679,29 @@ function buildApplicationFieldsHTML(lead){
   var entityOptions = ENTITY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.entityType===t?" selected":"") + '>' + t + '</option>'; }).join("");
   var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("");
   var exitOptions = EXIT_STRATEGIES.map(function(t){ return '<option value="' + t + '"' + (lead.exitStrategy===t?" selected":"") + '>' + t + '</option>'; }).join("");
-  return '<div class="form-two">' +
-      '<div class="form-row"><label>Guarantor Full Name</label><input class="input" name="guarantorName" value="' + esc(lead.guarantorName||lead.name||"") + '"></div>' +
+  var nameParts = (lead.guarantorFirstName || lead.guarantorLastName) ? null : (lead.name||"").split(" ");
+  var defFirst = lead.guarantorFirstName || (nameParts ? nameParts[0] : "") || "";
+  var defLast = lead.guarantorLastName || (nameParts && nameParts.length>1 ? nameParts[nameParts.length-1] : "") || "";
+  return '<div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
+      '<div><label>Guarantor First Name</label><input class="input" name="guarantorFirstName" value="' + esc(defFirst) + '"></div>' +
+      '<div><label>Middle Name</label><input class="input" name="guarantorMiddleName" value="' + esc(lead.guarantorMiddleName||"") + '"></div>' +
+      '<div><label>Last Name</label><input class="input" name="guarantorLastName" value="' + esc(defLast) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
       '<div class="form-row"><label>Guarantor Date of Birth</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
+      '<div class="form-row"><label>Guarantor Ownership %</label><input class="input" type="number" min="0" max="100" name="guarantorOwnershipPct" value="' + v(lead.guarantorOwnershipPct) + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>Guarantor Phone</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||lead.phone||"") + '"></div>' +
       '<div class="form-row"><label>Guarantor Email</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||lead.email||"") + '"></div>' +
     '</div>' +
-    '<div class="form-two">' +
-      '<div class="form-row"><label>Entity Legal Name (if closing in an entity)</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
-      '<div class="form-row"><label>Guarantor Ownership %</label><input class="input" type="number" min="0" max="100" name="guarantorOwnershipPct" value="' + v(lead.guarantorOwnershipPct) + '"></div>' +
-    '</div>' +
+    '<div class="form-row"><label>Entity Legal Name (if closing in an entity)</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>Entity Type</label><select class="select" name="entityType">' + entityOptions + '</select></div>' +
       '<div class="form-row"><label>Credit Score</label><input class="input" type="number" name="creditScore" min="300" max="850" value="' + v(lead.creditScore) + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>Investing Experience (deals completed)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '"></div>' +
+      '<div class="form-row"><label>Investing Experience (deals completed)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '" data-action="update-track-record-count"></div>' +
       '<div class="form-row"><label>Liquidity / Reserves</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
     '</div>' +
     '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress" value="' + esc(lead.propertyAddress||"") + '"></div>' +
@@ -3707,7 +3714,78 @@ function buildApplicationFieldsHTML(lead){
       '<div class="form-row"><label>Loan Amount Requested</label><input class="input" type="number" name="loanAmount" value="' + v(lead.loanAmount) + '"></div>' +
       '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
     '</div>' +
+    buildTrackRecordSectionHTML(lead) +
     buildScopeOfWorkFieldsHTML(lead);
+}
+var TRACK_EXIT_TYPES = ["Sold","Refinanced","Still Own"];
+function buildTrackRecordRowHTML(i, row){
+  row = row || {};
+  var exitOptions = TRACK_EXIT_TYPES.map(function(t){ return '<option value="' + t + '"' + (row.exitType===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  var v2 = function(x){ return x===null||x===undefined ? "" : x; };
+  return '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">' +
+    '<div class="hint" style="margin-bottom:6px">Prior Project #' + (i+1) + '</div>' +
+    '<div class="form-row"><label>Property Address</label><input class="input" name="trackAddress_' + i + '" value="' + esc(row.address||"") + '"></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Purchase Date</label><input class="input" type="date" name="trackPurchaseDate_' + i + '" value="' + (row.purchaseDate||"") + '"></div>' +
+      '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="trackPurchasePrice_' + i + '" value="' + v2(row.purchasePrice) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="trackRehabBudget_' + i + '" value="' + v2(row.rehabBudget) + '"></div>' +
+      '<div class="form-row"><label>Exit Type</label><select class="select" name="trackExitType_' + i + '">' + exitOptions + '</select></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Exit Date</label><input class="input" type="date" name="trackExitDate_' + i + '" value="' + (row.exitDate||"") + '"></div>' +
+      '<div class="form-row"><label>Exit Value (sale price or new loan amount)</label><input class="input" type="number" name="trackExitValue_' + i + '" value="' + v2(row.exitValue) + '"></div>' +
+    '</div>' +
+  '</div>';
+}
+function buildTrackRecordRowsHTML(count, existingRows){
+  var rows = [];
+  for (var i=0;i<count;i++){ rows.push(buildTrackRecordRowHTML(i, (existingRows||[])[i])); }
+  return rows.join("");
+}
+function buildTrackRecordSectionHTML(lead){
+  if (lead.loanType !== "Fix & Flip" && lead.loanType !== "Ground Up Construction") return "";
+  var count = Math.min(lead.experienceDeals||0, 20);
+  return '<div class="section-head" style="margin-top:20px"><h2>Track Record</h2></div>' +
+    '<div class="footnote" style="padding:0 0 10px">One row per completed project — updates automatically based on Investing Experience above.</div>' +
+    '<div id="track-record-rows">' + (count ? buildTrackRecordRowsHTML(count, lead.trackRecord) : '<div class="empty">Enter a number above for Investing Experience to add project rows.</div>') + '</div>';
+}
+function collectTrackRecordRowsFromDOM(container){
+  var rows = [];
+  var i = 0;
+  var el;
+  while ((el = container.querySelector('[name="trackAddress_' + i + '"]'))){
+    var get = function(name){ var f = container.querySelector('[name="' + name + '"]'); return f ? f.value : ""; };
+    rows.push({
+      address: get("trackAddress_" + i),
+      purchaseDate: get("trackPurchaseDate_" + i),
+      purchasePrice: get("trackPurchasePrice_" + i),
+      rehabBudget: get("trackRehabBudget_" + i),
+      exitType: get("trackExitType_" + i),
+      exitDate: get("trackExitDate_" + i),
+      exitValue: get("trackExitValue_" + i)
+    });
+    i++;
+  }
+  return rows;
+}
+function extractTrackRecordFromForm(fd){
+  var rows = [];
+  var i = 0;
+  while (fd.has("trackAddress_" + i)){
+    rows.push({
+      address: fd.get("trackAddress_" + i) || "",
+      purchaseDate: fd.get("trackPurchaseDate_" + i) || null,
+      purchasePrice: fd.get("trackPurchasePrice_" + i) ? Number(fd.get("trackPurchasePrice_" + i)) : null,
+      rehabBudget: fd.get("trackRehabBudget_" + i) ? Number(fd.get("trackRehabBudget_" + i)) : null,
+      exitType: fd.get("trackExitType_" + i) || "",
+      exitDate: fd.get("trackExitDate_" + i) || null,
+      exitValue: fd.get("trackExitValue_" + i) ? Number(fd.get("trackExitValue_" + i)) : null
+    });
+    i++;
+  }
+  return rows;
 }
 function buildScopeOfWorkFieldsHTML(lead){
   if (lead.loanType !== "Fix & Flip" && lead.loanType !== "Ground Up Construction") return "";
@@ -3991,6 +4069,13 @@ appEl.addEventListener("change", function(e){
   } else if (action === "upload-doc-staff"){
     var staffFile = t.files && t.files[0];
     if (staffFile) uploadLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10), staffFile, currentUser().name);
+  } else if (action === "update-track-record-count"){
+    var trContainer = document.getElementById("track-record-rows");
+    if (trContainer){
+      var trExisting = collectTrackRecordRowsFromDOM(trContainer);
+      var trCount = Math.max(0, Math.min(parseInt(t.value,10)||0, 20));
+      trContainer.innerHTML = trCount ? buildTrackRecordRowsHTML(trCount, trExisting) : '<div class="empty">Enter a number above for Investing Experience to add project rows.</div>';
+    }
   } else if (action === "pricer-input"){
     ui.pricerInputs = ui.pricerInputs || {};
     ui.pricerInputs[t.dataset.lead] = ui.pricerInputs[t.dataset.lead] || {};
@@ -4032,12 +4117,15 @@ appEl.addEventListener("submit", function(e){
       loanAmount: numOrNull("loanAmount"),
       termMonths: numOrNull("termMonths"),
       propertyCount: numOrNull("propertyCount"),
-      guarantorName: fd.get("guarantorName"),
+      guarantorFirstName: fd.get("guarantorFirstName"),
+      guarantorMiddleName: fd.get("guarantorMiddleName"),
+      guarantorLastName: fd.get("guarantorLastName"),
       guarantorPhone: fd.get("guarantorPhone"),
       guarantorEmail: fd.get("guarantorEmail"),
       birthday: fd.get("birthday"),
       guarantorOwnershipPct: numOrNull("guarantorOwnershipPct"),
-      entityLegalName: fd.get("entityLegalName")
+      entityLegalName: fd.get("entityLegalName"),
+      trackRecord: extractTrackRecordFromForm(fd)
     });
     var sowPatch = extractScopeOfWorkFromForm(fd);
     if (sowPatch) saveScopeOfWork(form.dataset.lead, sowPatch.items, sowPatch.notes);
@@ -4062,12 +4150,15 @@ appEl.addEventListener("submit", function(e){
       loanAmount: numOrNullPub("loanAmount"),
       termMonths: numOrNullPub("termMonths"),
       propertyCount: numOrNullPub("propertyCount"),
-      guarantorName: fd.get("guarantorName"),
+      guarantorFirstName: fd.get("guarantorFirstName"),
+      guarantorMiddleName: fd.get("guarantorMiddleName"),
+      guarantorLastName: fd.get("guarantorLastName"),
       guarantorPhone: fd.get("guarantorPhone"),
       guarantorEmail: fd.get("guarantorEmail"),
       birthday: fd.get("birthday"),
       guarantorOwnershipPct: numOrNullPub("guarantorOwnershipPct"),
-      entityLegalName: fd.get("entityLegalName")
+      entityLegalName: fd.get("entityLegalName"),
+      trackRecord: extractTrackRecordFromForm(fd)
     });
     var sowPatchPub = extractScopeOfWorkFromForm(fd);
     if (sowPatchPub) saveScopeOfWork(form.dataset.lead, sowPatchPub.items, sowPatchPub.notes);
