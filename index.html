@@ -633,7 +633,6 @@ var RATE_KEY_BY_LOAN_TYPE = {
   "Portfolio/Blanket":"portfolio", "Bridge":"bridge", "Mixed-Use":"mixedUse"
 };
 var SHORT_TERM_TYPES = ["Fix & Flip","Ground Up Construction","Bridge"];
-var APPLICATION_FORM_URL = "https://claude.ai/code/artifact/d9ae64b9-b0f5-4487-9fa7-d92fdf4194e6";
 var XACTUS_PORTAL_URL = "https://xactus.com/sign-in/";
 var CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 var CADENCE_STAGES = ["new","attempting","qualifying"];
@@ -658,7 +657,8 @@ var ui = {
   portalLeadId: null,
   leadFilter: { q:"", stage:"", loanType:"", assignedTo:"", status:"active" },
   commFilter: "",
-  toast: null
+  toast: null,
+  publicApply: null
 };
 try {
   var savedRole = localStorage.getItem("bp_view_as");
@@ -668,6 +668,16 @@ try {
     ui.loggedIn = true;
   }
 } catch(e){}
+
+(function(){
+  var qp = new URLSearchParams(window.location.search);
+  var applyId = qp.get("apply");
+  var applyToken = qp.get("t");
+  if (applyId && applyToken){
+    ui.publicApply = { leadId:applyId, token:applyToken, status:"loading" };
+    loadPublicApplication(applyId, applyToken);
+  }
+})();
 
 /* ---------------------------------------------------------------------
    Helpers
@@ -722,6 +732,9 @@ function isOwner(){ return ui.viewAs==="owner"; }
 function isProcessor(){ var u = userById(ui.viewAs); return !!(u && u.role==="processor"); }
 function isLO(){ var u = userById(ui.viewAs); return !!(u && u.role==="loan_officer"); }
 function currentUser(){ return userById(ui.viewAs) || { id:"owner", name:"Joe", role:"owner" }; }
+function canEditApplication(lead){
+  return stageIndex(lead.stage) < stageIndex("processing") || isOwner() || isProcessor();
+}
 function leadById(id){ return state.leads.filter(function(l){ return l.id===id; })[0] || null; }
 function nextLeadId(){
   var max = 0;
@@ -1096,15 +1109,14 @@ function winbackInfo(lead, today){
   if (!reasons.length) return null;
   return { reasons:reasons, days:days, priority:priority };
 }
+function randomToken(){
+  return (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) + Date.now().toString(36)).slice(0, 24);
+}
 function applicationLink(lead){
   var qp = new URLSearchParams();
-  qp.set("lead", lead.id);
-  if (lead.name) qp.set("name", lead.name);
-  if (lead.email) qp.set("email", lead.email);
-  if (lead.phone) qp.set("phone", lead.phone);
-  if (lead.loanType) qp.set("loanType", lead.loanType);
-  if (lead.propertyAddress) qp.set("property", lead.propertyAddress);
-  return APPLICATION_FORM_URL + "?" + qp.toString();
+  qp.set("apply", lead.id);
+  qp.set("t", lead.applicationToken || "");
+  return CRM_URL.replace(/\/$/, "") + "/?" + qp.toString();
 }
 function signoffFor(userId){
   var u = userById(userId);
@@ -1271,7 +1283,7 @@ function leadToRow(l){
     preapproval_sent_at: l.preapprovalSentAt, termsheet_sent_at: l.termsheetSentAt, credit_ordered_at: l.creditOrderedAt,
     last_contact_at: l.lastContactAt,
     monthly_taxes: l.monthlyTaxes, monthly_insurance: l.monthlyInsurance, monthly_hoa: l.monthlyHoa,
-    guideline_check: l.guidelineCheck || null, scope_of_work: l.scopeOfWork || null,
+    guideline_check: l.guidelineCheck || null, scope_of_work: l.scopeOfWork || null, application_token: l.applicationToken || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1291,7 +1303,7 @@ function rowToLead(r){
     preapprovalSentAt: r.preapproval_sent_at, termsheetSentAt: r.termsheet_sent_at, creditOrderedAt: r.credit_ordered_at,
     lastContactAt: r.last_contact_at,
     monthlyTaxes: r.monthly_taxes, monthlyInsurance: r.monthly_insurance, monthlyHoa: r.monthly_hoa,
-    guidelineCheck: r.guideline_check || null, scopeOfWork: r.scope_of_work || null,
+    guidelineCheck: r.guideline_check || null, scopeOfWork: r.scope_of_work || null, applicationToken: r.application_token || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -1300,6 +1312,42 @@ function notifToRow(n){
 }
 function rowToNotif(r){
   return { id: r.id, toUserId: r.to_user_id, leadId: r.lead_id, kind: r.kind, text: r.text, date: r.date, read: r.read };
+}
+function loadPublicApplication(leadId, token){
+  if (!sb){ ui.publicApply.status = "invalid"; render(); return; }
+  sb.from("leads").select("*").eq("id", leadId).eq("application_token", token).then(function(res){
+    if (res.error || !res.data || !res.data.length){
+      ui.publicApply.status = "invalid";
+      render();
+      return;
+    }
+    state.leads = [rowToLead(res.data[0])];
+    sb.rpc("list_users").then(function(res2){
+      if (res2.data) state.users = res2.data;
+      ui.publicApply.status = "ready";
+      render();
+    });
+  });
+}
+function submitPublicApplication(leadId, patch){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  if (patch.purchasePrice && patch.loanAmount){
+    lead.ltv = Math.round((patch.loanAmount / patch.purchasePrice) * 1000) / 10;
+  }
+  lead.applicationSentAt = lead.applicationSentAt || d;
+  lead.applicationTakenAt = d;
+  var idx = stageIndex(lead.stage);
+  if (idx >= 0 && idx < stageIndex("app_completed")) lead.stage = "app_completed";
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"application", text:"Application submitted online by " + lead.name, author: lead.name });
+  if (lead.assignedTo){
+    notifyUser(lead.assignedTo, lead.id, "application", lead.name + " completed their application online.");
+  }
+  ui.publicApply.status = "submitted";
+  runGuidelineCheck(leadId);
 }
 function hydrateFromSupabase(){
   if (!sb) return;
@@ -1562,10 +1610,14 @@ function addLead(data){
     propertyAddress:data.propertyAddress||"", propertyType:null, purchasePrice:null, arv:null, rehabBudget:null,
     rentEstimate:null, loanAmount:data.loanAmount||null, ltv:null, rate:null, termMonths:null,
     exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null, pointsCharged:null,
-    callAttempts:[], documents:[], thirdParties:[],
+    callAttempts:[], documents:[], thirdParties:[], applicationToken: randomToken(),
     activity:[{ date:d, type:"note", text:"Lead created via " + data.source, author: currentUser().name }]
   };
   state.leads.unshift(lead);
+  var addedDocs = applyRequiredDocs(id, { silent:true }) || [];
+  if (addedDocs.length){
+    lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
+  }
   showToast("Added " + lead.name);
   ui.modal = null;
   ui.view = "detail"; ui.selectedLeadId = id; ui.activeTab = "overview";
@@ -1674,11 +1726,11 @@ function requestDoc(leadId, name){
   showToast("Requested " + name + " — borrower notified by email & text");
   persist();
 }
-function applyRequiredDocs(leadId){
+function applyRequiredDocs(leadId, opts){
   var lead = leadById(leadId);
-  if (!lead) return;
+  if (!lead) return [];
   var list = REQUIRED_DOCS_BY_TYPE[lead.loanType];
-  if (!list || !list.length) return;
+  if (!list || !list.length) return [];
   lead.documents = lead.documents || [];
   var existing = lead.documents.map(function(d){ return (d.name||"").toLowerCase(); });
   var added = [];
@@ -1688,13 +1740,15 @@ function applyRequiredDocs(leadId){
       added.push(name);
     }
   });
-  if (!added.length){ showToast("All required documents already requested"); return; }
+  if (opts && opts.silent) return added;
+  if (!added.length){ showToast("All required documents already requested"); return added; }
   lead.activity = lead.activity || [];
   var d = todayISO();
   lead.activity.push({ date:d, type:"document", text:"Requested required document checklist (" + added.length + " item(s)) for " + lead.loanType, author: currentUser().name });
   lead.activity.push({ date:d, type:"notify", text:"Emailed and texted " + lead.name + " the full document checklist — now showing in their borrower portal.", author:"System" });
   showToast("Requested " + added.length + " required document(s)");
   persist();
+  return added;
 }
 function markDocReceived(leadId, idx){
   var lead = leadById(leadId);
@@ -1721,29 +1775,45 @@ function saveScopeOfWork(leadId, items, notes){
   if (!lead) return;
   var cleanItems = items.filter(function(it){ return it.cost !== null && it.cost !== undefined && it.cost !== 0; });
   var total = items.reduce(function(sum, it){ return sum + (it.cost||0); }, 0);
+  var authorName = ui.publicApply ? lead.name : currentUser().name;
   lead.scopeOfWork = {
     items: items,
     total: total,
     notes: notes||"",
-    preparedBy: currentUser().name,
+    preparedBy: authorName,
     preparedAt: todayISO()
   };
   lead.activity = lead.activity || [];
-  lead.activity.push({ date: todayISO(), type:"document", text:"Scope of work saved — " + fmtUSD(total) + " across " + cleanItems.length + " line item(s)", author: currentUser().name });
-  showToast("Scope of work saved");
-  ui.modal = null;
+  lead.activity.push({ date: todayISO(), type:"document", text:"Scope of work saved — " + fmtUSD(total) + " across " + cleanItems.length + " line item(s)", author: authorName });
+  if (!ui.publicApply){ showToast("Scope of work saved"); ui.modal = null; }
   persist();
 }
 
-function printScopeOfWork(leadId){
-  var lead = leadById(leadId);
-  if (!lead || !lead.scopeOfWork) return;
-  var sow = lead.scopeOfWork;
-  var rows = sow.items.filter(function(it){ return it.cost; }).map(function(it){
+function extractScopeOfWorkFromForm(fd){
+  var items = SOW_CATEGORIES.map(function(cat, i){
+    var raw = fd.get("cost_" + i);
+    return { category: cat, cost: (raw===null||raw==="") ? null : Number(raw) };
+  });
+  var hasAny = items.some(function(it){ return it.cost; });
+  return hasAny ? { items: items, notes: fd.get("notes") || "" } : null;
+}
+
+function collectLiveScopeOfWork(){
+  var items = SOW_CATEGORIES.map(function(cat){
+    var el = document.querySelector('[data-cat="' + cat + '"]');
+    return { category: cat, cost: (el && el.value) ? Number(el.value) : null };
+  });
+  var notesEl = document.querySelector('textarea[name="notes"]');
+  return { items: items, notes: notesEl ? notesEl.value : "" };
+}
+
+function buildScopeOfWorkPdfHtml(lead, items, notes, preparedBy, preparedAt){
+  var rows = items.filter(function(it){ return it.cost; }).map(function(it){
     return '<tr><td>' + esc(it.category) + '</td><td style="text-align:right">' + fmtUSD(it.cost) + '</td></tr>';
   }).join("");
+  var total = items.reduce(function(sum, it){ return sum + (it.cost||0); }, 0);
   var label = lead.loanType === "Ground Up Construction" ? "Construction Budget" : "Scope of Work";
-  var html = '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(label) + ' — ' + esc(lead.name) + '</title>' +
+  return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(label) + ' — ' + esc(lead.name) + '</title>' +
     '<style>' +
       'body{font-family:Georgia,serif;color:#1a1a1a;max-width:720px;margin:40px auto;padding:0 20px}' +
       'h1{font-size:1.4rem;margin-bottom:0}' +
@@ -1760,10 +1830,13 @@ function printScopeOfWork(leadId){
     '<div class="sub">' + esc(lead.name) + ' · ' + esc(lead.propertyAddress||"Property address TBD") + ' · ' + esc(lead.loanType||"") + '</div>' +
     '<table><thead><tr><th>Category</th><th style="text-align:right">Budget</th></tr></thead><tbody>' +
     (rows || '<tr><td colspan="2">No line items entered.</td></tr>') +
-    '</tbody><tfoot><tr><td>Total</td><td style="text-align:right">' + fmtUSD(sow.total) + '</td></tr></tfoot></table>' +
-    (sow.notes ? ('<div class="notes"><b>Notes:</b><br>' + esc(sow.notes) + '</div>') : '') +
-    '<div class="meta"><span>Prepared by ' + esc(sow.preparedBy||"") + '</span><span>' + fmtDate(sow.preparedAt) + '</span></div>' +
+    '</tbody><tfoot><tr><td>Total</td><td style="text-align:right">' + fmtUSD(total) + '</td></tr></tfoot></table>' +
+    (notes ? ('<div class="notes"><b>Notes:</b><br>' + esc(notes) + '</div>') : '') +
+    '<div class="meta"><span>Prepared by ' + esc(preparedBy||"") + '</span><span>' + fmtDate(preparedAt) + '</span></div>' +
     '</body></html>';
+}
+
+function openPrintWindow(html){
   var win = window.open("", "_blank");
   if (!win){ showToast("Pop-up blocked — allow pop-ups to export the PDF"); return; }
   win.document.open();
@@ -1772,6 +1845,21 @@ function printScopeOfWork(leadId){
   win.focus();
   win.onload = function(){ win.print(); };
   setTimeout(function(){ win.print(); }, 300);
+}
+
+function printScopeOfWork(leadId){
+  var lead = leadById(leadId);
+  if (!lead || !lead.scopeOfWork) return;
+  var sow = lead.scopeOfWork;
+  openPrintWindow(buildScopeOfWorkPdfHtml(lead, sow.items, sow.notes, sow.preparedBy, sow.preparedAt));
+}
+
+function previewScopeOfWork(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var live = collectLiveScopeOfWork();
+  var preparedBy = ui.publicApply ? lead.name : currentUser().name;
+  openPrintWindow(buildScopeOfWorkPdfHtml(lead, live.items, live.notes, preparedBy, todayISO()));
 }
 
 /* ---------------------------------------------------------------------
@@ -1874,6 +1962,12 @@ var BRAND_MARK = '<svg class="brand-mark" viewBox="0 0 40 40" fill="none" xmlns=
 
 function render(){
   var app = document.getElementById("app");
+  if (ui.publicApply){
+    app.innerHTML = renderPublicApply();
+    var toastHostPA = ui.toast ? ('<div class="toast" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+    app.insertAdjacentHTML("beforeend", toastHostPA);
+    return;
+  }
   if (!ui.loggedIn){
     app.innerHTML = renderLogin();
     var toastHost0 = document.getElementById("toast-host");
@@ -1901,6 +1995,38 @@ function render(){
   app.insertAdjacentHTML("beforeend", toastHTML);
 }
 
+function renderPublicApply(){
+  var pa = ui.publicApply;
+  var wrap = function(inner){
+    return '<div class="login-screen"><div class="login-card" style="max-width:560px">' +
+      '<div class="login-brand">' + BRAND_MARK + '<div><div class="brand-word">Bridgepoint</div><div class="brand-tag">Lending Desk</div></div></div>' +
+      inner +
+    '</div></div>';
+  };
+  if (pa.status === "loading"){
+    return wrap('<div class="view-sub" style="margin-top:16px">Loading your application…</div>');
+  }
+  if (pa.status === "invalid"){
+    return wrap('<h1 class="login-title">Link not found</h1><div class="login-sub">This application link is invalid or has expired. Please contact your loan officer for a new link.</div>');
+  }
+  var lead = state.leads[0];
+  if (pa.status === "submitted"){
+    return wrap('<h1 class="login-title">Thank you, ' + esc((lead.name||"").split(" ")[0]) + '!</h1>' +
+      '<div class="login-sub">Your application has been received. ' + esc(userName(lead.assignedTo)) + ' will follow up with you shortly.</div>');
+  }
+  if (stageIndex(lead.stage) >= stageIndex("processing")){
+    return wrap('<h1 class="login-title">Application locked</h1>' +
+      '<div class="login-sub">Your file is already in processing, so this link is now read-only. For any changes, please contact ' + esc(userName(lead.assignedTo)) + '.</div>');
+  }
+  return wrap(
+    '<h1 class="login-title">Loan Application</h1>' +
+    '<div class="login-sub">' + esc(lead.name) + ' · ' + esc(lead.loanType) + (lead.propertyAddress ? (' · ' + esc(lead.propertyAddress)) : '') + '</div>' +
+    '<form data-form="public-application" data-lead="' + lead.id + '" style="margin-top:18px">' +
+      buildApplicationFieldsHTML(lead) +
+      '<button class="btn btn-primary" style="width:100%;margin-top:14px" type="submit">Submit Application</button>' +
+    '</form>'
+  );
+}
 function renderLogin(){
   var brandBlock = '<div class="login-brand">' + BRAND_MARK + '<div><div class="brand-word">Bridgepoint</div><div class="brand-tag">Lending Desk</div></div></div>';
   return '<div class="login-screen"><div class="login-card">' + brandBlock +
@@ -2385,9 +2511,10 @@ function renderScopeOfWork(lead){
   if (lead.loanType !== "Fix & Flip" && lead.loanType !== "Ground Up Construction") return "";
   var label = lead.loanType === "Ground Up Construction" ? "Construction Budget" : "Scope of Work";
   var sow = lead.scopeOfWork;
+  var editable = canEditApplication(lead);
   var header = '<div class="section-head" style="margin-top:20px"><h2>' + label + '</h2>' +
     '<div style="display:flex;gap:8px">' +
-    '<button class="btn btn-sm" data-action="open-modal" data-modal="scopeOfWork" data-lead="' + lead.id + '">' + (sow ? "Edit" : "Create") + ' ' + label + '</button>' +
+    (editable ? ('<button class="btn btn-sm" data-action="open-modal" data-modal="scopeOfWork" data-lead="' + lead.id + '">' + (sow ? "Edit" : "Create") + ' ' + label + '</button>') : '') +
     (sow ? ('<button class="btn btn-sm" data-action="print-scope-of-work" data-lead="' + lead.id + '">Export PDF</button>') : '') +
     '</div></div>';
   if (!sow) return header + '<div class="hint">No ' + label.toLowerCase() + ' on file yet.</div>';
@@ -2507,8 +2634,10 @@ function renderRail(lead){
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<a class="btn btn-sm" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — " + lead.loanType) + '&body=' + encodeURIComponent(defaultOutreachMessage(lead)) + '" data-action="log-email" data-lead="' + lead.id + '">Email</a>' +
         (isProcessor() ? '' :
-          '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
-          '<button class="btn btn-sm" data-action="open-modal" data-modal="takeApplication" data-lead="' + lead.id + '">Take Application by Phone' + (lead.applicationTakenByPhone ? ' ✓' : '') + '</button>' +
+          (canEditApplication(lead) ? (
+            '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
+            '<button class="btn btn-sm" data-action="open-modal" data-modal="takeApplication" data-lead="' + lead.id + '">Take Application by Phone' + (lead.applicationTakenByPhone ? ' ✓' : '') + '</button>'
+          ) : '') +
           '<a class="btn btn-sm" href="' + XACTUS_PORTAL_URL + '" target="_blank" rel="noopener" data-action="order-credit" data-lead="' + lead.id + '">Order Credit' + (lead.creditOrderedAt ? ' ✓' : '') + '</a>'
         ) +
       '</div>' +
@@ -3008,7 +3137,7 @@ function modalSendApplication(leadId){
       '<div class="modal-body">' +
         '<div class="form-row"><label>Application link</label><input class="input mono" id="app-link-box" readonly value="' + esc(link) + '"></div>' +
         '<div class="form-row"><label>Message</label><textarea class="textarea" id="app-message-box" rows="3">' + esc(msg) + '</textarea></div>' +
-        '<div class="footnote" style="padding:0">Opens as a plain web page — no login, no PDF to print. They submit it and it emails straight to your applications inbox.</div>' +
+        '<div class="footnote" style="padding:0">Opens as a plain web page — no login required. When they submit it, it lands directly in this lead\'s file and notifies you here in the CRM.</div>' +
       '</div>' +
       '<div class="modal-foot" style="flex-wrap:wrap">' +
         '<button class="btn" type="button" data-action="copy-app-link">Copy Link</button>' +
@@ -3018,21 +3147,14 @@ function modalSendApplication(leadId){
       '</div>' +
     '</div></div>';
 }
-function modalTakeApplication(leadId){
-  var lead = leadById(leadId);
-  if (!lead) return "";
-  var entityOptions = ENTITY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.entityType===t?" selected":"") + '>' + t + '</option>'; }).join("");
-  var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("");
-  var exitOptions = EXIT_STRATEGIES.map(function(t){ return '<option value="' + t + '"' + (lead.exitStrategy===t?" selected":"") + '>' + t + '</option>'; }).join("");
+function buildScenarioFieldsHTML(lead){
   var v = function(x){ return x===null||x===undefined ? "" : x; };
   var loanType = lead.loanType;
   var isDSCR = loanType === "DSCR";
   var isRehabType = loanType === "Fix & Flip" || loanType === "Ground Up Construction" || loanType === "Bridge";
   var rehabLabel = loanType === "Ground Up Construction" ? "Construction Budget" : "Rehab Budget";
-  var scenarioFieldsHTML;
   if (isDSCR){
-    scenarioFieldsHTML =
-      '<div class="form-two">' +
+    return '<div class="form-two">' +
         '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
         '<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
       '</div>' +
@@ -3042,47 +3164,76 @@ function modalTakeApplication(leadId){
       '</div>' +
       '<div class="form-row"><label>Monthly HOA / Dues (if any)</label><input class="input" type="number" name="monthlyHoa" value="' + v(lead.monthlyHoa) + '"></div>';
   } else if (isRehabType){
-    scenarioFieldsHTML =
-      '<div class="form-two">' +
+    return '<div class="form-two">' +
         '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
         '<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
       '</div>' +
       '<div class="form-row"><label>' + rehabLabel + '</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>';
-  } else {
-    scenarioFieldsHTML =
-      '<div class="form-two">' +
-        '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
-        '<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
-      '</div>' +
-      '<div class="form-two">' +
-        '<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>' +
-        '<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
-      '</div>';
   }
+  return '<div class="form-two">' +
+      '<div class="form-row"><label>Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+      '<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>' +
+      '<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
+    '</div>';
+}
+function buildApplicationFieldsHTML(lead){
+  var v = function(x){ return x===null||x===undefined ? "" : x; };
+  var entityOptions = ENTITY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.entityType===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  var exitOptions = EXIT_STRATEGIES.map(function(t){ return '<option value="' + t + '"' + (lead.exitStrategy===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  return '<div class="form-two">' +
+      '<div class="form-row"><label>Entity Type</label><select class="select" name="entityType">' + entityOptions + '</select></div>' +
+      '<div class="form-row"><label>Credit Score</label><input class="input" type="number" name="creditScore" min="300" max="850" value="' + v(lead.creditScore) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Investing Experience (deals completed)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '"></div>' +
+      '<div class="form-row"><label>Liquidity / Reserves</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
+    '</div>' +
+    '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress" value="' + esc(lead.propertyAddress||"") + '"></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Property Type</label><select class="select" name="propertyType">' + propTypeOptions + '</select></div>' +
+      '<div class="form-row"><label>Exit Strategy</label><select class="select" name="exitStrategy">' + exitOptions + '</select></div>' +
+    '</div>' +
+    buildScenarioFieldsHTML(lead) +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Loan Amount Requested</label><input class="input" type="number" name="loanAmount" value="' + v(lead.loanAmount) + '"></div>' +
+      '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
+    '</div>' +
+    buildScopeOfWorkFieldsHTML(lead);
+}
+function buildScopeOfWorkFieldsHTML(lead){
+  if (lead.loanType !== "Fix & Flip" && lead.loanType !== "Ground Up Construction") return "";
+  var label = lead.loanType === "Ground Up Construction" ? "Construction Budget" : "Scope of Work";
+  var existing = {};
+  if (lead.scopeOfWork) lead.scopeOfWork.items.forEach(function(it){ existing[it.category] = it.cost; });
+  var rows = SOW_CATEGORIES.map(function(cat, i){
+    var val = existing[cat];
+    return '<div class="form-row" style="display:flex;align-items:center;gap:10px;margin-bottom:4px">' +
+      '<label style="flex:1;margin:0">' + esc(cat) + '</label>' +
+      '<input class="input" type="number" min="0" name="cost_' + i + '" data-cat="' + esc(cat) + '" value="' + (val ? val : "") + '" style="width:150px" placeholder="$0">' +
+      '</div>';
+  }).join("");
+  return '<div class="section-head" style="margin-top:20px">' +
+      '<h2 style="font-size:1rem">' + esc(label) + '</h2>' +
+      '<button class="btn btn-sm" type="button" data-action="preview-scope-of-work" data-lead="' + lead.id + '">Export PDF</button>' +
+    '</div>' +
+    '<div class="footnote" style="padding:0 0 8px">Enter a budget for each category that applies. Leave the rest blank.</div>' +
+    rows +
+    '<div class="form-row" style="margin-top:10px"><label>Scope Notes (timeline, details)</label><textarea class="textarea" name="notes" rows="3">' + esc((lead.scopeOfWork && lead.scopeOfWork.notes)||"") + '</textarea></div>';
+}
+function modalTakeApplication(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return "";
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
     '<div class="modal" data-stop="1" style="max-width:600px">' +
       '<div class="modal-head"><h3>Take Application by Phone — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
       '<form data-form="take-application" data-lead="' + lead.id + '">' +
       '<div class="modal-body">' +
         '<div class="footnote" style="padding:0">Fill this in while you\'re on the call. Saving marks the application complete and advances the loan to Application Completed.</div>' +
-        '<div class="form-two">' +
-          '<div class="form-row"><label>Entity Type</label><select class="select" name="entityType">' + entityOptions + '</select></div>' +
-          '<div class="form-row"><label>Credit Score</label><input class="input" type="number" name="creditScore" min="300" max="850" value="' + v(lead.creditScore) + '"></div>' +
-        '</div>' +
-        '<div class="form-two">' +
-          '<div class="form-row"><label>Investing Experience (deals completed)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '"></div>' +
-          '<div class="form-row"><label>Liquidity / Reserves</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
-        '</div>' +
-        '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress" value="' + esc(lead.propertyAddress||"") + '"></div>' +
-        '<div class="form-two">' +
-          '<div class="form-row"><label>Property Type</label><select class="select" name="propertyType">' + propTypeOptions + '</select></div>' +
-          '<div class="form-row"><label>Exit Strategy</label><select class="select" name="exitStrategy">' + exitOptions + '</select></div>' +
-        '</div>' +
-        scenarioFieldsHTML +
-        '<div class="form-two">' +
-          '<div class="form-row"><label>Loan Amount Requested</label><input class="input" type="number" name="loanAmount" value="' + v(lead.loanAmount) + '"></div>' +
-          '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
-        '</div>' +
+        buildApplicationFieldsHTML(lead) +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save Application</button></div>' +
       '</form>' +
@@ -3218,6 +3369,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
   else if (action === "load-required-docs"){ applyRequiredDocs(t.dataset.lead); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
+  else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "logout"){ logout(); }
   else if (action === "tour-next"){ ui.tourStep = (ui.tourStep||0)+1; render(); }
   else if (action === "tour-back"){ ui.tourStep = Math.max((ui.tourStep||0)-1,0); render(); }
@@ -3315,6 +3467,31 @@ appEl.addEventListener("submit", function(e){
       loanAmount: numOrNull("loanAmount"),
       termMonths: numOrNull("termMonths")
     });
+    var sowPatch = extractScopeOfWorkFromForm(fd);
+    if (sowPatch) saveScopeOfWork(form.dataset.lead, sowPatch.items, sowPatch.notes);
+    render();
+  } else if (type === "public-application"){
+    var numOrNullPub = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
+    submitPublicApplication(form.dataset.lead, {
+      entityType: fd.get("entityType"),
+      creditScore: numOrNullPub("creditScore"),
+      experienceDeals: numOrNullPub("experienceDeals"),
+      liquidity: numOrNullPub("liquidity"),
+      propertyAddress: fd.get("propertyAddress"),
+      propertyType: fd.get("propertyType"),
+      exitStrategy: fd.get("exitStrategy"),
+      purchasePrice: numOrNullPub("purchasePrice"),
+      arv: numOrNullPub("arv"),
+      rehabBudget: numOrNullPub("rehabBudget"),
+      rentEstimate: numOrNullPub("rentEstimate"),
+      monthlyTaxes: numOrNullPub("monthlyTaxes"),
+      monthlyInsurance: numOrNullPub("monthlyInsurance"),
+      monthlyHoa: numOrNullPub("monthlyHoa"),
+      loanAmount: numOrNullPub("loanAmount"),
+      termMonths: numOrNullPub("termMonths")
+    });
+    var sowPatchPub = extractScopeOfWorkFromForm(fd);
+    if (sowPatchPub) saveScopeOfWork(form.dataset.lead, sowPatchPub.items, sowPatchPub.notes);
     render();
   } else if (type === "send-back"){
     sendBackToLO(form.dataset.lead, fd.get("note"));
