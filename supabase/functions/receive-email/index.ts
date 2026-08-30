@@ -121,18 +121,37 @@ Deno.serve(async (req: Request) => {
 
         await sb.from("leads").update({ activity: activity, documents: documents }).eq("id", leadId);
 
+        const notifyText = filedNames.length
+          ? filedNames.join(", ") + " received from " + (matchedTp ? matchedTp.role : fromAddress)
+          : "New email reply from " + (leadRow.name || fromAddress);
+
         if (leadRow.assigned_to) {
           await sb.from("notifications").insert({
             id: "notif-" + crypto.randomUUID(),
             to_user_id: leadRow.assigned_to,
             lead_id: leadId,
             kind: "email",
-            text: filedNames.length
-              ? filedNames.join(", ") + " received from " + (matchedTp ? matchedTp.role : fromAddress)
-              : "New email reply from " + (leadRow.name || fromAddress),
+            text: notifyText,
             date: new Date().toISOString().slice(0, 10),
             read: false,
           });
+        }
+
+        // Title/insurance requests are coordinated through processing --
+        // make sure they see it land too, not just the assigned LO.
+        if (docLabel) {
+          const { data: processors } = await sb.from("users").select("id").eq("role", "processor");
+          for (const p of processors || []) {
+            await sb.from("notifications").insert({
+              id: "notif-" + crypto.randomUUID(),
+              to_user_id: p.id,
+              lead_id: leadId,
+              kind: "email",
+              text: docLabel + " returned for " + (leadRow.name || "a borrower") + " — " + notifyText,
+              date: new Date().toISOString().slice(0, 10),
+              read: false,
+            });
+          }
         }
       }
     }

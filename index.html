@@ -2475,34 +2475,64 @@ function toggleProcessingAction(leadId, kind){
   persist();
 }
 
+function processingContact(){
+  return state.users.filter(function(u){ return u.role==="processor"; })[0] || currentUser();
+}
 function requestThirdPartyDoc(leadId, role){
   var lead = leadById(leadId);
   if (!lead) return;
   var tp = (lead.thirdParties||[]).filter(function(t){ return t.role===role; })[0];
   if (!tp || !tp.email){ showToast("Add a " + role + " contact (with email) first"); return; }
   var isTitle = role === "Title Company";
-  var docLabel = isTitle ? "title commitment" : "insurance policy";
-  var lo = currentUser();
+  var proc = processingContact();
   var subject = "Bridgepoint Lending — " + (isTitle ? "Title Commitment" : "Insurance Policy") + " Request — " + (lead.propertyAddress || lead.name);
-  var bodyLines = [
-    "Hi " + (tp.name||"").split(" ")[0] + ",",
-    "",
-    "Could you send over the " + docLabel + " for the file below when it's ready?",
-    "",
-    "Borrower: " + lead.name,
-    "Property: " + (lead.propertyAddress || "TBD"),
-    "Loan Amount: " + fmtUSD(lead.loanAmount),
-    "Loan Type: " + lead.loanType
-  ];
-  if (!isTitle && lead.loanType === "DSCR"){
-    bodyLines.push("", "Coverage requirements: full replacement cost, coverage equal to the lesser of 100% of insurable value or unpaid principal balance, plus 6 months of rent-loss coverage.");
+  var bodyLines;
+  if (isTitle){
+    bodyLines = [
+      "Hello,",
+      "",
+      "I am " + (proc.name||"Erika").split(" ")[0] + " with Bridgepoint Lending. I am reaching for our borrower " + lead.name + " for property address " + (lead.propertyAddress || "TBD") + ".",
+      "",
+      "Please provide the below documents:",
+      "",
+      "Title / Closing / Escrow Company & Agent Name & Wire Instructions to confirm Secure Insight Registration/Approval",
+      "",
+      "Title Commitment dated within 90 days; Lender's policy must be equal to loan amount; 24-month Chain of Title and Tax Certificate. Proposed Insured issued to: BPL Mortgage, LLC ISAOA/ATIMA 1801 S Meyers Road, Suite 400, Oakbrook Terrace, IL 60181",
+      "",
+      "Preliminary Title Fees / Closing Fees / Recording Fees",
+      "",
+      "CPL: Must reference Borrower name loan is closing in and loan # Issued for : BPL Mortgage, LLC ISAOA/ATIMA 1801 S. Meyers Road, Suite 400, Oakbrook Terrace, IL 60181",
+      "",
+      "Most recent property tax bill from county website",
+      "",
+      "If you have any questions, please feel free to reach out via email or phone.",
+      "",
+      "Thank you!",
+      "",
+      "Also, if there is no survey required than the survey exception must be removed from the Lender's final policy and/or the Lender's policy must be issued with a NO SURVEY endorsement and you will need to reply back that you have acknowledged the removal of it."
+    ];
+  } else {
+    bodyLines = [
+      "Hi " + (tp.name||"").split(" ")[0] + ",",
+      "",
+      "Could you send over the insurance policy for the file below when it's ready?",
+      "",
+      "Borrower: " + lead.name,
+      "Property: " + (lead.propertyAddress || "TBD"),
+      "Loan Amount: " + fmtUSD(lead.loanAmount),
+      "Loan Type: " + lead.loanType
+    ];
+    if (lead.loanType === "DSCR"){
+      bodyLines.push("", "Coverage requirements: full replacement cost, coverage equal to the lesser of 100% of insurable value or unpaid principal balance, plus 6 months of rent-loss coverage.");
+    }
   }
-  bodyLines.push("", "Thanks,", lo.name);
+  bodyLines.push("", "");
+  bodyLines = bodyLines.concat(loContactLines(proc));
   var text = bodyLines.join("\n");
 
   if (!sb){ showToast("Email service unavailable"); return; }
   sb.functions.invoke("send-email", {
-    body: { leadId: lead.id, to: tp.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id }
+    body: { leadId: lead.id, to: tp.email, subject: subject, text: text, fromName: proc.name, fromAddress: proc.email, fromUserId: proc.id }
   }).then(function(res){
     if (res.error || !res.data || !res.data.ok){
       showToast("Couldn't send the request — try again");
@@ -2510,7 +2540,7 @@ function requestThirdPartyDoc(leadId, role){
     }
     if (isTitle) lead.titleRequestedAt = todayISO(); else lead.insuranceRequestedAt = todayISO();
     lead.activity = lead.activity || [];
-    lead.activity.push({ date: todayISO(), type:"notify", text: (isTitle?"Title commitment":"Insurance policy") + " requested from " + tp.name, author: lo.name });
+    lead.activity.push({ date: todayISO(), type:"notify", text: (isTitle?"Title commitment":"Insurance policy") + " requested from " + tp.name, author: proc.name });
     showToast((isTitle?"Title commitment":"Insurance policy") + " request sent to " + tp.name);
     persist();
   }).catch(function(){
