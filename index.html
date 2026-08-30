@@ -2495,6 +2495,19 @@ function setLoanDetails(leadId, loanAmount, rate, termMonths){
   showToast("Loan details updated");
   persist();
 }
+var PRICING_INPUT_KEYS = ["creditScore","purchasePrice","rentEstimate","experienceDeals","rehabBudget","propertyCount","citizenshipStatus"];
+function setPricingInputs(leadId, fd){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var numOrNull = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
+  PRICING_INPUT_KEYS.forEach(function(k){
+    if (!fd.has(k)) return;
+    lead[k] = (k === "citizenshipStatus") ? (fd.get(k) || null) : numOrNull(k);
+  });
+  if (lead.purchasePrice && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/lead.purchasePrice)*1000)/10;
+  showToast("Pricing inputs saved");
+  persist();
+}
 function toggleLanguage(leadId){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -3134,6 +3147,7 @@ function renderShell(){
       '</div>' +
       '<nav class="nav">' +
         navItem("today","☎","Today", callsDue||null) +
+        (!isProcessor() ? navItem("pricer","🧮","Pricer") : "") +
         navItem("pipeline","▤","Pipeline") +
         navItem("leads","☰","Leads & Loans", leads.length) +
         navItem("comms","✉","Communications") +
@@ -3160,6 +3174,7 @@ function renderShell(){
 
   var body = "";
   if (ui.view === "today") body = renderToday();
+  else if (ui.view === "pricer") body = renderStandalonePricer();
   else if (ui.view === "pipeline") body = renderPipeline();
   else if (ui.view === "leads") body = renderLeadsTable();
   else if (ui.view === "detail") body = renderLeadDetail();
@@ -3296,6 +3311,82 @@ function renderTeamSnapshot(){
   '</div>';
 }
 
+var STANDALONE_PRICER_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction","Portfolio/Blanket"];
+var STANDALONE_PRICER_NUMERIC_KEYS = ["creditScore","purchasePrice","loanAmount","rentEstimate","experienceDeals","rehabBudget","propertyCount","termMonths"];
+function defaultStandalonePricer(){
+  return {
+    loanType:"DSCR", propertyType:"SFR", creditScore:null, purchasePrice:null, loanAmount:null,
+    rentEstimate:null, experienceDeals:null, rehabBudget:null, propertyCount:null,
+    citizenshipStatus:null, transactionType:"purchase", prepayTerm:"5yr", points:"1.00", termMonths:360
+  };
+}
+function renderStandalonePricer(){
+  ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
+  var sp = ui.standalonePricer;
+  var isDSCR = sp.loanType === "DSCR" || sp.loanType === "Portfolio/Blanket";
+  var isPortfolio = sp.loanType === "Portfolio/Blanket";
+  var isRTL = sp.loanType === "Fix & Flip" || sp.loanType === "Bridge" || sp.loanType === "Ground Up Construction";
+  var v = function(x){ return x!=null ? x : ""; };
+  var sel = function(name, value){ return sp[name]===value ? " selected" : ""; };
+
+  var loanTypeOptions = STANDALONE_PRICER_LOAN_TYPES.map(function(t){ return '<option value="' + t + '"' + sel("loanType", t) + '>' + t + '</option>'; }).join("");
+  var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + sel("propertyType", t) + '>' + t + '</option>'; }).join("");
+  var citizenshipOptions = '<option value="">—</option>' + CITIZENSHIP_STATUSES.map(function(t){ return '<option value="' + t + '"' + sel("citizenshipStatus", t) + '>' + t + '</option>'; }).join("");
+
+  var fields = '<div class="form-two">' +
+      '<div class="form-row"><label>Loan Type</label><select class="select" name="loanType" data-action="standalone-pricer-field">' + loanTypeOptions + '</select></div>' +
+      '<div class="form-row"><label>Property Type</label><select class="select" name="propertyType" data-action="standalone-pricer-field">' + propTypeOptions + '</select></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Credit Score</label><input class="input" type="number" min="300" max="850" name="creditScore" data-action="standalone-pricer-field" value="' + v(sp.creditScore) + '"></div>' +
+      '<div class="form-row"><label>' + (isPortfolio?"Total ":"") + 'Purchase Price</label><input class="input" type="number" name="purchasePrice" data-action="standalone-pricer-field" value="' + v(sp.purchasePrice) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>Loan Amount Requested</label><input class="input" type="number" name="loanAmount" data-action="standalone-pricer-field" value="' + v(sp.loanAmount) + '"></div>' +
+      '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" data-action="standalone-pricer-field" value="' + v(sp.termMonths) + '"></div>' +
+    '</div>' +
+    (isDSCR ? ('<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" data-action="standalone-pricer-field" value="' + v(sp.rentEstimate) + '"></div>') : '') +
+    (isRTL ? ('<div class="form-two">' +
+        '<div class="form-row"><label>Investing Experience (deals)</label><input class="input" type="number" min="0" name="experienceDeals" data-action="standalone-pricer-field" value="' + v(sp.experienceDeals) + '"></div>' +
+        '<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" data-action="standalone-pricer-field" value="' + v(sp.rehabBudget) + '"></div>' +
+      '</div>') : '') +
+    (isPortfolio ? ('<div class="form-row"><label>Number of Properties</label><input class="input" type="number" min="1" name="propertyCount" data-action="standalone-pricer-field" value="' + v(sp.propertyCount) + '"></div>') : '') +
+    '<div class="form-row"><label>Citizenship Status</label><select class="select" name="citizenshipStatus" data-action="standalone-pricer-field">' + citizenshipOptions + '</select></div>' +
+    (isDSCR ? ('<div class="form-two">' +
+        '<div class="form-row"><label>Transaction Type</label><select class="select" name="transactionType" data-action="standalone-pricer-field">' +
+          TRANSACTION_TYPES.map(function(t){ return '<option value="' + t.key + '"' + sel("transactionType", t.key) + '>' + t.label + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-row"><label>Prepayment Penalty</label><select class="select" name="prepayTerm" data-action="standalone-pricer-field">' +
+          PREPAY_TERMS.map(function(t){ return '<option value="' + t.key + '"' + sel("prepayTerm", t.key) + '>' + t.label + '</option>'; }).join("") +
+        '</select></div>' +
+      '</div>') : ('<div class="form-row"><label>Rate Buy Down (points)</label><select class="select" name="points" data-action="standalone-pricer-field">' +
+        '<option value="1.00"' + sel("points","1.00") + '>1.00</option><option value="0.50"' + sel("points","0.50") + '>0.50</option><option value="0.00"' + sel("points","0.00") + '>0.00</option>' +
+      '</select></div>'));
+
+  var result = evaluatePricing(sp, sp);
+  var output;
+  if (!result){
+    output = '<div class="hint">Fill in credit score, purchase price, and loan amount to see live pricing.</div>';
+  } else if (result.ineligible){
+    output = '<div class="hint" style="color:var(--c-rust)">' + esc(result.reason) + '</div>';
+  } else {
+    var ysp = yspRevenue(sp);
+    var rows = field("Rate", fmtPct(result.rate), true) +
+      field("Lender Fee", fmtUSD(result.fee), true) +
+      (isDSCR ? field("Wholesale Price", result.price ? result.price.toFixed(3) : "—", true) : "") +
+      (isDSCR ? field("Yield Spread (YSP)", ysp ? fmtUSD(ysp) : (result.noYspAllowed ? "Not available" : "None (par or better)"), true) : "") +
+      (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
+      (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
+    output = '<div class="field-grid">' + rows + '</div>' +
+      (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
+      '<div style="margin-top:14px"><button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button></div>';
+  }
+
+  return topbar("Pricer", "Price any scenario across DSCR, Fix & Flip, Bridge, Ground Up Construction, and Portfolio/Blanket — Mixed-Use isn't modeled yet, no real rate sheet for it.", "") +
+    '<div class="content"><div class="panel panel-pad" style="max-width:640px">' +
+      fields + '<div class="section-head" style="margin-top:20px"><h2>Result</h2></div>' + output +
+    '</div></div>';
+}
 function renderToday(){
   var leads = scopedLeads();
   var k = kpisFor(leads);
@@ -3601,7 +3692,28 @@ function renderTabScenario(lead){
     field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderLoanDetailsEditor(lead) + renderGuidelineCheck(lead) + renderPricer(lead) + renderScopeOfWork(lead);
+  '</div>' + renderLoanDetailsEditor(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderScopeOfWork(lead);
+}
+
+function renderPricingInputsEditor(lead){
+  if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
+  var isDSCR = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
+  var isPortfolio = lead.loanType === "Portfolio/Blanket";
+  var isRTL = lead.loanType === "Fix & Flip" || lead.loanType === "Bridge" || lead.loanType === "Ground Up Construction";
+  var v = function(x){ return x!=null ? x : ""; };
+  var citizenshipOptions = '<option value="">—</option>' + CITIZENSHIP_STATUSES.map(function(t){ return '<option value="' + t + '"' + (lead.citizenshipStatus===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  return '<div class="section-head" style="margin-top:20px"><h2>Pricing Inputs</h2></div>' +
+    '<div class="footnote" style="padding:0 0 8px">What the Pricer below needs to run a real quote — fill in whatever\'s still missing.</div>' +
+    '<form data-form="pricing-inputs" data-lead="' + lead.id + '" class="form-two" style="align-items:flex-end">' +
+      '<div class="form-row"><label>Credit Score</label><input class="input" type="number" min="300" max="850" name="creditScore" value="' + v(lead.creditScore) + '"></div>' +
+      '<div class="form-row"><label>' + (isPortfolio?"Total ":"") + 'Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+      (isDSCR ? ('<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>') : '') +
+      (isRTL ? ('<div class="form-row"><label>Investing Experience (deals)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '"></div>') : '') +
+      (isRTL ? ('<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>') : '') +
+      (isPortfolio ? ('<div class="form-row"><label>Number of Properties</label><input class="input" type="number" min="1" name="propertyCount" value="' + v(lead.propertyCount) + '"></div>') : '') +
+      '<div class="form-row"><label>Citizenship Status</label><select class="select" name="citizenshipStatus">' + citizenshipOptions + '</select></div>' +
+      '<div class="form-row"><button class="btn btn-sm btn-primary" type="submit">Save Pricing Inputs</button></div>' +
+    '</form>';
 }
 
 function renderPricer(lead){
@@ -4203,6 +4315,7 @@ function renderPortal(){
 function renderModal(){
   if (!ui.modal) return "";
   if (ui.modal.type === "addLead") return modalAddLead();
+  if (ui.modal.type === "createLeadFromPricer") return modalCreateLeadFromPricer();
   if (ui.modal.type === "importLeads") return modalImportLeads();
   if (ui.modal.type === "logCall") return modalLogCall(ui.modal.leadId);
   if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
@@ -4652,6 +4765,60 @@ function modalSendText(leadId){
       '</div>' +
     '</div></div>';
 }
+function modalCreateLeadFromPricer(){
+  var loOptions = ownerOptions(currentUser().id);
+  var srcOptions = SOURCES.map(function(s){ return '<option value="' + s + '">' + s + '</option>'; }).join("");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Create Lead From This Scenario</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="create-lead-from-pricer">' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0 0 10px">Carries over every field from the Pricer — loan type, credit score, amounts, property type, and the computed rate. Just needs a name to contact them.</div>' +
+        '<div class="form-row"><label>Name</label><input class="input" name="name" required></div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Email</label><input class="input" type="email" name="email"></div>' +
+          '<div class="form-row"><label>Phone</label><input class="input" name="phone" required></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Source</label><select class="select" name="source">' + srcOptions + '</select></div>' +
+          '<div class="form-row"><label>Assign to</label><select class="select" name="assignedTo">' + loOptions + '</select></div>' +
+        '</div>' +
+        '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress"></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Create Lead</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+function createLeadFromScenario(data){
+  var sp = ui.standalonePricer || defaultStandalonePricer();
+  var id = nextLeadId();
+  var d = todayISO();
+  var result = evaluatePricing(sp, sp);
+  var lead = {
+    id:id, name:data.name, email:data.email||null, phone:data.phone, source:data.source, loanType: sp.loanType,
+    stage:"new", status:"active", assignedTo:data.assignedTo, createdAt:d, createdAtTs:nowTs(), firstAttemptAt:null,
+    entityType:"LLC", creditScore: sp.creditScore, experienceDeals: sp.experienceDeals, liquidity:null,
+    propertyAddress: data.propertyAddress||"", propertyType: sp.propertyType, purchasePrice: sp.purchasePrice, arv:null, rehabBudget: sp.rehabBudget,
+    rentEstimate: sp.rentEstimate, loanAmount: sp.loanAmount,
+    ltv: (sp.purchasePrice && sp.loanAmount) ? Math.round((sp.loanAmount/sp.purchasePrice)*1000)/10 : null,
+    rate: (result && !result.ineligible) ? result.rate : null, termMonths: sp.termMonths,
+    exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null, pointsCharged:null,
+    callAttempts:[], documents:[], thirdParties:[], applicationToken: randomToken(),
+    citizenshipStatus: sp.citizenshipStatus, transactionType: sp.transactionType, prepayTerm: sp.prepayTerm,
+    propertyCount: sp.propertyCount,
+    activity:[{ date:d, type:"note", text:"Lead created from the Pricer (" + sp.loanType + " scenario)", author: currentUser().name }]
+  };
+  state.leads.unshift(lead);
+  var addedDocs = applyRequiredDocs(id, { silent:true }) || [];
+  if (addedDocs.length){
+    lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
+  }
+  ui.standalonePricer = null;
+  ui.modal = null;
+  showToast("Created " + lead.name + " from pricer scenario");
+  ui.view = "detail"; ui.selectedLeadId = id; ui.activeTab = "scenario";
+  persist();
+}
 function modalAddLead(){
   var loOptions = ownerOptions();
   var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
@@ -4934,6 +5101,14 @@ appEl.addEventListener("change", function(e){
     ui.pricerInputs[t.dataset.lead] = ui.pricerInputs[t.dataset.lead] || {};
     ui.pricerInputs[t.dataset.lead][t.dataset.key] = t.value;
     syncPricerRateToLead(t.dataset.lead);
+  } else if (action === "standalone-pricer-field"){
+    ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
+    var spKey = t.name;
+    var spVal = t.value;
+    ui.standalonePricer[spKey] = (STANDALONE_PRICER_NUMERIC_KEYS.indexOf(spKey) !== -1)
+      ? (spVal === "" ? null : Number(spVal))
+      : (spVal || null);
+    render();
   }
 });
 
@@ -4992,6 +5167,11 @@ appEl.addEventListener("submit", function(e){
       source: fd.get("source"), loanType: fd.get("loanType"), assignedTo: fd.get("assignedTo"),
       loanAmount: fd.get("loanAmount") ? Number(fd.get("loanAmount")) : null,
       propertyAddress: fd.get("propertyAddress")
+    });
+  } else if (type === "create-lead-from-pricer"){
+    createLeadFromScenario({
+      name: fd.get("name"), email: fd.get("email"), phone: fd.get("phone"),
+      source: fd.get("source"), assignedTo: fd.get("assignedTo"), propertyAddress: fd.get("propertyAddress")
     });
   } else if (type === "take-application"){
     var numOrNull = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
@@ -5103,6 +5283,8 @@ appEl.addEventListener("submit", function(e){
     var ldRate = fd.get("rate") ? Number(fd.get("rate")) : null;
     var ldTerm = fd.get("termMonths") ? Number(fd.get("termMonths")) : null;
     setLoanDetails(form.dataset.lead, ldLoanAmount, ldRate, ldTerm);
+  } else if (type === "pricing-inputs"){
+    setPricingInputs(form.dataset.lead, fd);
   } else if (type === "rate"){
     updateMarketRate(form.dataset.key, Number(fd.get("rate")));
     form.reset();
