@@ -835,20 +835,53 @@ function monthlyPayment(principal, annualRatePct, termMonths){
   var r = (annualRatePct/100) / 12;
   return principal * r / (1 - Math.pow(1+r, -termMonths));
 }
+function stateFromAddress(address){
+  if (!address) return null;
+  var m = /,\s*([A-Za-z]{2})\s*\d{0,5}\s*$/.exec(address.trim());
+  return m ? m[1].toUpperCase() : null;
+}
+// RTL/Ground Up Matrix "Non-Cumulative Adjustments to Max LTV, ILTC/LTC & LTARV" --
+// same table appears in both the RTL Matrix (1.1.26) and Ground Up Matrix (1.1.26).
+// Adjustments don't stack; only the state-based one is applied here since
+// Foreign National is already routed to manual pricing separately. NY is
+// county-dependent (-15% for the five boroughs, -5% for Suffolk/Nassau, 0
+// elsewhere in-state) which isn't reliably parseable from a mailing address,
+// so it's flagged for manual verification instead of guessing a bucket.
+function rtlStateLeverageAdj(address){
+  var state = stateFromAddress(address);
+  if (state === "FL" || state === "TX") return { adj:-5, state:state, needsManualCheck:false };
+  if (state === "NY") return { adj:0, state:state, needsManualCheck:true };
+  return { adj:0, state:state, needsManualCheck:false };
+}
 function evaluateGuidelines(lead){
   var checks = [];
   function check(label, pass, detail){ checks.push({ label:label, pass:!!pass, detail:detail }); }
   var type = lead.loanType;
+  var stateAdj = (type === "Fix & Flip" || type === "Bridge" || type === "Ground Up Construction")
+    ? rtlStateLeverageAdj(lead.propertyAddress) : null;
+  var propState = stateFromAddress(lead.propertyAddress);
+  if (propState){
+    check("State eligibility", ["ND","SD","NV"].indexOf(propState) === -1,
+      propState + " — not currently licensed in ND, SD, or NV");
+  }
+  if (type === "DSCR" && propState && ["CO","NY","FL","VA","GA"].indexOf(propState) !== -1){
+    check("Entity requirement", !!(lead.entityType && lead.entityType !== "Individual"),
+      propState + " properties must close in an entity name (LLC/Corp), not individually" + (lead.entityType ? " — currently " + lead.entityType : ""));
+  }
 
   if (type === "DSCR"){
+    var isRural = lead.ruralStatus === "rural";
     check("Loan amount", lead.loanAmount>=50000 && lead.loanAmount<=2000000,
       fmtUSD(lead.loanAmount) + " — needs to be $50,000–$2,000,000");
-    check("Credit score", (lead.creditScore||0) >= 660, (lead.creditScore||"—") + " — 660 minimum");
+    check("Credit score", (lead.creditScore||0) >= (isRural?720:660), (lead.creditScore||"—") + " — " + (isRural?"720":"660") + " minimum" + (isRural?" for rural properties":""));
     if (lead.purchasePrice && lead.loanAmount){
       var ltv = lead.loanAmount / lead.purchasePrice * 100;
       var tier = DSCR_LTV_BY_FICO.filter(function(t){ return (lead.creditScore||0) >= t.minFico; })[0];
-      var maxLtv = tier ? tier.purchase : DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length-1].purchase;
-      check("LTV", ltv <= maxLtv, ltv.toFixed(0) + "% — max " + maxLtv + "% for this credit score band");
+      var maxLtv = isRural ? 65 : (tier ? tier.purchase : DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length-1].purchase);
+      check("LTV", ltv <= maxLtv, ltv.toFixed(0) + "% — max " + maxLtv + "%" + (isRural ? " for rural properties (65% cap regardless of credit score)" : " for this credit score band"));
+    }
+    if (isRural){
+      check("Rural property notice", true, "Rural properties require 65% max LTV, DSCR > 1.20x, and FICO ≥ 720 per the DSCR Rental Matrix — confirm with underwriting before quoting");
     }
     if (lead.rentEstimate && lead.loanAmount && lead.rate){
       var pi = monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths||360);
@@ -858,7 +891,8 @@ function evaluateGuidelines(lead){
           ? pi + (lead.monthlyTaxes||0) + (lead.monthlyInsurance||0) + (lead.monthlyHoa||0)
           : pi * 1.2;
         var dscr = lead.rentEstimate / pitia;
-        check("DSCR", dscr >= 1.0, dscr.toFixed(2) + "x" + (hasRealExpenses
+        var minDscr = isRural ? 1.20 : 1.0;
+        check("DSCR", dscr >= minDscr, dscr.toFixed(2) + "x — " + minDscr.toFixed(2) + "x minimum" + (isRural?" for rural properties":"") + (hasRealExpenses
           ? " (P&I " + fmtUSD(pi) + " + taxes/insurance/HOA " + fmtUSD(pitia-pi) + ")"
           : " — estimated, add monthly tax/insurance for an exact number"));
       }
@@ -900,8 +934,20 @@ function evaluateGuidelines(lead){
     var tierName = experienceTier(lead.experienceDeals);
     var rClass = type === "Bridge" ? "bridge" : rehabClass(lead);
     var limits = RTL_TIERS[tierName][rClass];
+    if (limits && stateAdj && stateAdj.adj){
+      limits = Object.assign({}, limits);
+      if (limits.ltc!=null) limits.ltc += stateAdj.adj;
+      if (limits.iltc!=null) limits.iltc += stateAdj.adj;
+      if (limits.ltarv!=null) limits.ltarv += stateAdj.adj;
+    }
     check("Experience / rehab scope", !!limits,
       (lead.experienceDeals||0) + " deal(s) (" + tierName + ") — " + rClass + " rehab" + (limits ? "" : " isn't eligible at this experience level"));
+    if (stateAdj && stateAdj.adj){
+      check("State leverage adjustment", true, stateAdj.state + " property — max leverage reduced " + stateAdj.adj + "% per the RTL Matrix's non-cumulative state adjustment table");
+    }
+    if (stateAdj && stateAdj.needsManualCheck){
+      check("NY county leverage adjustment", false, "NY properties in Bronx/New York/Richmond/Kings/Queens are -15%, Suffolk/Nassau are -5% — verify the county manually, not auto-applied");
+    }
     if (limits){
       if (rClass === "bridge"){
         if (lead.purchasePrice && lead.loanAmount){
@@ -930,8 +976,20 @@ function evaluateGuidelines(lead){
     check("Credit score", (lead.creditScore||0) >= 700, (lead.creditScore||"—") + " — 700 minimum");
     var guTierName = experienceTier(lead.experienceDeals);
     var guLimits = GROUNDUP_TIERS[guTierName];
+    if (guLimits && stateAdj && stateAdj.adj){
+      guLimits = Object.assign({}, guLimits);
+      if (guLimits.iltc!=null) guLimits.iltc += stateAdj.adj;
+      if (guLimits.totalLtc!=null) guLimits.totalLtc += stateAdj.adj;
+      if (guLimits.ltarv!=null) guLimits.ltarv += stateAdj.adj;
+    }
     check("Experience", !!guLimits,
       (lead.experienceDeals||0) + " deal(s) (" + guTierName + ") — ground-up isn't eligible under 3 completed deals");
+    if (stateAdj && stateAdj.adj){
+      check("State leverage adjustment", true, stateAdj.state + " property — max leverage reduced " + stateAdj.adj + "% per the Ground Up Matrix's non-cumulative state adjustment table");
+    }
+    if (stateAdj && stateAdj.needsManualCheck){
+      check("NY county leverage adjustment", false, "NY properties in Bronx/New York/Richmond/Kings/Queens are -15%, Suffolk/Nassau are -5% — verify the county manually, not auto-applied");
+    }
     if (guLimits){
       if (lead.purchasePrice && lead.loanAmount){
         var guInitialAdvance = lead.loanAmount - (lead.rehabBudget||0);
