@@ -2124,6 +2124,27 @@ function submitPhoneApplication(leadId, patch){
   showToast("Application saved for " + lead.name);
   runGuidelineCheck(leadId);
 }
+function sendDocumentViaEmail(leadId, kind){
+  var lead = leadById(leadId);
+  if (!lead || !lead.email) { showToast("No email on file for this borrower"); return; }
+  if (!sb){ showToast("Email service unavailable"); return; }
+  var isTerm = kind === "termSheet";
+  var label = isTerm ? "Term Sheet" : "Pre-Approval Letter";
+  var body = isTerm ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
+  var lo = docLoanOfficer(lead);
+  var subject = "Bridgepoint Lending — Your " + label;
+  sb.functions.invoke("send-email", {
+    body: { leadId: lead.id, to: lead.email, subject: subject, text: body, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
+  }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){
+      showToast("Couldn't send — try Open in Email App instead");
+      return;
+    }
+    sendDocumentAction(leadId, kind, "email");
+  }).catch(function(){
+    showToast("Couldn't send — try Open in Email App instead");
+  });
+}
 function sendDocumentAction(leadId, kind, channel){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -4067,12 +4088,13 @@ function modalSendDocument(leadId, kind){
       '<div class="modal-head"><h3>Send ' + label + ' — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
       '<div class="modal-body">' +
         docHTMLPreview(lead, kind) +
-        '<div class="footnote" style="padding:0">Includes ' + esc(lo.name||"the loan officer") + '\'s name, title, and contact info, with a typed signature. Emails the full letter; texts a short heads-up pointing to the borrower\'s inbox.</div>' +
+        '<div class="footnote" style="padding:0">Includes ' + esc(lo.name||"the loan officer") + '\'s name, title, and contact info, with a typed signature. "Send via Email" emails the full letter straight to ' + esc(lead.email||"the borrower") + ' automatically; "Text Heads-Up" sends a short text to ' + esc(lead.phone||"the borrower") + ' pointing them to check their inbox.</div>' +
       '</div>' +
       '<div class="modal-foot" style="flex-wrap:wrap">' +
-        '<a class="btn" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — Your " + label) + '&body=' + encodeURIComponent(body) + '" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="email">Email It</a>' +
-        '<a class="btn" href="sms:' + esc(digits) + '?&body=' + encodeURIComponent(smsMsg) + '" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="text">Text It</a>' +
-        '<button class="btn btn-primary" type="button" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="manually">Mark as Sent</button>' +
+        '<a class="btn" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — Your " + label) + '&body=' + encodeURIComponent(body) + '" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="email">Open in Email App</a>' +
+        '<a class="btn" href="sms:' + esc(digits) + '?&body=' + encodeURIComponent(smsMsg) + '" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="text">Text Heads-Up</a>' +
+        '<button class="btn btn-ghost" type="button" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="manually">Mark as Sent</button>' +
+        '<button class="btn btn-primary" type="button" data-action="send-document-email" data-lead="' + lead.id + '" data-kind="' + kind + '"' + (lead.email?'':' disabled') + '>Send via Email</button>' +
       '</div>' +
     '</div></div>';
 }
@@ -4620,6 +4642,11 @@ appEl.addEventListener("click", function(e){
   else if (action === "send-document"){
     sendDocumentAction(t.dataset.lead, t.dataset.kind, t.dataset.channel);
     if (t.dataset.channel === "manually"){ ui.modal = null; render(); }
+  }
+  else if (action === "send-document-email"){
+    sendDocumentViaEmail(t.dataset.lead, t.dataset.kind);
+    ui.modal = null;
+    render();
   }
   else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
