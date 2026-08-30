@@ -1264,12 +1264,35 @@ function pointsRevenue(lead){
 }
 function yspRevenue(lead){
   if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return 0;
+  if (!lead.loanAmount) return 0;
+  var noYsp = (lead.prepayTerm === "none") || (lead.propertyType === "Multifamily 5+");
+  if (noYsp) return 0;
+  if (lead.rate){
+    var priceRow = DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate - lead.rate) < 0.001; })[0];
+    if (priceRow) return Math.max(0, Math.round((priceRow.price - 100) / 100 * lead.loanAmount * 100) / 100);
+  }
   var inputs = { propertyType: lead.propertyType, transactionType: lead.transactionType || "purchase", prepayTerm: lead.prepayTerm || "5yr", points:"1.00" };
   var result = evaluatePricing(lead, inputs);
   return (result && !result.ineligible && result.yspDollar) ? result.yspDollar : 0;
 }
 function commissionAmount(lead){
   return (pointsRevenue(lead) + yspRevenue(lead)) * COMMISSION_SPLIT;
+}
+function processingFeeRevenue(lead){
+  var inputs = { propertyType: lead.propertyType, transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", points:"1.00" };
+  var result = evaluatePricing(lead, inputs);
+  return (result && !result.ineligible && result.fee) ? result.fee : 0;
+}
+function payrollFor(lead){
+  var skipLo = lead.assignedTo === "owner";
+  return {
+    lead: lead,
+    loName: userName(lead.assignedTo),
+    loCommission: skipLo ? 0 : commissionAmount(lead),
+    skipLo: skipLo,
+    processorName: processingContact().name,
+    processorFee: processingFeeRevenue(lead)
+  };
 }
 function commissionSummaryFor(userId){
   var today = startOfToday();
@@ -2195,6 +2218,15 @@ function moveStage(leadId, target){
     lead.status = (target==="closed" || target==="postclosing") ? "closed" : "active";
     if (target==="closed" && !lead.closeDate) lead.closeDate = d;
     lead.activity.push({ date:d, type:"stage", text:"Stage moved: " + oldLabel + " → " + stageLabel(target), author: currentUser().name });
+    if (target==="closed"){
+      var pr = payrollFor(lead);
+      var payoutParts = [];
+      if (!pr.skipLo) payoutParts.push(fmtUSD(pr.loCommission) + " to " + pr.loName);
+      if (pr.processorFee) payoutParts.push(fmtUSD(pr.processorFee) + " to " + pr.processorName);
+      if (payoutParts.length){
+        notifyUser("owner", lead.id, "payroll", lead.name + " closed — pay " + payoutParts.join(" and ") + ".");
+      }
+    }
     (lead.thirdParties||[]).forEach(function(tp){
       if (tp.notify){
         lead.activity.push({ date:d, type:"notify", text:"Notified " + tp.role + " " + tp.name + " — stage is now " + stageLabel(target), author:"System" });
@@ -3027,6 +3059,7 @@ function renderShell(){
         navItem("notifications","🔔","Notifications", notifCount||null) +
         (isOwner() ? navItem("market","%","Market Conditions") : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
+        (isOwner() ? navItem("payroll","$","Payroll") : "") +
         navItem("portal","⌂","Borrower Portal Preview") +
       '</nav>' +
       '<div class="sidebar-foot">' +
@@ -3050,6 +3083,7 @@ function renderShell(){
   else if (ui.view === "detail") body = renderLeadDetail();
   else if (ui.view === "market") body = renderMarket();
   else if (ui.view === "team") body = renderTeam();
+  else if (ui.view === "payroll") body = renderPayroll();
   else if (ui.view === "comms") body = renderCommunications();
   else if (ui.view === "performance") body = renderPerformance();
   else if (ui.view === "retargeting") body = renderRetargeting();
@@ -3691,7 +3725,8 @@ function renderRail(lead){
           '<span>%</span>' +
           '<button class="btn btn-sm" type="submit">Save</button>' +
         '</form>' +
-        (lead.pointsCharged!=null ? ('<div class="footnote" style="padding:6px 0 0">Est. commission to ' + esc(userName(lead.assignedTo)) + ' if this closes: <b>' + fmtUSD(commissionAmount(lead)) + '</b> (50% of ' + lead.pointsCharged + '% × ' + fmtUSD(lead.loanAmount) + ')</div>') : '<div class="footnote" style="padding:6px 0 0">Not set yet — used to calculate the loan officer\'s commission.</div>') +
+        (yspRevenue(lead) ? ('<div class="footnote" style="padding:6px 0 0">Yield Spread Earned: <b>' + fmtUSD(yspRevenue(lead)) + '</b></div>') : '') +
+        (lead.pointsCharged!=null ? ('<div class="footnote" style="padding:2px 0 0">' + (isOwner() ? "Total origination revenue (100%)" : ("Est. commission to " + esc(userName(lead.assignedTo)) + " (50%)")) + ' if this closes: <b>' + fmtUSD((pointsRevenue(lead)+yspRevenue(lead)) * (isOwner()?1:COMMISSION_SPLIT)) + '</b> (' + (isOwner()?"100%":"50%") + ' of ' + lead.pointsCharged + '% points' + (yspRevenue(lead) ? " + YSP" : "") + ' × ' + fmtUSD(lead.loanAmount) + ')</div>') : '<div class="footnote" style="padding:2px 0 0">Not set yet — used to calculate the loan officer\'s commission.</div>') +
       '</div>') +
     '</div>' +
     (isProcessor() ? '' :
@@ -3808,6 +3843,36 @@ function renderTeam(){
       '<div class="footnote" style="padding:0 0 10px">Each teammate logs in with their own PIN. Reset one here if someone forgets theirs.</div>' +
       '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Reset PIN</th></tr></thead><tbody>' + accessRows + '</tbody></table></div>' +
     '</div>';
+}
+
+function renderPayroll(){
+  var closed = state.leads.filter(function(l){ return l.status === "closed"; })
+    .sort(function(a,b){ return (b.closeDate||"").localeCompare(a.closeDate||""); });
+
+  var totalLo = 0, totalProc = 0;
+  var rows = closed.map(function(lead){
+    var p = payrollFor(lead);
+    totalLo += p.loCommission;
+    totalProc += p.processorFee;
+    return '<tr data-action="select-lead" data-lead="' + lead.id + '" style="cursor:pointer">' +
+      '<td><div class="cell-name">' + esc(lead.name) + '</div><div class="cell-sub">' + esc(lead.loanType) + ' · ' + fmtUSD(lead.loanAmount) + '</div></td>' +
+      '<td>' + fmtDate(lead.closeDate) + '</td>' +
+      '<td>' + esc(p.loName) + '</td>' +
+      '<td class="num">' + (p.skipLo ? '<span class="hint">Your loan — n/a</span>' : ('<b>' + fmtUSD(p.loCommission) + '</b>')) + '</td>' +
+      '<td>' + esc(p.processorName) + '</td>' +
+      '<td class="num"><b>' + fmtUSD(p.processorFee) + '</b></td>' +
+    '</tr>';
+  }).join("");
+
+  var table = closed.length ? (
+    '<div class="table-wrap"><table><thead><tr><th>Borrower</th><th>Closed</th><th>Loan Officer</th><th>LO Payout (50%)</th><th>Processor</th><th>Processing Fee (100%)</th></tr></thead><tbody>' +
+    rows +
+    '<tr style="font-weight:700;border-top:2px solid var(--border)"><td colspan="3">Total</td><td class="num">' + fmtUSD(totalLo) + '</td><td></td><td class="num">' + fmtUSD(totalProc) + '</td></tr>' +
+    '</tbody></table></div>'
+  ) : '<div class="empty">No closed loans yet.</div>';
+
+  return topbar("Payroll", "What you owe on every closed loan — loan officer commission (50% of points + YSP) and processing fee (100% to processing).", "") +
+    '<div class="content">' + table + '</div>';
 }
 
 var COMM_TYPES = ["call","text","email","notify"];
@@ -3962,7 +4027,7 @@ function renderNotifications(){
   var mine = isOwner() ? all : all.filter(function(n){ return n.toUserId===ui.viewAs; });
   var rows = mine.map(function(n){
     var lead = leadById(n.leadId);
-    var kindBadge = n.kind==="appraisal" ? '<span class="badge badge-gold">Appraisal</span>' : n.kind==="title" ? '<span class="badge badge-slate">Title</span>' : n.kind==="sent-back" ? '<span class="badge badge-rust">Sent Back</span>' : n.kind==="reassigned" ? '<span class="badge badge-forest">Reassigned</span>' : n.kind==="review" ? '<span class="badge badge-rust">Needs Review</span>' : '<span class="badge badge-neutral">Note</span>';
+    var kindBadge = n.kind==="appraisal" ? '<span class="badge badge-gold">Appraisal</span>' : n.kind==="title" ? '<span class="badge badge-slate">Title</span>' : n.kind==="sent-back" ? '<span class="badge badge-rust">Sent Back</span>' : n.kind==="reassigned" ? '<span class="badge badge-forest">Reassigned</span>' : n.kind==="review" ? '<span class="badge badge-rust">Needs Review</span>' : n.kind==="payroll" ? '<span class="badge badge-gold">Payroll</span>' : '<span class="badge badge-neutral">Note</span>';
     return '<div class="queue-card" style="border-left-color:' + (n.read? 'var(--border)':'var(--brand)') + '">' +
       '<div class="queue-main">' +
         '<div class="queue-title">' + kindBadge + ' ' + esc(n.text) + '</div>' +
