@@ -3427,7 +3427,7 @@ function renderLeadsTable(){
     return true;
   });
 
-  var loOptions = loanOfficers().map(function(u){ return '<option value="' + u.id + '"' + (f.assignedTo===u.id?" selected":"") + '>' + esc(u.name) + '</option>'; }).join("");
+  var loOptions = ownerOptions(f.assignedTo);
   var stageOptions = STAGES.map(function(s){ return '<option value="' + s.key + '"' + (f.stage===s.key?" selected":"") + '>' + s.label + '</option>'; }).join("");
   var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '"' + (f.loanType===t?" selected":"") + '>' + t + '</option>'; }).join("");
 
@@ -4653,7 +4653,7 @@ function modalSendText(leadId){
     '</div></div>';
 }
 function modalAddLead(){
-  var loOptions = loanOfficers().map(function(u){ return '<option value="' + u.id + '">' + esc(u.name) + '</option>'; }).join("");
+  var loOptions = ownerOptions();
   var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
   var srcOptions = SOURCES.map(function(s){ return '<option value="' + s + '">' + s + '</option>'; }).join("");
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
@@ -4703,7 +4703,7 @@ function modalImportLeads(){
     var aiNote = st.aiStatus === "checking"
       ? '<div class="hint">✨ Asking AI to double-check this mapping…</div>'
       : (st.aiStatus === "applied" ? '<div class="hint" style="color:var(--c-forest)">✨ AI reviewed and adjusted the mapping below.</div>' : "");
-    var loOptions = loanOfficers().map(function(u){ return '<option value="' + u.id + '">' + esc(u.name) + '</option>'; }).join("");
+    var loOptions = ownerOptions();
     var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
     var previewRows = st.rows.slice(0,5).map(function(r){ return '<tr>' + st.headers.map(function(h,i){ return '<td>' + esc((r[i]||"").toString().slice(0,40)) + '</td>'; }).join("") + '</tr>'; }).join("");
     var previewHead = '<tr>' + st.headers.map(function(h){ return '<th>' + esc(h) + '</th>'; }).join("") + '</tr>';
