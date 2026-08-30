@@ -1283,6 +1283,15 @@ function processingFeeRevenue(lead){
   var result = evaluatePricing(lead, inputs);
   return (result && !result.ineligible && result.fee) ? result.fee : 0;
 }
+function renderEarningsLive(lead){
+  var ysp = yspRevenue(lead);
+  return (ysp ? ('<div class="footnote" style="padding:6px 0 0">Yield Spread Earned: <b>' + fmtUSD(ysp) + '</b></div>') : '') +
+    (lead.pointsCharged!=null ? ('<div class="footnote" style="padding:2px 0 0">' + (isOwner() ? "Total origination revenue (100%)" : ("Est. commission to " + esc(userName(lead.assignedTo)) + " (50%)")) + ' if this closes: <b>' + fmtUSD((pointsRevenue(lead)+ysp) * (isOwner()?1:COMMISSION_SPLIT)) + '</b> (' + (isOwner()?"100%":"50%") + ' of ' + lead.pointsCharged + '% points' + (ysp ? " + YSP" : "") + ' × ' + fmtUSD(lead.loanAmount) + ')</div>') : '<div class="footnote" style="padding:2px 0 0">Not set yet — used to calculate the loan officer\'s commission.</div>') +
+    (lead.loanType==="DSCR" || lead.loanType==="Portfolio/Blanket" ? (
+      (lead.rate!=null && !ysp && (lead.prepayTerm!=="none" && lead.propertyType!=="Multifamily 5+")) ?
+      '<div class="footnote" style="padding:2px 0 0;color:var(--c-rust)">Rate is outside the modeled pricing range — needs manual YSP calculation.</div>' : ''
+    ) : '');
+}
 function payrollFor(lead){
   var skipLo = lead.assignedTo === "owner";
   return {
@@ -3545,8 +3554,8 @@ function renderLoanDetailsEditor(lead){
   return '<div class="section-head" style="margin-top:20px"><h2>Loan Details</h2></div>' +
     '<div class="footnote" style="padding:0 0 8px">Editable any time — terms sometimes change for unforeseen reasons after the fact. Updates the term sheet and the borrower portal.</div>' +
     '<form data-form="loan-details" data-lead="' + lead.id + '" class="form-two" style="align-items:flex-end">' +
-      '<div class="form-row"><label>Loan Amount</label><input class="input" type="number" name="loanAmount" value="' + (lead.loanAmount!=null?lead.loanAmount:"") + '"></div>' +
-      '<div class="form-row"><label>Rate (%)</label><input class="input" type="number" step="0.001" name="rate" value="' + (lead.rate!=null?lead.rate:"") + '"></div>' +
+      '<div class="form-row"><label>Loan Amount</label><input class="input" type="number" name="loanAmount" data-action="loan-details-live" data-lead="' + lead.id + '" value="' + (lead.loanAmount!=null?lead.loanAmount:"") + '"></div>' +
+      '<div class="form-row"><label>Rate (%)</label><input class="input" type="number" step="0.001" name="rate" data-action="loan-details-live" data-lead="' + lead.id + '" value="' + (lead.rate!=null?lead.rate:"") + '"></div>' +
       '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" value="' + (lead.termMonths!=null?lead.termMonths:"") + '"></div>' +
       '<div class="form-row"><button class="btn btn-sm btn-primary" type="submit">Save Terms</button></div>' +
     '</form>';
@@ -3792,8 +3801,7 @@ function renderRail(lead){
           '<span>%</span>' +
           '<button class="btn btn-sm" type="submit">Save</button>' +
         '</form>' +
-        (yspRevenue(lead) ? ('<div class="footnote" style="padding:6px 0 0">Yield Spread Earned: <b>' + fmtUSD(yspRevenue(lead)) + '</b></div>') : '') +
-        (lead.pointsCharged!=null ? ('<div class="footnote" style="padding:2px 0 0">' + (isOwner() ? "Total origination revenue (100%)" : ("Est. commission to " + esc(userName(lead.assignedTo)) + " (50%)")) + ' if this closes: <b>' + fmtUSD((pointsRevenue(lead)+yspRevenue(lead)) * (isOwner()?1:COMMISSION_SPLIT)) + '</b> (' + (isOwner()?"100%":"50%") + ' of ' + lead.pointsCharged + '% points' + (yspRevenue(lead) ? " + YSP" : "") + ' × ' + fmtUSD(lead.loanAmount) + ')</div>') : '<div class="footnote" style="padding:2px 0 0">Not set yet — used to calculate the loan officer\'s commission.</div>') +
+        '<div id="earnings-live-' + lead.id + '">' + renderEarningsLive(lead) + '</div>' +
       '</div>') +
     '</div>' +
     (isProcessor() ? '' :
@@ -4913,7 +4921,22 @@ appEl.addEventListener("change", function(e){
 var addressLookupTimer = null;
 appEl.addEventListener("input", function(e){
   var t = e.target;
-  if (!t.dataset || t.dataset.action !== "address-lookup") return;
+  if (!t.dataset) return;
+  if (t.dataset.action === "loan-details-live"){
+    var liveLead = leadById(t.dataset.lead);
+    var liveBox = document.getElementById("earnings-live-" + t.dataset.lead);
+    if (!liveLead || !liveBox) return;
+    var form = t.closest("form");
+    var rateVal = form.querySelector('[name="rate"]').value;
+    var amtVal = form.querySelector('[name="loanAmount"]').value;
+    var tempLead = Object.assign({}, liveLead, {
+      rate: rateVal!=="" ? Number(rateVal) : null,
+      loanAmount: amtVal!=="" ? Number(amtVal) : null
+    });
+    liveBox.innerHTML = renderEarningsLive(tempLead);
+    return;
+  }
+  if (t.dataset.action !== "address-lookup") return;
   var leadIdForLookup = t.dataset.lead;
   var query = t.value;
   var ruralBox = document.getElementById("rural-alert-" + leadIdForLookup);
