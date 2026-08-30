@@ -2530,9 +2530,12 @@ function setRuralStatus(leadId, isRural){
   var newStatus = isRural ? "rural" : "urban";
   if (leadId === "standalone"){
     ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
-    if (ui.standalonePricer.ruralStatus === newStatus) return;
     ui.standalonePricer.ruralStatus = newStatus;
-    render();
+    /* Deliberately not render() here -- this fires mid-typing the address
+       field, and a render would overwrite the input with the last-committed
+       (pre-keystroke) value. The banner near the field is updated directly
+       by the address-lookup handler; the Result panel picks up the new
+       rural status next time anything else triggers a render. */
     return;
   }
   var lead = leadById(leadId);
