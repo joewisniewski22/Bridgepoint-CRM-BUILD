@@ -1242,12 +1242,21 @@ function addTeamMember(data){
 }
 
 /* ---------------------------------------------------------------------
-   Commission (points charged)
+   Commission (points charged + yield spread premium)
 --------------------------------------------------------------------- */
 var COMMISSION_SPLIT = 0.5;
-function commissionAmount(lead){
+function pointsRevenue(lead){
   if (!lead.pointsCharged || !lead.loanAmount) return 0;
-  return lead.loanAmount * (lead.pointsCharged/100) * COMMISSION_SPLIT;
+  return lead.loanAmount * (lead.pointsCharged/100);
+}
+function yspRevenue(lead){
+  if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return 0;
+  var inputs = { propertyType: lead.propertyType, transactionType: lead.transactionType || "purchase", prepayTerm: lead.prepayTerm || "5yr", points:"1.00" };
+  var result = evaluatePricing(lead, inputs);
+  return (result && !result.ineligible && result.yspDollar) ? result.yspDollar : 0;
+}
+function commissionAmount(lead){
+  return (pointsRevenue(lead) + yspRevenue(lead)) * COMMISSION_SPLIT;
 }
 function commissionSummaryFor(userId){
   var today = startOfToday();
@@ -1495,11 +1504,11 @@ function computeQueue(userId){
 function companyPointsSummary(leads){
   var today = startOfToday();
   var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-  function pointsRevenue(l){ return (l.loanAmount && l.pointsCharged) ? l.loanAmount * (l.pointsCharged/100) : 0; }
+  function fullRevenue(l){ return pointsRevenue(l) + yspRevenue(l); }
   var closedThisMonth = leads.filter(function(l){ return l.status==="closed" && l.closeDate && new Date(l.closeDate+"T00:00:00") >= monthStart; });
   var active = leads.filter(function(l){ return l.status==="active"; });
-  var closedPoints = closedThisMonth.reduce(function(s,l){ return s + pointsRevenue(l); }, 0);
-  var potentialPoints = active.reduce(function(s,l){ return s + pointsRevenue(l); }, 0);
+  var closedPoints = closedThisMonth.reduce(function(s,l){ return s + fullRevenue(l); }, 0);
+  var potentialPoints = active.reduce(function(s,l){ return s + fullRevenue(l); }, 0);
   return { closedPoints:closedPoints, potentialPoints:potentialPoints, totalPoints:closedPoints+potentialPoints };
 }
 function kpisFor(leads){
@@ -3100,9 +3109,9 @@ function renderToday(){
       '<div class="kpi-label">Company Performance — This Month</div>' +
       '<div class="commission-row">' +
         '<div class="commission-stat"><div class="num">' + fmtUSD(k.closedValue + k.pipelineValue) + '</div><div class="commission-label">Total Loan Volume Earned · ' + fmtUSD(k.closedValue) + ' closed + ' + fmtUSD(k.pipelineValue) + ' active pipeline</div></div>' +
-        '<div class="commission-stat"><div class="num">' + fmtUSD(ps.totalPoints) + '</div><div class="commission-label">Total Points Earned · ' + fmtUSD(ps.closedPoints) + ' closed + ' + fmtUSD(ps.potentialPoints) + ' active pipeline</div></div>' +
+        '<div class="commission-stat"><div class="num">' + fmtUSD(ps.totalPoints) + '</div><div class="commission-label">Total Points + YSP Earned · ' + fmtUSD(ps.closedPoints) + ' closed + ' + fmtUSD(ps.potentialPoints) + ' active pipeline</div></div>' +
       '</div>' +
-      '<div class="footnote" style="padding:6px 0 0">Company-wide across every loan officer. "Earned" combines what\'s already closed this month with what\'s still active in the pipeline at each loan\'s points-charged rate — not money in hand until it closes.</div>' +
+      '<div class="footnote" style="padding:6px 0 0">Company-wide across every loan officer, full amount (not split). "Earned" combines what\'s already closed this month with what\'s still active in the pipeline, at each loan\'s points-charged rate plus estimated yield spread premium on eligible DSCR/Portfolio loans — not money in hand until it closes.</div>' +
     '</div>';
   }
 
@@ -3110,12 +3119,12 @@ function renderToday(){
   if (isLO()){
     var cs = commissionSummaryFor(ui.viewAs);
     commissionHTML = '<div class="commission-box">' +
-      '<div class="kpi-label">My Commission (50% of points charged)</div>' +
+      '<div class="kpi-label">My Commission (50% of points charged + YSP)</div>' +
       '<div class="commission-row">' +
         '<div class="commission-stat"><div class="num">' + fmtUSD(cs.earned) + '</div><div class="commission-label">Earned this month · ' + cs.closedCount + ' closed</div></div>' +
         '<div class="commission-stat"><div class="num">' + fmtUSD(cs.potential) + '</div><div class="commission-label">Potential · ' + cs.pipelineCount + ' active loan(s)</div></div>' +
       '</div>' +
-      '<div class="footnote" style="padding:6px 0 0">Potential assumes every active loan in your pipeline closes at its current points-charged rate — set points on each loan\'s Contact panel.</div>' +
+      '<div class="footnote" style="padding:6px 0 0">Potential assumes every active loan in your pipeline closes at its current points-charged rate, plus estimated yield spread premium on eligible DSCR/Portfolio loans — set points on each loan\'s Contact panel.</div>' +
     '</div>';
   }
 
