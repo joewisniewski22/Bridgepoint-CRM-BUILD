@@ -3035,6 +3035,24 @@ function badgeForStage(lead){
   return '<span class="badge badge-slate">' + esc(stageLabel(lead.stage)) + '</span>';
 }
 
+function staleTitleInsuranceItems(){
+  var today = startOfToday();
+  var items = [];
+  state.leads.forEach(function(lead){
+    if (lead.status !== "active") return;
+    [
+      { requestedAt: lead.titleRequestedAt, docName: "Title Commitment" },
+      { requestedAt: lead.insuranceRequestedAt, docName: "Insurance Policy" }
+    ].forEach(function(check){
+      if (!check.requestedAt) return;
+      var received = (lead.documents||[]).some(function(d){ return d.name === check.docName && d.status === "received"; });
+      if (received) return;
+      var days = daysDiff(new Date(check.requestedAt+"T00:00:00"), today);
+      if (days >= 5) items.push({ lead: lead, docName: check.docName, days: days });
+    });
+  });
+  return items;
+}
 function renderProcessingTodo(){
   var items = (state.notifications||[]).filter(function(n){
     return !n.read && (isOwner() || n.toUserId===ui.viewAs) && n.kind !== "review";
@@ -3073,7 +3091,21 @@ function renderProcessingTodo(){
     '</div>';
   }).join("");
 
-  var combined = notifHTML + aiHTML;
+  var staleHTML = staleTitleInsuranceItems().map(function(it){
+    var lo = userById(it.lead.assignedTo) || {};
+    return '<div class="queue-card type-followup">' +
+      '<div class="queue-main">' +
+        '<div class="queue-title">' + esc(it.docName) + ' requested ' + it.days + ' day(s) ago, not received</div>' +
+        '<div class="queue-reason">' + esc(it.lead.name) + ' · ' + esc(it.lead.propertyAddress||"") + ' — follow up with the third party to keep this file moving</div>' +
+        '<div class="queue-meta"><span>LO: ' + esc(lo.name||"—") + '</span><span>Stage: ' + esc(stageLabel(it.lead.stage)) + '</span></div>' +
+      '</div>' +
+      '<div class="queue-actions">' +
+        '<button class="btn btn-sm btn-primary" data-action="select-lead" data-lead="' + it.lead.id + '">View Loan</button>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+
+  var combined = notifHTML + aiHTML + staleHTML;
   if (!combined) return '<div class="empty">Nothing waiting on processing right now.</div>';
   return combined;
 }

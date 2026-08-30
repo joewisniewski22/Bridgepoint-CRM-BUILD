@@ -125,21 +125,10 @@ Deno.serve(async (req: Request) => {
           ? filedNames.join(", ") + " received from " + (matchedTp ? matchedTp.role : fromAddress)
           : "New email reply from " + (leadRow.name || fromAddress);
 
-        if (leadRow.assigned_to) {
-          await sb.from("notifications").insert({
-            id: "notif-" + crypto.randomUUID(),
-            to_user_id: leadRow.assigned_to,
-            lead_id: leadId,
-            kind: "email",
-            text: notifyText,
-            date: new Date().toISOString().slice(0, 10),
-            read: false,
-          });
-        }
-
-        // Title/insurance requests are coordinated through processing --
-        // make sure they see it land too, not just the assigned LO.
         if (docLabel) {
+          // Title/insurance is coordinated entirely through processing --
+          // Erika (or whoever's processing) gets this, not the assigned LO.
+          // Revisit if that routing turns out to be the wrong call.
           const { data: processors } = await sb.from("users").select("id").eq("role", "processor");
           for (const p of processors || []) {
             await sb.from("notifications").insert({
@@ -152,6 +141,16 @@ Deno.serve(async (req: Request) => {
               read: false,
             });
           }
+        } else if (leadRow.assigned_to) {
+          await sb.from("notifications").insert({
+            id: "notif-" + crypto.randomUUID(),
+            to_user_id: leadRow.assigned_to,
+            lead_id: leadId,
+            kind: "email",
+            text: notifyText,
+            date: new Date().toISOString().slice(0, 10),
+            read: false,
+          });
         }
       }
     }
