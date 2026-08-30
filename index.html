@@ -18,13 +18,14 @@
   --ink-muted:#726b5a;
   --ink-faint:#9b937e;
 
-  --brand:#1f3a3d;
-  --brand-strong:#152a2c;
-  --brand-tint:#e7eeed;
+  --navy:#1b2a47;
+  --brand:#1b2a47;
+  --brand-strong:#10192c;
+  --brand-tint:#e8ebf1;
   --brand-ink:#ffffff;
 
   --c-forest:#2f5d43;      --c-forest-bg:#e3ede4;
-  --c-gold:#8a6412;        --c-gold-bg:#f4e8c8;
+  --c-gold:#a9812e;        --c-gold-bg:#f5ead0;
   --c-rust:#9c3f2c;        --c-rust-bg:#f3e0d8;
   --c-slate:#3b5166;       --c-slate-bg:#e2e9ef;
   --c-neutral:#5c5748;     --c-neutral-bg:#e9e4d6;
@@ -53,10 +54,10 @@
     --ink-muted:#b3ab97;
     --ink-faint:#7d7666;
 
-    --brand:#7fa79f;
-    --brand-strong:#9dc0b8;
-    --brand-tint:#233230;
-    --brand-ink:#0f1c1a;
+    --brand:#8fa8d6;
+    --brand-strong:#aec2e8;
+    --brand-tint:#202a3d;
+    --brand-ink:#0b1220;
 
     --c-forest:#8fc7a2;   --c-forest-bg:#233b2b;
     --c-gold:#e0bd6d;     --c-gold-bg:#3c3320;
@@ -81,10 +82,10 @@
   --ink-muted:#b3ab97;
   --ink-faint:#7d7666;
 
-  --brand:#7fa79f;
-  --brand-strong:#9dc0b8;
-  --brand-tint:#233230;
-  --brand-ink:#0f1c1a;
+  --brand:#8fa8d6;
+  --brand-strong:#aec2e8;
+  --brand-tint:#202a3d;
+  --brand-ink:#0b1220;
 
   --c-forest:#8fc7a2;   --c-forest-bg:#233b2b;
   --c-gold:#e0bd6d;     --c-gold-bg:#3c3320;
@@ -1157,17 +1158,29 @@ function logout(){
   try { localStorage.removeItem("bp_authed_for"); } catch(e){}
   render();
 }
-function saveSignature(emailSignature, textSignoff, quoPhoneNumber){
+function uploadUserPhoto(userId, base64, contentType, onDone){
+  if (!sb){ onDone(null); return; }
+  var ext = contentType.indexOf("png")!==-1 ? "png" : "jpg";
+  sb.functions.invoke("setup-brand-assets", {
+    body: { path: "photos/" + userId + "-" + Date.now() + "." + ext, contentBase64: base64, contentType: contentType }
+  }).then(function(res){
+    onDone((res.data && res.data.url) || null);
+  }).catch(function(){ onDone(null); });
+}
+function saveSignature(emailSignature, textSignoff, quoPhoneNumber, photoUrl){
   var u = currentUser();
   if (!u || !sb) return;
-  Promise.all([
+  var calls = [
     sb.rpc("save_signature", { p_user_id: u.id, p_email_signature: emailSignature||"", p_text_signoff: textSignoff||"" }),
     sb.rpc("set_quo_phone_number", { p_user_id: u.id, p_quo_phone_number: quoPhoneNumber||null })
-  ]).then(function(results){
+  ];
+  if (photoUrl) calls.push(sb.rpc("set_photo_url", { p_user_id: u.id, p_photo_url: photoUrl }));
+  Promise.all(calls).then(function(results){
     if (results[0].error){ showToast("Couldn't save — try again"); return; }
     u.emailSignature = emailSignature || "";
     u.textSignoff = textSignoff || "";
     u.quoPhoneNumber = quoPhoneNumber || null;
+    if (photoUrl) u.photoUrl = photoUrl;
     var wasOnboarding = !u.onboarded;
     u.onboarded = true;
     if (wasOnboarding){
@@ -1223,7 +1236,7 @@ function addTeamMember(data){
     var inviter = currentUser();
     if (newUser.email){
       sb.functions.invoke("send-email", {
-        body: { to: newUser.email, subject: inviteEmail.subject, text: inviteEmail.body, fromName: inviter.name, fromAddress: inviter.email, fromUserId: inviter.id }
+        body: { to: newUser.email, subject: inviteEmail.subject, text: inviteEmail.body, fromName: inviter.name, fromAddress: inviter.email, fromUserId: inviter.id, fromPhotoUrl: inviter.photoUrl||null }
       }).then(function(res2){
         showToast((res2.error || !res2.data || !res2.data.ok)
           ? ("Added " + data.name + " — couldn't auto-send the invite, use the buttons below")
@@ -2532,7 +2545,7 @@ function requestThirdPartyDoc(leadId, role){
 
   if (!sb){ showToast("Email service unavailable"); return; }
   sb.functions.invoke("send-email", {
-    body: { leadId: lead.id, to: tp.email, subject: subject, text: text, fromName: proc.name, fromAddress: proc.email, fromUserId: proc.id }
+    body: { leadId: lead.id, to: tp.email, subject: subject, text: text, fromName: proc.name, fromAddress: proc.email, fromUserId: proc.id, fromPhotoUrl: proc.photoUrl||null }
   }).then(function(res){
     if (res.error || !res.data || !res.data.ok){
       showToast("Couldn't send the request — try again");
@@ -2804,6 +2817,7 @@ function updateMarketRate(key, newVal){
 /* ---------------------------------------------------------------------
    Rendering
 --------------------------------------------------------------------- */
+var LOGO_URL = "https://idzkigmvovehjpapatxv.supabase.co/storage/v1/object/public/public-assets/logo.jpg";
 var BRAND_MARK = '<svg class="brand-mark" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
   '<circle cx="20" cy="20" r="19" fill="var(--navy)" stroke="var(--brand)" stroke-width="1.6"/>' +
   '<path d="M9 24c2-4 5-6 11-6s9 2 11 6" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round"/>' +
@@ -2886,7 +2900,7 @@ function renderPublicApply(){
   );
 }
 function renderLogin(){
-  var brandBlock = '<div class="login-brand">' + BRAND_MARK + '<div><div class="brand-word">Bridgepoint</div><div class="brand-tag">Lending Desk</div></div></div>';
+  var brandBlock = '<div class="login-brand" style="justify-content:center"><img src="' + LOGO_URL + '" alt="Bridgepoint Lending" style="max-width:260px;width:100%;height:auto"></div>';
   return '<div class="login-screen"><div class="login-card">' + brandBlock +
     '<h1 class="login-title">Log In</h1>' +
     '<div class="login-sub">Your own username and PIN — your dashboard shows your own production.</div>' +
@@ -2911,6 +2925,9 @@ function renderOnboardingSignature(){
       '<div class="form-row" style="margin-top:10px"><label>Text message sign-off</label><input class="input" name="textSignoff" value="' + esc(u.textSignoff || defaultText) + '"></div>' +
       '<div class="form-row" style="margin-top:10px"><label>Your Quo phone number</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
       '<div class="login-sub" style="margin-top:2px">Set up your own line in the Quo app first, then paste the number here — CRM texts will send from it instead of the shared office line. You can add this later if you don\'t have it yet.</div>' +
+      '<div class="form-row" style="margin-top:10px"><label>Add a photo to your signature (optional)</label><input class="input" type="file" name="photo" accept="image/*">' +
+        (u.photoUrl ? '<img src="' + esc(u.photoUrl) + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;margin-top:6px">' : '') +
+      '</div>' +
       '<button class="btn btn-primary" style="width:100%;margin-top:14px" type="submit">Save &amp; Continue</button>' +
     '</form>' +
   '</div></div>';
@@ -4085,6 +4102,9 @@ function modalEditSignature(){
         '<div class="form-row"><label>Text message sign-off</label><input class="input" name="textSignoff" value="' + esc(u.textSignoff || defaultText) + '"></div>' +
         '<div class="form-row"><label>Your Quo phone number</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
         '<div class="footnote" style="padding:0">Find this in the Quo app under your own line. Texts you send from the CRM will go out from this number instead of the shared office line.</div>' +
+        '<div class="form-row"><label>Photo in your signature (optional)</label><input class="input" type="file" name="photo" accept="image/*">' +
+          (u.photoUrl ? '<img src="' + esc(u.photoUrl) + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;margin-top:6px">' : '') +
+        '</div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div>' +
       '</form>' +
@@ -4892,7 +4912,21 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "login"){
     attemptLogin(fd.get("username"), fd.get("pin"));
   } else if (type === "save-signature"){
-    saveSignature(fd.get("emailSignature"), fd.get("textSignoff"), fd.get("quoPhoneNumber"));
+    var photoInput = form.querySelector('[name="photo"]');
+    var photoFile = photoInput && photoInput.files && photoInput.files[0];
+    var finishSaveSig = function(photoUrl){
+      saveSignature(fd.get("emailSignature"), fd.get("textSignoff"), fd.get("quoPhoneNumber"), photoUrl);
+    };
+    if (photoFile){
+      var photoReader = new FileReader();
+      photoReader.onload = function(){
+        var base64 = String(photoReader.result).split(",")[1];
+        uploadUserPhoto(currentUser().id, base64, photoFile.type, finishSaveSig);
+      };
+      photoReader.readAsDataURL(photoFile);
+    } else {
+      finishSaveSig(null);
+    }
   } else if (type === "change-pin"){
     changeMyPin(fd.get("oldPin"), fd.get("newPin"));
   } else if (type === "reset-pin"){
