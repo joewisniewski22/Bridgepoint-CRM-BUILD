@@ -805,7 +805,7 @@ function syncPricerRateToLead(leadId){
   var inputs = (ui.pricerInputs && ui.pricerInputs[leadId]) || {};
   var result = evaluatePricing(lead, inputs);
   if (!result || result.ineligible) return null;
-  if (lead.rate === result.rate) { render(); return result; }
+  if (lead.rate != null) { render(); return result; } // never clobber a rate someone already locked in via Loan Details
   lead.rate = result.rate;
   if (lead.purchasePrice && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/lead.purchasePrice)*1000)/10;
   persist();
