@@ -1263,7 +1263,18 @@ function pointsRevenue(lead){
   return lead.loanAmount * (lead.pointsCharged/100);
 }
 function dscrPriceRowFor(rate){
-  return DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate - rate) < 0.001; })[0];
+  // Real rate sheets only quote in 0.125% increments. Round to the
+  // nearest one instead of requiring an exact match, so a rate that's
+  // slightly off-grid (typo, old data, floating point) still prices
+  // correctly -- only genuinely outside the sheet's range (more than
+  // half an increment past either end) counts as out of range.
+  if (rate < 6.375 - 0.0625 || rate > 7.500 + 0.0625) return null;
+  var best = null, bestDiff = Infinity;
+  DSCR_BASE_RATE_PRICE.forEach(function(p){
+    var diff = Math.abs(p.rate - rate);
+    if (diff < bestDiff){ bestDiff = diff; best = p; }
+  });
+  return best;
 }
 function yspOutOfRange(lead){
   if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return false;
