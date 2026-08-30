@@ -1492,6 +1492,16 @@ function computeQueue(userId){
   return items;
 }
 
+function companyPointsSummary(leads){
+  var today = startOfToday();
+  var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  function pointsRevenue(l){ return (l.loanAmount && l.pointsCharged) ? l.loanAmount * (l.pointsCharged/100) : 0; }
+  var closedThisMonth = leads.filter(function(l){ return l.status==="closed" && l.closeDate && new Date(l.closeDate+"T00:00:00") >= monthStart; });
+  var active = leads.filter(function(l){ return l.status==="active"; });
+  var closedPoints = closedThisMonth.reduce(function(s,l){ return s + pointsRevenue(l); }, 0);
+  var potentialPoints = active.reduce(function(s,l){ return s + pointsRevenue(l); }, 0);
+  return { closedPoints:closedPoints, potentialPoints:potentialPoints, totalPoints:closedPoints+potentialPoints };
+}
 function kpisFor(leads){
   var today = startOfToday();
   var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
@@ -3082,8 +3092,18 @@ function renderToday(){
   }
 
   var teamSnapshotHTML = "";
+  var companyPerfHTML = "";
   if (isOwner()){
     teamSnapshotHTML = renderTeamSnapshot();
+    var ps = companyPointsSummary(leads);
+    companyPerfHTML = '<div class="commission-box">' +
+      '<div class="kpi-label">Company Performance — This Month</div>' +
+      '<div class="commission-row">' +
+        '<div class="commission-stat"><div class="num">' + fmtUSD(k.closedValue + k.pipelineValue) + '</div><div class="commission-label">Total Loan Volume Earned · ' + fmtUSD(k.closedValue) + ' closed + ' + fmtUSD(k.pipelineValue) + ' active pipeline</div></div>' +
+        '<div class="commission-stat"><div class="num">' + fmtUSD(ps.totalPoints) + '</div><div class="commission-label">Total Points Earned · ' + fmtUSD(ps.closedPoints) + ' closed + ' + fmtUSD(ps.potentialPoints) + ' active pipeline</div></div>' +
+      '</div>' +
+      '<div class="footnote" style="padding:6px 0 0">Company-wide across every loan officer. "Earned" combines what\'s already closed this month with what\'s still active in the pipeline at each loan\'s points-charged rate — not money in hand until it closes.</div>' +
+    '</div>';
   }
 
   var commissionHTML = "";
@@ -3132,7 +3152,7 @@ function renderToday(){
 
   var dialerBtn = queue.length ? '<button class="btn btn-sm btn-primary" data-action="start-dialer">▶ Start Power Dialer</button>' : '';
   return topbar("Today", "Call list generated from new-lead cadence, market rate moves, and refinance timing.", "") +
-    '<div class="content">' + kpis + teamSnapshotHTML + commissionHTML +
+    '<div class="content">' + kpis + companyPerfHTML + teamSnapshotHTML + commissionHTML +
       '<div class="section"><div class="section-head"><h2>Priority call list</h2>' +
         '<div style="display:flex;align-items:center;gap:10px"><span class="hint">' + queue.length + ' item(s)</span>' + dialerBtn + '</div>' +
       '</div>' + list + '</div>' +
