@@ -8,6 +8,15 @@ const QUO_DEFAULT_USER_ID = Deno.env.get("QUO_DEFAULT_USER_ID") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+function toE164(raw: string): string {
+  if (!raw) return raw;
+  if (raw.startsWith("+")) return raw;
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10) return "+1" + digits;
+  if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
+  return raw; // let Quo reject it with a clear error rather than silently mis-format
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -27,12 +36,16 @@ Deno.serve(async (req: Request) => {
     const to: string = body.to;
     const text: string = body.text;
     const fromName: string | null = body.fromName || null;
+    // Each team member's own Quo line, passed from the CRM (their Team
+    // record) -- falls back to the shared office line when not set.
+    const fromNumber = toE164(body.fromNumber || QUO_FROM_NUMBER);
+    const toNumber = toE164(to);
 
     if (!to || !text) {
       return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400, headers: CORS_HEADERS });
     }
-    if (!QUO_FROM_NUMBER) {
-      return new Response(JSON.stringify({ error: "no_from_number", detail: "QUO_FROM_NUMBER secret isn't set yet -- needs the Quo business number to send from, in E.164 format (e.g. +18135550100)." }), { status: 500, headers: CORS_HEADERS });
+    if (!fromNumber) {
+      return new Response(JSON.stringify({ error: "no_from_number", detail: "No Quo number to send from -- set a personal line in Signature settings, or set the QUO_FROM_NUMBER secret for a shared default." }), { status: 500, headers: CORS_HEADERS });
     }
 
     const quoRes = await fetch("https://api.quo.com/v1/messages", {
@@ -43,8 +56,8 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         content: text,
-        from: QUO_FROM_NUMBER,
-        to: [to],
+        from: fromNumber,
+        to: [toNumber],
         userId: QUO_DEFAULT_USER_ID || undefined,
       }),
     });

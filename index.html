@@ -1157,13 +1157,17 @@ function logout(){
   try { localStorage.removeItem("bp_authed_for"); } catch(e){}
   render();
 }
-function saveSignature(emailSignature, textSignoff){
+function saveSignature(emailSignature, textSignoff, quoPhoneNumber){
   var u = currentUser();
   if (!u || !sb) return;
-  sb.rpc("save_signature", { p_user_id: u.id, p_email_signature: emailSignature||"", p_text_signoff: textSignoff||"" }).then(function(res){
-    if (res.error){ showToast("Couldn't save — try again"); return; }
+  Promise.all([
+    sb.rpc("save_signature", { p_user_id: u.id, p_email_signature: emailSignature||"", p_text_signoff: textSignoff||"" }),
+    sb.rpc("set_quo_phone_number", { p_user_id: u.id, p_quo_phone_number: quoPhoneNumber||null })
+  ]).then(function(results){
+    if (results[0].error){ showToast("Couldn't save — try again"); return; }
     u.emailSignature = emailSignature || "";
     u.textSignoff = textSignoff || "";
+    u.quoPhoneNumber = quoPhoneNumber || null;
     var wasOnboarding = !u.onboarded;
     u.onboarded = true;
     if (wasOnboarding){
@@ -1203,7 +1207,8 @@ function addTeamMember(data){
   if (!/^\d{4,6}$/.test(data.pin||"")){ ui.teamMemberError = "PIN must be 4–6 digits"; render(); return; }
   sb.rpc("create_user", {
     p_name: data.name, p_role: data.role, p_title: data.title||"", p_phone: data.phone||"",
-    p_email: data.email||"", p_username: data.username||"", p_pin: data.pin
+    p_email: data.email||"", p_username: data.username||"", p_pin: data.pin,
+    p_quo_phone_number: data.quoPhoneNumber||null
   }).then(function(res){
     if (res.error){
       var msg = (res.error.message||"").indexOf("username_taken") !== -1 ? "That username is already taken." : "Couldn't add them — try again.";
@@ -1606,6 +1611,7 @@ function addDaysISO(dateStr, days){
 function docLoanOfficer(lead){
   return userById(lead.assignedTo) || currentUser();
 }
+var OFFICE_PHONE = "(850) 719-4419";
 function loContactLines(lo, lang){
   if (lo.emailSignature) return lo.emailSignature.split("\n");
   var isEs = lang === "es";
@@ -1615,6 +1621,7 @@ function loContactLines(lo, lang){
   lines.push("Bridgepoint Lending — " + (isEs ? "Soluciones de Financiamiento Inmobiliario" : "Real Estate Financing Solutions"));
   var contact = [lo.phone, lo.email].filter(Boolean).join("  ·  ");
   if (contact) lines.push(contact);
+  lines.push((isEs ? "Oficina: " : "Office: ") + OFFICE_PHONE);
   return lines;
 }
 function buildPreApprovalLetter(lead){
@@ -2029,7 +2036,7 @@ function sendTextViaQuo(leadId, message){
   if (!sb){ showToast("Text service unavailable"); return; }
   var lo = currentUser();
   sb.functions.invoke("send-text", {
-    body: { leadId: lead.id, to: lead.phone, text: message, fromName: lo.name }
+    body: { leadId: lead.id, to: lead.phone, text: message, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
   }).then(function(res){
     if (res.error || !res.data || !res.data.ok){
       showToast("Couldn't send the text — try again, or use Copy Message");
@@ -2853,6 +2860,8 @@ function renderOnboardingSignature(){
     '<form data-form="save-signature">' +
       '<div class="form-row"><label>Email signature</label><textarea class="textarea" name="emailSignature" rows="5">' + esc(u.emailSignature || defaultEmailSig) + '</textarea></div>' +
       '<div class="form-row" style="margin-top:10px"><label>Text message sign-off</label><input class="input" name="textSignoff" value="' + esc(u.textSignoff || defaultText) + '"></div>' +
+      '<div class="form-row" style="margin-top:10px"><label>Your Quo phone number</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
+      '<div class="login-sub" style="margin-top:2px">Set up your own line in the Quo app first, then paste the number here — CRM texts will send from it instead of the shared office line. You can add this later if you don\'t have it yet.</div>' +
       '<button class="btn btn-primary" style="width:100%;margin-top:14px" type="submit">Save &amp; Continue</button>' +
     '</form>' +
   '</div></div>';
@@ -3983,6 +3992,8 @@ function modalEditSignature(){
       '<div class="modal-body">' +
         '<div class="form-row"><label>Email signature</label><textarea class="textarea" name="emailSignature" rows="5">' + esc(u.emailSignature || defaultEmailSig) + '</textarea></div>' +
         '<div class="form-row"><label>Text message sign-off</label><input class="input" name="textSignoff" value="' + esc(u.textSignoff || defaultText) + '"></div>' +
+        '<div class="form-row"><label>Your Quo phone number</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
+        '<div class="footnote" style="padding:0">Find this in the Quo app under your own line. Texts you send from the CRM will go out from this number instead of the shared office line.</div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div>' +
       '</form>' +
@@ -4011,7 +4022,8 @@ function modalAddTeamMember(){
           '<div class="form-row"><label>Username</label><input class="input" name="username" placeholder="e.g. carlos" required></div>' +
           '<div class="form-row"><label>Initial PIN (4–6 digits)</label><input class="input" type="text" inputmode="numeric" pattern="[0-9]*" name="pin" maxlength="6" required></div>' +
         '</div>' +
-        '<div class="footnote" style="padding:0">They\'ll be walked through setting up their own signature and a short tour the first time they log in.</div>' +
+        '<div class="form-row"><label>Their Quo phone number (if known)</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100"></div>' +
+        '<div class="footnote" style="padding:0">Have them set up their own line in Quo, then confirm it here or from their own Signature settings — CRM texts send from this number instead of the shared office line. They\'ll be walked through setting up their signature and a short tour the first time they log in.</div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add</button></div>' +
       '</form>' +
@@ -4789,7 +4801,7 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "login"){
     attemptLogin(fd.get("username"), fd.get("pin"));
   } else if (type === "save-signature"){
-    saveSignature(fd.get("emailSignature"), fd.get("textSignoff"));
+    saveSignature(fd.get("emailSignature"), fd.get("textSignoff"), fd.get("quoPhoneNumber"));
   } else if (type === "change-pin"){
     changeMyPin(fd.get("oldPin"), fd.get("newPin"));
   } else if (type === "reset-pin"){
@@ -4797,7 +4809,8 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "add-team-member"){
     addTeamMember({
       name: fd.get("name"), role: fd.get("role"), title: fd.get("title"),
-      phone: fd.get("phone"), email: fd.get("email"), username: fd.get("username"), pin: fd.get("pin")
+      phone: fd.get("phone"), email: fd.get("email"), username: fd.get("username"), pin: fd.get("pin"),
+      quoPhoneNumber: fd.get("quoPhoneNumber")
     });
     form.reset();
   } else if (type === "set-points"){
