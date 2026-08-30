@@ -1667,6 +1667,7 @@ function docLoanOfficer(lead){
   return userById(lead.assignedTo) || currentUser();
 }
 var OFFICE_PHONE = "(850) 719-4419";
+var GOOGLE_REVIEW_LINK = "https://g.page/r/CbJVKQumLqOQEAE/review";
 function loContactLines(lo, lang){
   if (lo.emailSignature) return lo.emailSignature.split("\n");
   var isEs = lang === "es";
@@ -2226,6 +2227,7 @@ function moveStage(leadId, target){
       if (payoutParts.length){
         notifyUser("owner", lead.id, "payroll", lead.name + " closed — pay " + payoutParts.join(" and ") + ".");
       }
+      sendReviewRequests(lead);
     }
     (lead.thirdParties||[]).forEach(function(tp){
       if (tp.notify){
@@ -2541,6 +2543,57 @@ function toggleProcessingAction(leadId, kind){
   persist();
 }
 
+function sendReviewRequests(lead){
+  if (!sb) return;
+  var lo = docLoanOfficer(lead);
+  var lang = lead.preferredLanguage || "en";
+  var isEs = lang === "es";
+  var first = (lead.name||"").split(" ")[0];
+
+  var borrowerSubject = isEs ? "¡Felicidades por su cierre! ¿Nos compartiría su experiencia?" : "Congrats on your closing! Would you share your experience?";
+  var borrowerEmail = isEs
+    ? ("Hola " + first + ",\n\n¡Felicidades por el cierre de su préstamo para " + (lead.propertyAddress||"su propiedad") + "! Fue un placer trabajar con usted.\n\nSi tiene un momento, nos encantaría que compartiera su experiencia con una reseña en Google — realmente nos ayuda:\n\n" + GOOGLE_REVIEW_LINK + "\n\n¡Gracias de nuevo, y esperamos trabajar con usted en su próximo proyecto!")
+    : ("Hi " + first + ",\n\nCongrats on closing your loan for " + (lead.propertyAddress||"your property") + "! It was a pleasure working with you.\n\nIf you have a minute, we'd really appreciate a quick Google review sharing your experience — it genuinely helps us out:\n\n" + GOOGLE_REVIEW_LINK + "\n\nThanks again, and we look forward to working with you on the next one!");
+  var borrowerText = isEs
+    ? ("Hola " + first + ", ¡felicidades por su cierre! Si tiene un minuto, agradecemos mucho una reseña en Google: " + GOOGLE_REVIEW_LINK + " — Gracias, " + (lo.name||"") + " de Bridgepoint Lending")
+    : ("Hi " + first + ", congrats on closing! If you have a minute, we'd really appreciate a quick Google review: " + GOOGLE_REVIEW_LINK + " — Thanks, " + (lo.name||"") + " at Bridgepoint Lending");
+
+  var recipients = [];
+  if (lead.email) recipients.push({ email: lead.email, phone: lead.phone, subject: borrowerSubject, emailBody: borrowerEmail, textBody: borrowerText, label: lead.name });
+  else if (lead.phone) recipients.push({ email: null, phone: lead.phone, subject: borrowerSubject, emailBody: borrowerEmail, textBody: borrowerText, label: lead.name });
+
+  var tpSubject = "Thank you for helping close " + lead.name + "'s loan!";
+  var tpEmailBody = function(tp){
+    return "Hi " + (tp.name||"").split(" ")[0] + ",\n\nThank you for helping get " + lead.name + "'s loan to the closing table — we really appreciate the partnership.\n\nIf you have a moment, we'd love a quick Google review of Bridgepoint Lending:\n\n" + GOOGLE_REVIEW_LINK + "\n\nThanks again, and we look forward to working together again!";
+  };
+  var tpTextBody = function(tp){
+    return "Hi " + (tp.name||"").split(" ")[0] + ", thanks for helping close " + lead.name + "'s loan! If you have a minute, we'd appreciate a quick Google review: " + GOOGLE_REVIEW_LINK + " — " + (lo.name||"") + ", Bridgepoint Lending";
+  };
+  (lead.thirdParties||[]).forEach(function(tp){
+    if (!tp.email && !tp.phone) return;
+    recipients.push({ email: tp.email, phone: tp.phone, subject: tpSubject, emailBody: tpEmailBody(tp), textBody: tpTextBody(tp), label: tp.name });
+  });
+
+  var sentTo = [];
+  recipients.forEach(function(r){
+    if (r.email){
+      sb.functions.invoke("send-email", {
+        body: { leadId: lead.id, to: r.email, subject: r.subject, text: r.emailBody, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
+      }).catch(function(){});
+    }
+    if (r.phone){
+      sb.functions.invoke("send-text", {
+        body: { leadId: lead.id, to: r.phone, text: r.textBody, fromName: lo.name, fromNumber: lo.quoPhoneNumber||null }
+      }).catch(function(){});
+    }
+    sentTo.push(r.label);
+  });
+
+  if (sentTo.length){
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"notify", text: "Review requests sent to " + sentTo.join(", "), author: lo.name });
+  }
+}
 function processingContact(){
   return state.users.filter(function(u){ return u.role==="processor"; })[0] || currentUser();
 }
