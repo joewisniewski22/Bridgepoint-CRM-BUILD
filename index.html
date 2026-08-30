@@ -3608,19 +3608,33 @@ function renderPricer(lead){
         propertyTypeSelect +
       '</div>');
   var result = evaluatePricing(lead, inputs);
+  var lockedToActualRate = false;
+  if (isDSCR && lead.rate && result && !result.ineligible){
+    var lockedNoYsp = (inputs.prepayTerm === "none") || (inputs.propertyType === "Multifamily 5+");
+    var lockedPriceRow = DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate - lead.rate) < 0.001; })[0];
+    result = Object.assign({}, result, {
+      rate: lead.rate,
+      price: lockedPriceRow ? lockedPriceRow.price : null,
+      noYspAllowed: lockedNoYsp,
+      ysp: (lockedPriceRow && !lockedNoYsp) ? Math.round((lockedPriceRow.price-100)*1000)/1000 : null,
+      yspDollar: (lockedPriceRow && !lockedNoYsp) ? Math.max(0, Math.round((lockedPriceRow.price-100)/100*lead.loanAmount*100)/100) : null
+    });
+    lockedToActualRate = true;
+  }
   var output;
   if (!result){
     output = '<div class="hint">Fill in credit score, purchase price, and loan amount to see live pricing.</div>';
   } else if (result.ineligible){
     output = '<div class="hint" style="color:var(--c-rust)">' + esc(result.reason) + '</div>';
   } else {
-    var rows = field("Rate", fmtPct(result.rate), true) +
+    var rows = field("Rate" + (lockedToActualRate ? " (locked on this loan)" : ""), fmtPct(result.rate), true) +
       field("Lender Fee", fmtUSD(result.fee), true) +
       (isDSCR ? field("Wholesale Price", result.price ? result.price.toFixed(3) : "—", true) : "") +
       (isDSCR ? field("Yield Spread (YSP)", result.ysp ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : (result.noYspAllowed ? "Not available" : "None (par or better)"), true) : "") +
       (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
       (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
     output = '<div class="field-grid">' + rows + '</div>' +
+      (lockedToActualRate ? '<div class="footnote" style="padding-top:8px">This loan already has a locked-in rate, so these figures reflect that rate rather than the sheet\'s suggested one — matches "Yield Spread Earned" in the rail. Change the rate from Loan Details above, not here.</div>' : '') +
       (isDSCR && result.yspDollar ? ('<div class="footnote" style="padding-top:8px">Est. YSP commission to ' + esc(userName(lead.assignedTo)) + ' if this closes: <b>' + fmtUSD(result.yspDollar * COMMISSION_SPLIT) + '</b> (50% of ' + fmtPct(result.ysp) + ' × ' + fmtUSD(lead.loanAmount) + ')</div>') : '') +
       (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
       (canEditApplication(lead) ? ('<div style="margin-top:10px"><button class="btn btn-sm" type="button" data-action="send-term-sheet-from-pricer" data-lead="' + lead.id + '">Send Term Sheet at This Rate</button></div>') : '');
