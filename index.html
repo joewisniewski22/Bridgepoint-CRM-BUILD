@@ -1262,14 +1262,27 @@ function pointsRevenue(lead){
   if (!lead.pointsCharged || !lead.loanAmount) return 0;
   return lead.loanAmount * (lead.pointsCharged/100);
 }
+function dscrPriceRowFor(rate){
+  return DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate - rate) < 0.001; })[0];
+}
+function yspOutOfRange(lead){
+  if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return false;
+  if (lead.rate == null) return false;
+  if (lead.prepayTerm === "none" || lead.propertyType === "Multifamily 5+") return false;
+  return !dscrPriceRowFor(lead.rate);
+}
 function yspRevenue(lead){
   if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return 0;
   if (!lead.loanAmount) return 0;
   var noYsp = (lead.prepayTerm === "none") || (lead.propertyType === "Multifamily 5+");
   if (noYsp) return 0;
-  if (lead.rate){
-    var priceRow = DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate - lead.rate) < 0.001; })[0];
-    if (priceRow) return Math.max(0, Math.round((priceRow.price - 100) / 100 * lead.loanAmount * 100) / 100);
+  if (lead.rate != null){
+    // A rate is already locked in -- price it off that exact rate, or
+    // treat it as out of range. Never fall back to the calculator's own
+    // independent estimate here, since that would show a number with no
+    // relationship to the rate actually on the file.
+    var priceRow = dscrPriceRowFor(lead.rate);
+    return priceRow ? Math.max(0, Math.round((priceRow.price - 100) / 100 * lead.loanAmount * 100) / 100) : 0;
   }
   var inputs = { propertyType: lead.propertyType, transactionType: lead.transactionType || "purchase", prepayTerm: lead.prepayTerm || "5yr", points:"1.00" };
   var result = evaluatePricing(lead, inputs);
@@ -1287,10 +1300,7 @@ function renderEarningsLive(lead){
   var ysp = yspRevenue(lead);
   return (ysp ? ('<div class="footnote" style="padding:6px 0 0">Yield Spread Earned: <b>' + fmtUSD(ysp) + '</b></div>') : '') +
     (lead.pointsCharged!=null ? ('<div class="footnote" style="padding:2px 0 0">' + (isOwner() ? "Total origination revenue (100%)" : ("Est. commission to " + esc(userName(lead.assignedTo)) + " (50%)")) + ' if this closes: <b>' + fmtUSD((pointsRevenue(lead)+ysp) * (isOwner()?1:COMMISSION_SPLIT)) + '</b> (' + (isOwner()?"100%":"50%") + ' of ' + lead.pointsCharged + '% points' + (ysp ? " + YSP" : "") + ' × ' + fmtUSD(lead.loanAmount) + ')</div>') : '<div class="footnote" style="padding:2px 0 0">Not set yet — used to calculate the loan officer\'s commission.</div>') +
-    (lead.loanType==="DSCR" || lead.loanType==="Portfolio/Blanket" ? (
-      (lead.rate!=null && !ysp && (lead.prepayTerm!=="none" && lead.propertyType!=="Multifamily 5+")) ?
-      '<div class="footnote" style="padding:2px 0 0;color:var(--c-rust)">Rate is outside the modeled pricing range — needs manual YSP calculation.</div>' : ''
-    ) : '');
+    (yspOutOfRange(lead) ? '<div class="footnote" style="padding:2px 0 0;color:var(--c-rust)">Rate is outside the modeled pricing range (6.375%–7.500%) — needs manual YSP calculation.</div>' : '');
 }
 function payrollFor(lead){
   var skipLo = lead.assignedTo === "owner";
@@ -3119,7 +3129,6 @@ function renderShell(){
         navItem("performance","⚡","Speed & Conversion") +
         navItem("retargeting","↺","Retargeting", winbackCount||null) +
         navItem("notifications","🔔","Notifications", notifCount||null) +
-        (isOwner() ? navItem("market","%","Market Conditions") : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
         navItem("portal","⌂","Borrower Portal Preview") +
@@ -3143,7 +3152,6 @@ function renderShell(){
   else if (ui.view === "pipeline") body = renderPipeline();
   else if (ui.view === "leads") body = renderLeadsTable();
   else if (ui.view === "detail") body = renderLeadDetail();
-  else if (ui.view === "market") body = renderMarket();
   else if (ui.view === "team") body = renderTeam();
   else if (ui.view === "payroll") body = renderPayroll();
   else if (ui.view === "comms") body = renderCommunications();
