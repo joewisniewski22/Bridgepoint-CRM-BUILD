@@ -545,6 +545,7 @@ var TP_ROLES = ["Realtor","Title Company","Escrow Officer","Insurance Agent","At
 
 var ACH_FORM_DOC_NAME = "ACH / Automatic Payment Authorization Form";
 var RTL_APPLICATION_DOC_NAME = "RTL Application (BPL)";
+var DSCR_APPLICATION_DOC_NAME = "DSCR Application (BPL)";
 var UNIVERSAL_DOCS = [
   "Government-Issued Photo ID",
   "2 Months Bank Statements",
@@ -560,7 +561,21 @@ var REQUIRED_DOCS_BY_TYPE = {
     "Signed Lease Agreement (or Market Rent Letter if vacant)",
     "Property Tax Bill",
     "Proof of Landlord / Hazard Insurance",
-    "HOA Statement (if applicable)"
+    "HOA / COA / PUD Questionnaire & Package (if applicable)",
+    "Paid Appraisal Invoice",
+    "Flood Insurance (if applicable)",
+    DSCR_APPLICATION_DOC_NAME
+  ]),
+  "Portfolio/Blanket": UNIVERSAL_DOCS.concat([
+    "Purchase Contract (purchase) or Current Mortgage Statement (refinance)",
+    "Signed Lease Agreement (or Market Rent Letter if vacant)",
+    "Property Tax Bill",
+    "Proof of Landlord / Hazard Insurance",
+    "HOA / COA / PUD Questionnaire & Package (if applicable)",
+    "Paid Appraisal Invoice",
+    "Flood Insurance (if applicable)",
+    "Schedule of Properties (addresses for every property in the portfolio)",
+    DSCR_APPLICATION_DOC_NAME
   ]),
   "Fix & Flip": UNIVERSAL_DOCS.concat([
     "Purchase Contract",
@@ -1946,7 +1961,7 @@ function leadToRow(l){
     preferred_language: l.preferredLanguage || "en",
     citizenship_status: l.citizenshipStatus || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
-    ach_form: l.achForm || null, rtl_app: l.rtlApp || null,
+    ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -1976,7 +1991,7 @@ function rowToLead(r){
     preferredLanguage: r.preferred_language || "en",
     citizenshipStatus: r.citizenship_status || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
-    achForm: r.ach_form || null, rtlApp: r.rtl_app || null,
+    achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -2761,8 +2776,9 @@ function requestThirdPartyDoc(leadId, role){
       "Loan Amount: " + fmtUSD(lead.loanAmount),
       "Loan Type: " + lead.loanType
     ];
-    if (lead.loanType === "DSCR"){
-      bodyLines.push("", "Coverage requirements: full replacement cost, coverage equal to the lesser of 100% of insurable value or unpaid principal balance, plus 6 months of rent-loss coverage.");
+    if (lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket"){
+      bodyLines.push("", "Coverage requirements: full replacement cost, coverage equal to the lesser of 100% of insurable value or unpaid principal balance, plus 6 months of rent-loss coverage. Condos require HO6 coverage.");
+      bodyLines.push("", "Mortgagee Clause:", "BPL Mortgage, LLC ISAOA / ATIMA", "c/o Fay Servicing, LLC", "P.O. Box 7047", "Troy, MI 48007-7047");
     }
   }
   bodyLines.push("", "");
@@ -3084,7 +3100,7 @@ function buildRtlApplicationPdfBlob(lead){
   w.row("Closing Agent", (r.closingAgent||"—") + " — " + (r.closingAgentContact||""));
 
   w.heading("9) Declarations");
-  RTL_APP_DECLARATIONS.forEach(function(d){
+  LOAN_APP_DECLARATIONS.forEach(function(d){
     var existing = (r.declarations||{})[d.key] || {};
     w.paragraph(d.text);
     w.twoCol("You", existing.guarantor||"No", "Co-Applicant", existing.coGuarantor||"No");
@@ -3097,7 +3113,86 @@ function buildRtlApplicationPdfBlob(lead){
 
   return w.doc.output("blob");
 }
-function applyAchAndRtlAppPatch(leadId, achData, rtlData){
+function buildDscrApplicationPdfBlob(lead){
+  var d = lead.dscrApp || {};
+  var isPortfolio = lead.loanType === "Portfolio/Blanket";
+  var w = makePdfWriter(
+    "DSCR Business Purpose Loan Application",
+    (lead.name||"") + " — " + (lead.loanType||"") + " — " + (lead.propertyAddress||"")
+  );
+  w.heading("1) Applicant");
+  w.row("Name", lead.name);
+  w.twoCol("Marital Status", d.maritalStatus, "Citizenship", lead.citizenshipStatus);
+  w.twoCol("Own/Rent", d.ownRent, "Years/Mo at Address", d.yearsAtAddress);
+  w.row("Current Address", d.homeAddress);
+  w.twoCol("Phone", lead.phone, "Email", lead.email);
+  w.twoCol("Date of Birth", lead.birthday, "SSN", "On file — see Government ID");
+
+  if (d.coFirstName || d.coLastName){
+    w.heading("2) Co-Applicant");
+    w.row("Name", (d.coFirstName||"") + " " + (d.coLastName||""));
+    w.twoCol("Phone", d.coPhone, "Email", d.coEmail);
+  }
+
+  w.heading("3) Entity Information");
+  w.twoCol("Entity Name", lead.entityLegalName, "Entity Type", lead.entityType);
+  w.twoCol("Date Established", d.entityDateEst, "EIN", d.entityEin);
+  w.twoCol("Bank Name", d.entityBankName, "Bank Balance", d.entityBankBalance ? fmtUSD(d.entityBankBalance) : null);
+  w.row("Entity Address", d.entityAddress);
+  (d.scheduleA||[]).forEach(function(o, i){
+    if (!o.name) return;
+    w.row("Owner #" + (i+1), o.name + " — " + (o.title||"") + " — " + (o.ownPct!=null?o.ownPct+"%":"") + " — Guarantor: " + (o.guarantor||"No") + " — US Citizen: " + (o.citizen||"No"));
+  });
+
+  w.heading("4) Declarations");
+  LOAN_APP_DECLARATIONS.forEach(function(decl){
+    var existing = (d.declarations||{})[decl.key] || {};
+    w.paragraph(decl.text);
+    w.twoCol("You", existing.guarantor||"No", "Co-Applicant", existing.coGuarantor||"No");
+    if (existing.explain) w.row("Explanation", existing.explain);
+  });
+
+  w.heading("5) Subject Property & Loan Terms" + (isPortfolio ? " — Property #1" : ""));
+  w.twoCol("Occupancy", d.occupancy, "Property Address", lead.propertyAddress);
+  w.twoCol("Property Type", lead.propertyType, "Purchase Price", lead.purchasePrice ? fmtUSD(lead.purchasePrice) : null);
+  w.twoCol("As-Is Value", lead.arv ? fmtUSD(lead.arv) : null, "Loan Amount Requested", lead.loanAmount ? fmtUSD(lead.loanAmount) : null);
+  w.twoCol("Transaction Purpose", lead.transactionType, "Cash Out Purpose", d.cashOutPurpose);
+  w.twoCol("Loan Term (months)", lead.termMonths, "Loan Product Needed", d.loanProduct);
+  w.row("Interior Access Contact", (d.accessName||"—") + " (" + (d.accessRelationship||"") + ") — " + (d.accessPhone||"") + " — " + (d.accessEmail||""));
+
+  if (isPortfolio && (d.multiPack||[]).length){
+    w.heading("Multi-Pack Addendum");
+    d.multiPack.forEach(function(p, i){
+      if (!p.address) return;
+      w.row("Property #" + (i+2), p.address);
+      w.twoCol("Occupancy", p.occupancy, "Property Type", p.propertyType);
+      w.twoCol("Purchase Price", p.purchasePrice ? fmtUSD(p.purchasePrice) : null, "As-Is Value", p.asIsValue ? fmtUSD(p.asIsValue) : null);
+      w.twoCol("Loan Amount Requested", p.loanAmount ? fmtUSD(p.loanAmount) : null, "Loan Term (months)", p.loanTerm);
+      w.twoCol("Transaction Purpose", p.transactionPurpose, "Cash Out Purpose", p.cashOutPurpose);
+    });
+  }
+
+  w.heading("6) Current Debt on Property (Refinance Only)");
+  w.twoCol("Balance Owed", d.balanceOwed ? fmtUSD(d.balanceOwed) : null, "Current Lender", d.currentLender);
+  w.twoCol("Original Cost", d.originalCost ? fmtUSD(d.originalCost) : null, "Year Acquired", d.yearAcquired);
+
+  w.heading("7) Contact Information — Title / Insurance / Closing Agent");
+  w.row("Title Company", (d.titleCompany||"—") + " — " + (d.titleContact||""));
+  w.row("Insurance Carrier", (d.insuranceCarrier||"—") + " — " + (d.insuranceContact||""));
+  w.row("Closing Agent", (d.closingAgent||"—") + " — " + (d.closingAgentContact||""));
+
+  if (d.comments){
+    w.heading("Comments");
+    w.paragraph(d.comments);
+  }
+
+  w.heading("Borrower's Certification & Authorization");
+  w.paragraph("The undersigned certifies that all information in this application is true and complete, and authorizes BPL Mortgage, LLC / Bridgepoint Lending, its successors and assigns, and any investor or mortgage guaranty insurer, to verify this information and obtain a credit report in connection with this loan.");
+  w.signatureLine("Applicant Signature", d.signatureDataUrl, d.signedAt);
+
+  return w.doc.output("blob");
+}
+function applyAchAndRtlAppPatch(leadId, achData, rtlData, dscrData){
   var lead = leadById(leadId);
   if (!lead) return;
   if (achData){
@@ -3110,6 +3205,12 @@ function applyAchAndRtlAppPatch(leadId, achData, rtlData){
     lead.rtlApp = rtlData;
     if (rtlData.signatureDataUrl){
       uploadGeneratedPdfDocument(leadId, RTL_APPLICATION_DOC_NAME, buildRtlApplicationPdfBlob(lead), { staffOnly:true, actorLabel: lead.name });
+    }
+  }
+  if (dscrData){
+    lead.dscrApp = dscrData;
+    if (dscrData.signatureDataUrl){
+      uploadGeneratedPdfDocument(leadId, DSCR_APPLICATION_DOC_NAME, buildDscrApplicationPdfBlob(lead), { staffOnly:true, actorLabel: lead.name });
     }
   }
 }
@@ -5013,6 +5114,7 @@ function buildApplicationFieldsHTML(lead, lang){
     buildTrackRecordSectionHTML(lead, lang) +
     buildScopeOfWorkFieldsHTML(lead, lang) +
     buildRtlApplicationFieldsHTML(lead, lang) +
+    buildDscrApplicationFieldsHTML(lead, lang) +
     buildAchFieldsHTML(lead, lang);
 }
 var TRACK_EXIT_TYPES = ["Sold","Refinanced","Still Own"];
@@ -5271,7 +5373,7 @@ function extractScheduleAFromForm(fd){
   }
   return rows;
 }
-var RTL_APP_DECLARATIONS = [
+var LOAN_APP_DECLARATIONS = [
   { key:"lawsuit", text:"Currently or previously involved in any pending lawsuits (foreclosure, collection, or suits by lenders/creditors/subcontractors)?" },
   { key:"bankruptcy", text:"Involved in bankruptcy or insolvency proceedings in the last 3 years?" },
   { key:"felony", text:"Charged or convicted of a felony?" },
@@ -5290,7 +5392,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
       '<option value="Yes"' + (val==="Yes"?" selected":"") + '>' + L("Yes") + '</option>' +
     '</select>';
   };
-  var declRows = RTL_APP_DECLARATIONS.map(function(d){
+  var declRows = LOAN_APP_DECLARATIONS.map(function(d){
     var existing = (r.declarations || {})[d.key] || {};
     return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">' +
       '<div style="margin-bottom:6px">' + L(d.text) + '</div>' +
@@ -5395,7 +5497,7 @@ function extractRtlApplicationFromForm(fd, signatureDataUrl, existing){
   if (!fd.has("rtlOwnRent") && !fd.has("scheduleACount")) return null;
   var num = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
   var declarations = {};
-  RTL_APP_DECLARATIONS.forEach(function(d){
+  LOAN_APP_DECLARATIONS.forEach(function(d){
     declarations[d.key] = {
       guarantor: fd.get("decl_" + d.key) || "No",
       coGuarantor: fd.get("decl_" + d.key + "_co") || "No",
@@ -5437,6 +5539,252 @@ function extractRtlApplicationFromForm(fd, signatureDataUrl, existing){
     insuranceContact: fd.get("rtlInsuranceContact") || "",
     closingAgent: fd.get("rtlClosingAgent") || "",
     closingAgentContact: fd.get("rtlClosingAgentContact") || "",
+    declarations: declarations,
+    signatureDataUrl: signatureDataUrl || (existing && existing.signatureDataUrl) || null,
+    signedAt: signatureDataUrl ? todayISO() : (existing && existing.signedAt) || null
+  };
+}
+
+/* ---------------------------------------------------------------------
+   DSCR Business Purpose Loan Application (BPL / Constructive Capital) —
+   DSCR and Portfolio/Blanket only. Same shape as the RTL application
+   above (shares Schedule A ownership rows and the Declarations block),
+   plus the Multi-Pack Addendum for Portfolio/Blanket loans covering
+   more than one property.
+--------------------------------------------------------------------- */
+function buildMultiPackRowHTML(i, row, lang){
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
+  row = row || {};
+  var v = function(x){ return x==null ? "" : x; };
+  var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (row.propertyType===t?" selected":"") + '>' + L(t) + '</option>'; }).join("");
+  return '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">' +
+    '<div class="hint" style="margin-bottom:6px">' + L("Property #") + (i+2) + '</div>' +
+    '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="mpAddress_' + i + '" value="' + esc(row.address||"") + '"></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Occupancy") + '</label><input class="input" name="mpOccupancy_' + i + '" value="' + esc(row.occupancy||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Property Type") + '</label><select class="select" name="mpPropertyType_' + i + '">' + propTypeOptions + '</select></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Purchase Price (if applicable)") + '</label><input class="input" type="number" name="mpPurchasePrice_' + i + '" value="' + v(row.purchasePrice) + '"></div>' +
+      '<div class="form-row"><label>' + L("As-Is Value") + '</label><input class="input" type="number" name="mpAsIsValue_' + i + '" value="' + v(row.asIsValue) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Loan Amount Requested") + '</label><input class="input" type="number" name="mpLoanAmount_' + i + '" value="' + v(row.loanAmount) + '"></div>' +
+      '<div class="form-row"><label>' + L("Loan Term (months)") + '</label><input class="input" type="number" name="mpLoanTerm_' + i + '" value="' + v(row.loanTerm) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Transaction Purpose") + '</label><input class="input" name="mpTransactionPurpose_' + i + '" value="' + esc(row.transactionPurpose||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Cash Out Purpose (if applicable)") + '</label><input class="input" name="mpCashOutPurpose_' + i + '" value="' + esc(row.cashOutPurpose||"") + '"></div>' +
+    '</div>' +
+  '</div>';
+}
+function buildMultiPackRowsHTML(count, existingRows, lang){
+  var rows = [];
+  for (var i=0;i<count;i++){ rows.push(buildMultiPackRowHTML(i, (existingRows||[])[i], lang)); }
+  return rows.join("");
+}
+function collectMultiPackRowsFromDOM(container){
+  var rows = [];
+  var i = 0;
+  var el;
+  while ((el = container.querySelector('[name="mpAddress_' + i + '"]'))){
+    var get = function(name){ var f = container.querySelector('[name="' + name + '"]'); return f ? f.value : ""; };
+    rows.push({
+      address: get("mpAddress_" + i), occupancy: get("mpOccupancy_" + i), propertyType: get("mpPropertyType_" + i),
+      purchasePrice: get("mpPurchasePrice_" + i), asIsValue: get("mpAsIsValue_" + i), loanAmount: get("mpLoanAmount_" + i),
+      loanTerm: get("mpLoanTerm_" + i), transactionPurpose: get("mpTransactionPurpose_" + i), cashOutPurpose: get("mpCashOutPurpose_" + i)
+    });
+    i++;
+  }
+  return rows;
+}
+function extractMultiPackFromForm(fd){
+  var rows = [];
+  var i = 0;
+  while (fd.has("mpAddress_" + i)){
+    rows.push({
+      address: fd.get("mpAddress_" + i) || "", occupancy: fd.get("mpOccupancy_" + i) || "", propertyType: fd.get("mpPropertyType_" + i) || "",
+      purchasePrice: fd.get("mpPurchasePrice_" + i) ? Number(fd.get("mpPurchasePrice_" + i)) : null,
+      asIsValue: fd.get("mpAsIsValue_" + i) ? Number(fd.get("mpAsIsValue_" + i)) : null,
+      loanAmount: fd.get("mpLoanAmount_" + i) ? Number(fd.get("mpLoanAmount_" + i)) : null,
+      loanTerm: fd.get("mpLoanTerm_" + i) ? Number(fd.get("mpLoanTerm_" + i)) : null,
+      transactionPurpose: fd.get("mpTransactionPurpose_" + i) || "", cashOutPurpose: fd.get("mpCashOutPurpose_" + i) || ""
+    });
+    i++;
+  }
+  return rows;
+}
+function buildDscrApplicationFieldsHTML(lead, lang){
+  if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return "";
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
+  var v = function(x){ return x==null ? "" : x; };
+  var d = lead.dscrApp || {};
+  var isPortfolio = lead.loanType === "Portfolio/Blanket";
+  var scheduleACount = Math.min(d.scheduleACount || 0, 6);
+  var multiPackCount = Math.min(d.multiPackCount || 0, 4);
+  var yn = function(name, val){
+    return '<select class="select" name="' + name + '">' +
+      '<option value="No"' + (val!=="Yes"?" selected":"") + '>' + L("No") + '</option>' +
+      '<option value="Yes"' + (val==="Yes"?" selected":"") + '>' + L("Yes") + '</option>' +
+    '</select>';
+  };
+  var declRows = LOAN_APP_DECLARATIONS.map(function(decl){
+    var existing = (d.declarations || {})[decl.key] || {};
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">' +
+      '<div style="margin-bottom:6px">' + L(decl.text) + '</div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>' + L("You") + '</label>' + yn("decl_" + decl.key, existing.guarantor) + '</div>' +
+        '<div class="form-row"><label>' + L("Co-Applicant (if any)") + '</label>' + yn("decl_" + decl.key + "_co", existing.coGuarantor) + '</div>' +
+      '</div>' +
+      '<div class="form-row"><label>' + L("If yes, explain") + '</label><input class="input" name="decl_' + decl.key + '_explain" value="' + esc(existing.explain||"") + '"></div>' +
+    '</div>';
+  }).join("");
+  return '<div class="section-head" style="margin-top:24px"><h2>' + L("DSCR Business Purpose Loan Application") + '</h2></div>' +
+    '<div class="footnote" style="padding:0 0 10px">' + L("A few more details Constructive Capital needs beyond what you already gave us — most of your loan info above carries over automatically.") + '</div>' +
+
+    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Your Current Address") + '</b></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Own or Rent?") + '</label><select class="select" name="dscrOwnRent"><option value="Own"' + (d.ownRent==="Own"?" selected":"") + '>' + L("Own") + '</option><option value="Rent"' + (d.ownRent==="Rent"?" selected":"") + '>' + L("Rent") + '</option></select></div>' +
+      '<div class="form-row"><label>' + L("Years/Months at Address") + '</label><input class="input" name="dscrYearsAtAddress" value="' + esc(d.yearsAtAddress||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="dscrHomeAddress" value="' + esc(d.homeAddress||"") + '"></div>' +
+    '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="dscrMaritalStatus">' +
+      ["Single","Married","Separated"].map(function(o){ return '<option value="' + o + '"' + (d.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
+    '</select></div>' +
+
+    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Co-Applicant (leave blank if none)") + '</b></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("First Name") + '</label><input class="input" name="dscrCoFirstName" value="' + esc(d.coFirstName||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Last Name") + '</label><input class="input" name="dscrCoLastName" value="' + esc(d.coLastName||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Phone") + '</label><input class="input" name="dscrCoPhone" value="' + esc(d.coPhone||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Email") + '</label><input class="input" type="email" name="dscrCoEmail" value="' + esc(d.coEmail||"") + '"></div>' +
+    '</div>' +
+
+    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Entity Details") + '</b></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Entity Formed (date)") + '</label><input class="input" type="date" name="dscrEntityDateEst" value="' + esc(d.entityDateEst||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("EIN") + '</label><input class="input" name="dscrEntityEin" value="' + esc(d.entityEin||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Entity Bank Name") + '</label><input class="input" name="dscrEntityBankName" value="' + esc(d.entityBankName||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Entity Bank Balance") + '</label><input class="input" type="number" name="dscrEntityBankBalance" value="' + v(d.entityBankBalance) + '"></div>' +
+    '</div>' +
+    '<div class="form-row"><label>' + L("Entity Address, City, State, ZIP") + '</label><input class="input" name="dscrEntityAddress" value="' + esc(d.entityAddress||"") + '"></div>' +
+
+    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Ownership — Schedule A") + '</b></div>' +
+    '<div class="form-row"><label>' + L("How many owners to list?") + '</label><input class="input" type="number" min="0" max="6" name="scheduleACount" value="' + (scheduleACount||"") + '" data-action="update-schedule-a-count" data-lang="' + lang + '" data-lead="' + lead.id + '"></div>' +
+    '<div id="schedule-a-rows-' + lead.id + '" data-lang="' + lang + '">' + (scheduleACount ? buildScheduleARowsHTML(scheduleACount, d.scheduleA, lang) : '<div class="empty">' + L("Enter a number above to add owner rows (leave 0 if you're the sole owner).") + '</div>') + '</div>' +
+
+    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Loan Terms") + '</b></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Occupancy") + '</label><input class="input" name="dscrOccupancy" value="' + esc(d.occupancy||"Investment") + '"></div>' +
+      '<div class="form-row"><label>' + L("Loan Product Needed") + '</label><select class="select" name="dscrLoanProduct">' +
+        '<option value="30 Year Fixed"' + (d.loanProduct!=="10/1 Interest Only"?" selected":"") + '>' + L("30 Year Fixed") + '</option>' +
+        '<option value="10/1 Interest Only"' + (d.loanProduct==="10/1 Interest Only"?" selected":"") + '>' + L("10/1 Interest Only") + '</option>' +
+      '</select></div>' +
+    '</div>' +
+    '<div class="form-row"><label>' + L("Cash Out Purpose (if applicable)") + '</label><input class="input" name="dscrCashOutPurpose" value="' + esc(d.cashOutPurpose||"") + '"></div>' +
+
+    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Interior Access Contact") + '</b></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Name or Lock Box #") + '</label><input class="input" name="dscrAccessName" value="' + esc(d.accessName||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Relationship") + '</label><input class="input" name="dscrAccessRelationship" value="' + esc(d.accessRelationship||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Phone") + '</label><input class="input" name="dscrAccessPhone" value="' + esc(d.accessPhone||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Email") + '</label><input class="input" type="email" name="dscrAccessEmail" value="' + esc(d.accessEmail||"") + '"></div>' +
+    '</div>' +
+
+    (isPortfolio ? (
+      '<div class="hint" style="margin:14px 0 6px"><b>' + L("Multi-Pack Addendum — additional properties beyond the one above") + '</b></div>' +
+      '<div class="form-row"><label>' + L("How many additional properties?") + '</label><input class="input" type="number" min="0" max="4" name="multiPackCount" value="' + (multiPackCount||"") + '" data-action="update-multi-pack-count" data-lang="' + lang + '" data-lead="' + lead.id + '"></div>' +
+      '<div id="multi-pack-rows-' + lead.id + '" data-lang="' + lang + '">' + (multiPackCount ? buildMultiPackRowsHTML(multiPackCount, d.multiPack, lang) : '<div class="empty">' + L("Enter a number above if this is a Blanket/Portfolio loan covering more than one property.") + '</div>') + '</div>'
+    ) : '') +
+
+    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Current Debt on Property — refinance only, leave blank for a purchase") + '</b></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Balance Owed") + '</label><input class="input" type="number" name="dscrBalanceOwed" value="' + v(d.balanceOwed) + '"></div>' +
+      '<div class="form-row"><label>' + L("Current Lender") + '</label><input class="input" name="dscrCurrentLender" value="' + esc(d.currentLender||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Original Cost") + '</label><input class="input" type="number" name="dscrOriginalCost" value="' + v(d.originalCost) + '"></div>' +
+      '<div class="form-row"><label>' + L("Year Acquired") + '</label><input class="input" name="dscrYearAcquired" value="' + esc(d.yearAcquired||"") + '"></div>' +
+    '</div>' +
+
+    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Title / Insurance / Closing Agent") + '</b></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Title Company") + '</label><input class="input" name="dscrTitleCompany" value="' + esc(d.titleCompany||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Title Contact / Phone / Email") + '</label><input class="input" name="dscrTitleContact" value="' + esc(d.titleContact||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Insurance Carrier") + '</label><input class="input" name="dscrInsuranceCarrier" value="' + esc(d.insuranceCarrier||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Insurance Contact / Phone / Email") + '</label><input class="input" name="dscrInsuranceContact" value="' + esc(d.insuranceContact||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Closing Agent Company") + '</label><input class="input" name="dscrClosingAgent" value="' + esc(d.closingAgent||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Closing Agent Contact / Phone / Email") + '</label><input class="input" name="dscrClosingAgentContact" value="' + esc(d.closingAgentContact||"") + '"></div>' +
+    '</div>' +
+
+    '<div class="form-row"><label>' + L("Comments (anything else we should know)") + '</label><textarea class="textarea" name="dscrComments" rows="3">' + esc(d.comments||"") + '</textarea></div>' +
+
+    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Declarations") + '</b></div>' +
+    declRows +
+
+    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Certification") + '</b></div>' +
+    '<div class="footnote" style="padding:0 0 8px">' + L("By signing, you certify that everything in this application is true and complete, and authorize Bridgepoint Lending / BPL Mortgage, LLC and its investors to verify this information and pull credit.") + '</div>' +
+    sigPadHTML("sig-dscrapp-" + lead.id, L("Sign Here to Certify"));
+}
+function extractDscrApplicationFromForm(fd, signatureDataUrl, existing){
+  if (!fd.has("dscrOwnRent")) return null;
+  var num = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
+  var declarations = {};
+  LOAN_APP_DECLARATIONS.forEach(function(decl){
+    declarations[decl.key] = {
+      guarantor: fd.get("decl_" + decl.key) || "No",
+      coGuarantor: fd.get("decl_" + decl.key + "_co") || "No",
+      explain: fd.get("decl_" + decl.key + "_explain") || ""
+    };
+  });
+  return {
+    ownRent: fd.get("dscrOwnRent") || "",
+    yearsAtAddress: fd.get("dscrYearsAtAddress") || "",
+    homeAddress: fd.get("dscrHomeAddress") || "",
+    maritalStatus: fd.get("dscrMaritalStatus") || "",
+    coFirstName: fd.get("dscrCoFirstName") || "",
+    coLastName: fd.get("dscrCoLastName") || "",
+    coPhone: fd.get("dscrCoPhone") || "",
+    coEmail: fd.get("dscrCoEmail") || "",
+    entityDateEst: fd.get("dscrEntityDateEst") || "",
+    entityEin: fd.get("dscrEntityEin") || "",
+    entityBankName: fd.get("dscrEntityBankName") || "",
+    entityBankBalance: num("dscrEntityBankBalance"),
+    entityAddress: fd.get("dscrEntityAddress") || "",
+    scheduleACount: num("scheduleACount") || 0,
+    scheduleA: extractScheduleAFromForm(fd),
+    occupancy: fd.get("dscrOccupancy") || "",
+    loanProduct: fd.get("dscrLoanProduct") || "",
+    cashOutPurpose: fd.get("dscrCashOutPurpose") || "",
+    accessName: fd.get("dscrAccessName") || "",
+    accessRelationship: fd.get("dscrAccessRelationship") || "",
+    accessPhone: fd.get("dscrAccessPhone") || "",
+    accessEmail: fd.get("dscrAccessEmail") || "",
+    multiPackCount: num("multiPackCount") || 0,
+    multiPack: extractMultiPackFromForm(fd),
+    balanceOwed: num("dscrBalanceOwed"),
+    currentLender: fd.get("dscrCurrentLender") || "",
+    originalCost: num("dscrOriginalCost"),
+    yearAcquired: fd.get("dscrYearAcquired") || "",
+    titleCompany: fd.get("dscrTitleCompany") || "",
+    titleContact: fd.get("dscrTitleContact") || "",
+    insuranceCarrier: fd.get("dscrInsuranceCarrier") || "",
+    insuranceContact: fd.get("dscrInsuranceContact") || "",
+    closingAgent: fd.get("dscrClosingAgent") || "",
+    closingAgentContact: fd.get("dscrClosingAgentContact") || "",
+    comments: fd.get("dscrComments") || "",
     declarations: declarations,
     signatureDataUrl: signatureDataUrl || (existing && existing.signatureDataUrl) || null,
     signedAt: signatureDataUrl ? todayISO() : (existing && existing.signedAt) || null
@@ -5876,6 +6224,14 @@ appEl.addEventListener("change", function(e){
       var saCount = Math.max(0, Math.min(parseInt(t.value,10)||0, 6));
       saContainer.innerHTML = saCount ? buildScheduleARowsHTML(saCount, saExisting, saLang) : '<div class="empty">' + esc(tr("Enter a number above to add owner rows (leave 0 if you're the sole owner).", saLang)) + '</div>';
     }
+  } else if (action === "update-multi-pack-count"){
+    var mpContainer = document.getElementById("multi-pack-rows-" + t.dataset.lead);
+    if (mpContainer){
+      var mpLang = t.dataset.lang || "en";
+      var mpExisting = collectMultiPackRowsFromDOM(mpContainer);
+      var mpCount = Math.max(0, Math.min(parseInt(t.value,10)||0, 4));
+      mpContainer.innerHTML = mpCount ? buildMultiPackRowsHTML(mpCount, mpExisting, mpLang) : '<div class="empty">' + esc(tr("Enter a number above if this is a Blanket/Portfolio loan covering more than one property.", mpLang)) + '</div>';
+    }
   } else if (action === "pricer-input"){
     ui.pricerInputs = ui.pricerInputs || {};
     ui.pricerInputs[t.dataset.lead] = ui.pricerInputs[t.dataset.lead] || {};
@@ -5993,7 +6349,8 @@ appEl.addEventListener("submit", function(e){
     var taLead = leadById(form.dataset.lead);
     var taAchData = extractAchFromForm(fd, signaturePadDataUrl("sig-ach-" + form.dataset.lead), taLead && taLead.achForm);
     var taRtlData = extractRtlApplicationFromForm(fd, signaturePadDataUrl("sig-rtlapp-" + form.dataset.lead), taLead && taLead.rtlApp);
-    applyAchAndRtlAppPatch(form.dataset.lead, taAchData, taRtlData);
+    var taDscrData = extractDscrApplicationFromForm(fd, signaturePadDataUrl("sig-dscrapp-" + form.dataset.lead), taLead && taLead.dscrApp);
+    applyAchAndRtlAppPatch(form.dataset.lead, taAchData, taRtlData, taDscrData);
     var sowPatch = extractScopeOfWorkFromForm(fd);
     if (sowPatch) saveScopeOfWork(form.dataset.lead, sowPatch.items, sowPatch.notes);
     render();
@@ -6002,6 +6359,7 @@ appEl.addEventListener("submit", function(e){
     var pubLead = leadById(form.dataset.lead);
     var pubAchData = extractAchFromForm(fd, signaturePadDataUrl("sig-ach-" + form.dataset.lead), pubLead && pubLead.achForm);
     var pubRtlData = extractRtlApplicationFromForm(fd, signaturePadDataUrl("sig-rtlapp-" + form.dataset.lead), pubLead && pubLead.rtlApp);
+    var pubDscrData = extractDscrApplicationFromForm(fd, signaturePadDataUrl("sig-dscrapp-" + form.dataset.lead), pubLead && pubLead.dscrApp);
     submitPublicApplication(form.dataset.lead, {
       entityType: fd.get("entityType"),
       creditScore: numOrNullPub("creditScore"),
@@ -6033,7 +6391,7 @@ appEl.addEventListener("submit", function(e){
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
     });
-    applyAchAndRtlAppPatch(form.dataset.lead, pubAchData, pubRtlData);
+    applyAchAndRtlAppPatch(form.dataset.lead, pubAchData, pubRtlData, pubDscrData);
     var sowPatchPub = extractScopeOfWorkFromForm(fd);
     if (sowPatchPub) saveScopeOfWork(form.dataset.lead, sowPatchPub.items, sowPatchPub.notes);
     render();
