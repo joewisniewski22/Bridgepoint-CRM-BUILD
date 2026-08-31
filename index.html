@@ -3130,7 +3130,28 @@ function uploadLeadDocument(leadId, idx, file, actorLabel){
     lead.activity.push({ date:todayISO(), type:"document", text: actorLabel + " uploaded: " + doc.name + " (" + file.name + ")", author: actorLabel });
     showToast("Uploaded " + doc.name);
     persist();
+    requestAiDocReview(lead, doc);
   });
+}
+function requestAiDocReview(lead, doc){
+  if (!sb || !doc.storagePath) return;
+  sb.functions.invoke("review-document", { body: {
+    path: doc.storagePath, docName: doc.name,
+    context: {
+      borrowerName: lead.name, loanType: lead.loanType, loanAmount: lead.loanAmount,
+      propertyAddress: lead.propertyAddress, ltv: lead.ltv
+    }
+  } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok) return;
+    doc.aiReview = { status: res.data.status, note: res.data.note, reviewedAt: todayISO(), dismissed:false };
+    lead.activity = lead.activity || [];
+    lead.activity.push({
+      date: todayISO(), type:"note",
+      text: "AI review — " + doc.name + ": " + (res.data.status==="clear" ? "looks good, no issues found." : ("flagged — " + res.data.note)),
+      author: "AI Assistant"
+    });
+    persist();
+  }).catch(function(){});
 }
 
 function saveScopeOfWork(leadId, items, notes){
@@ -3493,67 +3514,20 @@ function uploadGeneratedPdfDocument(leadId, docName, blob, opts){
 }
 
 /* ---------------------------------------------------------------------
-   AI document review (simulated — prototype has no real file content
-   to inspect, so findings are drawn deterministically per document so
-   the same document always reviews the same way)
+   AI document review — real review via the "review-document" edge
+   function (Claude vision), fired automatically on every upload and
+   re-runnable manually. See requestAiDocReview / runAiDocReview / scanAllDocuments.
 --------------------------------------------------------------------- */
-var AI_DOC_FINDINGS = {
-  "Government ID": [
-    { status:"clear", note:"Name, date of birth, and expiration date are legible and match the borrower record." },
-    { status:"flag", note:"ID expiration date appears to be in the past — request a current, unexpired copy." },
-    { status:"flag", note:"Name on the ID doesn't exactly match the borrower name on file — confirm spelling/legal name." }
-  ],
-  "Bank Statements (2mo)": [
-    { status:"clear", note:"Account holder name and statement period match; balances are consistent across pages." },
-    { status:"flag", note:"Most recent statement is more than 60 days old — request an updated copy before underwriting." },
-    { status:"flag", note:"Large unexplained deposit on this statement — will likely need a letter of explanation." }
-  ],
-  "Purchase Contract": [
-    { status:"clear", note:"Purchase price and property address match what's on file, and the contract is signed by all parties." },
-    { status:"flag", note:"Contract is missing a signature or date on the signature page." },
-    { status:"flag", note:"Purchase price on the contract doesn't match the amount entered on this loan." }
-  ],
-  "Entity Docs (Operating Agreement)": [
-    { status:"clear", note:"Entity name, formation state, and authorized signer match the borrower record." },
-    { status:"flag", note:"Operating agreement doesn't clearly name an authorized signer — may need a certification page." }
-  ],
-  "Appraisal": [
-    { status:"clear", note:"Appraised value supports the requested loan amount at the target LTV." },
-    { status:"flag", note:"Appraised value came in below the value used to calculate LTV — loan terms may need revisiting." }
-  ],
-  "Insurance Binder": [
-    { status:"clear", note:"Coverage amount and effective dates look sufficient for this property and loan." },
-    { status:"flag", note:"Coverage amount looks lower than the loan amount — confirm with the insurance agent." }
-  ],
-  "_default": [
-    { status:"clear", note:"Document looks complete and consistent with the loan file." },
-    { status:"flag", note:"Scan quality is low in places — some fields may be hard to verify. Consider requesting a clearer copy." }
-  ]
-};
-function hashStr(s){
-  var h = 0;
-  for (var i=0;i<s.length;i++){ h = (h*31 + s.charCodeAt(i)) | 0; }
-  return Math.abs(h);
-}
-function applyAiDocReview(lead, doc){
-  var pool = AI_DOC_FINDINGS[doc.name] || AI_DOC_FINDINGS["_default"];
-  var pick = pool[hashStr(lead.id + "|" + doc.name + "|" + (doc.fileName||"")) % pool.length];
-  doc.aiReview = { status: pick.status, note: pick.note, reviewedAt: todayISO(), dismissed:false };
-  return pick;
-}
 function runAiDocReview(leadId, idx){
   var lead = leadById(leadId);
   if (!lead || !lead.documents[idx]) return;
   var doc = lead.documents[idx];
-  var pick = applyAiDocReview(lead, doc);
-  lead.activity = lead.activity || [];
-  lead.activity.push({
-    date: todayISO(), type:"note",
-    text: "AI review — " + doc.name + ": " + (pick.status==="clear" ? "looks good, no issues found." : ("flagged — " + pick.note)),
-    author: "AI Assistant"
-  });
-  showToast(pick.status === "clear" ? "AI review: looks good" : "AI review: flagged for follow-up");
-  persist();
+  if (!doc.storagePath){
+    showToast("No file on record for this document — upload it to run AI review");
+    return;
+  }
+  showToast("Re-running AI review…");
+  requestAiDocReview(lead, doc);
 }
 function missingRequiredDocs(lead){
   var list = REQUIRED_DOCS_BY_TYPE[lead.loanType] || [];
@@ -3576,27 +3550,37 @@ function docIssuesExplanation(lead){
 }
 function scanAllDocuments(leadId){
   var lead = leadById(leadId);
-  if (!lead) return;
-  var docs = lead.documents || [];
-  var scanned = 0, flaggedCount = 0;
-  docs.forEach(function(d){
-    if (d.status === "received"){
-      var pick = applyAiDocReview(lead, d);
-      scanned++;
-      if (pick.status === "flag") flaggedCount++;
-    }
+  if (!lead || !sb) return;
+  var docs = (lead.documents||[]).filter(function(d){ return d.status === "received" && d.storagePath; });
+  if (!docs.length){
+    showToast("No received documents with a file on record to scan");
+    return;
+  }
+  showToast("Scanning " + docs.length + " document(s)…");
+  var calls = docs.map(function(d){
+    return sb.functions.invoke("review-document", { body: {
+      path: d.storagePath, docName: d.name,
+      context: { borrowerName: lead.name, loanType: lead.loanType, loanAmount: lead.loanAmount, propertyAddress: lead.propertyAddress, ltv: lead.ltv }
+    } }).then(function(res){
+      if (res.error || !res.data || !res.data.ok) return false;
+      d.aiReview = { status: res.data.status, note: res.data.note, reviewedAt: todayISO(), dismissed:false };
+      return res.data.status === "flag";
+    }).catch(function(){ return false; });
   });
-  var missing = missingRequiredDocs(lead);
-  lead.activity = lead.activity || [];
-  lead.activity.push({
-    date: todayISO(),
-    type: "note",
-    text: "AI scanned " + scanned + " document(s)" + (flaggedCount ? (" — " + flaggedCount + " flagged") : " — all clear") +
-      (missing.length ? ("; " + missing.length + " required document(s) still missing") : ""),
-    author: "AI Assistant"
+  Promise.all(calls).then(function(flags){
+    var flaggedCount = flags.filter(Boolean).length;
+    var missing = missingRequiredDocs(lead);
+    lead.activity = lead.activity || [];
+    lead.activity.push({
+      date: todayISO(),
+      type: "note",
+      text: "AI scanned " + docs.length + " document(s)" + (flaggedCount ? (" — " + flaggedCount + " flagged") : " — all clear") +
+        (missing.length ? ("; " + missing.length + " required document(s) still missing") : ""),
+      author: "AI Assistant"
+    });
+    showToast((flaggedCount || missing.length) ? "Scan complete — issues found, see summary below" : "Scan complete — all clear");
+    persist();
   });
-  showToast((flaggedCount || missing.length) ? "Scan complete — issues found, see summary below" : "Scan complete — all clear");
-  persist();
 }
 function sendBackToLOWithAiFindings(leadId){
   var lead = leadById(leadId);
