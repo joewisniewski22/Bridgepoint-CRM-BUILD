@@ -1241,7 +1241,8 @@ function userById(id){ return state.users.filter(function(u){ return u.id===id; 
 function userName(id){ var u = userById(id); return u ? u.name : "Unassigned"; }
 function loName(id){ return userName(id); }
 function isOwner(){ return ui.viewAs==="owner" || ui.viewAs==="demo"; }
-function isDemo(){ return ui.viewAs==="demo"; }
+function isDemoAccountId(id){ return id==="demo" || id==="demo-processor"; }
+function isDemo(){ return isDemoAccountId(ui.viewAs); }
 function isProcessor(){ var u = userById(ui.viewAs); return !!(u && u.role==="processor"); }
 function isLO(){ var u = userById(ui.viewAs); return !!(u && u.role==="loan_officer"); }
 function currentUser(){ return userById(ui.viewAs) || { id:"owner", name:"Joe", role:"owner" }; }
@@ -1257,7 +1258,7 @@ function nextLeadId(){
   });
   return "L" + String(max+1).padStart(3,"0");
 }
-function loanOfficers(){ return state.users.filter(function(u){ return u.role==="loan_officer" && u.id!=="demo"; }); }
+function loanOfficers(){ return state.users.filter(function(u){ return u.role==="loan_officer" && !isDemoAccountId(u.id); }); }
 function ownerOptions(currentId){
   var owner = state.users.filter(function(u){ return u.role==="owner"; });
   var list = owner.concat(loanOfficers());
@@ -1299,7 +1300,7 @@ function attemptLogin(username, pin){
     ui.loginError = null;
     ui.loginSelectedUser = null;
     ui.loginUsername = "";
-    if (u.id === "demo"){ ui.view = "tour"; ui.tourStep = 0; }
+    if (isDemoAccountId(u.id)){ ui.view = "tour"; ui.tourStep = 0; }
     else { ui.view = u.onboarded ? "today" : "onboardSignature"; }
     ui.selectedLeadId = null;
     try { localStorage.setItem("bp_view_as", u.id); localStorage.setItem("bp_authed_for", u.id); } catch(e){}
@@ -2150,7 +2151,7 @@ function leadToRow(l){
     citizenship_status: l.citizenshipStatus || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
-    assigned_processor: l.assignedProcessor || null,
+    assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -2181,7 +2182,7 @@ function rowToLead(r){
     citizenshipStatus: r.citizenship_status || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
-    assignedProcessor: r.assigned_processor || null,
+    assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -2595,6 +2596,20 @@ function reassignLead(leadId, newOwnerId){
   persist();
 }
 
+function toggleOnHold(leadId, note){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  lead.onHold = !lead.onHold;
+  lead.activity = lead.activity || [];
+  lead.activity.push({
+    date: todayISO(), type:"system",
+    text: lead.onHold ? ("Put on hold" + (note ? (": " + note) : "")) : "Taken off hold",
+    author: currentUser().name
+  });
+  showToast(lead.onHold ? "Marked on hold" : "Removed from hold");
+  persist();
+}
+
 function reassignProcessor(leadId, newProcId){
   var lead = leadById(leadId);
   if (!lead || !newProcId || lead.assignedProcessor === newProcId) return;
@@ -3000,7 +3015,7 @@ function sendReviewRequests(lead){
   }
 }
 function allProcessors(){
-  return state.users.filter(function(u){ return u.role==="processor"; });
+  return state.users.filter(function(u){ return u.role==="processor" && !isDemoAccountId(u.id); });
 }
 function leastLoadedProcessor(){
   var procs = allProcessors();
@@ -3891,7 +3906,7 @@ function renderOnboardingSignature(){
 }
 
 function tourStepsForRole(){
-  if (isDemo()) return [
+  if (ui.viewAs==="demo") return [
     { title:"Welcome to the Bridgepoint Lending Desk", body:"This is the whole shop, end to end — lead intake, pricing, the borrower's own portal, processing, closing, and commission payroll, all in one system. We'll walk it in two parts: first the sales side, then processing. This is real production data, so it's exactly what the team works in every day." },
     { title:"PART 1: SALES — Today, the call queue", body:"Every LO's homepage. It ranks calls by urgency: 🔥 hot brand-new leads first (speed to lead matters most), then rate-drop callbacks, stalled applications, birthdays, and win-back opportunities on cold/lost deals. Nobody has to guess who to call next — and now it also texts your phone the moment a hot lead lands, even if the app isn't open." },
     { title:"Leads & Loans + Pipeline", body:"Every loan, filterable by stage, loan type, or officer. Pipeline shows the same thing as a kanban board by stage. Click into any one to see the full file — borrower info, documents, activity log, everything." },
@@ -4835,14 +4850,17 @@ function renderRail(lead){
   var statusRow = "";
   if (lead.status === "cold") statusRow = '<button class="btn btn-sm" data-action="move-stage" data-lead="' + lead.id + '" data-target="reactivate">Reactivate</button>';
   else if (lead.status === "lost") statusRow = '<span class="badge badge-neutral">Lost / Dead</span>';
-  else statusRow = '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="cold">Mark Cold</button>' +
+  else if (!isProcessor()) statusRow = '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="cold">Mark Cold</button>' +
       '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="lost">Mark Lost</button>';
+  if (isProcessor() || isOwner()){
+    statusRow += '<button class="btn btn-sm' + (lead.onHold ? ' btn-primary' : '') + '" data-action="toggle-on-hold" data-lead="' + lead.id + '">' + (lead.onHold ? "Remove Hold" : "⏸ Put On Hold") + '</button>';
+  }
 
   return '<div class="panel" style="align-self:flex-start">' +
     '<div class="rail-block">' +
       '<div class="rail-title">Borrower</div>' +
       '<div class="rail-name">' + esc(lead.name) + '</div>' +
-      '<div class="stage-line">' + badgeForStage(lead) + '</div>' +
+      '<div class="stage-line">' + badgeForStage(lead) + (lead.onHold ? ' <span class="badge badge-rust">⏸ On Hold</span>' : '') + '</div>' +
       '<button class="btn btn-sm' + (lead.preferredLanguage==="es" ? " btn-primary" : "") + '" style="width:100%;margin-top:8px" data-action="toggle-language" data-lead="' + lead.id + '" title="' + (lead.preferredLanguage==="es" ? "Spanish — click to switch back to English" : "English — click to switch to Spanish") + '">' +
         (lead.preferredLanguage==="es" ? "🇪🇸" : "🇺🇸") + ' Spanish Speaking' +
       '</button>' +
@@ -4991,7 +5009,7 @@ function renderTeam(){
       '<td class="num">' + fmtUSD(cs.earned) + '</td><td class="num">' + fmtUSD(cs.potential) + '</td></tr>';
   }).join("");
 
-  var accessRows = state.users.filter(function(u){ return u.role !== "owner"; }).map(function(u){
+  var accessRows = state.users.filter(function(u){ return u.role !== "owner" && !isDemoAccountId(u.id); }).map(function(u){
     var roleLabel = u.role==="processor" ? "Processor" : "Loan Officer";
     return '<tr><td><b>' + esc(u.name) + '</b></td><td>' + roleLabel + '</td>' +
       '<td>' + (u.role==="processor" ? '<span class="hint">n/a</span>' : (
@@ -6502,6 +6520,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "close-modal"){ ui.modal = null; ui.importState = null; render(); }
   else if (action === "import-back"){ ui.importState = null; render(); }
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
+  else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "ai-review-doc"){ runAiDocReview(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
