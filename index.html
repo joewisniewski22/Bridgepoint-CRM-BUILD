@@ -557,6 +557,13 @@ var ES_DICT = {
   "No messages yet — ask a question below.":"Aún no hay mensajes — haga una pregunta abajo.",
   "Type a message…":"Escriba un mensaje…", "Send":"Enviar", "You":"Usted",
   "Your loan officer gets this as a text and can reply right from their phone.":"Su oficial de préstamos recibe esto como mensaje de texto y puede responder directamente desde su teléfono.",
+  "Your Contacts":"Sus Contactos",
+  "Title company, insurance agent, or anyone else involved in this loan — add them here so we can coordinate directly.":"Compañía de título, agente de seguros, o cualquier otra persona involucrada en este préstamo — agréguelos aquí para que podamos coordinar directamente.",
+  "No contacts added yet.":"Aún no se han agregado contactos.",
+  "Add Contact":"Agregar Contacto",
+  "Name":"Nombre", "Phone":"Teléfono",
+  "Realtor":"Agente Inmobiliario", "Title Company":"Compañía de Título", "Escrow Officer":"Oficial de Plica",
+  "Insurance Agent":"Agente de Seguros", "Attorney":"Abogado", "Appraiser":"Tasador",
   "Let's get your application started":"Comencemos su solicitud",
   "Takes about 10 minutes — fill in what you can, sign at the end.":"Toma unos 10 minutos — complete lo que pueda y firme al final.",
   "Submit Application":"Enviar Solicitud",
@@ -2862,6 +2869,20 @@ function addThirdParty(leadId, tp){
   ui.modal = null;
   persist();
 }
+function addThirdPartyFromPortal(leadId, tp){
+  var lead = leadById(leadId);
+  if (!lead || !tp.name) return;
+  lead.thirdParties = lead.thirdParties || [];
+  lead.thirdParties.push(tp);
+  lead.activity = lead.activity || [];
+  lead.activity.push({
+    date: todayISO(), type:"note",
+    text: lead.name + " added a contact — " + tp.role + ": " + tp.name + (tp.phone?(" · "+tp.phone):"") + (tp.email?(" · "+tp.email):""),
+    author: lead.name
+  });
+  if (lead.assignedTo) notifyUser(lead.assignedTo, lead.id, "third-party", lead.name + " added a " + tp.role + " contact: " + tp.name);
+  persist();
+}
 function toggleNotify(leadId, idx){
   var lead = leadById(leadId);
   if (!lead || !lead.thirdParties[idx]) return;
@@ -3794,6 +3815,24 @@ function buildBorrowerPortalHTML(lead, opts){
     (docs || '<div class="empty">' + L("No documents requested yet.") + '</div>') +
   '</div>';
 
+  var tpRows = (lead.thirdParties||[]).map(function(tp){
+    return '<div class="doc-row"><div><div><b>' + esc(tp.name) + '</b></div>' +
+      '<div class="cell-sub">' + L(tp.role) + (tp.phone?(' · '+esc(tp.phone)):'') + (tp.email?(' · '+esc(tp.email)):'') + '</div></div></div>';
+  }).join("");
+  var tpRoleOptions = TP_ROLES.map(function(r){ return '<option value="' + r + '">' + L(r) + '</option>'; }).join("");
+  var thirdPartiesCard = '<div class="portal-section">' +
+    '<div class="rail-title">' + L("Your Contacts") + '</div>' +
+    '<div class="footnote" style="padding:2px 0 8px">' + L("Title company, insurance agent, or anyone else involved in this loan — add them here so we can coordinate directly.") + '</div>' +
+    (tpRows || '<div class="empty">' + L("No contacts added yet.") + '</div>') +
+    '<form data-form="portal-add-third-party" data-lead="' + lead.id + '" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' +
+      '<select class="select" name="role">' + tpRoleOptions + '</select>' +
+      '<input class="input" name="name" placeholder="' + L("Name") + '" required style="flex:1;min-width:120px">' +
+      '<input class="input" name="phone" placeholder="' + L("Phone") + '" style="flex:1;min-width:100px">' +
+      '<input class="input" name="email" placeholder="' + L("Email") + '" style="flex:1;min-width:120px">' +
+      '<button class="btn btn-sm btn-primary" type="submit">' + L("Add Contact") + '</button>' +
+    '</form>' +
+  '</div>';
+
   var chatMessages = (lead.portalChat||[]).map(function(m){
     var mine = m.from === "borrower";
     return '<div style="display:flex;' + (mine?'justify-content:flex-end':'justify-content:flex-start') + ';margin-bottom:8px">' +
@@ -3815,7 +3854,7 @@ function buildBorrowerPortalHTML(lead, opts){
     '<div class="footnote" style="padding-top:6px">' + L("Your loan officer gets this as a text and can reply right from their phone.") + '</div>' +
   '</div>';
 
-  return header + termsCard + loCard + docsCard + chatCard;
+  return header + termsCard + loCard + docsCard + thirdPartiesCard + chatCard;
 }
 function renderLogin(){
   var brandBlock = '<div class="login-brand" style="justify-content:center"><img src="' + LOGO_URL + '" alt="Bridgepoint Lending" style="max-width:260px;width:100%;height:auto"></div>';
@@ -3945,7 +3984,7 @@ function renderShell(){
       '<div class="sidebar-foot">' +
         '<div class="role-box">' +
           '<b>' + esc(currentUser().name) + '</b><br>' +
-          (isDemo() ? "Demo Account" : isOwner() ? "Owner" : isProcessor() ? "Processor" : "Loan Officer") +
+          (currentUser().role==="owner" ? "Owner" : currentUser().role==="processor" ? "Processor" : "Loan Officer") +
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">' +
             (isDemo() ? '<button class="btn btn-sm btn-primary" style="flex:1" data-action="restart-tour">▶ Replay Tour</button>' : '<button class="btn btn-sm" style="flex:1" data-action="open-modal" data-modal="changePin">Change PIN</button>') +
             (isDemo() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="editSignature">Signature</button>') +
@@ -6836,6 +6875,10 @@ appEl.addEventListener("submit", function(e){
     render();
   } else if (type === "portal-message"){
     sendPortalMessage(form.dataset.lead, fd.get("message"));
+    form.reset();
+    render();
+  } else if (type === "portal-add-third-party"){
+    addThirdPartyFromPortal(form.dataset.lead, { role: fd.get("role"), name: fd.get("name"), phone: fd.get("phone"), email: fd.get("email"), notify: true });
     form.reset();
     render();
   } else if (type === "log-call"){
