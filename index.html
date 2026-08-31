@@ -1233,7 +1233,8 @@ function stageIndex(key){ return STAGE_MAP[key] ? STAGE_MAP[key].index : -1; }
 function userById(id){ return state.users.filter(function(u){ return u.id===id; })[0] || null; }
 function userName(id){ var u = userById(id); return u ? u.name : "Unassigned"; }
 function loName(id){ return userName(id); }
-function isOwner(){ return ui.viewAs==="owner"; }
+function isOwner(){ return ui.viewAs==="owner" || ui.viewAs==="demo"; }
+function isDemo(){ return ui.viewAs==="demo"; }
 function isProcessor(){ var u = userById(ui.viewAs); return !!(u && u.role==="processor"); }
 function isLO(){ var u = userById(ui.viewAs); return !!(u && u.role==="loan_officer"); }
 function currentUser(){ return userById(ui.viewAs) || { id:"owner", name:"Joe", role:"owner" }; }
@@ -1291,7 +1292,8 @@ function attemptLogin(username, pin){
     ui.loginError = null;
     ui.loginSelectedUser = null;
     ui.loginUsername = "";
-    ui.view = u.onboarded ? "today" : "onboardSignature";
+    if (u.id === "demo"){ ui.view = "tour"; ui.tourStep = 0; }
+    else { ui.view = u.onboarded ? "today" : "onboardSignature"; }
     ui.selectedLeadId = null;
     try { localStorage.setItem("bp_view_as", u.id); localStorage.setItem("bp_authed_for", u.id); } catch(e){}
     render();
@@ -3835,6 +3837,18 @@ function renderOnboardingSignature(){
 }
 
 function tourStepsForRole(){
+  if (isDemo()) return [
+    { title:"Welcome to the Bridgepoint Lending Desk", body:"This is the whole shop, end to end — lead intake, pricing, the borrower's own portal, processing, closing, and commission payroll, all in one system. Click through each nav item on the left as we go — this is real production data, so it's exactly what the team works in every day." },
+    { title:"Today — the call queue", body:"Every LO's homepage. It ranks calls by urgency: 🔥 hot brand-new leads first (speed to lead matters most), then rate-drop callbacks, stalled applications, birthdays, and win-back opportunities on cold/lost deals. Nobody has to guess who to call next." },
+    { title:"Leads & Loans + Pipeline", body:"Every loan, filterable by stage, loan type, or officer. Pipeline shows the same thing as a kanban board by stage. Click into any one to see the full file — borrower info, documents, activity log, everything." },
+    { title:"The Pricer — live, not a guess", body:"Open any DSCR/Fix & Flip/Bridge/Portfolio loan's Loan Scenario tab. It prices off our actual current wholesale rate sheets — par rate by default, and if we adjust the rate up for yield spread, the YSP dollar amount updates live as you move the slider. One click sends a term sheet at that exact rate." },
+    { title:"Sending the application — and the Borrower Portal", body:"Click Send Application or the new Send Borrower Portal button, and the borrower gets a link by text AND email. That link is a full branded portal: their loan status, a photo of their actual property pulled from Street View, their document checklist, and a live chat that texts straight to the assigned LO's phone — the LO can reply from a normal text message and it posts back into the borrower's portal automatically. Click Borrower Portal Preview in the nav to see exactly what any borrower sees, in their own language if they're Spanish-speaking." },
+    { title:"Real AI document review", body:"Every document a borrower uploads gets automatically reviewed by AI the moment it lands — not a canned check, it actually reads the file. It's already caught real things: missing signatures, expired IDs, and even an LTV math error on a real file. Flagged items show up right on the loan and in the processing queue." },
+    { title:"Processing, without the back-and-forth", body:"One click emails the title company or insurance agent with everything they need, and their reply files itself onto the loan automatically. Files auto-assign to whichever processor has the lightest load, so nothing piles up on one person." },
+    { title:"Team, commission splits, and Payroll", body:"Team shows workload and production per loan officer, with each person's negotiated origination split editable right there. Payroll shows exactly what's owed to whom on every closed loan — split automatically by our actual commission rules, no spreadsheet required." },
+    { title:"Speed & Conversion", body:"Real funnel analytics — where leads drop off stage by stage, conversion rate by marketing source, and speed-to-lead ranked by officer. This is how we'll know what's actually working as we scale." },
+    { title:"That's the whole loop", body:"Lead comes in → contacted fast → priced live → application + portal sent → documents AI-reviewed → processed → closed → paid out — all in one place, for every loan officer and processor, every time. Take it away — click into anything live." }
+  ];
   if (isProcessor()) return [
     { title:"Today = your processing queue", body:"No cold-calling here — just what needs processing: appraisal/title requests from loan officers, files flagged for review, and anything else routed to you." },
     { title:"You only see processing-stage loans", body:"Leads & Loans and Pipeline only show loans in Processing, Underwriting, Clear to Close, and Closed. Everything earlier stays with the loan officer until it's ready for you." },
@@ -3913,10 +3927,10 @@ function renderShell(){
       '<div class="sidebar-foot">' +
         '<div class="role-box">' +
           '<b>' + esc(currentUser().name) + '</b><br>' +
-          (isOwner() ? "Owner" : isProcessor() ? "Processor" : "Loan Officer") +
+          (isDemo() ? "Demo Account" : isOwner() ? "Owner" : isProcessor() ? "Processor" : "Loan Officer") +
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">' +
-            '<button class="btn btn-sm" style="flex:1" data-action="open-modal" data-modal="changePin">Change PIN</button>' +
-            '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="editSignature">Signature</button>' +
+            (isDemo() ? '<button class="btn btn-sm btn-primary" style="flex:1" data-action="restart-tour">▶ Replay Tour</button>' : '<button class="btn btn-sm" style="flex:1" data-action="open-modal" data-modal="changePin">Change PIN</button>') +
+            (isDemo() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="editSignature">Signature</button>') +
             '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="logout">Log Out</button>' +
           '</div>' +
         '</div>' +
@@ -6463,6 +6477,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }
   else if (action === "logout"){ logout(); }
+  else if (action === "restart-tour"){ ui.view = "tour"; ui.tourStep = 0; render(); }
   else if (action === "tour-next"){ ui.tourStep = (ui.tourStep||0)+1; render(); }
   else if (action === "tour-back"){ ui.tourStep = Math.max((ui.tourStep||0)-1,0); render(); }
   else if (action === "tour-skip" || action === "tour-finish"){ ui.view = "today"; render(); }
