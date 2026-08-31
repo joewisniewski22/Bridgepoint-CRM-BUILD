@@ -1356,12 +1356,6 @@ function dscrPriceRowFor(rate){
   });
   return best;
 }
-function yspOutOfRange(lead){
-  if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return false;
-  if (lead.rate == null) return false;
-  if (lead.prepayTerm === "none" || lead.propertyType === "Multifamily 5+") return false;
-  return !dscrPriceRowFor(lead.rate);
-}
 function yspRevenue(lead){
   if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return 0;
   if (!lead.loanAmount) return 0;
@@ -1387,11 +1381,37 @@ function processingFeeRevenue(lead){
   var result = evaluatePricing(lead, inputs);
   return (result && !result.ineligible && result.fee) ? result.fee : 0;
 }
+function yspBreakdown(lead){
+  if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return null;
+  var noYsp = (lead.prepayTerm === "none") || (lead.propertyType === "Multifamily 5+");
+  if (noYsp) return { amount: 0, reason: "not eligible — no-prepay or 5+ unit multifamily" };
+  if (lead.rate == null) return { amount: null, reason: "pending — set a rate first" };
+  var priceRow = dscrPriceRowFor(lead.rate);
+  if (!priceRow) return { amount: null, reason: "rate is outside the modeled pricing range (6.375%–7.500%) — needs manual calculation" };
+  return { amount: Math.max(0, Math.round((priceRow.price - 100) / 100 * lead.loanAmount * 100) / 100), reason: null };
+}
 function renderEarningsLive(lead){
-  var ysp = yspRevenue(lead);
-  return (ysp ? ('<div class="footnote" style="padding:6px 0 0">Yield Spread Earned: <b>' + fmtUSD(ysp) + '</b></div>') : '') +
-    (lead.pointsCharged!=null ? ('<div class="footnote" style="padding:2px 0 0">' + (isOwner() ? "Total origination revenue (100%)" : ("Est. commission to " + esc(userName(lead.assignedTo)) + " (50%)")) + ' if this closes: <b>' + fmtUSD((pointsRevenue(lead)+ysp) * (isOwner()?1:COMMISSION_SPLIT)) + '</b> (' + (isOwner()?"100%":"50%") + ' of ' + lead.pointsCharged + '% points' + (ysp ? " + YSP" : "") + ' × ' + fmtUSD(lead.loanAmount) + ')</div>') : '<div class="footnote" style="padding:2px 0 0">Not set yet — used to calculate the loan officer\'s commission.</div>') +
-    (yspOutOfRange(lead) ? '<div class="footnote" style="padding:2px 0 0;color:var(--c-rust)">Rate is outside the modeled pricing range (6.375%–7.500%) — needs manual YSP calculation.</div>' : '');
+  var pts = pointsRevenue(lead);
+  var yb = yspBreakdown(lead);
+  var yspAmt = (yb && yb.amount!=null) ? yb.amount : 0;
+  var total = pts + yspAmt;
+  var rows = [];
+  rows.push(lead.pointsCharged!=null
+    ? ('Origination Points (' + lead.pointsCharged + '%): <b>' + fmtUSD(pts) + '</b>')
+    : 'Origination Points: <b>not set yet</b>');
+  if (yb){
+    rows.push(yb.amount!=null
+      ? ('Yield Spread Earned: <b>' + fmtUSD(yb.amount) + '</b>')
+      : ('Yield Spread Earned: <b>' + esc(yb.reason) + '</b>'));
+  }
+  if (lead.pointsCharged!=null){
+    rows.push(isOwner()
+      ? ('Total origination revenue (100%) if this closes: <b>' + fmtUSD(total) + '</b>')
+      : ('Your split (50%) if this closes: <b>' + fmtUSD(total * COMMISSION_SPLIT) + '</b> of ' + fmtUSD(total) + ' total'));
+  } else {
+    rows.push('Set points charged above — used to calculate the loan officer\'s commission.');
+  }
+  return rows.map(function(r){ return '<div class="footnote" style="padding:2px 0 0">' + r + '</div>'; }).join('');
 }
 function payrollFor(lead){
   var skipLo = lead.assignedTo === "owner";
@@ -1857,7 +1877,7 @@ function buildTermSheet(lead){
   var today = todayISO();
   var expires = addDaysISO(today, 15);
   var lang = lead.preferredLanguage || "en";
-  var commission = lead.pointsCharged!=null ? (lead.pointsCharged + "%") : (lang==="es" ? "Por determinar" : "TBD");
+  var commission = (lead.pointsCharged!=null && lead.loanAmount) ? fmtUSD(pointsRevenue(lead)) : (lang==="es" ? "Por determinar" : "TBD");
   var lines = [];
   if (lang === "es"){
     lines.push("BRIDGEPOINT LENDING — HOJA DE TÉRMINOS");
@@ -1873,7 +1893,7 @@ function buildTermSheet(lead){
     lines.push("Tasa: " + (lead.rate ? fmtPct(lead.rate) : "Por determinar — sujeta a bloqueo de tasa"));
     lines.push("Plazo: " + (lead.termMonths ? (lead.termMonths + " meses") : "Por determinar"));
     lines.push("Relación Préstamo-Valor: " + (lead.ltv ? (lead.ltv + "%") : "Por determinar"));
-    lines.push("Puntos Cobrados: " + commission);
+    lines.push("Originación: " + commission);
     lines.push("");
     lines.push("PROPIEDAD");
     lines.push("Dirección: " + (lead.propertyAddress || "Por determinar"));
@@ -1898,7 +1918,7 @@ function buildTermSheet(lead){
     lines.push("Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
     lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
     lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
-    lines.push("Points Charged: " + commission);
+    lines.push("Origination: " + commission);
     lines.push("");
     lines.push("PROPERTY");
     lines.push("Address: " + (lead.propertyAddress || "TBD"));
