@@ -1129,6 +1129,11 @@ var RATE_KEY_BY_LOAN_TYPE = {
 };
 var SHORT_TERM_TYPES = ["Fix & Flip","Ground Up Construction","Bridge"];
 var XACTUS_PORTAL_URL = "https://xactus.com/sign-in/";
+// Street View Static API key, restricted by HTTP referrer to this site's
+// domain in Google Cloud Console -- that referrer restriction is what makes
+// it safe to use directly in client-side <img> src the way Google intends
+// for this API, no server-side proxy needed. Empty until Joe adds his own.
+var GOOGLE_MAPS_API_KEY = "";
 var CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 var CADENCE_STAGES = ["new","attempting","qualifying"];
 var CADENCE_MAX = 5;
@@ -3611,9 +3616,14 @@ function buildBorrowerPortalHTML(lead, opts){
     '</div>';
   }).join("") + '</div>';
 
+  var propertyImageHTML = (lead.propertyAddress && GOOGLE_MAPS_API_KEY) ? (
+    '<img src="https://maps.googleapis.com/maps/api/streetview?size=340x220&location=' + encodeURIComponent(lead.propertyAddress) + '&key=' + GOOGLE_MAPS_API_KEY + '" ' +
+    'alt="" style="width:150px;height:104px;object-fit:cover;border-radius:10px;box-shadow:var(--shadow-card);display:block;margin-left:auto" ' +
+    'onerror="this.style.display=\'none\'">'
+  ) : '';
   var header = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">' +
       '<div class="portal-hero"><img src="' + LOGO_URL + '" alt="Bridgepoint Lending"></div>' +
-      (opts.selectorHTML || '') +
+      '<div style="text-align:right">' + (opts.selectorHTML || '') + propertyImageHTML + '</div>' +
     '</div>' +
     '<h2 class="font-display" style="margin:16px 0 2px">' + L("Welcome") + ', ' + esc((lead.name||"").split(" ")[0]) + '</h2>' +
     '<div class="view-sub">' + L(lead.loanType) + (lead.propertyAddress ? (' · ' + esc(lead.propertyAddress)) : '') + '</div>' +
