@@ -1250,6 +1250,21 @@ function nextLeadId(){
   return "L" + String(max+1).padStart(3,"0");
 }
 function loanOfficers(){ return state.users.filter(function(u){ return u.role==="loan_officer"; }); }
+function leastLoadedLO(requireSpanish){
+  var pool = loanOfficers();
+  if (requireSpanish){
+    var spanish = pool.filter(function(u){ return u.speaksSpanish; });
+    if (spanish.length) pool = spanish;
+  }
+  if (!pool.length) return null;
+  var loadCount = {};
+  pool.forEach(function(u){ loadCount[u.id] = 0; });
+  state.leads.forEach(function(l){
+    if (l.status==="active" && l.assignedTo && loadCount.hasOwnProperty(l.assignedTo)) loadCount[l.assignedTo]++;
+  });
+  pool = pool.slice().sort(function(a,b){ return loadCount[a.id]-loadCount[b.id]; });
+  return pool[0];
+}
 function ownerOptions(currentId){
   var owner = state.users.filter(function(u){ return u.role==="owner"; });
   var list = owner.concat(loanOfficers());
@@ -6313,7 +6328,9 @@ function createLeadFromScenario(data){
   persist();
 }
 function modalAddLead(){
-  var loOptions = ownerOptions();
+  var suggested = leastLoadedLO(false);
+  var suggestedSpanish = leastLoadedLO(true);
+  var loOptions = ownerOptions(suggested ? suggested.id : currentUser().id);
   var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
   var srcOptions = SOURCES.map(function(s){ return '<option value="' + s + '">' + s + '</option>'; }).join("");
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
@@ -6331,10 +6348,13 @@ function modalAddLead(){
           '<div class="form-row"><label>Loan Type</label><select class="select" name="loanType">' + typeOptions + '</select></div>' +
         '</div>' +
         '<div class="form-two">' +
-          '<div class="form-row"><label>Assign to</label><select class="select" name="assignedTo">' + loOptions + '</select></div>' +
+          '<div class="form-row"><label>Assign to</label><select class="select" name="assignedTo">' + loOptions + '</select>' +
+            (suggestedSpanish ? ('<label style="display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--text-muted);margin-top:4px"><input type="checkbox" data-action="toggle-spanish-route" data-normal="' + (suggested?suggested.id:"") + '" data-spanish="' + suggestedSpanish.id + '"> Spanish-speaking client — route to a Spanish-speaking officer</label>') : '') +
+          '</div>' +
           '<div class="form-row"><label>Loan Amount (est.)</label><input class="input" type="number" name="loanAmount"></div>' +
         '</div>' +
         '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress"></div>' +
+        '<div class="footnote" style="padding-top:4px">Assign to defaults to whichever officer has the lightest active pipeline right now — change it anytime.</div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add Lead</button></div>' +
       '</form>' +
@@ -6363,7 +6383,8 @@ function modalImportLeads(){
     var aiNote = st.aiStatus === "checking"
       ? '<div class="hint">✨ Asking AI to double-check this mapping…</div>'
       : (st.aiStatus === "applied" ? '<div class="hint" style="color:var(--c-forest)">✨ AI reviewed and adjusted the mapping below.</div>' : "");
-    var loOptions = ownerOptions();
+    var suggestedImportLO = leastLoadedLO(false);
+    var loOptions = ownerOptions(suggestedImportLO ? suggestedImportLO.id : currentUser().id);
     var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
     var previewRows = st.rows.slice(0,5).map(function(r){ return '<tr>' + st.headers.map(function(h,i){ return '<td>' + esc((r[i]||"").toString().slice(0,40)) + '</td>'; }).join("") + '</tr>'; }).join("");
     var previewHead = '<tr>' + st.headers.map(function(h){ return '<th>' + esc(h) + '</th>'; }).join("") + '</tr>';
@@ -6576,6 +6597,10 @@ appEl.addEventListener("change", function(e){
     reassignLead(t.dataset.lead, t.value);
   } else if (action === "reassign-processor"){
     reassignProcessor(t.dataset.lead, t.value);
+  } else if (action === "toggle-spanish-route"){
+    var routeForm = t.closest("form");
+    var routeSel = routeForm && routeForm.querySelector('[name="assignedTo"]');
+    if (routeSel) routeSel.value = t.checked ? t.dataset.spanish : t.dataset.normal;
   } else if (action === "toggle-notify"){
     toggleNotify(t.dataset.lead, parseInt(t.dataset.idx,10));
   } else if (action === "portal-select"){
