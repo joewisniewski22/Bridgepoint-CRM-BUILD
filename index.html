@@ -735,11 +735,24 @@ var DSCR_BASE_RATE_PRICE = [
   {rate:6.750, price:101.000},{rate:6.625, price:100.750},{rate:6.500, price:100.375},
   {rate:6.375, price:100.000}
 ];
-function evaluateDscrPricing(lead, inputs){
+// The rate/price grid (DSCR_BASE_RATE_PRICE) is a buy-up curve measured from
+// PAR, not a table of absolute rates -- "par" is DSCR_BASE_PAR_RATE (6.375%)
+// PLUS this specific borrower's own risk-based adjustments (FICO/LTV/DSCR
+// band/property/transaction/loan amount/prepay), so two borrowers with
+// different risk profiles have different par rates. Quoting AT a borrower's
+// own par rate always prices at 100.000 (zero YSP) by definition; only
+// choosing a HIGHER rate than that borrower's par earns YSP, looked up by
+// how far above par the chosen rate is (delta), reusing this same table's
+// shape since it already spans par (6.375, delta 0) through the max buy-up
+// (7.500, delta 1.125) in 0.125% steps.
+function dscrPriceForDelta(deltaFromPar){
+  if (deltaFromPar < -0.0001) return null;
+  var tableRate = Math.round((DSCR_BASE_PAR_RATE + deltaFromPar) * 1000) / 1000;
+  return DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate - tableRate) < 0.001; })[0] || null;
+}
+var DSCR_MAX_BUYUP = 1.125;
+function dscrParRate(lead, inputs){
   if (!lead.creditScore || !lead.loanAmount || !lead.purchasePrice) return null;
-  if (lead.citizenshipStatus === "Foreign National" || lead.citizenshipStatus === "ITIN"){
-    return { ineligible:true, reason: (lead.citizenshipStatus) + " pricing isn't modeled on this sheet — needs manual pricing from underwriting." };
-  }
   var propertyType = (inputs && inputs.propertyType) || lead.propertyType;
   var ltv = lead.loanAmount / lead.purchasePrice * 100;
   var col = dscrLtvCol(ltv);
@@ -786,14 +799,34 @@ function evaluateDscrPricing(lead, inputs){
   rate += DSCR_PREPAY_ADJ[prepayKey][col];
 
   rate = Math.round(rate*1000)/1000;
-  var priceRow = DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate-rate) < 0.001; })[0];
-  var fee = DSCR_FEE_BY_PROPERTY[propertyType] || DSCR_FEE_BY_PROPERTY["SFR"];
-  var price = priceRow ? priceRow.price : null;
+  return { rate: rate, ltv: ltv, dscr: dscrVal, notes: notes, propertyType: propertyType };
+}
+function evaluateDscrPricing(lead, inputs){
+  if (lead.citizenshipStatus === "Foreign National" || lead.citizenshipStatus === "ITIN"){
+    return { ineligible:true, reason: (lead.citizenshipStatus) + " pricing isn't modeled on this sheet — needs manual pricing from underwriting." };
+  }
+  var par = dscrParRate(lead, inputs);
+  if (!par) return null;
+  if (par.ineligible) return par;
+
+  var propertyType = par.propertyType;
+  var prepayKey = (inputs && inputs.prepayTerm) || "5yr";
   var noYspAllowed = prepayKey === "none" || propertyType === "Multifamily 5+";
-  if (noYspAllowed && price) notes.push("No YSP available" + (prepayKey === "none" ? " on a No Prepay option" : " on 5-8 unit properties"));
-  var ysp = (price && !noYspAllowed) ? Math.round((price - 100) * 1000) / 1000 : null;
-  var yspDollar = (ysp && lead.loanAmount) ? lead.loanAmount * (ysp / 100) : null;
-  return { rate: rate, price: price, ysp: ysp, yspDollar: yspDollar, noYspAllowed: noYspAllowed, fee: fee, ltv: ltv, dscr: dscrVal, notes: notes };
+  var fee = DSCR_FEE_BY_PROPERTY[propertyType] || DSCR_FEE_BY_PROPERTY["SFR"];
+
+  var quoteRate = (inputs && inputs.rateOverride != null) ? Number(inputs.rateOverride) : par.rate;
+  quoteRate = Math.round(quoteRate*1000)/1000;
+  if (quoteRate < par.rate) quoteRate = par.rate;
+  if (quoteRate > par.rate + DSCR_MAX_BUYUP) quoteRate = Math.round((par.rate + DSCR_MAX_BUYUP)*1000)/1000;
+  var delta = Math.round((quoteRate - par.rate)*1000)/1000;
+
+  var priceRow = dscrPriceForDelta(delta);
+  var price = priceRow ? priceRow.price : (delta === 0 ? 100.000 : null);
+  var notes = par.notes.slice();
+  if (noYspAllowed && delta > 0) notes.push("No YSP available" + (prepayKey === "none" ? " on a No Prepay option" : " on 5-8 unit properties"));
+  var ysp = (price != null && !noYspAllowed) ? Math.round((price - 100) * 1000) / 1000 : (delta === 0 ? 0 : null);
+  var yspDollar = (ysp != null && lead.loanAmount) ? Math.round(lead.loanAmount * (ysp / 100) * 100) / 100 : (ysp === 0 ? 0 : null);
+  return { rate: quoteRate, parRate: par.rate, price: price, ysp: ysp, yspDollar: yspDollar, noYspAllowed: noYspAllowed, fee: fee, ltv: par.ltv, dscr: par.dscr, notes: notes };
 }
 var DSCR_MULTIPACK_FEE = { "3-4": 1745, "5+": 1495 };
 function evaluatePortfolioPricing(lead, inputs){
@@ -1342,19 +1375,15 @@ function pointsRevenue(lead){
   if (!lead.pointsCharged || !lead.loanAmount) return 0;
   return lead.loanAmount * (lead.pointsCharged/100);
 }
-function dscrPriceRowFor(rate){
-  // Real rate sheets only quote in 0.125% increments. Round to the
-  // nearest one instead of requiring an exact match, so a rate that's
-  // slightly off-grid (typo, old data, floating point) still prices
-  // correctly -- only genuinely outside the sheet's range (more than
-  // half an increment past either end) counts as out of range.
-  if (rate < 6.375 - 0.0625 || rate > 7.500 + 0.0625) return null;
-  var best = null, bestDiff = Infinity;
-  DSCR_BASE_RATE_PRICE.forEach(function(p){
-    var diff = Math.abs(p.rate - rate);
-    if (diff < bestDiff){ bestDiff = diff; best = p; }
-  });
-  return best;
+function dscrLockedRateInfo(lead){
+  // Where this borrower's own committed rate sits relative to THEIR par
+  // rate -- see dscrParRate/dscrPriceForDelta above for why par moves per
+  // borrower instead of being a fixed absolute rate.
+  var par = dscrParRate(lead, { propertyType: lead.propertyType, transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr" });
+  if (!par || par.ineligible || lead.rate == null) return null;
+  var delta = Math.round((lead.rate - par.rate)*1000)/1000;
+  if (delta < -0.0001) return { parRate: par.rate, delta: delta, priceRow: null, belowPar: true };
+  return { parRate: par.rate, delta: delta, priceRow: dscrPriceForDelta(delta), belowPar: false };
 }
 function yspRevenue(lead){
   if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return 0;
@@ -1362,14 +1391,14 @@ function yspRevenue(lead){
   var noYsp = (lead.prepayTerm === "none") || (lead.propertyType === "Multifamily 5+");
   if (noYsp) return 0;
   if (lead.rate != null){
-    // A rate is already locked in -- price it off that exact rate, or
-    // treat it as out of range. Never fall back to the calculator's own
-    // independent estimate here, since that would show a number with no
-    // relationship to the rate actually on the file.
-    var priceRow = dscrPriceRowFor(lead.rate);
-    return priceRow ? Math.max(0, Math.round((priceRow.price - 100) / 100 * lead.loanAmount * 100) / 100) : 0;
+    // A rate is already locked in -- price it off that exact rate relative
+    // to this borrower's own par, or treat it as out of range. Never fall
+    // back to the calculator's own independent estimate here, since that
+    // would show a number with no relationship to the rate actually on file.
+    var info = dscrLockedRateInfo(lead);
+    return (info && info.priceRow) ? Math.max(0, Math.round((info.priceRow.price - 100) / 100 * lead.loanAmount * 100) / 100) : 0;
   }
-  var inputs = { propertyType: lead.propertyType, transactionType: lead.transactionType || "purchase", prepayTerm: lead.prepayTerm || "5yr", points:"1.00" };
+  var inputs = { propertyType: lead.propertyType, transactionType: lead.transactionType || "purchase", prepayTerm: lead.prepayTerm || "5yr" };
   var result = evaluatePricing(lead, inputs);
   return (result && !result.ineligible && result.yspDollar) ? result.yspDollar : 0;
 }
@@ -1386,9 +1415,11 @@ function yspBreakdown(lead){
   var noYsp = (lead.prepayTerm === "none") || (lead.propertyType === "Multifamily 5+");
   if (noYsp) return { amount: 0, reason: "not eligible — no-prepay or 5+ unit multifamily" };
   if (lead.rate == null) return { amount: null, reason: "pending — set a rate first" };
-  var priceRow = dscrPriceRowFor(lead.rate);
-  if (!priceRow) return { amount: null, reason: "rate is outside the modeled pricing range (6.375%–7.500%) — needs manual calculation" };
-  return { amount: Math.max(0, Math.round((priceRow.price - 100) / 100 * lead.loanAmount * 100) / 100), reason: null };
+  var info = dscrLockedRateInfo(lead);
+  if (!info) return { amount: null, reason: "can't compute this borrower's par rate yet — missing credit score, purchase price, or loan amount" };
+  if (info.belowPar) return { amount: null, reason: "rate is below this borrower's par rate (" + fmtPct(info.parRate) + ") — pricing below par isn't modeled, needs manual calculation" };
+  if (!info.priceRow) return { amount: null, reason: "rate is more than " + DSCR_MAX_BUYUP + "% above this borrower's par rate (" + fmtPct(info.parRate) + ") — outside the modeled buy-up range, needs manual calculation" };
+  return { amount: Math.max(0, Math.round((info.priceRow.price - 100) / 100 * lead.loanAmount * 100) / 100), reason: null };
 }
 function renderEarningsLive(lead){
   var pts = pointsRevenue(lead);
@@ -3754,7 +3785,8 @@ function defaultStandalonePricer(){
     loanType:"DSCR", propertyType:"SFR", creditScore:null, purchasePrice:null,
     propertyAddress:null, ruralStatus:null, arv:null,
     rentEstimate:null, experienceDeals:null, rehabBudget:null, propertyCount:null,
-    citizenshipStatus:null, transactionType:"purchase", prepayTerm:"5yr", points:"1.00", termMonths:360
+    citizenshipStatus:null, transactionType:"purchase", prepayTerm:"5yr", points:"1.00", termMonths:360,
+    rateOverride:null
   };
 }
 function computeMaxLoanAmount(sp){
@@ -3859,36 +3891,44 @@ function renderStandalonePricer(){
         '<option value="1.00"' + sel("points","1.00") + '>1.00</option><option value="0.50"' + sel("points","0.50") + '>0.50</option><option value="0.00"' + sel("points","0.00") + '>0.00</option>' +
       '</select></div>'));
 
+  return topbar("Pricer", "Price any scenario across DSCR, Fix & Flip, Bridge, Ground Up Construction, and Portfolio/Blanket — Mixed-Use isn't modeled yet, no real rate sheet for it.", "") +
+    '<div class="content"><div class="panel panel-pad" style="max-width:640px">' +
+      fields + '<div class="section-head" style="margin-top:20px"><h2>Result</h2></div>' +
+      '<div id="pricer-output-standalone">' + buildStandalonePricerOutputHTML(sp) + '</div>' +
+    '</div></div>';
+}
+function standaloneRateAdjustField(currentRate, parRate){
+  var maxRate = Math.round((parRate + DSCR_MAX_BUYUP)*1000)/1000;
+  return '<div class="field"><label>Rate</label><div class="val mono">' +
+    '<input type="number" step="0.125" min="' + parRate + '" max="' + maxRate + '" data-action="standalone-pricer-rate-live" value="' + currentRate + '" style="width:90px;font:inherit;padding:2px 4px">%' +
+  '</div></div>';
+}
+function buildStandalonePricerOutputHTML(sp){
+  var isDSCR = sp.loanType === "DSCR" || sp.loanType === "Portfolio/Blanket";
   var maxLoanInfo = computeMaxLoanAmount(sp);
   var effectiveLoanAmount = maxLoanInfo ? Math.floor(maxLoanInfo.amount) : null;
   var result = effectiveLoanAmount ? evaluatePricing(Object.assign({}, sp, { loanAmount: effectiveLoanAmount }), sp) : null;
-  var output;
   if (!maxLoanInfo){
-    output = '<div class="hint">Fill in credit score (DSCR/Portfolio) or investing experience (Fix & Flip/Bridge/Ground Up), plus purchase price, to see the max loan amount and pricing.</div>';
+    return '<div class="hint">Fill in credit score (DSCR/Portfolio) or investing experience (Fix & Flip/Bridge/Ground Up), plus purchase price, to see the max loan amount and pricing.</div>';
   } else if (!result){
-    output = '<div class="hint">Add a bit more info to see live pricing at the max qualifying amount.</div>';
+    return '<div class="hint">Add a bit more info to see live pricing at the max qualifying amount.</div>';
   } else if (result.ineligible){
-    output = '<div class="hint" style="color:var(--c-rust)">' + esc(result.reason) + '</div>';
-  } else {
-    var ysp = yspRevenue(Object.assign({}, sp, { loanAmount: effectiveLoanAmount }));
-    var rows = field("Max Loan Amount You Qualify For", fmtUSD(effectiveLoanAmount), true) +
-      field("Rate", fmtPct(result.rate), true) +
-      field("Lender Fee", fmtUSD(result.fee), true) +
-      (isDSCR ? field("Wholesale Price", result.price ? result.price.toFixed(3) : "—", true) : "") +
-      (isDSCR ? field("Yield Spread (YSP)", ysp ? fmtUSD(ysp) : (result.noYspAllowed ? "Not available" : "None (par or better)"), true) : "") +
-      (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
-      (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
-    output = '<div class="field-grid">' + rows + '</div>' +
-      (maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.adj ? ('<div class="footnote" style="padding-top:8px">' + maxLoanInfo.stateAdj.state + ' property — max leverage reduced ' + maxLoanInfo.stateAdj.adj + '% per the matrix\'s state adjustment table.</div>') : '') +
-      (maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.needsManualCheck ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">NY property — county-specific leverage reduction applies (-15% for the five boroughs, -5% Suffolk/Nassau). Verify manually, not applied here.</div>' : '') +
-      (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
-      '<div style="margin-top:14px"><button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button></div>';
+    return '<div class="hint" style="color:var(--c-rust)">' + esc(result.reason) + '</div>';
   }
-
-  return topbar("Pricer", "Price any scenario across DSCR, Fix & Flip, Bridge, Ground Up Construction, and Portfolio/Blanket — Mixed-Use isn't modeled yet, no real rate sheet for it.", "") +
-    '<div class="content"><div class="panel panel-pad" style="max-width:640px">' +
-      fields + '<div class="section-head" style="margin-top:20px"><h2>Result</h2></div>' + output +
-    '</div></div>';
+  var rateField = (isDSCR && result.parRate!=null) ? standaloneRateAdjustField(result.rate, result.parRate) : field("Rate", fmtPct(result.rate), true);
+  var rows = field("Max Loan Amount You Qualify For", fmtUSD(effectiveLoanAmount), true) +
+    rateField +
+    field("Lender Fee", fmtUSD(result.fee), true) +
+    (isDSCR ? field("Wholesale Price", result.price!=null ? result.price.toFixed(3) : "—", true) : "") +
+    (isDSCR ? field("Yield Spread (YSP)", (result.ysp!=null && result.ysp>0) ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : (result.noYspAllowed ? "Not available" : (result.ysp===0 ? "$0 (at par)" : "None (par or better)")), true) : "") +
+    (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
+    (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
+  return '<div class="field-grid">' + rows + '</div>' +
+    (isDSCR ? '<div class="footnote" style="padding-top:8px">Defaults to this borrower\'s par rate (no yield spread). Use the up/down arrows on Rate to quote higher and earn yield spread — updates live.</div>' : '') +
+    (maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.adj ? ('<div class="footnote" style="padding-top:8px">' + maxLoanInfo.stateAdj.state + ' property — max leverage reduced ' + maxLoanInfo.stateAdj.adj + '% per the matrix\'s state adjustment table.</div>') : '') +
+    (maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.needsManualCheck ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">NY property — county-specific leverage reduction applies (-15% for the five boroughs, -5% Suffolk/Nassau). Verify manually, not applied here.</div>' : '') +
+    (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
+    '<div style="margin-top:14px"><button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button></div>';
 }
 function renderToday(){
   var leads = scopedLeads();
@@ -4219,10 +4259,70 @@ function renderPricingInputsEditor(lead){
     '</form>';
 }
 
+function dscrRateAdjustField(lead, currentRate, parRate){
+  var maxRate = Math.round((parRate + DSCR_MAX_BUYUP)*1000)/1000;
+  return '<div class="field"><label>Rate</label><div class="val mono">' +
+    '<input type="number" step="0.125" min="' + parRate + '" max="' + maxRate + '" data-action="pricer-rate-live" data-lead="' + lead.id + '" value="' + currentRate + '" style="width:90px;font:inherit;padding:2px 4px">%' +
+  '</div></div>';
+}
+function buildPricerOutputHTML(lead, inputs){
+  var isDSCR = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
+  var maxLoanInfo = computeMaxLoanAmount(lead);
+  var lockedToActualRate = false;
+  var result, effectiveLoanAmount, parRateForDisplay = null;
+  if (isDSCR && lead.rate){
+    effectiveLoanAmount = lead.loanAmount;
+    result = evaluatePricing(lead, inputs);
+    if (result && !result.ineligible){
+      var lockedNoYsp = (inputs.prepayTerm === "none") || (inputs.propertyType === "Multifamily 5+");
+      var lockedInfo = dscrLockedRateInfo(lead);
+      var lockedPriceRow = lockedInfo ? lockedInfo.priceRow : null;
+      var lockedAtPar = lockedInfo && lockedInfo.delta === 0;
+      result = Object.assign({}, result, {
+        rate: lead.rate,
+        price: lockedPriceRow ? lockedPriceRow.price : (lockedAtPar ? 100.000 : null),
+        noYspAllowed: lockedNoYsp,
+        ysp: (lockedPriceRow && !lockedNoYsp) ? Math.round((lockedPriceRow.price-100)*1000)/1000 : ((lockedAtPar && !lockedNoYsp) ? 0 : null),
+        yspDollar: (lockedPriceRow && !lockedNoYsp) ? Math.max(0, Math.round((lockedPriceRow.price-100)/100*lead.loanAmount*100)/100) : ((lockedAtPar && !lockedNoYsp) ? 0 : null)
+      });
+      lockedToActualRate = true;
+    }
+  } else {
+    effectiveLoanAmount = maxLoanInfo ? Math.floor(maxLoanInfo.amount) : lead.loanAmount;
+    result = effectiveLoanAmount ? evaluatePricing(Object.assign({}, lead, { loanAmount: effectiveLoanAmount }), inputs) : null;
+    if (result && !result.ineligible) parRateForDisplay = result.parRate;
+  }
+  var output;
+  if (!result){
+    output = '<div class="hint">Fill in credit score, purchase price, and the pricing inputs above to see live pricing.</div>';
+  } else if (result.ineligible){
+    output = '<div class="hint" style="color:var(--c-rust)">' + esc(result.reason) + '</div>';
+  } else {
+    var rateField = (isDSCR && !lockedToActualRate && parRateForDisplay!=null)
+      ? dscrRateAdjustField(lead, result.rate, parRateForDisplay)
+      : field("Rate" + (lockedToActualRate ? " (locked on this loan)" : ""), fmtPct(result.rate), true);
+    var rows = (maxLoanInfo && !lockedToActualRate ? field("Max Loan Amount You Qualify For", fmtUSD(effectiveLoanAmount), true) : "") +
+      rateField +
+      field("Lender Fee", fmtUSD(result.fee), true) +
+      (isDSCR ? field("Wholesale Price", result.price!=null ? result.price.toFixed(3) : "—", true) : "") +
+      (isDSCR ? field("Yield Spread (YSP)", (result.ysp!=null && result.ysp>0) ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : (result.noYspAllowed ? "Not available" : (result.ysp===0 ? "$0 (at par)" : "None (par or better)")), true) : "") +
+      (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
+      (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
+    output = '<div class="field-grid">' + rows + '</div>' +
+      (isDSCR && !lockedToActualRate ? '<div class="footnote" style="padding-top:8px">Defaults to this borrower\'s par rate (no yield spread). Use the up/down arrows on Rate to quote higher and earn yield spread — updates live.</div>' : '') +
+      (lockedToActualRate ? '<div class="footnote" style="padding-top:8px">This loan already has a locked-in rate, so these figures reflect that rate rather than the sheet\'s suggested one — matches "Yield Spread Earned" in the rail. Change the rate from Loan Details above, not here.</div>' : '') +
+      (maxLoanInfo && maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.adj ? ('<div class="footnote" style="padding-top:8px">' + maxLoanInfo.stateAdj.state + ' property — max leverage reduced ' + maxLoanInfo.stateAdj.adj + '% per the matrix\'s state adjustment table.</div>') : '') +
+      (maxLoanInfo && maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.needsManualCheck ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">NY property — county-specific leverage reduction applies (-15% for the five boroughs, -5% Suffolk/Nassau). Verify manually, not applied here.</div>' : '') +
+      (isDSCR && result.yspDollar ? ('<div class="footnote" style="padding-top:8px">Est. YSP commission to ' + esc(userName(lead.assignedTo)) + ' if this closes: <b>' + fmtUSD(result.yspDollar * COMMISSION_SPLIT) + '</b> (50% of ' + fmtPct(result.ysp) + ' × ' + fmtUSD(effectiveLoanAmount) + ')</div>') : '') +
+      (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
+      (canEditApplication(lead) ? ('<div style="margin-top:10px"><button class="btn btn-sm" type="button" data-action="send-term-sheet-from-pricer" data-lead="' + lead.id + '">Send Term Sheet at This Rate</button></div>') : '');
+  }
+  return output;
+}
 function renderPricer(lead){
   if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
   ui.pricerInputs = ui.pricerInputs || {};
-  var inputs = ui.pricerInputs[lead.id] || (ui.pricerInputs[lead.id] = { points:"1.00", transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", propertyType: lead.propertyType||"SFR" });
+  var inputs = ui.pricerInputs[lead.id] || (ui.pricerInputs[lead.id] = { points:"1.00", transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", propertyType: lead.propertyType||"SFR", rateOverride: null });
   var isDSCR = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
   var propertyTypeSelect = '<div class="form-row"><label>Property Type</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="propertyType">' +
       PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (inputs.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("") +
@@ -4250,51 +4350,9 @@ function renderPricer(lead){
         '</select></div>' +
         propertyTypeSelect +
       '</div>');
-  var maxLoanInfo = computeMaxLoanAmount(lead);
-  var lockedToActualRate = false;
-  var result, effectiveLoanAmount;
-  if (isDSCR && lead.rate){
-    effectiveLoanAmount = lead.loanAmount;
-    result = evaluatePricing(lead, inputs);
-    if (result && !result.ineligible){
-      var lockedNoYsp = (inputs.prepayTerm === "none") || (inputs.propertyType === "Multifamily 5+");
-      var lockedPriceRow = DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate - lead.rate) < 0.001; })[0];
-      result = Object.assign({}, result, {
-        rate: lead.rate,
-        price: lockedPriceRow ? lockedPriceRow.price : null,
-        noYspAllowed: lockedNoYsp,
-        ysp: (lockedPriceRow && !lockedNoYsp) ? Math.round((lockedPriceRow.price-100)*1000)/1000 : null,
-        yspDollar: (lockedPriceRow && !lockedNoYsp) ? Math.max(0, Math.round((lockedPriceRow.price-100)/100*lead.loanAmount*100)/100) : null
-      });
-      lockedToActualRate = true;
-    }
-  } else {
-    effectiveLoanAmount = maxLoanInfo ? Math.floor(maxLoanInfo.amount) : lead.loanAmount;
-    result = effectiveLoanAmount ? evaluatePricing(Object.assign({}, lead, { loanAmount: effectiveLoanAmount }), inputs) : null;
-  }
-  var output;
-  if (!result){
-    output = '<div class="hint">Fill in credit score, purchase price, and the pricing inputs above to see live pricing.</div>';
-  } else if (result.ineligible){
-    output = '<div class="hint" style="color:var(--c-rust)">' + esc(result.reason) + '</div>';
-  } else {
-    var rows = (maxLoanInfo && !lockedToActualRate ? field("Max Loan Amount You Qualify For", fmtUSD(effectiveLoanAmount), true) : "") +
-      field("Rate" + (lockedToActualRate ? " (locked on this loan)" : ""), fmtPct(result.rate), true) +
-      field("Lender Fee", fmtUSD(result.fee), true) +
-      (isDSCR ? field("Wholesale Price", result.price ? result.price.toFixed(3) : "—", true) : "") +
-      (isDSCR ? field("Yield Spread (YSP)", result.ysp ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : (result.noYspAllowed ? "Not available" : "None (par or better)"), true) : "") +
-      (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
-      (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
-    output = '<div class="field-grid">' + rows + '</div>' +
-      (lockedToActualRate ? '<div class="footnote" style="padding-top:8px">This loan already has a locked-in rate, so these figures reflect that rate rather than the sheet\'s suggested one — matches "Yield Spread Earned" in the rail. Change the rate from Loan Details above, not here.</div>' : '') +
-      (maxLoanInfo && maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.adj ? ('<div class="footnote" style="padding-top:8px">' + maxLoanInfo.stateAdj.state + ' property — max leverage reduced ' + maxLoanInfo.stateAdj.adj + '% per the matrix\'s state adjustment table.</div>') : '') +
-      (maxLoanInfo && maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.needsManualCheck ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">NY property — county-specific leverage reduction applies (-15% for the five boroughs, -5% Suffolk/Nassau). Verify manually, not applied here.</div>' : '') +
-      (isDSCR && result.yspDollar ? ('<div class="footnote" style="padding-top:8px">Est. YSP commission to ' + esc(userName(lead.assignedTo)) + ' if this closes: <b>' + fmtUSD(result.yspDollar * COMMISSION_SPLIT) + '</b> (50% of ' + fmtPct(result.ysp) + ' × ' + fmtUSD(effectiveLoanAmount) + ')</div>') : '') +
-      (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
-      (canEditApplication(lead) ? ('<div style="margin-top:10px"><button class="btn btn-sm" type="button" data-action="send-term-sheet-from-pricer" data-lead="' + lead.id + '">Send Term Sheet at This Rate</button></div>') : '');
-  }
   return '<div class="section-head" style="margin-top:20px"><h2>Pricer</h2></div>' +
-    controls + output +
+    controls +
+    '<div id="pricer-output-' + lead.id + '">' + buildPricerOutputHTML(lead, inputs) + '</div>' +
     '<div class="footnote" style="padding-top:8px">Live from Constructive Capital\'s current wholesale rate sheets — common-path pricing only (foreign national, IO/STR overlays not modeled). Internal use only, never shown to the borrower.</div>';
 }
 
@@ -6264,6 +6322,7 @@ appEl.addEventListener("change", function(e){
     ui.standalonePricer[spKey] = (STANDALONE_PRICER_NUMERIC_KEYS.indexOf(spKey) !== -1)
       ? (spVal === "" ? null : Number(spVal))
       : (spVal || null);
+    if (spKey === "loanType") ui.standalonePricer.rateOverride = null;
     render();
   } else if (action === "address-lookup" && t.dataset.lead === "standalone"){
     ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
@@ -6288,6 +6347,23 @@ appEl.addEventListener("input", function(e){
       loanAmount: amtVal!=="" ? Number(amtVal) : null
     });
     liveBox.innerHTML = renderEarningsLive(tempLead);
+    return;
+  }
+  if (t.dataset.action === "pricer-rate-live"){
+    var prLead = leadById(t.dataset.lead);
+    var outBox = document.getElementById("pricer-output-" + t.dataset.lead);
+    if (!prLead || !outBox) return;
+    ui.pricerInputs = ui.pricerInputs || {};
+    var prInputs = ui.pricerInputs[t.dataset.lead] || (ui.pricerInputs[t.dataset.lead] = {});
+    prInputs.rateOverride = t.value !== "" ? Number(t.value) : null;
+    outBox.innerHTML = buildPricerOutputHTML(prLead, prInputs);
+    return;
+  }
+  if (t.dataset.action === "standalone-pricer-rate-live"){
+    ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
+    ui.standalonePricer.rateOverride = t.value !== "" ? Number(t.value) : null;
+    var spOutBox = document.getElementById("pricer-output-standalone");
+    if (spOutBox) spOutBox.innerHTML = buildStandalonePricerOutputHTML(ui.standalonePricer);
     return;
   }
   if (t.dataset.action !== "address-lookup") return;
