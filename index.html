@@ -1255,6 +1255,9 @@ function ownerOptions(currentId){
   var list = owner.concat(loanOfficers());
   return list.map(function(u){ return '<option value="' + u.id + '"' + (u.id===currentId?" selected":"") + '>' + esc(u.name) + (u.role==="owner"?" (You)":"") + '</option>'; }).join("");
 }
+function processorOptions(currentId){
+  return allProcessors().map(function(u){ return '<option value="' + u.id + '"' + (u.id===currentId?" selected":"") + '>' + esc(u.name) + '</option>'; }).join("");
+}
 
 /* ---------------------------------------------------------------------
    Login / access
@@ -1519,7 +1522,7 @@ function payrollFor(lead){
     loName: userName(lead.assignedTo),
     loCommission: skipLo ? 0 : commissionAmount(lead),
     skipLo: skipLo,
-    processorName: processingContact().name,
+    processorName: processingContact(lead).name,
     processorFee: processingFeeRevenue(lead)
   };
 }
@@ -1585,6 +1588,35 @@ function speedToLeadStats(leads){
 /* ---------------------------------------------------------------------
    Conversion by source
 --------------------------------------------------------------------- */
+function furthestStageIndex(lead){
+  // A lost/cold lead's .stage gets overwritten to "lost"/"cold" (not in
+  // STAGES), losing where they actually got to -- reconstruct the real
+  // high-water mark from the activity log's "Stage moved: X → Y" entries
+  // instead of trusting the current stage value alone.
+  var idx = stageIndex(lead.stage);
+  if (idx === -1) idx = 0;
+  (lead.activity||[]).forEach(function(a){
+    if (a.type !== "stage") return;
+    var m = /→\s*(.+)$/.exec(a.text||"");
+    if (!m) return;
+    var label = m[1].trim();
+    var match = STAGES.filter(function(s){ return s.label === label; })[0];
+    if (match){
+      var i = stageIndex(match.key);
+      if (i > idx) idx = i;
+    }
+  });
+  return idx;
+}
+function funnelCounts(leads){
+  return STAGES.map(function(s, i){
+    return {
+      key: s.key, label: s.label,
+      reached: leads.filter(function(l){ return furthestStageIndex(l) >= i; }).length,
+      current: leads.filter(function(l){ return l.stage === s.key; }).length
+    };
+  });
+}
 function conversionBySource(leads){
   var bySource = {};
   SOURCES.forEach(function(s){ bySource[s] = { source:s, total:0, closed:0, active:0, lostCold:0, closedValue:0 }; });
@@ -2109,6 +2141,7 @@ function leadToRow(l){
     citizenship_status: l.citizenshipStatus || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
+    assigned_processor: l.assignedProcessor || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -2139,6 +2172,7 @@ function rowToLead(r){
     citizenshipStatus: r.citizenship_status || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
+    assignedProcessor: r.assigned_processor || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -2513,6 +2547,7 @@ function moveStage(leadId, target){
   } else {
     var oldLabel = stageLabel(lead.stage);
     lead.stage = target;
+    if (target==="docs") ensureProcessorAssigned(lead);
     lead.status = (target==="closed" || target==="postclosing") ? "closed" : "active";
     if (target==="closed" && !lead.closeDate) lead.closeDate = d;
     lead.activity.push({ date:d, type:"stage", text:"Stage moved: " + oldLabel + " → " + stageLabel(target), author: currentUser().name });
@@ -2545,6 +2580,18 @@ function reassignLead(leadId, newOwnerId){
   lead.activity.push({ date: todayISO(), type:"system", text:"Reassigned from " + oldOwnerName + " to " + userName(newOwnerId), author: currentUser().name });
   notifyUser(newOwnerId, lead.id, "reassigned", currentUser().name + " assigned " + lead.name + " to you.");
   showToast("Reassigned to " + userName(newOwnerId));
+  persist();
+}
+
+function reassignProcessor(leadId, newProcId){
+  var lead = leadById(leadId);
+  if (!lead || !newProcId || lead.assignedProcessor === newProcId) return;
+  var oldName = userName(lead.assignedProcessor);
+  lead.assignedProcessor = newProcId;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text:"Processor reassigned from " + oldName + " to " + userName(newProcId), author: currentUser().name });
+  notifyUser(newProcId, lead.id, "reassigned", currentUser().name + " assigned " + lead.name + "'s file to you.");
+  showToast("Processor reassigned to " + userName(newProcId));
   persist();
 }
 
@@ -2846,14 +2893,15 @@ function toggleProcessingAction(leadId, kind){
   lead[orderedKey] = !lead[orderedKey];
   if (lead[orderedKey]){
     lead[atKey] = d;
+    ensureProcessorAssigned(lead);
     var lo = currentUser();
     var details = label + " needed for " + lead.name + " — " + (lead.propertyType||"property") + " at " + (lead.propertyAddress||"address TBD") +
       ". " + (lead.loanType||"Loan") + " " + fmtUSD(lead.loanAmount) + (lead.ltv ? (" @ " + lead.ltv + "% LTV") : "") +
       ". Borrower: " + (lead.name||"") + (lead.phone ? (" · " + lead.phone) : "") + (lead.email ? (" · " + lead.email) : "") +
       ". Requested by " + (lo.name||"") + (lo.phone ? (" · " + lo.phone) : "") + ".";
     lead.activity.push({ date:d, type:"notify", text: label + " ordered — notified processing", author: currentUser().name });
-    var processors = state.users.filter(function(u){ return u.role==="processor"; });
-    processors.forEach(function(p){ notifyUser(p.id, leadId, kind, details); });
+    var proc = processingContact(lead);
+    if (proc) notifyUser(proc.id, leadId, kind, details);
     showToast(label + " ordered — processing notified with full details");
   } else {
     lead[atKey] = null;
@@ -2914,8 +2962,32 @@ function sendReviewRequests(lead){
     lead.activity.push({ date: todayISO(), type:"notify", text: "Review requests sent to " + sentTo.join(", "), author: lo.name });
   }
 }
-function processingContact(){
-  return state.users.filter(function(u){ return u.role==="processor"; })[0] || currentUser();
+function allProcessors(){
+  return state.users.filter(function(u){ return u.role==="processor"; });
+}
+function leastLoadedProcessor(){
+  var procs = allProcessors();
+  if (!procs.length) return null;
+  var loadCount = {};
+  procs.forEach(function(p){ loadCount[p.id] = 0; });
+  state.leads.forEach(function(l){
+    if (l.status==="active" && l.assignedProcessor && loadCount.hasOwnProperty(l.assignedProcessor)) loadCount[l.assignedProcessor]++;
+  });
+  procs.sort(function(a,b){ return loadCount[a.id]-loadCount[b.id]; });
+  return procs[0];
+}
+function ensureProcessorAssigned(lead){
+  // Auto-assigns to whichever processor currently has the fewest active
+  // files, so workload self-balances as more processors are hired --
+  // with a single processor today this always resolves to them, unchanged
+  // from current behavior.
+  if (lead.assignedProcessor) return;
+  var p = leastLoadedProcessor();
+  if (p) lead.assignedProcessor = p.id;
+}
+function processingContact(lead){
+  var assigned = lead && lead.assignedProcessor ? userById(lead.assignedProcessor) : null;
+  return assigned || allProcessors()[0] || currentUser();
 }
 function requestThirdPartyDoc(leadId, role){
   var lead = leadById(leadId);
@@ -2923,7 +2995,7 @@ function requestThirdPartyDoc(leadId, role){
   var tp = (lead.thirdParties||[]).filter(function(t){ return t.role===role; })[0];
   if (!tp || !tp.email){ showToast("Add a " + role + " contact (with email) first"); return; }
   var isTitle = role === "Title Company";
-  var proc = processingContact();
+  var proc = processingContact(lead);
   var subject = "Bridgepoint Lending — " + (isTitle ? "Title Commitment" : "Insurance Policy") + " Request — " + (lead.propertyAddress || lead.name);
   var bodyLines;
   if (isTitle){
@@ -3938,7 +4010,9 @@ function renderProcessingTodo(){
     '</div>';
   }).join("");
 
-  var aiHTML = aiFlaggedDocs().map(function(f){
+  var aiHTML = aiFlaggedDocs().filter(function(f){
+    return isOwner() || !isProcessor() || f.lead.assignedProcessor === ui.viewAs;
+  }).map(function(f){
     return '<div class="queue-card type-winback">' +
       '<div class="queue-main">' +
         '<div class="queue-title">AI flagged a document — ' + esc(f.doc.name) + '</div>' +
@@ -3952,7 +4026,9 @@ function renderProcessingTodo(){
     '</div>';
   }).join("");
 
-  var staleHTML = staleTitleInsuranceItems().map(function(it){
+  var staleHTML = staleTitleInsuranceItems().filter(function(it){
+    return isOwner() || !isProcessor() || it.lead.assignedProcessor === ui.viewAs;
+  }).map(function(it){
     var lo = userById(it.lead.assignedTo) || {};
     return '<div class="queue-card type-followup">' +
       '<div class="queue-main">' +
@@ -4721,6 +4797,16 @@ function renderRail(lead){
         '</select>'
       ) : ('<div>' + esc(userName(lead.assignedTo)) + '</div>')) +
     '</div>' +
+    (allProcessors().length ? (
+    '<div class="rail-block">' +
+      '<div class="rail-title">Processor</div>' +
+      ((isOwner() || isProcessor()) ? (
+        '<select class="select" style="width:100%" data-action="reassign-processor" data-lead="' + lead.id + '">' +
+          '<option value="">— Not yet assigned —</option>' +
+          processorOptions(lead.assignedProcessor) +
+        '</select>'
+      ) : ('<div>' + esc(lead.assignedProcessor ? userName(lead.assignedProcessor) : "Not yet assigned") + '</div>')) +
+    '</div>') : '') +
     '<div class="rail-block">' +
       '<div class="rail-title">Contact</div>' +
       '<div class="contact-row">' +
@@ -4985,6 +5071,23 @@ function renderPerformance(){
       '</tbody></table></div></div>';
   }
 
+  var funnel = funnelCounts(leads);
+  var funnelMax = funnel.length ? funnel[0].reached : 0;
+  var funnelHTML = '<div class="table-wrap"><table><thead><tr><th>Stage</th><th>Reached This Stage</th><th>Currently Here</th><th>Drop-off to Next Stage</th></tr></thead><tbody>' +
+    funnel.map(function(f, i){
+      var next = funnel[i+1];
+      var dropPct = (next && f.reached) ? Math.round((1 - next.reached/f.reached) * 100) : null;
+      var barPct = funnelMax ? Math.round((f.reached/funnelMax)*100) : 0;
+      return '<tr><td><b>' + esc(f.label) + '</b>' +
+          '<div style="background:var(--border-soft);border-radius:4px;height:6px;margin-top:4px;overflow:hidden"><div style="width:' + barPct + '%;height:100%;background:var(--brand)"></div></div>' +
+        '</td>' +
+        '<td class="num">' + f.reached + '</td>' +
+        '<td class="num">' + f.current + '</td>' +
+        '<td class="num">' + (dropPct===null ? '—' : (dropPct>0 ? ('<span style="color:var(--c-rust)">-' + dropPct + '%</span>') : '0%')) + '</td>' +
+      '</tr>';
+    }).join("") +
+    '</tbody></table></div>';
+
   var convRows = conversionBySource(leads);
   var convHTML = '<div class="table-wrap"><table><thead><tr><th>Source</th><th>Total Leads</th><th>Closed</th><th>Conversion Rate</th><th>Active</th><th>Lost / Cold</th><th>Closed Volume</th></tr></thead><tbody>' +
     (convRows.length ? convRows.map(function(b){
@@ -5005,6 +5108,7 @@ function renderPerformance(){
       '<div class="section"><div class="section-head"><h2>Speed to Lead — by Lead</h2><span class="hint">First call/text attempt after creation</span></div>' +
         '<div class="table-wrap"><table><thead><tr><th>Lead</th>' + (isOwner() ? '<th>Loan Officer</th>' : '') + '<th>Source</th><th>Created</th><th>Speed to Lead</th></tr></thead><tbody>' + stlRows + '</tbody></table></div>' +
       '</div>' +
+      '<div class="section"><div class="section-head"><h2>Funnel — Where Leads Drop Off</h2><span class="hint">"Reached" counts every lead that ever got at least this far, even if later lost/cold</span></div>' + funnelHTML + '</div>' +
       '<div class="section"><div class="section-head"><h2>Conversion by Marketing Source</h2><span class="hint">Includes Self-Generated leads</span></div>' + convHTML + '</div>' +
     '</div>';
 }
@@ -6470,6 +6574,8 @@ appEl.addEventListener("change", function(e){
     moveStage(t.dataset.lead, t.value);
   } else if (action === "reassign-lead"){
     reassignLead(t.dataset.lead, t.value);
+  } else if (action === "reassign-processor"){
+    reassignProcessor(t.dataset.lead, t.value);
   } else if (action === "toggle-notify"){
     toggleNotify(t.dataset.lead, parseInt(t.dataset.idx,10));
   } else if (action === "portal-select"){
