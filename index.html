@@ -4103,7 +4103,9 @@ function requestPortalCustomization(prompt){
     ui.portalCustomizeBusy = false;
     if (res.error || !res.data || !res.data.ok){ showToast("Couldn't apply that — try rephrasing"); render(); return; }
     u.portalPrefs = res.data.prefs;
-    sb.rpc("set_portal_prefs", { p_user_id: u.id, p_prefs: res.data.prefs }).catch(function(){});
+    sb.rpc("set_portal_prefs", { p_user_id: u.id, p_prefs: res.data.prefs }).then(function(saveRes){
+      if (saveRes.error) console.error("set_portal_prefs error", saveRes.error);
+    }).catch(function(err){ console.error("set_portal_prefs threw", err); });
     showToast(res.data.summary || "Portal updated");
     render();
   }).catch(function(){
