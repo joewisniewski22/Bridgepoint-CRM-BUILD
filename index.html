@@ -2247,6 +2247,37 @@ function loadPublicApplication(leadId, token){
     });
   });
 }
+var staffLeadPollTimer = null;
+var staffLeadPollingId = null;
+function ensureStaffLeadPolling(leadId){
+  // Staff sessions otherwise never see another staff member's changes to a
+  // lead they already have open (e.g. Joe flips the Spanish-speaking toggle
+  // while the assigned LO already has the file open) -- there's no
+  // realtime channel wired up, so poll quietly in the background while a
+  // staff member is sitting on a lead's detail page, same approach as the
+  // borrower portal's own polling.
+  if (staffLeadPollingId === leadId) return;
+  if (staffLeadPollTimer) clearInterval(staffLeadPollTimer);
+  staffLeadPollingId = leadId;
+  staffLeadPollTimer = setInterval(function(){
+    if (!sb || ui.view !== "detail" || ui.selectedLeadId !== leadId){
+      clearInterval(staffLeadPollTimer);
+      staffLeadPollTimer = null;
+      staffLeadPollingId = null;
+      return;
+    }
+    sb.from("leads").select("*").eq("id", leadId).then(function(res){
+      if (res.error || !res.data || !res.data.length) return;
+      var fresh = rowToLead(res.data[0]);
+      var idx = state.leads.findIndex(function(l){ return l.id === leadId; });
+      if (idx === -1) return;
+      var old = state.leads[idx];
+      if (JSON.stringify(old) === JSON.stringify(fresh)) return;
+      state.leads[idx] = fresh;
+      render();
+    });
+  }, 15000);
+}
 function startPortalPolling(leadId, token){
   // No realtime channel wired up for the public portal, so poll quietly in
   // the background for new chat replies / stage changes while the borrower
@@ -4661,6 +4692,7 @@ function renderLeadDetail(){
   if (!lead){
     return topbar("Lead not found","","") + '<div class="content"><div class="empty">Select a lead from Leads &amp; Loans or Pipeline.</div></div>';
   }
+  ensureStaffLeadPolling(lead.id);
   var tabs = '<div class="tabs">' +
     tabBtn("overview","Overview") + tabBtn("scenario","Loan Scenario") + tabBtn("documents","Documents") +
     tabBtn("activity","Activity &amp; Calls") + tabBtn("thirdparties","Third Parties") +
