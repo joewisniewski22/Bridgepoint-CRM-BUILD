@@ -1785,6 +1785,34 @@ function applicationLink(lead){
   qp.set("t", lead.applicationToken || "");
   return CRM_URL.replace(/\/$/, "") + "/?" + qp.toString();
 }
+function sendBorrowerPortalInvite(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
+  var link = applicationLink(lead);
+  var lang = lead.preferredLanguage || "en";
+  var lo = docLoanOfficer(lead);
+  var firstName = (lead.name||"").split(" ")[0];
+  var text = lang === "es"
+    ? ("Hola " + firstName + ", puede revisar el estado de su préstamo, subir documentos y enviar mensajes a " + (lo.name||"su oficial de préstamos") + " en cualquier momento aquí: " + link)
+    : ("Hi " + firstName + ", you can check your loan status, upload documents, and message " + (lo.name||"your loan officer") + " anytime here: " + link);
+  var subject = lang === "es" ? "Bridgepoint Lending — Su Portal de Cliente" : "Bridgepoint Lending — Your Borrower Portal";
+  if (lead.email && sb){
+    sb.functions.invoke("send-email", {
+      body: { leadId: lead.id, to: lead.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
+    });
+  }
+  if (lead.phone && sb){
+    sb.functions.invoke("send-text", {
+      body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
+    });
+  }
+  lead.applicationSentAt = lead.applicationSentAt || todayISO();
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"notify", text: "Sent borrower portal link (email + text)", author: lo.name || currentUser().name });
+  showToast("Portal link sent to " + lead.name);
+  persist();
+}
 function signoffFor(userId){
   var u = userById(userId);
   return (u && u.textSignoff) ? ("\n\n" + u.textSignoff) : "";
@@ -4649,7 +4677,8 @@ function renderRail(lead){
         (isProcessor() ? '' :
           (canEditApplication(lead) ? (
             '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
-            '<button class="btn btn-sm" data-action="open-modal" data-modal="takeApplication" data-lead="' + lead.id + '">Take Application by Phone' + (lead.applicationTakenByPhone ? ' ✓' : '') + '</button>'
+            '<button class="btn btn-sm" data-action="open-modal" data-modal="takeApplication" data-lead="' + lead.id + '">Take Application by Phone' + (lead.applicationTakenByPhone ? ' ✓' : '') + '</button>' +
+            '<button class="btn btn-sm" data-action="send-borrower-portal" data-lead="' + lead.id + '" title="Sends the same link by both email and text right now — no modal, no picking a channel">Send Borrower Portal</button>'
           ) : '') +
           '<a class="btn btn-sm" href="' + XACTUS_PORTAL_URL + '" target="_blank" rel="noopener" data-action="order-credit" data-lead="' + lead.id + '">Order Credit' + (lead.creditOrderedAt ? ' ✓' : '') + '</a>'
         ) +
@@ -6274,6 +6303,7 @@ appEl.addEventListener("click", function(e){
     render();
   }
   else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
+  else if (action === "send-borrower-portal"){ sendBorrowerPortalInvite(t.dataset.lead); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }
