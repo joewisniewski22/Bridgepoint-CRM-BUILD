@@ -94,7 +94,40 @@ Deno.serve(async (req: Request) => {
         });
       }
     } else {
-      console.log("receive-text: no lead matched sender", msg.from);
+      // Not a borrower's own number -- check if a staff member is replying
+      // to a portal chat notification from their own phone/Quo line. SMS has
+      // no thread ID, so route to whichever of this staff member's leads
+      // most recently has an unanswered borrower portal message (the last
+      // portal_chat entry is still "from: borrower"). Imperfect if a staff
+      // member has more than one open portal conversation at once, but it's
+      // the best signal available without per-lead phone numbers.
+      const { data: users } = await sb.from("users").select("id, name, phone, quo_phone_number");
+      const staffMatch = (users || []).find((u: Record<string, unknown>) => {
+        const phones = [u.phone as string, u.quo_phone_number as string].filter(Boolean);
+        return phones.some((p) => p.replace(/\D/g, "").slice(-10) === senderDigits.slice(-10));
+      });
+      if (staffMatch) {
+        const { data: staffLeads } = await sb.from("leads").select("id, portal_chat").eq("assigned_to", staffMatch.id as string);
+        let target: Record<string, unknown> | null = null;
+        let targetTs = "";
+        for (const l of staffLeads || []) {
+          const chat = (l.portal_chat as Array<Record<string, unknown>>) || [];
+          const last = chat[chat.length - 1];
+          if (last && last.from === "borrower" && (last.ts as string) > targetTs) {
+            target = l;
+            targetTs = last.ts as string;
+          }
+        }
+        if (target) {
+          const chat = ((target.portal_chat as unknown[]) || []).slice();
+          chat.push({ from: "lo", text: msg.text, ts: new Date().toISOString(), authorName: staffMatch.name });
+          await sb.from("leads").update({ portal_chat: chat }).eq("id", target.id as string);
+          return new Response(JSON.stringify({ ok: true, routedToPortalChat: target.id }), { headers: CORS_HEADERS });
+        }
+        console.log("receive-text: staff sender matched but no open portal thread", staffMatch.id);
+      } else {
+        console.log("receive-text: no lead or staff matched sender", msg.from);
+      }
     }
 
     return new Response(JSON.stringify({ ok: true, matched: !!match }), { headers: CORS_HEADERS });

@@ -358,10 +358,30 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .login-error{background:var(--c-rust-bg);color:var(--c-rust);font-size:12.5px;padding:8px 10px;border-radius:6px;margin-top:10px}
 
 /* ---------------------------------------------------------------------
-   Borrower portal preview
+   Borrower portal
 --------------------------------------------------------------------- */
 .portal{max-width:640px}
-.portal-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:22px;box-shadow:var(--shadow-card)}
+.portal-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:26px;box-shadow:var(--shadow-card)}
+.portal-hero{display:flex;align-items:center;gap:14px;margin-bottom:4px}
+.portal-hero img{max-height:40px;width:auto}
+.portal-status-badge{display:inline-flex;align-items:center;gap:6px;background:var(--c-gold-bg);color:var(--c-gold);font-weight:700;font-size:.85rem;padding:5px 12px;border-radius:999px;margin:10px 0 4px}
+.portal-stepper{display:flex;margin:22px 0 8px}
+.portal-stepper-item{flex:1;display:flex;flex-direction:column;align-items:center;position:relative;text-align:center}
+.portal-stepper-item:not(:last-child)::after{content:"";position:absolute;top:13px;left:50%;width:100%;height:2px;background:var(--border);z-index:0}
+.portal-stepper-item.done:not(:last-child)::after{background:var(--brand)}
+.portal-stepper-dot{width:26px;height:26px;border-radius:50%;background:var(--surface);border:2px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--ink-faint);z-index:1;position:relative}
+.portal-stepper-item.done .portal-stepper-dot{background:var(--brand);border-color:var(--brand);color:#fff}
+.portal-stepper-item.now .portal-stepper-dot{background:var(--c-gold);border-color:var(--c-gold);color:#fff;box-shadow:0 0 0 4px var(--c-gold-bg)}
+.portal-stepper-label{font-size:10.5px;margin-top:6px;color:var(--ink-faint);max-width:78px;line-height:1.25}
+.portal-stepper-item.now .portal-stepper-label,.portal-stepper-item.done .portal-stepper-label{color:var(--ink);font-weight:600}
+.portal-section{margin-top:22px;padding-top:20px;border-top:1px solid var(--border-soft)}
+.portal-section:first-of-type{border-top:none;padding-top:0}
+.portal-lo-card{display:flex;align-items:center;gap:12px;margin:8px 0 4px}
+.portal-lo-photo{width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;background:var(--brand-tint)}
+.portal-lo-actions{display:flex;gap:8px;margin-top:6px}
+.portal-lo-actions a{display:inline-flex;align-items:center;gap:5px;font-size:.82rem;font-weight:600;padding:5px 11px;border-radius:999px;background:var(--brand-tint);color:var(--brand);text-decoration:none}
+.portal-cta{background:var(--c-gold-bg);border:1px solid var(--c-gold);border-radius:var(--radius);padding:16px 18px;margin:16px 0}
+/* legacy alias -- older markup used the flat segmented bar */
 .portal-progress{display:flex;gap:4px;margin:16px 0}
 .portal-step{flex:1;height:6px;border-radius:3px;background:var(--border)}
 .portal-step.done{background:var(--brand)}
@@ -2012,7 +2032,7 @@ function leadToRow(l){
     preferred_language: l.preferredLanguage || "en",
     citizenship_status: l.citizenshipStatus || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
-    ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null,
+    ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -2042,7 +2062,7 @@ function rowToLead(r){
     preferredLanguage: r.preferred_language || "en",
     citizenshipStatus: r.citizenship_status || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
-    achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null,
+    achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -2065,8 +2085,46 @@ function loadPublicApplication(leadId, token){
       if (res2.data) state.users = res2.data;
       ui.publicApply.status = "ready";
       render();
+      startPortalPolling(leadId, token);
     });
   });
+}
+function startPortalPolling(leadId, token){
+  // No realtime channel wired up for the public portal, so poll quietly in
+  // the background for new chat replies / stage changes while the borrower
+  // has the page open, instead of requiring a manual reload to see them.
+  if (ui.publicApply._pollStarted) return;
+  ui.publicApply._pollStarted = true;
+  setInterval(function(){
+    if (!sb || !ui.publicApply) return;
+    sb.from("leads").select("*").eq("id", leadId).eq("application_token", token).then(function(res){
+      if (res.error || !res.data || !res.data.length) return;
+      var fresh = rowToLead(res.data[0]);
+      var old = state.leads[0];
+      if (!old) return;
+      var changed = JSON.stringify(old.portalChat||[]) !== JSON.stringify(fresh.portalChat||[]) || old.stage !== fresh.stage || old.rate !== fresh.rate;
+      state.leads[0] = fresh;
+      if (changed) render();
+    });
+  }, 20000);
+}
+function sendPortalMessage(leadId, text){
+  var lead = leadById(leadId);
+  if (!lead || !text || !text.trim()) return;
+  var msg = text.trim();
+  lead.portalChat = lead.portalChat || [];
+  lead.portalChat.push({ from:"borrower", text: msg, ts: nowTs(), authorName: lead.name });
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"text", text: "Portal message from borrower: " + msg, author: lead.name });
+  var lo = userById(lead.assignedTo);
+  var toNumber = lo && (lo.quoPhoneNumber || lo.phone);
+  if (toNumber && sb){
+    sb.functions.invoke("send-text", {
+      body: { leadId: lead.id, to: toNumber, text: "Portal message from " + lead.name + ": " + msg }
+    });
+  }
+  if (lead.assignedTo) notifyUser(lead.assignedTo, lead.id, "portal-message", lead.name + " sent a portal message: " + msg.slice(0,80));
+  persist();
 }
 function submitPublicApplication(leadId, patch){
   var lead = leadById(leadId);
@@ -3478,42 +3536,129 @@ function render(){
 
 function renderPublicApply(){
   var pa = ui.publicApply;
-  var wrap = function(inner){
-    return '<div class="login-screen"><div class="login-card" style="max-width:560px">' +
-      '<div class="login-brand">' + BRAND_MARK + '<div><div class="brand-word">Bridgepoint</div><div class="brand-tag">Lending Desk</div></div></div>' +
+  var wrap = function(inner, wide){
+    return '<div class="login-screen"><div class="login-card"' + (wide ? ' style="max-width:640px"' : '') + '>' +
       inner +
     '</div></div>';
   };
   if (pa.status === "loading"){
-    return wrap('<div class="view-sub" style="margin-top:16px">Loading your application…</div>');
+    return wrap('<div class="login-brand">' + BRAND_MARK + '<div><div class="brand-word">Bridgepoint</div><div class="brand-tag">Lending Desk</div></div></div>' +
+      '<div class="view-sub" style="margin-top:16px">Loading your application…</div>');
   }
   if (pa.status === "invalid"){
-    return wrap('<h1 class="login-title">Link not found</h1><div class="login-sub">This application link is invalid or has expired. Please contact your loan officer for a new link.</div>');
+    return wrap('<div class="login-brand">' + BRAND_MARK + '<div><div class="brand-word">Bridgepoint</div><div class="brand-tag">Lending Desk</div></div></div>' +
+      '<h1 class="login-title">Link not found</h1><div class="login-sub">This application link is invalid or has expired. Please contact your loan officer for a new link.</div>');
   }
   var lead = state.leads[0];
+  return wrap(buildBorrowerPortalHTML(lead, { justSubmitted: pa.status === "submitted" }), true);
+}
+/* ---------------------------------------------------------------------
+   Borrower portal — the one page a borrower ever needs: reachable the
+   moment they're first sent a link (before the application's even done)
+   and for the life of the loan after. Same markup powers the real public
+   link (renderPublicApply) and the staff-facing preview (renderPortal).
+--------------------------------------------------------------------- */
+function buildBorrowerPortalHTML(lead, opts){
+  opts = opts || {};
   var lang = lead.preferredLanguage || "en";
-  if (pa.status === "submitted"){
-    return wrap(lang === "es"
-      ? ('<h1 class="login-title">¡Gracias, ' + esc((lead.name||"").split(" ")[0]) + '!</h1>' +
-         '<div class="login-sub">Su solicitud ha sido recibida. ' + esc(userName(lead.assignedTo)) + ' se pondrá en contacto con usted pronto.</div>')
-      : ('<h1 class="login-title">Thank you, ' + esc((lead.name||"").split(" ")[0]) + '!</h1>' +
-         '<div class="login-sub">Your application has been received. ' + esc(userName(lead.assignedTo)) + ' will follow up with you shortly.</div>'));
+  var L = function(s){ return esc(tr(s, lang)); };
+  var hasCompletedIntake = !!lead.applicationTakenAt;
+  var idx = borrowerStageGroupIndex(lead.stage);
+
+  var stepper = '<div class="portal-stepper">' + BORROWER_STAGE_GROUPS.map(function(s,i){
+    var cls = i < idx ? "done" : (i===idx ? "now" : "");
+    return '<div class="portal-stepper-item ' + cls + '">' +
+      '<div class="portal-stepper-dot">' + (i < idx ? "✓" : (i+1)) + '</div>' +
+      '<div class="portal-stepper-label">' + L(s.label) + '</div>' +
+    '</div>';
+  }).join("") + '</div>';
+
+  var header = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">' +
+      '<div class="portal-hero"><img src="' + LOGO_URL + '" alt="Bridgepoint Lending"></div>' +
+      (opts.selectorHTML || '') +
+    '</div>' +
+    '<h2 class="font-display" style="margin:16px 0 2px">' + L("Welcome") + ', ' + esc((lead.name||"").split(" ")[0]) + '</h2>' +
+    '<div class="view-sub">' + L(lead.loanType) + (lead.propertyAddress ? (' · ' + esc(lead.propertyAddress)) : '') + '</div>' +
+    '<div class="portal-status-badge">' + esc(tr(borrowerStageLabel(lead.stage), lang)) + '</div>' +
+    stepper +
+    (opts.justSubmitted ? ('<div class="hint" style="color:var(--c-forest);margin:6px 0 0">' + L("Thanks — we've got your application! Here's where things stand.") + '</div>') : '');
+
+  if (!hasCompletedIntake){
+    return header +
+      '<div class="portal-cta">' +
+        '<b>' + L("Let's get your application started") + '</b>' +
+        '<div class="footnote" style="padding:4px 0 0">' + L("Takes about 10 minutes — fill in what you can, sign at the end.") + '</div>' +
+      '</div>' +
+      '<form data-form="public-application" data-lead="' + lead.id + '" style="margin-top:10px">' +
+        buildApplicationFieldsHTML(lead, lang) +
+        '<button class="btn btn-primary" style="width:100%;margin-top:14px" type="submit">' + L("Submit Application") + '</button>' +
+      '</form>';
   }
-  if (stageIndex(lead.stage) >= stageIndex("processing")){
-    return wrap(lang === "es"
-      ? ('<h1 class="login-title">Solicitud bloqueada</h1>' +
-         '<div class="login-sub">Su expediente ya está en procesamiento, por lo que este enlace ahora es de solo lectura. Para cualquier cambio, comuníquese con ' + esc(userName(lead.assignedTo)) + '.</div>')
-      : ('<h1 class="login-title">Application locked</h1>' +
-         '<div class="login-sub">Your file is already in processing, so this link is now read-only. For any changes, please contact ' + esc(userName(lead.assignedTo)) + '.</div>'));
-  }
-  return wrap(
-    '<h1 class="login-title">' + (lang==="es" ? "Solicitud de Préstamo" : "Loan Application") + '</h1>' +
-    '<div class="login-sub">' + esc(lead.name) + ' · ' + esc(tr(lead.loanType, lang)) + (lead.propertyAddress ? (' · ' + esc(lead.propertyAddress)) : '') + '</div>' +
-    '<form data-form="public-application" data-lead="' + lead.id + '" style="margin-top:18px">' +
-      buildApplicationFieldsHTML(lead, lang) +
-      '<button class="btn btn-primary" style="width:100%;margin-top:14px" type="submit">' + (lang==="es" ? "Enviar Solicitud" : "Submit Application") + '</button>' +
-    '</form>'
-  );
+
+  var termsCard = (lead.loanAmount || lead.rate) ? (
+    '<div class="portal-section">' +
+      '<div class="rail-title">' + L("Your Loan Details") + '</div>' +
+      '<div class="footnote" style="padding:2px 0 8px">' + L("Preliminary — subject to change") + '</div>' +
+      '<div class="field-grid">' +
+        (lead.propertyAddress ? field(L("Property"), esc(lead.propertyAddress)) : "") +
+        (lead.loanAmount ? field(L("Loan Amount"), fmtUSD(lead.loanAmount), true) : "") +
+        (lead.rate ? field(L("Rate"), fmtPct(lead.rate), true) : "") +
+        (lead.termMonths ? field(L("Term"), lead.termMonths + " " + L("months"), true) : "") +
+      '</div>' +
+    '</div>'
+  ) : "";
+
+  var lo = userById(lead.assignedTo) || {};
+  var loCard = '<div class="portal-section">' +
+    '<div class="rail-title">' + L("Your Loan Officer") + '</div>' +
+    '<div class="portal-lo-card">' +
+      (lo.photoUrl ? ('<img class="portal-lo-photo" src="' + esc(lo.photoUrl) + '">') : '<div class="portal-lo-photo"></div>') +
+      '<div>' +
+        '<div style="font-weight:700">' + esc(lo.name||"—") + '</div>' +
+        '<div class="portal-lo-actions">' +
+          (lo.phone ? ('<a href="tel:' + esc(lo.phone) + '">📞 ' + esc(lo.phone) + '</a>') : '') +
+          (lo.email ? ('<a href="mailto:' + esc(lo.email) + '">✉️ ' + L("Email") + '</a>') : '') +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
+  var visibleDocs = (lead.documents||[]).map(function(d,i){ return {d:d, i:i}; }).filter(function(x){ return !x.d.staffOnly; });
+  var docs = visibleDocs.map(function(x){
+    var d = x.d, i = x.i;
+    var received = d.status==="received";
+    return '<div class="doc-row"><div><div>' + L(d.name) + '</div><div class="cell-sub">' + (received ? (L("Received") + " " + fmtDate(d.receivedAt)) : L("Needed to move forward")) + '</div></div>' +
+      (received ? '<span class="badge badge-forest">' + L("Received") + '</span>' :
+        '<label class="btn btn-sm btn-primary" style="cursor:pointer">' + L("Upload") + '<input type="file" style="display:none" data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label>') +
+      '</div>';
+  }).join("");
+  var docsCard = '<div class="portal-section">' +
+    '<div class="rail-title">' + L("Document Checklist") + '</div>' +
+    (docs || '<div class="empty">' + L("No documents requested yet.") + '</div>') +
+  '</div>';
+
+  var chatMessages = (lead.portalChat||[]).map(function(m){
+    var mine = m.from === "borrower";
+    return '<div style="display:flex;' + (mine?'justify-content:flex-end':'justify-content:flex-start') + ';margin-bottom:8px">' +
+      '<div style="max-width:80%;padding:8px 12px;border-radius:14px;background:' + (mine?'var(--brand)':'var(--brand-tint)') + ';color:' + (mine?'#fff':'var(--ink)') + ';font-size:.9rem">' +
+        esc(m.text) +
+        '<div style="font-size:.7rem;opacity:.7;margin-top:3px">' + (mine ? L("You") : esc(m.authorName || lo.name || L("Loan Officer"))) + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+  var chatCard = '<div class="portal-section">' +
+    '<div class="rail-title">' + L("Chat with Your Loan Officer") + '</div>' +
+    '<div style="max-height:280px;overflow-y:auto;padding:4px 2px;margin-bottom:10px">' +
+      (chatMessages || '<div class="empty">' + L("No messages yet — ask a question below.") + '</div>') +
+    '</div>' +
+    '<form data-form="portal-message" data-lead="' + lead.id + '" style="display:flex;gap:8px">' +
+      '<input class="input" type="text" name="message" placeholder="' + L("Type a message…") + '" required style="flex:1">' +
+      '<button class="btn btn-sm btn-primary" type="submit">' + L("Send") + '</button>' +
+    '</form>' +
+    '<div class="footnote" style="padding-top:6px">' + L("Your loan officer gets this as a text and can reply right from their phone.") + '</div>' +
+  '</div>';
+
+  return header + termsCard + loCard + docsCard + chatCard;
 }
 function renderLogin(){
   var brandBlock = '<div class="login-brand" style="justify-content:center"><img src="' + LOGO_URL + '" alt="Bridgepoint Lending" style="max-width:260px;width:100%;height:auto"></div>';
@@ -4845,53 +4990,9 @@ function renderPortal(){
   var lead = leadById(ui.portalLeadId) || state.leads[0];
   if (!ui.portalLeadId && lead) ui.portalLeadId = lead.id;
 
-  var body = "";
-  if (lead){
-    var lang = lead.preferredLanguage || "en";
-    var L = function(s){ return esc(tr(s, lang)); };
-    var idx = borrowerStageGroupIndex(lead.stage);
-    var steps = BORROWER_STAGE_GROUPS.map(function(s,i){
-      var cls = i < idx ? "done" : (i===idx ? "now" : "");
-      return '<div class="portal-step ' + cls + '" title="' + esc(tr(s.label, lang)) + '"></div>';
-    }).join("");
-
-    var termsCard = (lead.loanAmount || lead.rate) ? (
-      '<div class="rail-title" style="margin-top:10px">' + L("Your Loan Details") + '</div>' +
-      '<div class="footnote" style="padding:2px 0 8px">' + L("Preliminary — subject to change") + '</div>' +
-      '<div class="field-grid" style="margin-bottom:18px">' +
-        (lead.propertyAddress ? field(L("Property"), esc(lead.propertyAddress)) : "") +
-        (lead.loanAmount ? field(L("Loan Amount"), fmtUSD(lead.loanAmount), true) : "") +
-        (lead.rate ? field(L("Rate"), fmtPct(lead.rate), true) : "") +
-        (lead.termMonths ? field(L("Term"), lead.termMonths + " " + L("months"), true) : "") +
-      '</div>'
-    ) : "";
-
-    var docs = (lead.documents||[]).map(function(d,i){
-      var received = d.status==="received";
-      return '<div class="doc-row"><div><div>' + L(d.name) + '</div><div class="cell-sub">' + (received ? (L("Received") + " " + fmtDate(d.receivedAt)) : L("Needed to move forward")) + '</div></div>' +
-        (received ? '<span class="badge badge-forest">' + L("Received") + '</span>' :
-          '<label class="btn btn-sm btn-primary" style="cursor:pointer">' + L("Upload") + '<input type="file" style="display:none" data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label>') +
-        '</div>';
-    }).join("");
-
-    body = '<div class="panel panel-pad portal-card">' +
-      '<div style="display:flex;justify-content:space-between;align-items:flex-start">' +
-        '<div>' + BRAND_MARK + '</div>' +
-        '<select class="select" data-action="portal-select">' + options + '</select>' +
-      '</div>' +
-      '<h2 class="font-display" style="margin:18px 0 2px">' + L("Welcome back") + ', ' + esc(lead.name.split(" ")[0]) + '</h2>' +
-      '<div class="view-sub">' + L(lead.loanType) + ' · ' + esc(lead.propertyAddress||"") + '</div>' +
-      '<div class="portal-progress">' + steps + '</div>' +
-      '<div class="view-sub" style="margin-bottom:18px">' + L("Current status:") + ' <b>' + esc(tr(borrowerStageLabel(lead.stage), lang)) + '</b></div>' +
-      termsCard +
-      '<div class="rail-title" style="margin-top:10px">' + L("Your loan officer") + '</div>' +
-      '<div style="margin:6px 0 18px">' + esc(userName(lead.assignedTo)) + ' · ' + esc((userById(lead.assignedTo)||{}).phone||"") + '</div>' +
-      '<div class="rail-title">' + L("Document checklist") + '</div>' +
-      (docs || '<div class="empty">' + L("No documents requested yet.") + '</div>') +
-    '</div>';
-  } else {
-    body = '<div class="empty">No borrowers yet.</div>';
-  }
+  var body = lead
+    ? ('<div class="panel panel-pad portal-card">' + buildBorrowerPortalHTML(lead, { selectorHTML: '<select class="select" data-action="portal-select">' + options + '</select>' }) + '</div>')
+    : '<div class="empty">No borrowers yet.</div>';
 
   return '<div class="portal">' + body + '</div>' +
     '<div style="position:fixed;top:14px;left:14px"><button class="btn btn-ghost" data-action="nav" data-view="today">← Exit preview</button></div>';
@@ -6508,6 +6609,10 @@ appEl.addEventListener("submit", function(e){
     runImport(fd);
   } else if (type === "send-back"){
     sendBackToLO(form.dataset.lead, fd.get("note"));
+    render();
+  } else if (type === "portal-message"){
+    sendPortalMessage(form.dataset.lead, fd.get("message"));
+    form.reset();
     render();
   } else if (type === "log-call"){
     logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
