@@ -2259,23 +2259,29 @@ function ensureStaffLeadPolling(leadId){
   if (staffLeadPollingId === leadId) return;
   if (staffLeadPollTimer) clearInterval(staffLeadPollTimer);
   staffLeadPollingId = leadId;
+  console.log("[staff-poll] starting for", leadId);
   staffLeadPollTimer = setInterval(function(){
+    console.log("[staff-poll] tick", leadId, "view=", ui.view, "selected=", ui.selectedLeadId);
     if (!sb || ui.view !== "detail" || ui.selectedLeadId !== leadId){
+      console.log("[staff-poll] stopping (guard failed)");
       clearInterval(staffLeadPollTimer);
       staffLeadPollTimer = null;
       staffLeadPollingId = null;
       return;
     }
     sb.from("leads").select("*").eq("id", leadId).then(function(res){
+      console.log("[staff-poll] fetch result", res.error, res.data && res.data.length);
       if (res.error || !res.data || !res.data.length) return;
       var fresh = rowToLead(res.data[0]);
       var idx = state.leads.findIndex(function(l){ return l.id === leadId; });
       if (idx === -1) return;
       var old = state.leads[idx];
-      if (JSON.stringify(old) === JSON.stringify(fresh)) return;
+      var same = JSON.stringify(old) === JSON.stringify(fresh);
+      console.log("[staff-poll] same?", same, "oldLang=", old.preferredLanguage, "freshLang=", fresh.preferredLanguage);
+      if (same) return;
       state.leads[idx] = fresh;
       render();
-    });
+    }, function(err){ console.log("[staff-poll] fetch rejected", err); });
   }, 15000);
 }
 function startPortalPolling(leadId, token){
