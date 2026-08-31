@@ -1913,21 +1913,31 @@ function sendBorrowerPortalInvite(leadId){
     ? ("Hola " + firstName + ", puede revisar el estado de su préstamo, subir documentos y enviar mensajes a " + (lo.name||"su oficial de préstamos") + " en cualquier momento aquí: " + link)
     : ("Hi " + firstName + ", you can check your loan status, upload documents, and message " + (lo.name||"your loan officer") + " anytime here: " + link);
   var subject = lang === "es" ? "Bridgepoint Lending — Su Portal de Cliente" : "Bridgepoint Lending — Your Borrower Portal";
-  if (lead.email && sb){
-    sb.functions.invoke("send-email", {
+  if (!sb){ showToast("Send service unavailable"); return; }
+  showToast("Sending portal link…");
+  var calls = [];
+  if (lead.email){
+    calls.push(sb.functions.invoke("send-email", {
       body: { leadId: lead.id, to: lead.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
-    });
+    }).then(function(res){ return { channel:"email", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"email", ok:false }; }));
   }
-  if (lead.phone && sb){
-    sb.functions.invoke("send-text", {
+  if (lead.phone){
+    calls.push(sb.functions.invoke("send-text", {
       body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
-    });
+    }).then(function(res){ return { channel:"text", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
   }
-  lead.applicationSentAt = lead.applicationSentAt || todayISO();
-  lead.activity = lead.activity || [];
-  lead.activity.push({ date: todayISO(), type:"notify", text: "Sent borrower portal link (email + text)", author: lo.name || currentUser().name });
-  showToast("Portal link sent to " + lead.name);
-  persist();
+  Promise.all(calls).then(function(results){
+    var sentVia = results.filter(function(r){ return r.ok; }).map(function(r){ return r.channel; });
+    if (!sentVia.length){
+      showToast("Couldn't send the portal link — try again");
+      return;
+    }
+    lead.applicationSentAt = lead.applicationSentAt || todayISO();
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"notify", text: "Sent borrower portal link (" + sentVia.join(" + ") + ")", author: lo.name || currentUser().name });
+    showToast("Portal link sent to " + lead.name + " via " + sentVia.join(" + ") + (sentVia.length < results.length ? " (one channel failed)" : ""));
+    persist();
+  });
 }
 function signoffFor(userId){
   var u = userById(userId);
@@ -2529,6 +2539,7 @@ function sendDocumentViaEmail(leadId, kind){
   var body = isTerm ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
   var lo = docLoanOfficer(lead);
   var subject = "Bridgepoint Lending — Your " + label;
+  showToast("Sending " + label + "…");
   sb.functions.invoke("send-email", {
     body: { leadId: lead.id, to: lead.email, subject: subject, text: body, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
   }).then(function(res){
@@ -2536,12 +2547,13 @@ function sendDocumentViaEmail(leadId, kind){
       showToast("Couldn't send — try Open in Email App instead");
       return;
     }
-    sendDocumentAction(leadId, kind, "email");
+    ui.modal = null;
+    sendDocumentAction(leadId, kind, "email", lo.name, lead.email);
   }).catch(function(){
     showToast("Couldn't send — try Open in Email App instead");
   });
 }
-function sendDocumentAction(leadId, kind, channel){
+function sendDocumentAction(leadId, kind, channel, fromName, toAddress){
   var lead = leadById(leadId);
   if (!lead) return;
   var d = todayISO();
@@ -2549,7 +2561,9 @@ function sendDocumentAction(leadId, kind, channel){
   if (kind === "termSheet") lead.termsheetSentAt = d; else lead.preapprovalSentAt = d;
   lead.activity = lead.activity || [];
   lead.activity.push({ date:d, type:"application", text: label + " sent to " + lead.name + (channel ? (" via " + channel) : ""), author: currentUser().name });
-  showToast(label + " marked as sent");
+  showToast(channel === "email" && toAddress
+    ? (label + " emailed to " + toAddress + (fromName ? (" from " + fromName) : ""))
+    : (label + " marked as sent"));
   persist();
 }
 function logCreditOrder(leadId){
