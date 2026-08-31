@@ -2178,6 +2178,7 @@ function leadToRow(l){
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
+    outside_lender: l.outsideLender || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -2209,6 +2210,7 @@ function rowToLead(r){
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
+    outsideLender: r.outside_lender || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -4731,13 +4733,49 @@ function renderGuidelineCheck(lead){
     ? ('<div style="margin-top:10px"><button class="btn btn-sm" type="button" data-action="ai-explain-guideline" data-lead="' + lead.id + '">✨ Explain to LO</button>' +
        '<div id="guideline-explain-box" class="footnote" style="padding-top:8px;white-space:pre-wrap"></div></div>')
     : '';
+  var outsideLenderSection = (gc.status === "review" && canViewOutsideLender()) ? renderOutsideLenderBox(lead) : '';
   return header +
     '<div style="margin-bottom:10px">' + badge + ' <span class="hint">as of ' + fmtDate(gc.evaluatedAt) + '</span></div>' +
-    rows + explainSection +
+    rows + explainSection + outsideLenderSection +
     '<div class="footnote" style="padding-top:8px">Preliminary check against BPL/Constructive Loans matrices — not a substitute for full underwriting. Internal use only, never shown to the borrower.</div>';
+}
+var OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN"];
+function canManageOutsideLender(){ return ui.viewAs==="owner" || ui.viewAs==="lo-fiore"; }
+function canViewOutsideLender(){ return canManageOutsideLender() || ui.viewAs==="proc-erika"; }
+function setOutsideLender(leadId, lender){
+  var lead = leadById(leadId);
+  if (!lead || !canManageOutsideLender()) return;
+  lead.outsideLender = lender || null;
+  showToast(lender ? ("Routed to " + lender) : "Set back to in-house / needs manual placement");
+  persist();
+}
+function renderOutsideLenderBox(lead){
+  var current = lead.outsideLender || "";
+  if (!canManageOutsideLender()){
+    return '<div class="panel panel-pad" style="margin-top:10px">' +
+      '<div class="rail-title" style="margin-bottom:4px">Outside Lender</div>' +
+      '<div>' + esc(lead.outsideLender || "Not yet placed") + '</div>' +
+    '</div>';
+  }
+  var options = '<option value="">— Not yet placed —</option>' +
+    OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (current===l?" selected":"") + '>' + l + '</option>'; }).join("");
+  return '<div class="panel panel-pad" style="margin-top:10px">' +
+    '<div class="rail-title" style="margin-bottom:4px">Outside Lender</div>' +
+    '<div class="footnote" style="padding-bottom:6px">Only you, Fiore, and Erika can see this. Every other LO just sees "Needs Review."</div>' +
+    '<select class="select" data-action="set-outside-lender" data-lead="' + lead.id + '">' + options + '</select>' +
+  '</div>';
 }
 var GUIDELINE_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction","Portfolio/Blanket"];
 function renderLoanDetailsEditor(lead){
+  if (lead.outsideLender && !canManageOutsideLender()){
+    return '<div class="section-head" style="margin-top:20px"><h2>Loan Details</h2></div>' +
+      '<div class="footnote" style="padding:0 0 8px">This file is priced through an outside lender — terms are locked to what was set from the term sheet. Contact Joe or Fiore for any changes.</div>' +
+      '<div class="field-grid">' +
+        field("Loan Amount", lead.loanAmount!=null ? fmtUSD(lead.loanAmount) : "—", true) +
+        field("Rate", lead.rate!=null ? fmtPct(lead.rate) : "—", true) +
+        field("Term", lead.termMonths!=null ? (lead.termMonths + " months") : "—", true) +
+      '</div>';
+  }
   return '<div class="section-head" style="margin-top:20px"><h2>Loan Details</h2></div>' +
     '<div class="footnote" style="padding:0 0 8px">Editable any time — terms sometimes change for unforeseen reasons after the fact. Updates the term sheet and the borrower portal.</div>' +
     '<form data-form="loan-details" data-lead="' + lead.id + '" class="form-two" style="align-items:flex-end">' +
@@ -4855,6 +4893,17 @@ function buildPricerOutputHTML(lead, inputs){
 }
 function renderPricer(lead){
   if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
+  if (lead.outsideLender){
+    return '<div class="section-head" style="margin-top:20px"><h2>Pricer</h2></div>' +
+      '<div class="panel panel-pad">' +
+        '<div class="rail-title" style="margin-bottom:4px">Priced via ' + esc(lead.outsideLender) + '</div>' +
+        '<div class="field-grid">' +
+          field("Rate", lead.rate!=null ? fmtPct(lead.rate) : "—", true) +
+          field("Points", lead.pointsCharged!=null ? (lead.pointsCharged + "%") : "—", true) +
+        '</div>' +
+        (canManageOutsideLender() ? '<div class="footnote" style="padding-top:8px">This is an outside-lender file — the Constructive rate sheet doesn\'t apply. Set the rate/points from Loan Details and Points Charged above using the term sheet, not this Pricer.</div>' : '<div class="footnote" style="padding-top:8px">Priced through an outside lender — not editable here.</div>') +
+      '</div>';
+  }
   ui.pricerInputs = ui.pricerInputs || {};
   var inputs = ui.pricerInputs[lead.id] || (ui.pricerInputs[lead.id] = { points:"0.00", transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", propertyType: lead.propertyType||"SFR", rateOverride: null });
   var isDSCR = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
@@ -5091,11 +5140,14 @@ function renderRail(lead){
       (isProcessor() ? '' :
       '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft)">' +
         '<div class="rail-title" style="margin-bottom:6px">Points Charged</div>' +
-        '<form data-form="set-points" data-lead="' + lead.id + '" class="points-input-row">' +
-          '<input class="input" type="number" step="0.125" min="0" max="15" name="points" placeholder="e.g. 2.5" value="' + (lead.pointsCharged!=null?lead.pointsCharged:"") + '">' +
-          '<span>%</span>' +
-          '<button class="btn btn-sm" type="submit">Save</button>' +
-        '</form>' +
+        ((lead.outsideLender && !canManageOutsideLender()) ?
+          ('<div>' + (lead.pointsCharged!=null ? (lead.pointsCharged + "%") : "—") + '</div><div class="footnote">Locked — priced through an outside lender.</div>') :
+          ('<form data-form="set-points" data-lead="' + lead.id + '" class="points-input-row">' +
+            '<input class="input" type="number" step="0.125" min="0" max="15" name="points" placeholder="e.g. 2.5" value="' + (lead.pointsCharged!=null?lead.pointsCharged:"") + '">' +
+            '<span>%</span>' +
+            '<button class="btn btn-sm" type="submit">Save</button>' +
+          '</form>')
+        ) +
         '<div id="earnings-live-' + lead.id + '">' + renderEarningsLive(lead) + '</div>' +
       '</div>') +
     '</div>' +
@@ -6847,6 +6899,8 @@ appEl.addEventListener("change", function(e){
     reassignLead(t.dataset.lead, t.value);
   } else if (action === "reassign-processor"){
     reassignProcessor(t.dataset.lead, t.value);
+  } else if (action === "set-outside-lender"){
+    setOutsideLender(t.dataset.lead, t.value);
   } else if (action === "toggle-notify"){
     toggleNotify(t.dataset.lead, parseInt(t.dataset.idx,10));
   } else if (action === "portal-select"){
