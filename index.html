@@ -2235,7 +2235,7 @@ function sendPortalMessage(leadId, text){
       body: { leadId: lead.id, to: toNumber, text: "Portal message from " + lead.name + ": " + msg }
     });
   }
-  if (lead.assignedTo) notifyUser(lead.assignedTo, lead.id, "portal-message", lead.name + " sent a portal message: " + msg.slice(0,80));
+  if (lead.assignedTo) notifyUser(lead.assignedTo, lead.id, "portal-message", lead.name + " sent a portal message: " + msg.slice(0,80), { skipText:true });
   persist();
 }
 function submitPublicApplication(leadId, patch){
@@ -2633,6 +2633,9 @@ function addLead(data){
   if (addedDocs.length){
     lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
   }
+  if (lead.assignedTo && lead.assignedTo !== currentUser().id){
+    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — contact fast, speed to lead matters most.");
+  }
   showToast("Added " + lead.name);
   ui.modal = null;
   ui.view = "detail"; ui.selectedLeadId = id; ui.activeTab = "overview";
@@ -2870,12 +2873,20 @@ function toggleNotify(leadId, idx){
    In-app notifications (stands in for real email/SMS delivery, which
    this hosted page cannot send on its own)
 --------------------------------------------------------------------- */
-function notifyUser(userId, leadId, kind, text){
+function notifyUser(userId, leadId, kind, text, opts){
   state.notifications = state.notifications || [];
   state.notifications.unshift({
     id: "N" + Date.now().toString(36) + Math.floor(Math.random()*1000),
     toUserId:userId, leadId:leadId, kind:kind, text:text, date: todayISO(), read:false
   });
+  if (!opts || !opts.skipText) pushStaffAlert(userId, text);
+}
+function pushStaffAlert(userId, text){
+  if (!sb) return;
+  var u = userById(userId);
+  var phone = u && (u.phone || u.quoPhoneNumber);
+  if (!phone) return;
+  sb.functions.invoke("send-text", { body: { to: phone, text: "Bridgepoint CRM: " + text } }).catch(function(){});
 }
 function markNotificationRead(id){
   var n = (state.notifications||[]).filter(function(x){ return x.id===id; })[0];
@@ -3155,6 +3166,10 @@ function requestAiDocReview(lead, doc){
       text: "AI review — " + doc.name + ": " + (res.data.status==="clear" ? "looks good, no issues found." : ("flagged — " + res.data.note)),
       author: "AI Assistant"
     });
+    if (res.data.status === "flag"){
+      var flagTarget = lead.assignedProcessor || lead.assignedTo;
+      if (flagTarget) notifyUser(flagTarget, lead.id, "ai-flag", lead.name + " — " + doc.name + " flagged by AI: " + res.data.note);
+    }
     persist();
   }).catch(function(){});
 }
@@ -3934,7 +3949,7 @@ function renderShell(){
             '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="logout">Log Out</button>' +
           '</div>' +
         '</div>' +
-        '<div class="footnote" style="padding:10px 0 0">Early testing — emails and document uploads are real. In-app notifications only for now (no push/SMS alerts yet). We\'re actively taking feedback.</div>' +
+        '<div class="footnote" style="padding:10px 0 0">Early testing — emails, texts, and document uploads are all real, including SMS alerts to your phone for things that need your attention. We\'re actively taking feedback.</div>' +
       '</div>' +
     '</aside>';
 
