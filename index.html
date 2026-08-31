@@ -557,6 +557,10 @@ var ES_DICT = {
   "No messages yet — ask a question below.":"Aún no hay mensajes — haga una pregunta abajo.",
   "Type a message…":"Escriba un mensaje…", "Send":"Enviar", "You":"Usted",
   "Your loan officer gets this as a text and can reply right from their phone.":"Su oficial de préstamos recibe esto como mensaje de texto y puede responder directamente desde su teléfono.",
+  "Underwriting Needs From You":"Suscripción Necesita Lo Siguiente de Usted",
+  "Attachment":"Archivo Adjunto",
+  "Your File Is In Processing":"Su Expediente Está en Procesamiento",
+  "Your loan officer and our processing team are handling everything from here. If you need to send a document or have a question, please contact your loan officer directly.":"Su oficial de préstamos y nuestro equipo de procesamiento se encargan de todo a partir de aquí. Si necesita enviar un documento o tiene una pregunta, comuníquese directamente con su oficial de préstamos.",
   "Your Contacts":"Sus Contactos",
   "Title company, insurance agent, or anyone else involved in this loan — add them here so we can coordinate directly.":"Compañía de título, agente de seguros, o cualquier otra persona involucrada en este préstamo — agréguelos aquí para que podamos coordinar directamente.",
   "No contacts added yet.":"Aún no se han agregado contactos.",
@@ -1562,14 +1566,22 @@ function commissionSummaryFor(userId){
   var potential = activePipeline.reduce(function(s,l){ return s + commissionAmount(l); }, 0);
   return { earned: earned, potential: potential, closedCount: closedThisMonth.length, pipelineCount: activePipeline.length };
 }
+function notifyProcessorOfPricingChange(lead, whatChanged){
+  if (stageIndex(lead.stage) < stageIndex("processing")) return;
+  var proc = processingContact(lead);
+  if (!proc) return;
+  notifyUser(proc.id, lead.id, "pricing-change", currentUser().name + " changed " + whatChanged + " on " + lead.name + "'s loan after it moved into processing — update title and the lender.");
+}
 function setPointsCharged(leadId, points){
   var lead = leadById(leadId);
   if (!lead) return;
   var n = points===""||points===null||points===undefined ? null : Number(points);
   if (n !== null && (isNaN(n) || n < 0 || n > 15)){ showToast("Points should be between 0 and 15"); return; }
+  var prevPoints = lead.pointsCharged;
   lead.pointsCharged = n;
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"note", text: n===null ? "Points charged cleared" : ("Points charged set to " + n + "%"), author: currentUser().name });
+  if (n !== prevPoints) notifyProcessorOfPricingChange(lead, "the points charged");
   showToast(n===null ? "Points charged cleared" : "Points charged set to " + n + "%");
   persist();
 }
@@ -2165,7 +2177,7 @@ function leadToRow(l){
     citizenship_status: l.citizenshipStatus || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
-    assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold,
+    assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -2196,7 +2208,7 @@ function rowToLead(r){
     citizenshipStatus: r.citizenship_status || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
-    assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold,
+    assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -2853,13 +2865,15 @@ function setLoanDetails(leadId, loanAmount, rate, termMonths){
   var lead = leadById(leadId);
   if (!lead) return;
   var changed = [];
+  var rateChanged = false;
   if (loanAmount!=null && loanAmount !== lead.loanAmount){ lead.loanAmount = loanAmount; changed.push("loan amount to " + fmtUSD(loanAmount)); }
-  if (rate!=null && rate !== lead.rate){ lead.rate = rate; changed.push("rate to " + fmtPct(rate)); }
+  if (rate!=null && rate !== lead.rate){ lead.rate = rate; changed.push("rate to " + fmtPct(rate)); rateChanged = true; }
   if (termMonths!=null && termMonths !== lead.termMonths){ lead.termMonths = termMonths; changed.push("term to " + termMonths + " months"); }
   if (lead.purchasePrice && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/lead.purchasePrice)*1000)/10;
   if (!changed.length) return;
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"system", text:"Loan terms updated — " + changed.join(", "), author: currentUser().name });
+  if (rateChanged) notifyProcessorOfPricingChange(lead, "the rate (affects yield spread)");
   showToast("Loan details updated");
   persist();
 }
@@ -3170,6 +3184,16 @@ function viewLeadDocument(leadId, idx){
     window.open(res.data.signedUrl, "_blank");
   });
 }
+function viewUnderwritingConditionFile(leadId, condId, isBorrowerFile){
+  var lead = leadById(leadId);
+  var cond = lead && (lead.uwConditions||[]).filter(function(c){ return c.id===condId; })[0];
+  var path = cond && (isBorrowerFile ? cond.borrowerFileUrl : cond.fileUrl);
+  if (!path || !sb) return;
+  sb.storage.from("lead-documents").createSignedUrl(path, 3600).then(function(res){
+    if (res.error || !res.data){ showToast("Couldn't open the file — try again"); return; }
+    window.open(res.data.signedUrl, "_blank");
+  });
+}
 function markDocReceived(leadId, idx){
   var lead = leadById(leadId);
   if (!lead || !lead.documents[idx]) return;
@@ -3197,6 +3221,50 @@ function uploadLeadDocument(leadId, idx, file, actorLabel){
     showToast("Uploaded " + doc.name);
     persist();
     requestAiDocReview(lead, doc);
+  });
+}
+function addUnderwritingCondition(leadId, description, file){
+  var lead = leadById(leadId);
+  if (!lead || !description) return;
+  var cond = { id:"uwc-" + Date.now().toString(36), description:description, createdAt:todayISO(), createdBy:currentUser().name, status:"open", fileUrl:null, fileName:null, borrowerFileUrl:null, borrowerFileName:null };
+  lead.uwConditions = lead.uwConditions || [];
+  lead.uwConditions.push(cond);
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"note", text:"Underwriting condition added: " + description, author: currentUser().name });
+  if (lead.assignedTo) notifyUser(lead.assignedTo, lead.id, "uw-condition", "New underwriting condition on " + lead.name + "'s loan: " + description.slice(0,120));
+  var lo = docLoanOfficer(lead);
+  var portalLink = applicationLink(lead);
+  var msgText = "Hi " + (lead.name||"").split(" ")[0] + ", underwriting needs the following to keep your loan moving: " + description + "\n\nView details and respond here: " + portalLink;
+  if (sb && lead.phone) sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: msgText, fromName: lo.name, fromNumber: lo.quoPhoneNumber||null } }).catch(function(){});
+  if (sb && lead.email) sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lead.email, subject: "Action needed on your loan — underwriting condition", text: msgText, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null } }).catch(function(){});
+  showToast("Condition added — borrower and loan officer notified");
+  persist();
+  if (file) uploadUnderwritingConditionFile(leadId, cond.id, file, currentUser().name, false);
+}
+function uploadUnderwritingConditionFile(leadId, condId, file, actorLabel, isBorrowerResponse){
+  var lead = leadById(leadId);
+  if (!lead || !file || !sb) return;
+  var cond = (lead.uwConditions||[]).filter(function(c){ return c.id===condId; })[0];
+  if (!cond) return;
+  var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  var path = leadId + "/uwcond-" + Date.now() + "-" + safeName;
+  sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+    if (res.error){ showToast("Upload failed — try again"); return; }
+    lead.activity = lead.activity || [];
+    if (isBorrowerResponse){
+      cond.status = "received";
+      cond.borrowerFileUrl = path;
+      cond.borrowerFileName = file.name;
+      cond.receivedAt = todayISO();
+      lead.activity.push({ date: todayISO(), type:"document", text: actorLabel + " responded to underwriting condition (" + file.name + "): " + cond.description.slice(0,60), author: actorLabel });
+      var target = lead.assignedProcessor || lead.assignedTo;
+      if (target) notifyUser(target, lead.id, "uw-condition-response", lead.name + " uploaded a response to an underwriting condition.");
+    } else {
+      cond.fileUrl = path;
+      cond.fileName = file.name;
+      lead.activity.push({ date: todayISO(), type:"document", text: actorLabel + " attached a reference file to an underwriting condition: " + file.name, author: actorLabel });
+    }
+    persist();
   });
 }
 function requestAiDocReview(lead, doc){
@@ -3830,6 +3898,31 @@ function buildBorrowerPortalHTML(lead, opts){
     '</div>' +
   '</div>';
 
+  var uwConditionRows = (lead.uwConditions||[]).map(function(c){
+    return '<div class="doc-row" style="align-items:flex-start"><div>' +
+      '<div>' + esc(c.description) + '</div>' +
+      (c.fileName ? ('<div class="cell-sub">' + L("Attachment") + ': ' + esc(c.fileName) + '</div>') : '') +
+      '</div>' +
+      (c.status==="received"
+        ? ('<span class="badge badge-forest">' + L("Received") + '</span>')
+        : ('<label class="btn btn-sm btn-primary" style="cursor:pointer">' + L("Upload") + '<input type="file" style="display:none" data-action="upload-uw-condition-response" data-lead="' + lead.id + '" data-condid="' + c.id + '"></label>')) +
+    '</div>';
+  }).join("");
+  var uwConditionsCard = (lead.uwConditions && lead.uwConditions.length) ? (
+    '<div class="portal-section">' +
+      '<div class="rail-title">' + L("Underwriting Needs From You") + '</div>' +
+      uwConditionRows +
+    '</div>'
+  ) : "";
+
+  if (stageIndex(lead.stage) >= stageIndex("processing")){
+    return header + termsCard + loCard + uwConditionsCard +
+      '<div class="portal-section">' +
+        '<div class="rail-title">' + L("Your File Is In Processing") + '</div>' +
+        '<div class="footnote" style="padding:2px 0 0">' + L("Your loan officer and our processing team are handling everything from here. If you need to send a document or have a question, please contact your loan officer directly.") + '</div>' +
+      '</div>';
+  }
+
   var visibleDocs = (lead.documents||[]).map(function(d,i){ return {d:d, i:i}; }).filter(function(x){ return !x.d.staffOnly; });
   var docs = visibleDocs.map(function(x){
     var d = x.d, i = x.i;
@@ -3883,7 +3976,7 @@ function buildBorrowerPortalHTML(lead, opts){
     '<div class="footnote" style="padding-top:6px">' + L("Your loan officer gets this as a text and can reply right from their phone.") + '</div>' +
   '</div>';
 
-  return header + termsCard + loCard + docsCard + thirdPartiesCard + chatCard;
+  return header + termsCard + loCard + uwConditionsCard + docsCard + thirdPartiesCard + chatCard;
 }
 function renderLogin(){
   var brandBlock = '<div class="login-brand" style="justify-content:center"><img src="' + LOGO_URL + '" alt="Bridgepoint Lending" style="max-width:260px;width:100%;height:auto"></div>';
@@ -3986,29 +4079,71 @@ function navItem(view, icon, label, count){
     '<span class="ic">' + icon + '</span><span>' + label + '</span>' + countHTML + '</button>';
 }
 
+function renderPortalCustomizer(){
+  var prefs = currentUser().portalPrefs || {};
+  var hasCustomization = !!(prefs.accentColor || (prefs.hiddenNavItems && prefs.hiddenNavItems.length) || prefs.welcomeNote);
+  return '<div class="rail-block" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft)">' +
+    '<div class="rail-title" style="margin-bottom:6px">✨ Customize My Portal</div>' +
+    '<form data-form="customize-portal" style="display:flex;gap:6px">' +
+      '<input class="input" type="text" name="prompt" placeholder="e.g. make my accent color green" style="flex:1" ' + (ui.portalCustomizeBusy ? 'disabled' : '') + '>' +
+      '<button class="btn btn-sm" type="submit"' + (ui.portalCustomizeBusy ? ' disabled' : '') + '>' + (ui.portalCustomizeBusy ? '…' : 'Go') + '</button>' +
+    '</form>' +
+    (hasCustomization ? '<button class="btn btn-sm btn-ghost" style="width:100%;margin-top:6px" data-action="reset-portal-customization">Reset to Default</button>' : '') +
+    '<div class="footnote" style="padding-top:4px">Changes only what you see — colors, which tabs show, a personal note. Never pricing or anyone else\'s view.</div>' +
+  '</div>';
+}
+function requestPortalCustomization(prompt){
+  if (!sb || !prompt) return;
+  var u = currentUser();
+  ui.portalCustomizeBusy = true;
+  render();
+  sb.functions.invoke("customize-portal", { body: { prompt: prompt, current: u.portalPrefs || {} } }).then(function(res){
+    ui.portalCustomizeBusy = false;
+    if (res.error || !res.data || !res.data.ok){ showToast("Couldn't apply that — try rephrasing"); render(); return; }
+    u.portalPrefs = res.data.prefs;
+    sb.rpc("set_portal_prefs", { p_user_id: u.id, p_prefs: res.data.prefs }).catch(function(){});
+    showToast(res.data.summary || "Portal updated");
+    render();
+  }).catch(function(){
+    ui.portalCustomizeBusy = false;
+    showToast("Couldn't apply that — try again");
+    render();
+  });
+}
+function resetPortalCustomization(){
+  var u = currentUser();
+  u.portalPrefs = {};
+  if (sb) sb.rpc("set_portal_prefs", { p_user_id: u.id, p_prefs: {} }).catch(function(){});
+  showToast("Portal reset to default");
+  render();
+}
 function renderShell(){
   var leads = scopedLeads();
   var callsDue = computeQueue(ui.viewAs).length;
   var today = startOfToday();
   var winbackCount = (isOwner() ? state.leads : leads).filter(function(l){ return winbackInfo(l, today); }).length;
   var notifCount = unreadNotifCount(ui.viewAs);
+  var prefs = currentUser().portalPrefs || {};
+  var hiddenNav = prefs.hiddenNavItems || [];
+  var accentStyle = (prefs.accentColor ? (' style="--brand:' + esc(prefs.accentColor) + '"') : '');
+  var navVisible = function(key){ return hiddenNav.indexOf(key) === -1; };
   var sidebar =
-    '<aside class="sidebar">' +
+    '<aside class="sidebar"' + accentStyle + '>' +
       '<div class="brand">' + BRAND_MARK +
         '<div><div class="brand-word">Bridgepoint</div><div class="brand-tag">Lending Desk</div></div>' +
       '</div>' +
       '<nav class="nav">' +
         navItem("today","☎","Today", callsDue||null) +
-        (!isProcessor() ? navItem("pricer","🧮","Pricer") : "") +
-        navItem("pipeline","▤","Pipeline") +
+        (!isProcessor() && navVisible("pricer") ? navItem("pricer","🧮","Pricer") : "") +
+        (navVisible("pipeline") ? navItem("pipeline","▤","Pipeline") : "") +
         navItem("leads","☰","Leads & Loans", leads.length) +
-        navItem("comms","✉","Communications") +
-        navItem("performance","⚡","Speed & Conversion") +
-        navItem("retargeting","↺","Retargeting", winbackCount||null) +
-        navItem("notifications","🔔","Notifications", notifCount||null) +
+        (navVisible("comms") ? navItem("comms","✉","Communications") : "") +
+        (navVisible("performance") ? navItem("performance","⚡","Speed & Conversion") : "") +
+        (navVisible("retargeting") ? navItem("retargeting","↺","Retargeting", winbackCount||null) : "") +
+        (navVisible("notifications") ? navItem("notifications","🔔","Notifications", notifCount||null) : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
-        navItem("portal","⌂","Borrower Portal Preview") +
+        (navVisible("portal") ? navItem("portal","⌂","Borrower Portal Preview") : "") +
       '</nav>' +
       '<div class="sidebar-foot">' +
         '<div class="role-box">' +
@@ -4020,6 +4155,7 @@ function renderShell(){
             '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="logout">Log Out</button>' +
           '</div>' +
         '</div>' +
+        (isLO() ? renderPortalCustomizer() : '') +
         '<div class="footnote" style="padding:10px 0 0">Early testing — emails, texts, and document uploads are all real, including SMS alerts to your phone for things that need your attention. We\'re actively taking feedback.</div>' +
       '</div>' +
     '</aside>';
@@ -4038,7 +4174,7 @@ function renderShell(){
   else if (ui.view === "notifications") body = renderNotifications();
   else body = renderToday();
 
-  return sidebar + '<div class="main">' + body + '</div>';
+  return sidebar + '<div class="main"' + accentStyle + '>' + (prefs.welcomeNote && ui.view==="today" ? ('<div class="panel panel-pad" style="margin:16px 16px 0;border-color:var(--brand)">✨ ' + esc(prefs.welcomeNote) + '</div>') : '') + body + '</div>';
 }
 
 function topbar(title, sub, actionsHTML){
@@ -4826,11 +4962,34 @@ function renderTabDocuments(lead){
       '</div>' +
       '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + viewBtn + uploadBtn + markBtn + '</div></div>';
   }).join("");
+  var uwRows = (lead.uwConditions||[]).map(function(c){
+    var statusBadge = c.status==="received" ? '<span class="badge badge-forest">Response Received</span>' : '<span class="badge badge-slate">Open</span>';
+    return '<div class="doc-row" style="align-items:flex-start"><div>' +
+      '<div>' + esc(c.description) + '</div>' +
+      '<div class="cell-sub">Added ' + fmtDate(c.createdAt) + ' by ' + esc(c.createdBy) + '</div>' +
+      (c.fileName ? ('<button class="btn btn-sm" type="button" style="margin-top:4px" data-action="view-uw-condition-file" data-lead="' + lead.id + '" data-condid="' + c.id + '" data-borrower="0">View: ' + esc(c.fileName) + '</button>') : '') +
+      (c.borrowerFileName ? ('<button class="btn btn-sm" type="button" style="margin-top:4px;margin-left:6px" data-action="view-uw-condition-file" data-lead="' + lead.id + '" data-condid="' + c.id + '" data-borrower="1">View Borrower Response: ' + esc(c.borrowerFileName) + '</button>') : '') +
+      '</div>' +
+      '<div>' + statusBadge + '</div></div>';
+  }).join("");
+  var uwSection = '<div class="section-head" style="margin-top:20px"><h2>Underwriting Conditions</h2></div>' +
+    (uwRows || '<div class="empty">No underwriting conditions on file yet.</div>') +
+    ((isProcessor() || isOwner()) ? (
+      '<form data-form="add-uw-condition" data-lead="' + lead.id + '" style="margin-top:12px">' +
+        '<textarea class="textarea" name="description" placeholder="Describe what\'s needed (sent to the borrower and loan officer immediately)…" required></textarea>' +
+        '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
+          '<label class="btn btn-sm btn-ghost" style="cursor:pointer">Attach a file (optional)<input type="file" name="file" style="display:none" data-action="uw-condition-file-select"></label>' +
+          '<span class="hint" id="uw-condition-filename-' + lead.id + '"></span>' +
+        '</div>' +
+        '<button class="btn btn-sm btn-primary" type="submit" style="margin-top:8px">Send Condition</button>' +
+      '</form>'
+    ) : '');
   return scanBar + issuesPanel + (rows || '<div class="empty">No documents requested yet.</div>') +
     '<form data-form="request-doc" data-lead="' + lead.id + '" style="display:flex;gap:8px;margin-top:14px">' +
       '<input class="input" name="name" placeholder="Document name (e.g. Bank Statements)" style="flex:1">' +
       '<button class="btn btn-sm" type="submit">Request Document</button>' +
-    '</form>';
+    '</form>' +
+    uwSection;
 }
 
 var ACTIVITY_ICON_CLASS = { call:"call", stage:"stage", notify:"notify", document:"document", text:"text", email:"email", application:"application", credit:"credit" };
@@ -6547,6 +6706,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "view-uw-condition-file"){ viewUnderwritingConditionFile(t.dataset.lead, t.dataset.condid, t.dataset.borrower==="1"); }
   else if (action === "ai-review-doc"){ runAiDocReview(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
   else if (action === "scan-all-documents"){ scanAllDocuments(t.dataset.lead); render(); }
   else if (action === "send-back-ai"){ sendBackToLOWithAiFindings(t.dataset.lead); render(); }
@@ -6582,6 +6742,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }
   else if (action === "logout"){ logout(); }
   else if (action === "restart-tour"){ ui.view = "tour"; ui.tourStep = 0; render(); }
+  else if (action === "reset-portal-customization"){ resetPortalCustomization(); }
   else if (action === "tour-next"){ ui.tourStep = (ui.tourStep||0)+1; render(); }
   else if (action === "tour-back"){ ui.tourStep = Math.max((ui.tourStep||0)-1,0); render(); }
   else if (action === "tour-skip" || action === "tour-finish"){ ui.view = "today"; render(); }
@@ -6690,6 +6851,15 @@ appEl.addEventListener("change", function(e){
     var file = t.files && t.files[0];
     var upLead = leadById(t.dataset.lead);
     if (file && upLead) uploadLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10), file, upLead.name);
+  } else if (action === "upload-uw-condition-response"){
+    var uwRespFile = t.files && t.files[0];
+    var uwRespLead = leadById(t.dataset.lead);
+    if (uwRespFile && uwRespLead) uploadUnderwritingConditionFile(t.dataset.lead, t.dataset.condid, uwRespFile, uwRespLead.name, true);
+  } else if (action === "uw-condition-file-select"){
+    var uwFile = t.files && t.files[0];
+    var uwForm = t.closest("form");
+    var uwSpan = uwForm && document.getElementById("uw-condition-filename-" + uwForm.dataset.lead);
+    if (uwSpan) uwSpan.textContent = uwFile ? uwFile.name : "";
   } else if (action === "upload-doc-staff"){
     var staffFile = t.files && t.files[0];
     if (staffFile) uploadLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10), staffFile, currentUser().name);
@@ -6935,6 +7105,13 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "request-doc"){
     requestDoc(form.dataset.lead, fd.get("name"));
     form.reset();
+  } else if (type === "add-uw-condition"){
+    var uwFileInput = form.querySelector('[name="file"]');
+    var uwCondFile = uwFileInput && uwFileInput.files && uwFileInput.files[0];
+    addUnderwritingCondition(form.dataset.lead, fd.get("description"), uwCondFile || null);
+    form.reset();
+    var uwFilenameSpan = document.getElementById("uw-condition-filename-" + form.dataset.lead);
+    if (uwFilenameSpan) uwFilenameSpan.textContent = "";
   } else if (type === "follow-up"){
     setFollowUp(form.dataset.lead, fd.get("date"), fd.get("note"));
   } else if (type === "birthday"){
@@ -6955,6 +7132,9 @@ appEl.addEventListener("submit", function(e){
     ui.modal = null; render();
   } else if (type === "login"){
     attemptLogin(fd.get("username"), fd.get("pin"));
+  } else if (type === "customize-portal"){
+    requestPortalCustomization(fd.get("prompt"));
+    form.reset();
   } else if (type === "save-signature"){
     var photoInput = form.querySelector('[name="photo"]');
     var photoFile = photoInput && photoInput.files && photoInput.files[0];
