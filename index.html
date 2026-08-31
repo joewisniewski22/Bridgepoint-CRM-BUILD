@@ -690,7 +690,8 @@ var RTL_FEE_BY_PROJECT = {
   bridge: 1995, light: 1995, standard: 1995, super: 1995,
   guc_sfr: 2195, guc_24: 2695
 };
-function evaluateRtlGucPricing(lead, points, propertyType){
+var RTL_TXN_ADJ = { purchase: 0, ratetermrefi: 0.50, cashout: 1.00 };
+function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
   if (lead.citizenshipStatus === "Foreign National" || lead.citizenshipStatus === "ITIN"){
     return { ineligible:true, reason: (lead.citizenshipStatus) + " pricing isn't modeled on this sheet — needs manual pricing from underwriting." };
   }
@@ -705,6 +706,12 @@ function evaluateRtlGucPricing(lead, points, propertyType){
     rate += 0.75;
     notes.push("Ground Up add-on +0.75%");
   }
+  var txnKey = transactionType || "purchase";
+  var txnAdj = RTL_TXN_ADJ[txnKey] || 0;
+  if (txnAdj){
+    rate += txnAdj;
+    notes.push((txnKey === "cashout" ? "Cash-Out Refinance" : "Rate/Term Refinance") + " add-on +" + txnAdj.toFixed(2) + "%");
+  }
   var fee = isGuc
     ? (propertyType === "2-4 Unit" ? RTL_FEE_BY_PROJECT.guc_24 : RTL_FEE_BY_PROJECT.guc_sfr)
     : RTL_FEE_BY_PROJECT[rehabClass(lead)];
@@ -715,7 +722,8 @@ function evaluateRtlGucPricing(lead, points, propertyType){
   return { rate: Math.round(rate*100)/100, points: Number(points), fee: fee, tier: tier, notes: notes };
 }
 
-var DSCR_BASE_PAR_RATE = 6.375;
+var DSCR_BASE_PAR_RATE = 6.000;
+var DSCR_MIN_NOTE_RATE = 6.250;
 var DSCR_LTV_BANDS = [55, 60, 65, 70, 75, 80];
 function dscrLtvCol(ltv){
   for (var i=0;i<DSCR_LTV_BANDS.length;i++){ if (ltv <= DSCR_LTV_BANDS[i]) return i; }
@@ -767,21 +775,23 @@ var DSCR_FEE_BY_PROPERTY = {
   "Multifamily 5+": 3995
 };
 var DSCR_BASE_RATE_PRICE = [
-  {rate:7.500, price:102.125},{rate:7.375, price:102.000},{rate:7.250, price:101.875},
-  {rate:7.125, price:101.750},{rate:7.000, price:101.500},{rate:6.875, price:101.250},
-  {rate:6.750, price:101.000},{rate:6.625, price:100.750},{rate:6.500, price:100.375},
-  {rate:6.375, price:100.000}
+  {rate:7.125, price:102.125},{rate:7.000, price:102.000},{rate:6.875, price:101.875},
+  {rate:6.750, price:101.750},{rate:6.625, price:101.500},{rate:6.500, price:101.250},
+  {rate:6.375, price:101.000},{rate:6.250, price:100.750},{rate:6.125, price:100.375},
+  {rate:6.000, price:100.000}
 ];
 // The rate/price grid (DSCR_BASE_RATE_PRICE) is a buy-up curve measured from
-// PAR, not a table of absolute rates -- "par" is DSCR_BASE_PAR_RATE (6.375%)
+// PAR, not a table of absolute rates -- "par" is DSCR_BASE_PAR_RATE (6.000%)
 // PLUS this specific borrower's own risk-based adjustments (FICO/LTV/DSCR
 // band/property/transaction/loan amount/prepay), so two borrowers with
 // different risk profiles have different par rates. Quoting AT a borrower's
 // own par rate always prices at 100.000 (zero YSP) by definition; only
 // choosing a HIGHER rate than that borrower's par earns YSP, looked up by
 // how far above par the chosen rate is (delta), reusing this same table's
-// shape since it already spans par (6.375, delta 0) through the max buy-up
-// (7.500, delta 1.125) in 0.125% steps.
+// shape since it already spans par (6.000, delta 0) through the max buy-up
+// (7.125, delta 1.125) in 0.125% steps. Per the C3 Surge sheet (eff.
+// 8/6/2026), a hard floor of DSCR_MIN_NOTE_RATE (6.250%) still applies below
+// this curve's own par for exceptionally strong borrowers.
 function dscrPriceForDelta(deltaFromPar){
   if (deltaFromPar < -0.0001) return null;
   var tableRate = Math.round((DSCR_BASE_PAR_RATE + deltaFromPar) * 1000) / 1000;
@@ -836,6 +846,10 @@ function dscrParRate(lead, inputs){
   rate += DSCR_PREPAY_ADJ[prepayKey][col];
 
   rate = Math.round(rate*1000)/1000;
+  if (rate < DSCR_MIN_NOTE_RATE){
+    notes.push("Risk-adjusted rate came in below the sheet's " + DSCR_MIN_NOTE_RATE.toFixed(3) + "% minimum note rate — floored at the minimum.");
+    rate = DSCR_MIN_NOTE_RATE;
+  }
   return { rate: rate, ltv: ltv, dscr: dscrVal, notes: notes, propertyType: propertyType };
 }
 function evaluateDscrPricing(lead, inputs){
@@ -887,7 +901,7 @@ function evaluatePricing(lead, inputs){
   if (lead.loanType === "DSCR") return evaluateDscrPricing(lead, inputs);
   if (lead.loanType === "Portfolio/Blanket") return evaluatePortfolioPricing(lead, inputs);
   if (lead.loanType === "Fix & Flip" || lead.loanType === "Ground Up Construction" || lead.loanType === "Bridge"){
-    return evaluateRtlGucPricing(lead, (inputs && inputs.points) || "1.00", (inputs && inputs.propertyType) || lead.propertyType);
+    return evaluateRtlGucPricing(lead, (inputs && inputs.points) || "0.00", (inputs && inputs.propertyType) || lead.propertyType, (inputs && inputs.transactionType) || lead.transactionType || "purchase");
   }
   return null;
 }
@@ -1482,7 +1496,7 @@ function commissionAmount(lead){
   return pointsRevenue(lead) * originationSplitFor(lead) + yspRevenue(lead) * YSP_SPLIT;
 }
 function processingFeeRevenue(lead){
-  var inputs = { propertyType: lead.propertyType, transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", points:"1.00" };
+  var inputs = { propertyType: lead.propertyType, transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", points:"0.00" };
   var result = evaluatePricing(lead, inputs);
   return (result && !result.ineligible && result.fee) ? result.fee : 0;
 }
@@ -4160,7 +4174,7 @@ function defaultStandalonePricer(){
     loanType:"DSCR", propertyType:"SFR", creditScore:null, purchasePrice:null,
     propertyAddress:null, ruralStatus:null, arv:null,
     rentEstimate:null, experienceDeals:null, rehabBudget:null, propertyCount:null,
-    citizenshipStatus:null, transactionType:"purchase", prepayTerm:"5yr", points:"1.00", termMonths:360,
+    citizenshipStatus:null, transactionType:"purchase", prepayTerm:"5yr", points:"0.00", termMonths:360,
     rateOverride:null
   };
 }
@@ -4262,9 +4276,14 @@ function renderStandalonePricer(){
         '<div class="form-row"><label>Prepayment Penalty</label><select class="select" name="prepayTerm" data-action="standalone-pricer-field">' +
           PREPAY_TERMS.map(function(t){ return '<option value="' + t.key + '"' + sel("prepayTerm", t.key) + '>' + t.label + '</option>'; }).join("") +
         '</select></div>' +
-      '</div>') : ('<div class="form-row"><label>Rate Buy Down (points)</label><select class="select" name="points" data-action="standalone-pricer-field">' +
-        '<option value="1.00"' + sel("points","1.00") + '>1.00</option><option value="0.50"' + sel("points","0.50") + '>0.50</option><option value="0.00"' + sel("points","0.00") + '>0.00</option>' +
-      '</select></div>'));
+      '</div>') : ('<div class="form-two">' +
+        '<div class="form-row"><label>Origination Points Charged</label><select class="select" name="points" data-action="standalone-pricer-field">' +
+          '<option value="0.00"' + sel("points","0.00") + '>0.00 (default)</option><option value="0.50"' + sel("points","0.50") + '>0.50 — buy down the rate</option><option value="1.00"' + sel("points","1.00") + '>1.00 — buy down the rate further</option>' +
+        '</select></div>' +
+        '<div class="form-row"><label>Transaction Type</label><select class="select" name="transactionType" data-action="standalone-pricer-field">' +
+          TRANSACTION_TYPES.map(function(t){ return '<option value="' + t.key + '"' + sel("transactionType", t.key) + '>' + t.label + '</option>'; }).join("") +
+        '</select></div>' +
+      '</div>'));
 
   return topbar("Pricer", "Price any scenario across DSCR, Fix & Flip, Bridge, Ground Up Construction, and Portfolio/Blanket — Mixed-Use isn't modeled yet, no real rate sheet for it.", "") +
     '<div class="content"><div class="panel panel-pad" style="max-width:640px">' +
@@ -4697,7 +4716,7 @@ function buildPricerOutputHTML(lead, inputs){
 function renderPricer(lead){
   if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
   ui.pricerInputs = ui.pricerInputs || {};
-  var inputs = ui.pricerInputs[lead.id] || (ui.pricerInputs[lead.id] = { points:"1.00", transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", propertyType: lead.propertyType||"SFR", rateOverride: null });
+  var inputs = ui.pricerInputs[lead.id] || (ui.pricerInputs[lead.id] = { points:"0.00", transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", propertyType: lead.propertyType||"SFR", rateOverride: null });
   var isDSCR = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
   var propertyTypeSelect = '<div class="form-row"><label>Property Type</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="propertyType">' +
       PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (inputs.propertyType===t?" selected":"") + '>' + t + '</option>'; }).join("") +
@@ -4718,10 +4737,15 @@ function renderPricer(lead){
         '</select></div>' +
       '</div>' + propertyTypeSelect)
     : ('<div class="form-two">' +
-        '<div class="form-row"><label>Rate Buy Down (points)</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="points">' +
-          '<option value="1.00"' + (inputs.points==="1.00"?" selected":"") + '>1.00</option>' +
-          '<option value="0.50"' + (inputs.points==="0.50"?" selected":"") + '>0.50</option>' +
-          '<option value="0.00"' + (inputs.points==="0.00"?" selected":"") + '>0.00</option>' +
+        '<div class="form-row"><label>Origination Points Charged</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="points">' +
+          '<option value="0.00"' + (inputs.points==="0.00"?" selected":"") + '>0.00 (default)</option>' +
+          '<option value="0.50"' + (inputs.points==="0.50"?" selected":"") + '>0.50 — buy down the rate</option>' +
+          '<option value="1.00"' + (inputs.points==="1.00"?" selected":"") + '>1.00 — buy down the rate further</option>' +
+        '</select></div>' +
+        '<div class="form-row"><label>Transaction Type</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="transactionType">' +
+          '<option value="purchase"' + (inputs.transactionType==="purchase"?" selected":"") + '>Purchase</option>' +
+          '<option value="ratetermrefi"' + (inputs.transactionType==="ratetermrefi"?" selected":"") + '>Rate/Term Refinance</option>' +
+          '<option value="cashout"' + (inputs.transactionType==="cashout"?" selected":"") + '>Cash-Out Refinance</option>' +
         '</select></div>' +
         propertyTypeSelect +
       '</div>');
