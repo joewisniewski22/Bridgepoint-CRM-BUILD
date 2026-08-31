@@ -3858,7 +3858,9 @@ function buildBorrowerPortalHTML(lead, opts){
     stepper +
     (opts.justSubmitted ? ('<div class="hint" style="color:var(--c-forest);margin:6px 0 0">' + L("Thanks — we've got your application! Here's where things stand.") + '</div>') : '');
 
-  if (!hasCompletedIntake){
+  var isInProcessing = stageIndex(lead.stage) >= stageIndex("processing");
+
+  if (!hasCompletedIntake && !isInProcessing){
     return header +
       '<div class="portal-cta">' +
         '<b>' + L("Let's get your application started") + '</b>' +
@@ -3915,7 +3917,7 @@ function buildBorrowerPortalHTML(lead, opts){
     '</div>'
   ) : "";
 
-  if (stageIndex(lead.stage) >= stageIndex("processing")){
+  if (isInProcessing){
     return header + termsCard + loCard + uwConditionsCard +
       '<div class="portal-section">' +
         '<div class="rail-title">' + L("Your File Is In Processing") + '</div>' +
