@@ -1250,7 +1250,7 @@ function nextLeadId(){
   });
   return "L" + String(max+1).padStart(3,"0");
 }
-function loanOfficers(){ return state.users.filter(function(u){ return u.role==="loan_officer"; }); }
+function loanOfficers(){ return state.users.filter(function(u){ return u.role==="loan_officer" && u.id!=="demo"; }); }
 function ownerOptions(currentId){
   var owner = state.users.filter(function(u){ return u.role==="owner"; });
   var list = owner.concat(loanOfficers());
