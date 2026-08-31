@@ -1363,13 +1363,28 @@ function resetUserPin(userId, newPin){
     render();
   });
 }
+function setOriginationSplit(userId, splitPct){
+  if (!isOwner() || !sb) return;
+  var u = userById(userId);
+  if (!u) return;
+  var n = Number(splitPct);
+  if (isNaN(n) || n < 0 || n > 100){ showToast("Split should be a percent between 0 and 100"); return; }
+  var frac = Math.round(n) / 100;
+  sb.rpc("set_origination_split", { p_user_id: userId, p_split: frac }).then(function(res){
+    if (res.error){ showToast("Couldn't update split — try again"); return; }
+    u.originationSplit = frac;
+    showToast(u.name + "'s split set to " + Math.round(n) + "% on company leads");
+    render();
+  });
+}
 function addTeamMember(data){
   if (!isOwner() || !sb) return;
   if (!/^\d{4,6}$/.test(data.pin||"")){ ui.teamMemberError = "PIN must be 4–6 digits"; render(); return; }
   sb.rpc("create_user", {
     p_name: data.name, p_role: data.role, p_title: data.title||"", p_phone: data.phone||"",
     p_email: data.email||"", p_username: data.username||"", p_pin: data.pin,
-    p_quo_phone_number: data.quoPhoneNumber||null
+    p_quo_phone_number: data.quoPhoneNumber||null,
+    p_origination_split: data.originationSplit ? (Number(data.originationSplit)/100) : 0.5
   }).then(function(res){
     if (res.error){
       var msg = (res.error.message||"").indexOf("username_taken") !== -1 ? "That username is already taken." : "Couldn't add them — try again.";
@@ -1405,7 +1420,20 @@ function addTeamMember(data){
 /* ---------------------------------------------------------------------
    Commission (points charged + yield spread premium)
 --------------------------------------------------------------------- */
-var COMMISSION_SPLIT = 0.5;
+// Origination (points) split defaults to 50/50 but is negotiated per
+// employee (stored on their user record) for company-provided leads. Any
+// self-generated business (lead.source === "Self-Generated") pays 70% to
+// the employee regardless of their negotiated default -- applies to every
+// employee, including ones with a different default split. Yield spread
+// is always split 50/50, for everyone, regardless of source or employee.
+var YSP_SPLIT = 0.5;
+var SELF_GEN_ORIGINATION_SPLIT = 0.70;
+var DEFAULT_ORIGINATION_SPLIT = 0.5;
+function originationSplitFor(lead){
+  if (lead.source === "Self-Generated") return SELF_GEN_ORIGINATION_SPLIT;
+  var lo = userById(lead.assignedTo);
+  return (lo && lo.originationSplit != null) ? Number(lo.originationSplit) : DEFAULT_ORIGINATION_SPLIT;
+}
 function pointsRevenue(lead){
   if (!lead.pointsCharged || !lead.loanAmount) return 0;
   return lead.loanAmount * (lead.pointsCharged/100);
@@ -1438,7 +1466,7 @@ function yspRevenue(lead){
   return (result && !result.ineligible && result.yspDollar) ? result.yspDollar : 0;
 }
 function commissionAmount(lead){
-  return (pointsRevenue(lead) + yspRevenue(lead)) * COMMISSION_SPLIT;
+  return pointsRevenue(lead) * originationSplitFor(lead) + yspRevenue(lead) * YSP_SPLIT;
 }
 function processingFeeRevenue(lead){
   var inputs = { propertyType: lead.propertyType, transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", points:"1.00" };
@@ -1461,6 +1489,7 @@ function renderEarningsLive(lead){
   var yb = yspBreakdown(lead);
   var yspAmt = (yb && yb.amount!=null) ? yb.amount : 0;
   var total = pts + yspAmt;
+  var oSplit = originationSplitFor(lead);
   var rows = [];
   rows.push(lead.pointsCharged!=null
     ? ('Origination Points (' + lead.pointsCharged + '%): <b>' + fmtUSD(pts) + '</b>')
@@ -1471,9 +1500,13 @@ function renderEarningsLive(lead){
       : ('Yield Spread Earned: <b>' + esc(yb.reason) + '</b>'));
   }
   if (lead.pointsCharged!=null){
-    rows.push(isOwner()
-      ? ('Total origination revenue (100%) if this closes: <b>' + fmtUSD(total) + '</b>')
-      : ('Your split (50%) if this closes: <b>' + fmtUSD(total * COMMISSION_SPLIT) + '</b> of ' + fmtUSD(total) + ' total'));
+    if (isOwner()){
+      rows.push('Total origination revenue (100%) if this closes: <b>' + fmtUSD(total) + '</b>');
+    } else {
+      var mine = pts * oSplit + yspAmt * YSP_SPLIT;
+      var splitNote = Math.round(oSplit*100) + '% of points' + (yb ? (' + ' + Math.round(YSP_SPLIT*100) + '% of YSP') : '') + (lead.source==="Self-Generated" ? ' — self-generated rate' : '');
+      rows.push('Your split if this closes: <b>' + fmtUSD(mine) + '</b> (' + splitNote + ') of ' + fmtUSD(total) + ' total');
+    }
   } else {
     rows.push('Set points charged above — used to calculate the loan officer\'s commission.');
   }
@@ -4161,7 +4194,7 @@ function renderToday(){
   if (isLO()){
     var cs = commissionSummaryFor(ui.viewAs);
     commissionHTML = '<div class="commission-box">' +
-      '<div class="kpi-label">My Commission (50% of points charged + YSP)</div>' +
+      '<div class="kpi-label">My Commission (your negotiated split of points + YSP)</div>' +
       '<div class="commission-row">' +
         '<div class="commission-stat"><div class="num">' + fmtUSD(cs.earned) + '</div><div class="commission-label">Earned this month · ' + cs.closedCount + ' closed</div></div>' +
         '<div class="commission-stat"><div class="num">' + fmtUSD(cs.potential) + '</div><div class="commission-label">Potential · ' + cs.pipelineCount + ' active loan(s)</div></div>' +
@@ -4506,7 +4539,7 @@ function buildPricerOutputHTML(lead, inputs){
       (lockedToActualRate ? '<div class="footnote" style="padding-top:8px">This loan already has a locked-in rate, so these figures reflect that rate rather than the sheet\'s suggested one — matches "Yield Spread Earned" in the rail. Change the rate from Loan Details above, not here.</div>' : '') +
       (maxLoanInfo && maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.adj ? ('<div class="footnote" style="padding-top:8px">' + maxLoanInfo.stateAdj.state + ' property — max leverage reduced ' + maxLoanInfo.stateAdj.adj + '% per the matrix\'s state adjustment table.</div>') : '') +
       (maxLoanInfo && maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.needsManualCheck ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">NY property — county-specific leverage reduction applies (-15% for the five boroughs, -5% Suffolk/Nassau). Verify manually, not applied here.</div>' : '') +
-      (isDSCR && result.yspDollar ? ('<div class="footnote" style="padding-top:8px">Est. YSP commission to ' + esc(userName(lead.assignedTo)) + ' if this closes: <b>' + fmtUSD(result.yspDollar * COMMISSION_SPLIT) + '</b> (50% of ' + fmtPct(result.ysp) + ' × ' + fmtUSD(effectiveLoanAmount) + ')</div>') : '') +
+      (isDSCR && result.yspDollar ? ('<div class="footnote" style="padding-top:8px">Est. YSP commission to ' + esc(userName(lead.assignedTo)) + ' if this closes: <b>' + fmtUSD(result.yspDollar * YSP_SPLIT) + '</b> (50% of ' + fmtPct(result.ysp) + ' × ' + fmtUSD(effectiveLoanAmount) + ')</div>') : '') +
       (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
       (canEditApplication(lead) ? ('<div style="margin-top:10px"><button class="btn btn-sm" type="button" data-action="send-term-sheet-from-pricer" data-lead="' + lead.id + '">Send Term Sheet at This Rate</button></div>') : '');
   }
@@ -4817,6 +4850,13 @@ function renderTeam(){
   var accessRows = state.users.filter(function(u){ return u.role !== "owner"; }).map(function(u){
     var roleLabel = u.role==="processor" ? "Processor" : "Loan Officer";
     return '<tr><td><b>' + esc(u.name) + '</b></td><td>' + roleLabel + '</td>' +
+      '<td>' + (u.role==="processor" ? '<span class="hint">n/a</span>' : (
+        '<form data-form="set-origination-split" data-user="' + u.id + '" style="display:flex;gap:6px;align-items:center">' +
+          '<input class="input" style="width:70px" type="number" min="0" max="100" name="split" value="' + Math.round((u.originationSplit!=null?u.originationSplit:0.5)*100) + '">' +
+          '<span>%</span>' +
+          '<button class="btn btn-sm" type="submit">Save</button>' +
+        '</form>'
+      )) + '</td>' +
       '<td><form data-form="reset-pin" data-user="' + u.id + '" style="display:flex;gap:6px;align-items:center">' +
         '<input class="input" style="width:100px" type="text" inputmode="numeric" pattern="[0-9]*" name="pin" placeholder="New PIN" maxlength="6" required>' +
         '<button class="btn btn-sm" type="submit">Reset PIN</button>' +
@@ -4828,8 +4868,8 @@ function renderTeam(){
     '<div class="content">' +
       '<div class="table-wrap"><table><thead><tr><th>Loan Officer</th><th>Active Leads</th><th>Calls Due</th><th>Pipeline Value</th><th>Closed</th><th>Earned (mo.)</th><th>Potential (mo.)</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
       '<div class="section-head" style="margin-top:24px"><h2>Login Access</h2></div>' +
-      '<div class="footnote" style="padding:0 0 10px">Each teammate logs in with their own PIN. Reset one here if someone forgets theirs.</div>' +
-      '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Reset PIN</th></tr></thead><tbody>' + accessRows + '</tbody></table></div>' +
+      '<div class="footnote" style="padding:0 0 10px">Each teammate logs in with their own PIN. Reset one here if someone forgets theirs. Origination split is their share of points on company-provided leads — self-generated business always pays 70% regardless of this number, and yield spread is always 50/50.</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Origination Split (company leads)</th><th>Reset PIN</th></tr></thead><tbody>' + accessRows + '</tbody></table></div>' +
     '</div>';
 }
 
@@ -4846,20 +4886,20 @@ function renderPayroll(){
       '<td><div class="cell-name">' + esc(lead.name) + '</div><div class="cell-sub">' + esc(lead.loanType) + ' · ' + fmtUSD(lead.loanAmount) + '</div></td>' +
       '<td>' + fmtDate(lead.closeDate) + '</td>' +
       '<td>' + esc(p.loName) + '</td>' +
-      '<td class="num">' + (p.skipLo ? '<span class="hint">Your loan — n/a</span>' : ('<b>' + fmtUSD(p.loCommission) + '</b>')) + '</td>' +
+      '<td class="num">' + (p.skipLo ? '<span class="hint">Your loan — n/a</span>' : ('<b>' + fmtUSD(p.loCommission) + '</b><div class="cell-sub">' + Math.round(originationSplitFor(lead)*100) + '% points' + (lead.source==="Self-Generated"?" (self-gen)":"") + ' + ' + Math.round(YSP_SPLIT*100) + '% YSP</div>')) + '</td>' +
       '<td>' + esc(p.processorName) + '</td>' +
       '<td class="num"><b>' + fmtUSD(p.processorFee) + '</b></td>' +
     '</tr>';
   }).join("");
 
   var table = closed.length ? (
-    '<div class="table-wrap"><table><thead><tr><th>Borrower</th><th>Closed</th><th>Loan Officer</th><th>LO Payout (50%)</th><th>Processor</th><th>Processing Fee (100%)</th></tr></thead><tbody>' +
+    '<div class="table-wrap"><table><thead><tr><th>Borrower</th><th>Closed</th><th>Loan Officer</th><th>LO Payout</th><th>Processor</th><th>Processing Fee (100%)</th></tr></thead><tbody>' +
     rows +
     '<tr style="font-weight:700;border-top:2px solid var(--border)"><td colspan="3">Total</td><td class="num">' + fmtUSD(totalLo) + '</td><td></td><td class="num">' + fmtUSD(totalProc) + '</td></tr>' +
     '</tbody></table></div>'
   ) : '<div class="empty">No closed loans yet.</div>';
 
-  return topbar("Payroll", "What you owe on every closed loan — loan officer commission (50% of points + YSP) and processing fee (100% to processing).", "") +
+  return topbar("Payroll", "What you owe on every closed loan — loan officer commission (their negotiated split of points, 70% on self-generated business, always 50% of YSP) and processing fee (100% to processing).", "") +
     '<div class="content">' + table + '</div>';
 }
 
@@ -5165,8 +5205,12 @@ function modalAddTeamMember(){
           '<div class="form-row"><label>Username</label><input class="input" name="username" placeholder="e.g. carlos" required></div>' +
           '<div class="form-row"><label>Initial PIN (4–6 digits)</label><input class="input" type="text" inputmode="numeric" pattern="[0-9]*" name="pin" maxlength="6" required></div>' +
         '</div>' +
-        '<div class="form-row"><label>Their Quo phone number (if known)</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100"></div>' +
-        '<div class="footnote" style="padding:0">Have them set up their own line in Quo, then confirm it here or from their own Signature settings — CRM texts send from this number instead of the shared office line. They\'ll be walked through setting up their signature and a short tour the first time they log in.</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Their Quo phone number (if known)</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100"></div>' +
+          '<div class="form-row"><label>Origination Split on Company Leads (%)</label><input class="input" type="number" min="0" max="100" name="originationSplit" value="50" placeholder="50"></div>' +
+        '</div>' +
+        '<div class="footnote" style="padding:0">Their share of points on company-provided leads — defaults to 50%. Self-generated business always pays 70% to them regardless of this number; yield spread is always split 50/50 for everyone.</div>' +
+        '<div class="footnote" style="padding:4px 0 0">Have them set up their own line in Quo, then confirm it here or from their own Signature settings — CRM texts send from this number instead of the shared office line. They\'ll be walked through setting up their signature and a short tour the first time they log in.</div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add</button></div>' +
       '</form>' +
@@ -6719,9 +6763,11 @@ appEl.addEventListener("submit", function(e){
     addTeamMember({
       name: fd.get("name"), role: fd.get("role"), title: fd.get("title"),
       phone: fd.get("phone"), email: fd.get("email"), username: fd.get("username"), pin: fd.get("pin"),
-      quoPhoneNumber: fd.get("quoPhoneNumber")
+      quoPhoneNumber: fd.get("quoPhoneNumber"), originationSplit: fd.get("originationSplit")
     });
     form.reset();
+  } else if (type === "set-origination-split"){
+    setOriginationSplit(form.dataset.user, fd.get("split"));
   } else if (type === "set-points"){
     setPointsCharged(form.dataset.lead, fd.get("points"));
   } else if (type === "dialer-log"){
