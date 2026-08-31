@@ -6332,7 +6332,9 @@ function createLeadFromScenario(data){
   persist();
 }
 function modalAddLead(){
-  var loOptions = ownerOptions(currentUser().id);
+  var assignField = isOwner()
+    ? ('<div class="form-row"><label>Assign to</label><select class="select" name="assignedTo">' + ownerOptions(currentUser().id) + '</select></div>')
+    : ('<div class="form-row"><label>Assign to</label><div class="input" style="background:var(--surface-2)">' + esc(currentUser().name) + '</div><input type="hidden" name="assignedTo" value="' + esc(currentUser().id) + '"></div>');
   var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
   var srcOptions = SOURCES.map(function(s){ return '<option value="' + s + '">' + s + '</option>'; }).join("");
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
@@ -6350,7 +6352,7 @@ function modalAddLead(){
           '<div class="form-row"><label>Loan Type</label><select class="select" name="loanType">' + typeOptions + '</select></div>' +
         '</div>' +
         '<div class="form-two">' +
-          '<div class="form-row"><label>Assign to</label><select class="select" name="assignedTo">' + loOptions + '</select></div>' +
+          assignField +
           '<div class="form-row"><label>Loan Amount (est.)</label><input class="input" type="number" name="loanAmount"></div>' +
         '</div>' +
         '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress"></div>' +
@@ -6382,7 +6384,9 @@ function modalImportLeads(){
     var aiNote = st.aiStatus === "checking"
       ? '<div class="hint">✨ Asking AI to double-check this mapping…</div>'
       : (st.aiStatus === "applied" ? '<div class="hint" style="color:var(--c-forest)">✨ AI reviewed and adjusted the mapping below.</div>' : "");
-    var loOptions = ownerOptions(currentUser().id);
+    var assignField = isOwner()
+      ? ('<div class="form-row"><label>Assign all to</label><select class="select" name="assignedTo">' + ownerOptions(currentUser().id) + '</select></div>')
+      : ('<div class="form-row"><label>Assign all to</label><div class="input" style="background:var(--surface-2)">' + esc(currentUser().name) + '</div><input type="hidden" name="assignedTo" value="' + esc(currentUser().id) + '"></div>');
     var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
     var previewRows = st.rows.slice(0,5).map(function(r){ return '<tr>' + st.headers.map(function(h,i){ return '<td>' + esc((r[i]||"").toString().slice(0,40)) + '</td>'; }).join("") + '</tr>'; }).join("");
     var previewHead = '<tr>' + st.headers.map(function(h){ return '<th>' + esc(h) + '</th>'; }).join("") + '</tr>';
@@ -6402,7 +6406,7 @@ function modalImportLeads(){
         '<div class="form-row"><label>Property Address column (optional)</label><select class="select" name="map_address">' + headerOptions(m.address) + '</select></div>' +
         '<div class="form-two">' +
           '<div class="form-row"><label>Loan Type for all imported contacts</label><select class="select" name="loanType">' + typeOptions + '</select></div>' +
-          '<div class="form-row"><label>Assign all to</label><select class="select" name="assignedTo">' + loOptions + '</select></div>' +
+          assignField +
         '</div>' +
         '<div class="hint" style="margin:10px 0 4px">Preview (first 5 rows):</div>' +
         '<div class="table-wrap" style="max-height:180px;overflow:auto"><table><thead>' + previewHead + '</thead><tbody>' + previewRows + '</tbody></table></div>' +
