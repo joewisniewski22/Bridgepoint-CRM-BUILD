@@ -2258,6 +2258,9 @@ function submitPublicApplication(leadId, patch){
 }
 function hydrateFromSupabase(){
   if (!sb) return;
+  sb.rpc("list_users").then(function(res){
+    if (res.data){ res.data.forEach(upsertLocalUser); render(); }
+  });
   sb.from("leads").select("*").then(function(res){
     if (res.error){ console.error("lead fetch error", res.error); return; }
     if (res.data){ state.leads = res.data.map(rowToLead); render(); }
