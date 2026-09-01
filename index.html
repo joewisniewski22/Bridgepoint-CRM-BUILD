@@ -210,6 +210,13 @@ button{font-family:inherit}
 .section-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:12px}
 .hint{font-size:12px;color:var(--ink-faint)}
 .empty{padding:28px;text-align:center;color:var(--ink-faint);font-size:13px}
+.ai-chat-log{display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow-y:auto;padding-right:4px}
+.ai-msg{max-width:80%;padding:8px 12px;border-radius:var(--radius);border:1px solid var(--border-soft)}
+.ai-msg-role{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-faint);margin-bottom:3px}
+.ai-msg-body{font-size:13px;line-height:1.5;white-space:pre-wrap}
+.ai-msg-user{align-self:flex-end;background:var(--brand);color:#fff;border-color:var(--brand)}
+.ai-msg-user .ai-msg-role{color:rgba(255,255,255,.7)}
+.ai-msg-assistant{align-self:flex-start;background:var(--surface-2)}
 
 /* ---------------------------------------------------------------------
    Tables
@@ -2665,6 +2672,7 @@ function moveStage(leadId, target){
         notifyUser("owner", lead.id, "payroll", lead.name + " closed — pay " + payoutParts.join(" and ") + ".");
       }
       sendReviewRequests(lead);
+      if (sb) sb.functions.invoke("auto-recent-closing", { body: { leadId: lead.id } }).catch(function(){});
     }
     (lead.thirdParties||[]).forEach(function(tp){
       if (tp.notify){
@@ -4226,6 +4234,7 @@ function renderShell(){
         (navVisible("notifications") ? navItem("notifications","🔔","Notifications", notifCount||null) : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
+        (isOwner() ? navItem("ai-assistant","🤖","AI Assistant") : "") +
         (navVisible("portal") ? navItem("portal","⌂","Borrower Portal Preview") : "") +
       '</nav>' +
       '<div class="sidebar-foot">' +
@@ -4251,6 +4260,7 @@ function renderShell(){
   else if (ui.view === "detail") body = renderLeadDetail();
   else if (ui.view === "team") body = renderTeam();
   else if (ui.view === "payroll") body = renderPayroll();
+  else if (ui.view === "ai-assistant") body = renderAiAssistant();
   else if (ui.view === "comms") body = renderCommunications();
   else if (ui.view === "performance") body = renderPerformance();
   else if (ui.view === "retargeting") body = renderRetargeting();
@@ -5389,6 +5399,58 @@ function renderPayroll(){
 
   return topbar("Payroll", "What you owe on every closed loan — loan officer commission (their negotiated split of points, 70% on self-generated business, always 50% of YSP) and processing fee (100% to processing).", "") +
     '<div class="content">' + table + '</div>';
+}
+
+function loadAiChatHistory(){
+  ui.aiChatLog = [];
+  if (!sb) return;
+  var userId = currentUser().id;
+  sb.from("ai_chat_messages").select("role,content,created_at").eq("user_id", userId).order("created_at", { ascending:true }).limit(50).then(function(res){
+    ui.aiChatLog = (res.data || []).map(function(m){ return { role: m.role, content: m.content }; });
+    render();
+  }).catch(function(){ render(); });
+}
+function sendAiCommand(message){
+  if (!sb || !message) return;
+  var userId = currentUser().id;
+  ui.aiChatLog = ui.aiChatLog || [];
+  ui.aiChatLog.push({ role:"user", content: message });
+  ui.aiCommandBusy = true;
+  render();
+  sb.functions.invoke("owner-ai-command", { body: { message: message, userId: userId } }).then(function(res){
+    ui.aiCommandBusy = false;
+    if (res.error || !res.data || !res.data.ok){
+      ui.aiChatLog.push({ role:"assistant", content:"Something went wrong — try again." });
+      render();
+      return;
+    }
+    ui.aiChatLog.push({ role:"assistant", content: res.data.reply || "(done)" });
+    render();
+  }).catch(function(){
+    ui.aiCommandBusy = false;
+    ui.aiChatLog.push({ role:"assistant", content:"Something went wrong — try again." });
+    render();
+  });
+}
+function renderAiAssistant(){
+  var log = ui.aiChatLog;
+  var bubbles = (log===undefined)
+    ? '<div class="empty">Loading…</div>'
+    : (log.length===0
+      ? '<div class="empty">Ask me to look up closed deals, or draft and publish a recent-closing or story post to bplending.com.<br>e.g. "post the Munoz deal as a recent closing" or "write a story about our fastest DSCR close this month"</div>'
+      : log.map(function(m){
+          return '<div class="ai-msg ai-msg-' + m.role + '"><div class="ai-msg-role">' + (m.role==="user" ? esc(currentUser().name) : "AI Assistant") + '</div><div class="ai-msg-body">' + esc(m.content) + '</div></div>';
+        }).join(""));
+  return topbar("AI Assistant", "Owner-only. Handles marketing content (recent closings, stories) to bplending.com right now — ad spend and other integrations get added here once they're connected.", "") +
+    '<div class="content">' +
+      '<div class="panel panel-pad" style="max-width:760px">' +
+        '<div class="ai-chat-log" id="ai-chat-log">' + bubbles + '</div>' +
+        '<form data-form="ai-command" style="display:flex;gap:8px;margin-top:12px">' +
+          '<input class="input" type="text" name="message" placeholder="e.g. post the Munoz deal as a recent closing" style="flex:1" autocomplete="off"' + (ui.aiCommandBusy ? ' disabled' : '') + '>' +
+          '<button class="btn btn-primary" type="submit"' + (ui.aiCommandBusy ? ' disabled' : '') + '>' + (ui.aiCommandBusy ? '…' : 'Send') + '</button>' +
+        '</form>' +
+      '</div>' +
+    '</div>';
 }
 
 var COMM_TYPES = ["call","text","email","notify"];
@@ -6808,7 +6870,12 @@ appEl.addEventListener("click", function(e){
   if (!t) return;
   var action = t.dataset.action;
 
-  if (action === "nav"){ ui.view = t.dataset.view; if (ui.view!=="detail") ui.selectedLeadId=null; render(); }
+  if (action === "nav"){
+    ui.view = t.dataset.view;
+    if (ui.view!=="detail") ui.selectedLeadId=null;
+    if (ui.view==="ai-assistant" && ui.aiChatLog===undefined) loadAiChatHistory();
+    render();
+  }
   else if (action === "select-lead"){ ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); }
   else if (action === "filter-lo-jump"){ ui.view="leads"; ui.leadFilter.assignedTo=t.dataset.lo; ui.leadFilter.status=""; render(); }
   else if (action === "set-tab"){
@@ -7252,6 +7319,9 @@ appEl.addEventListener("submit", function(e){
     attemptLogin(fd.get("username"), fd.get("pin"));
   } else if (type === "customize-portal"){
     requestPortalCustomization(fd.get("prompt"));
+    form.reset();
+  } else if (type === "ai-command"){
+    sendAiCommand(fd.get("message"));
     form.reset();
   } else if (type === "save-signature"){
     var photoInput = form.querySelector('[name="photo"]');
