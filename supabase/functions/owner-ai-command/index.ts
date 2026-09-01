@@ -1,19 +1,18 @@
 // Owner-only AI command box. Joe types a plain-English request in his
 // portal; Claude decides which of a small, fixed set of real backend tools
 // to call (look up closed deals, draft/publish marketing content to the
-// bplending.com WordPress site) and reports back what it actually did.
-// Deliberately narrow tool surface -- no arbitrary code/SQL execution, no
-// ad-spend or payment tools yet (those get added only once those
-// integrations are actually connected). Never claims an action succeeded
-// unless the corresponding tool call reported success.
+// CRM's own public showcase page) and reports back what it actually did.
+// CRM-native by design -- this whole CRM build is meant to eventually
+// replace GoHighLevel (which currently runs bplending.com), not deepen
+// the dependency on it. Deliberately narrow tool surface -- no arbitrary
+// code/SQL execution, no ad-spend or payment tools yet (those get added
+// only once those integrations are actually connected). Never claims an
+// action succeeded unless the corresponding tool call reported success.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const WP_URL = Deno.env.get("WP_URL") || "";
-const WP_USERNAME = Deno.env.get("WP_USERNAME") || "";
-const WP_APP_PASSWORD = Deno.env.get("WP_APP_PASSWORD") || "";
 const MODEL = "claude-sonnet-5";
 
 const CORS_HEADERS = {
@@ -27,7 +26,8 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 const SYSTEM_PROMPT =
   "You are Joe's AI operations assistant for Bridgepoint Lending, embedded in his CRM (owner-only -- you're never shown to loan officers or borrowers). " +
-  "You currently have tools for: looking up recently closed deals, and drafting/publishing marketing content (recent-closing announcements, story posts) to the company WordPress site at bplending.com. " +
+  "You currently have tools for: looking up recently closed deals, and drafting/publishing marketing content (recent-closing announcements, story posts) to the CRM's own public showcase page. " +
+  "This CRM is meant to eventually replace GoHighLevel entirely (which currently runs bplending.com) -- content you publish lives on the CRM's public page, not GoHighLevel. " +
   "You do NOT yet have access to ad platforms (Meta/Facebook), payments, pricing, or other users' data -- if asked for something outside your current tools, say clearly that it isn't wired up yet rather than pretending to do it. " +
   "When asked to post/publish something, always use create_content then publish_content -- never claim something is live unless publish_content reports success. " +
   "When drafting closing announcements or stories, default to NOT naming the borrower and NOT including their exact street address (city/state only) unless Joe explicitly asks you to include the name -- these are real clients' financial details. " +
@@ -66,7 +66,7 @@ const TOOLS = [
   },
   {
     name: "publish_content",
-    description: "Publish a draft content item live to the bplending.com WordPress site.",
+    description: "Publish a draft content item live to the CRM's public showcase page (bridgepoint-crm-build.vercel.app/?showcase=1).",
     input_schema: {
       type: "object",
       properties: { contentId: { type: "string" } },
@@ -78,21 +78,6 @@ const TOOLS = [
 function fmtUSD(n: number | null): string | null {
   if (n == null) return null;
   return "$" + Math.round(n).toLocaleString("en-US");
-}
-
-async function publishToWordPress(title: string, body: string): Promise<{ ok: boolean; wpPostId?: number; wpUrl?: string; error?: string }> {
-  if (!WP_URL || !WP_USERNAME || !WP_APP_PASSWORD) {
-    return { ok: false, error: "WordPress isn't connected yet -- Joe needs to generate a WP Application Password and set WP_URL/WP_USERNAME/WP_APP_PASSWORD." };
-  }
-  const auth = btoa(WP_USERNAME + ":" + WP_APP_PASSWORD);
-  const res = await fetch(WP_URL.replace(/\/$/, "") + "/wp-json/wp/v2/posts", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Basic " + auth },
-    body: JSON.stringify({ title, content: body, status: "publish" }),
-  });
-  const data = await res.json();
-  if (!res.ok) return { ok: false, error: JSON.stringify(data) };
-  return { ok: true, wpPostId: data.id, wpUrl: data.link };
 }
 
 async function runTool(name: string, input: Record<string, unknown>): Promise<unknown> {
@@ -124,17 +109,13 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     return { ok: true, contentId };
   }
   if (name === "publish_content") {
-    const { data: row, error } = await sb.from("site_content").select("*").eq("id", input.contentId).single();
+    const { data: row, error } = await sb.from("site_content").select("id").eq("id", input.contentId).single();
     if (error || !row) return { error: "content_not_found" };
-    const result = await publishToWordPress(row.title, row.body);
-    if (result.ok) {
-      await sb.from("site_content").update({
-        status: "published", wp_post_id: result.wpPostId, wp_url: result.wpUrl, published_at: new Date().toISOString(),
-      }).eq("id", row.id);
-    } else {
-      await sb.from("site_content").update({ status: "publish_failed" }).eq("id", row.id);
-    }
-    return result;
+    const { error: updErr } = await sb.from("site_content").update({
+      status: "published", published_at: new Date().toISOString(),
+    }).eq("id", row.id);
+    if (updErr) return { ok: false, error: updErr.message };
+    return { ok: true, url: "https://bridgepoint-crm-build.vercel.app/?showcase=1" };
   }
   return { error: "unknown_tool" };
 }

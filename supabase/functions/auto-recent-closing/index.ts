@@ -1,16 +1,16 @@
 // Fires automatically when a loan moves to Closed/Funded. Builds a
 // conservative, anonymized closing announcement (loan type, general
 // location, amount -- no borrower name, no exact street address) and
-// publishes it straight to the bplending.com WordPress site. This is the
-// deterministic, always-safe path; the owner's AI command box can create
-// richer/named posts on request via the site-content tools instead.
+// publishes it to the CRM's own public showcase page (see site_content
+// table + the public ?showcase=1 route in index.html). CRM-native by
+// design -- Joe's site currently runs on GoHighLevel and this whole CRM
+// build is meant to eventually replace GHL, not deepen the dependency on
+// it. The owner's AI command box can create richer/named posts on request
+// via the same create/publish path.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const WP_URL = Deno.env.get("WP_URL") || "";
-const WP_USERNAME = Deno.env.get("WP_USERNAME") || "";
-const WP_APP_PASSWORD = Deno.env.get("WP_APP_PASSWORD") || "";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -52,21 +52,6 @@ function buildClosingCopy(lead: Record<string, unknown>): { title: string; body:
   return { title, body };
 }
 
-async function publishToWordPress(title: string, body: string): Promise<{ ok: boolean; wpPostId?: number; wpUrl?: string; error?: string }> {
-  if (!WP_URL || !WP_USERNAME || !WP_APP_PASSWORD) {
-    return { ok: false, error: "WordPress isn't connected yet (missing WP_URL/WP_USERNAME/WP_APP_PASSWORD secrets)." };
-  }
-  const auth = btoa(WP_USERNAME + ":" + WP_APP_PASSWORD);
-  const res = await fetch(WP_URL.replace(/\/$/, "") + "/wp-json/wp/v2/posts", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Basic " + auth },
-    body: JSON.stringify({ title, content: body, status: "publish" }),
-  });
-  const data = await res.json();
-  if (!res.ok) return { ok: false, error: JSON.stringify(data) };
-  return { ok: true, wpPostId: data.id, wpUrl: data.link };
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") {
@@ -89,19 +74,11 @@ Deno.serve(async (req: Request) => {
     const { title, body: postBody } = buildClosingCopy(lead);
     const contentId = "sc-" + crypto.randomUUID();
     await sb.from("site_content").insert({
-      id: contentId, type: "closing", lead_id: leadId, title, body: postBody, status: "draft", created_by: "system",
+      id: contentId, type: "closing", lead_id: leadId, title, body: postBody,
+      status: "published", created_by: "system", published_at: new Date().toISOString(),
     });
 
-    const wpResult = await publishToWordPress(title, postBody);
-    if (wpResult.ok) {
-      await sb.from("site_content").update({
-        status: "published", wp_post_id: wpResult.wpPostId, wp_url: wpResult.wpUrl, published_at: new Date().toISOString(),
-      }).eq("id", contentId);
-    } else {
-      await sb.from("site_content").update({ status: "publish_failed" }).eq("id", contentId);
-    }
-
-    return new Response(JSON.stringify({ ok: true, contentId, title, published: wpResult.ok, wpUrl: wpResult.wpUrl, error: wpResult.error }), { headers: CORS_HEADERS });
+    return new Response(JSON.stringify({ ok: true, contentId, title, published: true }), { headers: CORS_HEADERS });
   } catch (err) {
     return new Response(JSON.stringify({ error: "server_error", detail: String(err) }), { status: 500, headers: CORS_HEADERS });
   }
