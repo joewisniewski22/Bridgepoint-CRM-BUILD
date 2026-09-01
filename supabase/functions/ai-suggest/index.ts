@@ -110,7 +110,10 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "anthropic_error", detail: aiData }), { status: 502, headers: CORS_HEADERS });
     }
 
-    const text = (aiData.content && aiData.content[0] && aiData.content[0].text) || "";
+    // Claude's response can include a "thinking" block before the actual
+    // "text" block -- never assume content[0] is the text.
+    const textBlock = (aiData.content || []).find((c: Record<string, unknown>) => c.type === "text");
+    const text = (textBlock && textBlock.text) || "";
     return new Response(JSON.stringify({ ok: true, suggestion: text.trim() }), { headers: CORS_HEADERS });
   } catch (err) {
     return new Response(JSON.stringify({ error: "server_error", detail: String(err) }), { status: 500, headers: CORS_HEADERS });

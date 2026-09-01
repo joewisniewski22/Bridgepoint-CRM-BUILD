@@ -69,7 +69,10 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "anthropic_error", detail: aiData }), { status: 502, headers: CORS_HEADERS });
     }
 
-    const raw = (aiData.content && aiData.content[0] && aiData.content[0].text) || "";
+    // Claude's response can include a "thinking" block before the actual
+    // "text" block -- never assume content[0] is the text.
+    const textBlock = (aiData.content || []).find((c: Record<string, unknown>) => c.type === "text");
+    const raw = (textBlock && textBlock.text) || "";
     let parsed: Record<string, unknown> = {};
     try {
       const jsonMatch = raw.match(/\{[\s\S]*\}/);

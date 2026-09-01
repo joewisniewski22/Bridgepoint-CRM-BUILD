@@ -33,6 +33,24 @@ const FIELD_MAP: Record<string, string> = {
   exitStrategy: "exit_strategy",
 };
 
+const RATE_KEY_BY_LOAN_TYPE: Record<string, string> = {
+  "DSCR": "dscr", "Fix & Flip": "fixFlip", "Ground Up Construction": "groundUp",
+  "Portfolio/Blanket": "portfolio", "Bridge": "bridge", "Mixed-Use": "mixedUse",
+};
+
+function marketRateContext(loanType: string, rates: Array<Record<string, unknown>>): string {
+  const key = RATE_KEY_BY_LOAN_TYPE[loanType];
+  const row = rates.find((r) => r.key === key);
+  if (!row) return "";
+  const current = row.current as number;
+  const previous = row.previous as number;
+  if (current == null) return "";
+  if (previous != null && current < previous) {
+    return "Current market note: " + loanType + " rates just moved down to " + current + "% (from " + previous + "%) -- a real, timely reason to move now if it fits naturally, don't force it.";
+  }
+  return "Current market note: " + loanType + " rates are at " + current + "% right now.";
+}
+
 function buildTranscript(activity: Array<Record<string, unknown>>): string {
   return (activity || [])
     .filter((a) => a.type === "text")
@@ -63,6 +81,8 @@ Deno.serve(async (req: Request) => {
     const awaitingLanguage = lead.ai_stage === "awaiting_language";
     const lang = lead.preferred_language === "es" ? "Spanish" : "English";
     const transcript = buildTranscript(lead.activity as Array<Record<string, unknown>>);
+    const { data: rateRows } = await sb.from("market_rates").select("key,current,previous");
+    const rateNote = marketRateContext(lead.loan_type as string, rateRows || []);
 
     const knownFields = Object.keys(FIELD_MAP).filter((k) => lead[FIELD_MAP[k]] != null && lead[FIELD_MAP[k]] !== "");
     const missingFields = Object.keys(FIELD_MAP).filter((k) => !knownFields.includes(k));
@@ -70,6 +90,7 @@ Deno.serve(async (req: Request) => {
     const systemPrompt =
       "You are texting on behalf of " + loName + " at Bridgepoint Lending, a hard-money/DSCR real estate lender, with a prospective borrower named " + (lead.name || "the lead") + " who came in via " + (lead.source || "an ad") + " for a " + (lead.loan_type || "loan") + " inquiry. " +
       "Your single goal is CONVERSION: get them to complete our loan application or agree to a call with " + loName + ". Keep every message short (1-3 sentences), casual real-texting style, never corporate or salesy. No more than one question per message. " +
+      (rateNote ? (rateNote + " ") : "") +
       (awaitingLanguage
         ? "Your last message already asked (in both languages) whether they prefer English or Spanish. Read their latest reply and figure out which they picked -- look for \"spanish\", \"espanol\", \"español\", or a close misspelling/typo of those => Spanish; otherwise assume English. Then write your NEXT message already in that language, moving the conversation forward (e.g. ask about the property or their timeline)."
         : "Continue the conversation in " + lang + ". Use the transcript below for context -- don't repeat questions already answered.") +
@@ -87,7 +108,10 @@ Deno.serve(async (req: Request) => {
     const aiData = await aiRes.json();
     if (!aiRes.ok) return new Response(JSON.stringify({ error: "anthropic_error", detail: aiData }), { status: 502, headers: CORS_HEADERS });
 
-    const raw = (aiData.content && aiData.content[0] && aiData.content[0].text) || "";
+    // Claude's response can include a "thinking" block before the actual
+    // "text" block -- never assume content[0] is the text.
+    const textBlock = (aiData.content || []).find((c: Record<string, unknown>) => c.type === "text");
+    const raw = (textBlock && textBlock.text) || "";
     let parsed: Record<string, unknown> = {};
     try {
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
