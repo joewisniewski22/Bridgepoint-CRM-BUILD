@@ -924,8 +924,7 @@ function syncPricerRateToLead(leadId){
 function applyPricerRateAndSendTermSheet(leadId){
   var result = syncPricerRateToLead(leadId);
   if (!result){ showToast("Fix the pricing inputs before sending a term sheet"); return; }
-  ui.modal = { type:"sendDocument", leadId:leadId, kind:"termSheet" };
-  render();
+  sendDocumentBoth(leadId, "termSheet");
 }
 function experienceTier(deals){
   deals = deals || 0;
@@ -2138,22 +2137,6 @@ function buildTermSheet(lead){
   lines = lines.concat(loContactLines(lo, lang));
   return lines.join("\n");
 }
-function docHTMLPreview(lead, kind){
-  var body = kind === "termSheet" ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
-  var linesArr = body.split("\n");
-  var lo = docLoanOfficer(lead);
-  var isEs = (lead.preferredLanguage||"en") === "es";
-  var closingIdx = linesArr.length - loContactLines(lo, isEs ? "es" : "en").length;
-  var beforeSig = linesArr.slice(0, closingIdx).join("\n");
-  return '<div class="doc-preview">' +
-    '<pre class="doc-preview-text">' + esc(beforeSig) + '</pre>' +
-    '<div class="signature">' + esc(lo.name || "") + '</div>' +
-    '<div class="doc-preview-text" style="margin-top:2px">' + esc(lo.title || (isEs ? "Oficial de Préstamos" : "Loan Officer")) + '<br>Bridgepoint Lending — ' + (isEs ? "Soluciones de Financiamiento Inmobiliario" : "Real Estate Financing Solutions") +
-      (lo.phone || lo.email ? ('<br>' + esc([lo.phone, lo.email].filter(Boolean).join("  ·  "))) : '') +
-    '</div>' +
-  '</div>';
-}
-
 /* ---------------------------------------------------------------------
    Actions (mutate state, then persist)
 --------------------------------------------------------------------- */
@@ -2564,32 +2547,52 @@ function submitPhoneApplication(leadId, patch){
 function docPdfFilename(lead, label){
   return label.replace(/\s+/g,"_") + "_" + (lead.name||"Borrower").replace(/[^a-zA-Z0-9]+/g,"_") + ".pdf";
 }
-function sendDocumentViaEmail(leadId, kind){
+function sendDocumentBoth(leadId, kind){
   var lead = leadById(leadId);
-  if (!lead || !lead.email) { showToast("No email on file for this borrower"); return; }
-  if (!sb){ showToast("Email service unavailable"); return; }
+  if (!lead) return;
+  if (!sb){ showToast("Send service unavailable"); return; }
+  if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
   var isTerm = kind === "termSheet";
   var label = isTerm ? "Term Sheet" : "Pre-Approval Letter";
   var body = isTerm ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
   var lo = docLoanOfficer(lead);
   var subject = "Bridgepoint Lending — Your " + label;
   var filename = docPdfFilename(lead, label);
+  var isEs = (lead.preferredLanguage||"en") === "es";
+  var firstName = (lead.name||"").split(" ")[0];
+  var smsMsg = isEs
+    ? ("Hola " + firstName + ", es " + (lo.name||"") + " de Bridgepoint Lending — le acabo de enviar por correo electrónico su " + (isTerm ? "hoja de términos" : "carta de preaprobación") + " con todos los detalles. Revise su bandeja de entrada (" + (lead.email||"su correo") + ") y avíseme si tiene preguntas.")
+    : ("Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your " + label.toLowerCase() + " with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!");
   showToast("Sending " + label + "…");
   sb.functions.invoke("generate-doc-pdf", { body: { text: body, label: label } }).then(function(pdfRes){
     var pdfBase64 = (pdfRes && pdfRes.data && pdfRes.data.ok) ? pdfRes.data.pdfBase64 : null;
-    return sb.functions.invoke("send-email", {
-      body: { leadId: lead.id, to: lead.email, subject: subject, text: body, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null,
-        attachmentBase64: pdfBase64, attachmentName: pdfBase64 ? filename : null }
-    });
-  }).then(function(res){
-    if (res.error || !res.data || !res.data.ok){
-      showToast("Couldn't send — try Open in Email App instead");
+    var calls = [];
+    if (lead.email){
+      calls.push(sb.functions.invoke("send-email", {
+        body: { leadId: lead.id, to: lead.email, subject: subject, text: body, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null,
+          attachmentBase64: pdfBase64, attachmentName: pdfBase64 ? filename : null }
+      }).then(function(res){ return { channel:"email", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"email", ok:false }; }));
+    }
+    if (lead.phone){
+      calls.push(sb.functions.invoke("send-text", {
+        body: { leadId: lead.id, to: lead.phone, text: smsMsg, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
+      }).then(function(res){ return { channel:"text", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
+    }
+    return Promise.all(calls);
+  }).then(function(results){
+    var sentVia = results.filter(function(r){ return r.ok; }).map(function(r){ return r.channel; });
+    if (!sentVia.length){
+      showToast("Couldn't send " + label + " — try again");
       return;
     }
-    ui.modal = null;
-    sendDocumentAction(leadId, kind, "email", lo.name, lead.email);
+    var d = todayISO();
+    if (isTerm) lead.termsheetSentAt = d; else lead.preapprovalSentAt = d;
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date:d, type:"application", text: label + " sent to " + lead.name + " via " + sentVia.join(" + "), author: lo.name || currentUser().name });
+    showToast(label + " sent to " + lead.name + " via " + sentVia.join(" + ") + (sentVia.length < results.length ? " (one channel failed)" : ""));
+    persist();
   }).catch(function(){
-    showToast("Couldn't send — try Open in Email App instead");
+    showToast("Couldn't send " + label + " — try again");
   });
 }
 function downloadDocumentPdf(leadId, kind){
@@ -2610,19 +2613,6 @@ function downloadDocumentPdf(leadId, kind){
     document.body.removeChild(link);
     showToast(label + " PDF downloaded");
   }).catch(function(){ showToast("Couldn't generate PDF"); });
-}
-function sendDocumentAction(leadId, kind, channel, fromName, toAddress){
-  var lead = leadById(leadId);
-  if (!lead) return;
-  var d = todayISO();
-  var label = kind === "termSheet" ? "Term Sheet" : "Pre-Approval Letter";
-  if (kind === "termSheet") lead.termsheetSentAt = d; else lead.preapprovalSentAt = d;
-  lead.activity = lead.activity || [];
-  lead.activity.push({ date:d, type:"application", text: label + " sent to " + lead.name + (channel ? (" via " + channel) : ""), author: currentUser().name });
-  showToast(channel === "email" && toAddress
-    ? (label + " emailed to " + toAddress + (fromName ? (" from " + fromName) : ""))
-    : (label + " marked as sent"));
-  persist();
 }
 function logCreditOrder(leadId){
   var lead = leadById(leadId);
@@ -5228,8 +5218,14 @@ function renderRail(lead){
     '<div class="rail-block">' +
       '<div class="rail-title">Send to Borrower</div>' +
       '<div style="display:flex;flex-direction:column;gap:8px">' +
-        '<button class="btn btn-sm" data-action="open-modal" data-modal="sendDocument" data-kind="preapproval" data-lead="' + lead.id + '">Send Pre-Approval' + (lead.preapprovalSentAt ? ' ✓' : '') + '</button>' +
-        '<button class="btn btn-sm" data-action="open-modal" data-modal="sendDocument" data-kind="termSheet" data-lead="' + lead.id + '">Send Term Sheet' + (lead.termsheetSentAt ? ' ✓' : '') + '</button>' +
+        '<div style="display:flex;gap:6px">' +
+          '<button class="btn btn-sm" style="flex:1" data-action="send-document-both" data-kind="preapproval" data-lead="' + lead.id + '" title="Emails the pre-approval letter (PDF attached) and texts a heads-up automatically — no modal, no picking a channel">Send Pre-Approval' + (lead.preapprovalSentAt ? ' ✓' : '') + '</button>' +
+          '<button class="btn btn-sm btn-ghost" data-action="download-document-pdf" data-kind="preapproval" data-lead="' + lead.id + '" title="Download PDF">⬇</button>' +
+        '</div>' +
+        '<div style="display:flex;gap:6px">' +
+          '<button class="btn btn-sm" style="flex:1" data-action="send-document-both" data-kind="termSheet" data-lead="' + lead.id + '" title="Emails the term sheet (PDF attached) and texts a heads-up automatically — no modal, no picking a channel">Send Term Sheet' + (lead.termsheetSentAt ? ' ✓' : '') + '</button>' +
+          '<button class="btn btn-sm btn-ghost" data-action="download-document-pdf" data-kind="termSheet" data-lead="' + lead.id + '" title="Download PDF">⬇</button>' +
+        '</div>' +
       '</div>' +
       (lead.preapprovalSentAt ? ('<div class="footnote" style="padding:6px 0 0">Pre-approval sent ' + fmtDate(lead.preapprovalSentAt) + '</div>') : '') +
       (lead.termsheetSentAt ? ('<div class="footnote" style="padding:2px 0 0">Term sheet sent ' + fmtDate(lead.termsheetSentAt) + '</div>') : '') +
@@ -5596,7 +5592,6 @@ function renderModal(){
   if (ui.modal.type === "addTeamMember") return modalAddTeamMember();
   if (ui.modal.type === "sendInvite") return modalSendInvite(ui.modal.user);
   if (ui.modal.type === "dialer") return modalDialer();
-  if (ui.modal.type === "sendDocument") return modalSendDocument(ui.modal.leadId, ui.modal.kind);
   if (ui.modal.type === "scopeOfWork") return modalScopeOfWork(ui.modal.leadId);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   return "";
@@ -5614,31 +5609,6 @@ function modalSendBack(leadId){
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Send Back</button></div>' +
       '</form>' +
-    '</div></div>';
-}
-function modalSendDocument(leadId, kind){
-  var lead = leadById(leadId);
-  if (!lead) return "";
-  var isTerm = kind === "termSheet";
-  var label = isTerm ? "Term Sheet" : "Pre-Approval Letter";
-  var body = isTerm ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
-  var lo = docLoanOfficer(lead);
-  var smsMsg = "Hi " + (lead.name||"").split(" ")[0] + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your " + label.toLowerCase() + ". Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!";
-  var digits = (lead.phone||"").replace(/[^0-9+]/g,"");
-  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
-    '<div class="modal" data-stop="1" style="max-width:560px">' +
-      '<div class="modal-head"><h3>Send ' + label + ' — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
-      '<div class="modal-body">' +
-        docHTMLPreview(lead, kind) +
-        '<div class="footnote" style="padding:0">Includes ' + esc(lo.name||"the loan officer") + '\'s name, title, and contact info, with a typed signature. "Send via Email" emails the full letter straight to ' + esc(lead.email||"the borrower") + ' automatically; "Text Heads-Up" sends a short text to ' + esc(lead.phone||"the borrower") + ' pointing them to check their inbox.</div>' +
-      '</div>' +
-      '<div class="modal-foot" style="flex-wrap:wrap">' +
-        '<a class="btn" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — Your " + label) + '&body=' + encodeURIComponent(body) + '" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="email">Open in Email App</a>' +
-        '<a class="btn" href="sms:' + esc(digits) + '?&body=' + encodeURIComponent(smsMsg) + '" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="text">Text Heads-Up</a>' +
-        '<button class="btn btn-ghost" type="button" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="manually">Mark as Sent</button>' +
-        '<button class="btn btn-ghost" type="button" data-action="download-document-pdf" data-lead="' + lead.id + '" data-kind="' + kind + '">Download PDF</button>' +
-        '<button class="btn btn-primary" type="button" data-action="send-document-email" data-lead="' + lead.id + '" data-kind="' + kind + '"' + (lead.email?'':' disabled') + '>Send via Email</button>' +
-      '</div>' +
     '</div></div>';
 }
 function modalChangePin(){
@@ -6856,12 +6826,8 @@ appEl.addEventListener("click", function(e){
     sendApplicationAction(t.dataset.lead, t.dataset.channel);
     if (t.dataset.channel === "manually"){ ui.modal = null; render(); }
   }
-  else if (action === "send-document"){
-    sendDocumentAction(t.dataset.lead, t.dataset.kind, t.dataset.channel);
-    if (t.dataset.channel === "manually"){ ui.modal = null; render(); }
-  }
-  else if (action === "send-document-email"){
-    sendDocumentViaEmail(t.dataset.lead, t.dataset.kind);
+  else if (action === "send-document-both"){
+    sendDocumentBoth(t.dataset.lead, t.dataset.kind);
   }
   else if (action === "download-document-pdf"){
     downloadDocumentPdf(t.dataset.lead, t.dataset.kind);
