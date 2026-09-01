@@ -2561,6 +2561,9 @@ function submitPhoneApplication(leadId, patch){
   showToast("Application saved for " + lead.name);
   runGuidelineCheck(leadId);
 }
+function docPdfFilename(lead, label){
+  return label.replace(/\s+/g,"_") + "_" + (lead.name||"Borrower").replace(/[^a-zA-Z0-9]+/g,"_") + ".pdf";
+}
 function sendDocumentViaEmail(leadId, kind){
   var lead = leadById(leadId);
   if (!lead || !lead.email) { showToast("No email on file for this borrower"); return; }
@@ -2570,9 +2573,14 @@ function sendDocumentViaEmail(leadId, kind){
   var body = isTerm ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
   var lo = docLoanOfficer(lead);
   var subject = "Bridgepoint Lending — Your " + label;
+  var filename = docPdfFilename(lead, label);
   showToast("Sending " + label + "…");
-  sb.functions.invoke("send-email", {
-    body: { leadId: lead.id, to: lead.email, subject: subject, text: body, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
+  sb.functions.invoke("generate-doc-pdf", { body: { text: body, label: label } }).then(function(pdfRes){
+    var pdfBase64 = (pdfRes && pdfRes.data && pdfRes.data.ok) ? pdfRes.data.pdfBase64 : null;
+    return sb.functions.invoke("send-email", {
+      body: { leadId: lead.id, to: lead.email, subject: subject, text: body, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null,
+        attachmentBase64: pdfBase64, attachmentName: pdfBase64 ? filename : null }
+    });
   }).then(function(res){
     if (res.error || !res.data || !res.data.ok){
       showToast("Couldn't send — try Open in Email App instead");
@@ -2583,6 +2591,25 @@ function sendDocumentViaEmail(leadId, kind){
   }).catch(function(){
     showToast("Couldn't send — try Open in Email App instead");
   });
+}
+function downloadDocumentPdf(leadId, kind){
+  var lead = leadById(leadId);
+  if (!lead || !sb) return;
+  var isTerm = kind === "termSheet";
+  var label = isTerm ? "Term Sheet" : "Pre-Approval Letter";
+  var body = isTerm ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
+  var filename = docPdfFilename(lead, label);
+  showToast("Preparing PDF…");
+  sb.functions.invoke("generate-doc-pdf", { body: { text: body, label: label } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){ showToast("Couldn't generate PDF"); return; }
+    var link = document.createElement("a");
+    link.href = "data:application/pdf;base64," + res.data.pdfBase64;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast(label + " PDF downloaded");
+  }).catch(function(){ showToast("Couldn't generate PDF"); });
 }
 function sendDocumentAction(leadId, kind, channel, fromName, toAddress){
   var lead = leadById(leadId);
@@ -5609,6 +5636,7 @@ function modalSendDocument(leadId, kind){
         '<a class="btn" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — Your " + label) + '&body=' + encodeURIComponent(body) + '" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="email">Open in Email App</a>' +
         '<a class="btn" href="sms:' + esc(digits) + '?&body=' + encodeURIComponent(smsMsg) + '" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="text">Text Heads-Up</a>' +
         '<button class="btn btn-ghost" type="button" data-action="send-document" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channel="manually">Mark as Sent</button>' +
+        '<button class="btn btn-ghost" type="button" data-action="download-document-pdf" data-lead="' + lead.id + '" data-kind="' + kind + '">Download PDF</button>' +
         '<button class="btn btn-primary" type="button" data-action="send-document-email" data-lead="' + lead.id + '" data-kind="' + kind + '"' + (lead.email?'':' disabled') + '>Send via Email</button>' +
       '</div>' +
     '</div></div>';
@@ -6834,8 +6862,9 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "send-document-email"){
     sendDocumentViaEmail(t.dataset.lead, t.dataset.kind);
-    ui.modal = null;
-    render();
+  }
+  else if (action === "download-document-pdf"){
+    downloadDocumentPdf(t.dataset.lead, t.dataset.kind);
   }
   else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
   else if (action === "send-borrower-portal"){ sendBorrowerPortalInvite(t.dataset.lead); }

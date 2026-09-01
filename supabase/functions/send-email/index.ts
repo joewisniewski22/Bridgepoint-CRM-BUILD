@@ -55,6 +55,11 @@ Deno.serve(async (req: Request) => {
     // for system-generated sends with no specific sender.
     const fromAddress: string = body.fromAddress || FROM_ADDRESS;
     const fromPhotoUrl: string | null = body.fromPhotoUrl || null;
+    // Optional single PDF attachment (base64), e.g. a generated Pre-Approval
+    // Letter / Term Sheet from the generate-doc-pdf function.
+    const attachmentBase64: string | null = body.attachmentBase64 || null;
+    const attachmentName: string | null = body.attachmentName || null;
+    const attachmentContentType: string = body.attachmentContentType || "application/pdf";
 
     if (!to || !subject || !text) {
       return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400, headers: CORS_HEADERS });
@@ -77,6 +82,9 @@ Deno.serve(async (req: Request) => {
         TextBody: text,
         HtmlBody: buildHtmlBody(text, fromPhotoUrl),
         MessageStream: "outbound",
+        ...(attachmentBase64 && attachmentName ? {
+          Attachments: [{ Name: attachmentName, Content: attachmentBase64, ContentType: attachmentContentType }],
+        } : {}),
       }),
     });
     const pmData = await pmRes.json();
