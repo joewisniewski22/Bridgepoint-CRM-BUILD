@@ -2171,6 +2171,7 @@ function leadToRow(l){
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
+    automation_paused: !!l.automationPaused,
     outside_lender: l.outsideLender || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
@@ -2203,6 +2204,7 @@ function rowToLead(r){
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
+    automationPaused: !!r.automation_paused,
     outsideLender: r.outside_lender || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
@@ -2700,6 +2702,19 @@ function toggleOnHold(leadId, note){
   persist();
 }
 
+function toggleAutomationPaused(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  lead.automationPaused = !lead.automationPaused;
+  lead.activity = lead.activity || [];
+  lead.activity.push({
+    date: todayISO(), type:"system",
+    text: lead.automationPaused ? "AI automation (texts/emails/campaigns) stopped for this client" : "AI automation resumed for this client",
+    author: currentUser().name
+  });
+  showToast(lead.automationPaused ? "AI automation stopped for " + lead.name : "AI automation resumed for " + lead.name);
+  persist();
+}
 function reassignProcessor(leadId, newProcId){
   var lead = leadById(leadId);
   if (!lead || !newProcId || lead.assignedProcessor === newProcId) return;
@@ -5159,9 +5174,12 @@ function renderRail(lead){
     '<div class="rail-block">' +
       '<div class="rail-title">Borrower</div>' +
       '<div class="rail-name">' + esc(lead.name) + '</div>' +
-      '<div class="stage-line">' + badgeForStage(lead) + (lead.onHold ? ' <span class="badge badge-rust">⏸ On Hold</span>' : '') + '</div>' +
+      '<div class="stage-line">' + badgeForStage(lead) + (lead.onHold ? ' <span class="badge badge-rust">⏸ On Hold</span>' : '') + (lead.automationPaused ? ' <span class="badge badge-rust">🚫 Automation Stopped</span>' : '') + '</div>' +
       '<button class="btn btn-sm' + (lead.preferredLanguage==="es" ? " btn-primary" : "") + '" style="width:100%;margin-top:8px" data-action="toggle-language" data-lead="' + lead.id + '" title="' + (lead.preferredLanguage==="es" ? "Spanish — click to switch back to English" : "English — click to switch to Spanish") + '">' +
         (lead.preferredLanguage==="es" ? "🇪🇸" : "🇺🇸") + ' Spanish Speaking' +
+      '</button>' +
+      '<button class="btn btn-sm' + (lead.automationPaused ? " btn-primary" : "") + '" style="width:100%;margin-top:6px" data-action="toggle-automation-paused" data-lead="' + lead.id + '" title="Stops AI-driven texts/emails/campaigns to this client only — never affects internal AI scanning (document review, guideline checks, etc.)">' +
+        (lead.automationPaused ? "▶ Resume Automation" : "🚫 Stop Automation") +
       '</button>' +
     '</div>' +
     '<div class="rail-block">' +
@@ -6804,6 +6822,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "import-back"){ ui.importState = null; render(); }
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
   else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
+  else if (action === "toggle-automation-paused"){ toggleAutomationPaused(t.dataset.lead); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-uw-condition-file"){ viewUnderwritingConditionFile(t.dataset.lead, t.dataset.condid, t.dataset.borrower==="1"); }
