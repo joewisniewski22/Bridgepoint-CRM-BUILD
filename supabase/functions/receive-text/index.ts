@@ -10,6 +10,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -66,7 +67,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const senderDigits = msg.from.replace(/\D/g, "");
-    const { data: leads } = await sb.from("leads").select("id, phone, name, activity, assigned_to");
+    const { data: leads } = await sb.from("leads").select("id, phone, name, activity, assigned_to, automation_paused, ai_stage");
     const match = (leads || []).find((l: Record<string, unknown>) => {
       const phone = (l.phone as string) || "";
       return phone.replace(/\D/g, "").slice(-10) === senderDigits.slice(-10);
@@ -92,6 +93,38 @@ Deno.serve(async (req: Request) => {
           date: new Date().toISOString().slice(0, 10),
           read: false,
         });
+
+        // Always alert the assigned LO for real (text + email), not just the
+        // in-app notification above -- a client engaging is time-sensitive.
+        const { data: lo } = await sb.from("users").select("name,phone,email,quo_phone_number").eq("id", match.assigned_to).single();
+        if (lo) {
+          const link = CRM_URL + "?lead=" + match.id;
+          const alertText = (match.name as string) + " replied: \"" + msg.text.slice(0, 100) + "\" — " + link;
+          if (lo.phone) {
+            fetch(SUPABASE_URL + "/functions/v1/send-text", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+              body: JSON.stringify({ to: lo.phone, text: alertText, fromName: "Bridgepoint CRM" }),
+            }).catch(() => {});
+          }
+          if (lo.email) {
+            fetch(SUPABASE_URL + "/functions/v1/send-email", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+              body: JSON.stringify({ to: lo.email, subject: (match.name as string) + " just replied", text: alertText, fromName: "Bridgepoint CRM" }),
+            }).catch(() => {});
+          }
+        }
+      }
+
+      // Hand off to the AI conversion-texting automation, if this lead is
+      // enrolled (ai_stage set) and the LO hasn't hit Stop Automation.
+      if (match.ai_stage && !match.automation_paused) {
+        await fetch(SUPABASE_URL + "/functions/v1/ai-lead-engage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+          body: JSON.stringify({ leadId: match.id }),
+        }).catch(() => {});
       }
     } else {
       // Not a borrower's own number -- check if a staff member is replying

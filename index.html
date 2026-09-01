@@ -1225,6 +1225,8 @@ try {
   var qp = new URLSearchParams(window.location.search);
   var applyId = qp.get("apply");
   var applyToken = qp.get("t");
+  var deepLinkLead = qp.get("lead");
+  if (deepLinkLead) ui.pendingDeepLinkLead = deepLinkLead;
   if (qp.get("showcase")){
     ui.publicShowcase = { status:"loading", items:[] };
     loadPublicShowcase();
@@ -2199,7 +2201,7 @@ function leadToRow(l){
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
-    automation_paused: !!l.automationPaused,
+    automation_paused: !!l.automationPaused, ai_stage: l.aiStage || null,
     outside_lender: l.outsideLender || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
@@ -2232,7 +2234,7 @@ function rowToLead(r){
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
-    automationPaused: !!r.automation_paused,
+    automationPaused: !!r.automation_paused, aiStage: r.ai_stage || null,
     outsideLender: r.outside_lender || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
@@ -2355,7 +2357,13 @@ function hydrateFromSupabase(){
   });
   sb.from("leads").select("*").then(function(res){
     if (res.error){ console.error("lead fetch error", res.error); return; }
-    if (res.data){ state.leads = res.data.map(rowToLead); render(); }
+    if (res.data){ state.leads = res.data.map(rowToLead); }
+    if (ui.pendingDeepLinkLead){
+      var pl = leadById(ui.pendingDeepLinkLead);
+      if (pl){ ui.view = "detail"; ui.selectedLeadId = pl.id; ui.activeTab = "overview"; }
+      ui.pendingDeepLinkLead = null;
+    }
+    render();
   });
   sb.from("notifications").select("*").then(function(res){
     if (res.error){ console.error("notification fetch error", res.error); return; }
@@ -2771,6 +2779,37 @@ function sendBackToLO(leadId, note){
   persist();
 }
 
+function crmLeadLink(leadId){
+  return CRM_URL + "?lead=" + leadId;
+}
+function notifyLoNewLead(lead){
+  // notifyUser()'s own pushStaffAlert already texts the LO for "hot-lead"
+  // notifications (with the deep link baked into that text) -- this only
+  // adds the email side, so the LO isn't double-texted.
+  if (!sb || !lead.assignedTo) return;
+  var lo = userById(lead.assignedTo);
+  if (!lo || !lo.email) return;
+  var link = crmLeadLink(lead.id);
+  var text = "New lead: " + lead.name + " (" + lead.loanType + ", " + lead.source + ") — open & dial: " + link;
+  sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lo.email, subject: "New lead: " + lead.name, text: text, fromName: "Bridgepoint CRM" } }).catch(function(){});
+}
+var BILINGUAL_LOS = ["lo-fanis","lo-david"];
+function startAiEngagement(lead){
+  if (!sb || !lead.phone) return;
+  if (lead.source === "Self-Generated") return;
+  var isBilingual = BILINGUAL_LOS.indexOf(lead.assignedTo) !== -1;
+  var lo = userById(lead.assignedTo) || {};
+  var loName = lo.name || "your loan officer";
+  var firstName = (lead.name || "there").split(" ")[0];
+  var text = isBilingual
+    ? ("Hi " + firstName + "! It's " + loName + " with Bridgepoint Lending, following up on your " + (lead.loanType||"loan") + " inquiry. Would you prefer English or Spanish?\n\n¡Hola " + firstName + "! Soy " + loName + " de Bridgepoint Lending, dándole seguimiento a su consulta de préstamo. ¿Prefiere inglés o español?")
+    : ("Hi " + firstName + "! It's " + loName + " with Bridgepoint Lending, following up on your " + (lead.loanType||"loan") + " inquiry. What property are you looking to finance?");
+  sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: loName, fromNumber: lo.quoPhoneNumber||null } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok) return;
+    lead.aiStage = isBilingual ? "awaiting_language" : "engaging";
+    persist();
+  }).catch(function(){});
+}
 function addLead(data){
   var id = nextLeadId();
   var d = todayISO();
@@ -2790,8 +2829,10 @@ function addLead(data){
     lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
   }
   if (lead.assignedTo && lead.assignedTo !== currentUser().id){
-    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — contact fast, speed to lead matters most.");
+    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id));
+    notifyLoNewLead(lead);
   }
+  startAiEngagement(lead);
   showToast("Added " + lead.name);
   ui.modal = null;
   ui.view = "detail"; ui.selectedLeadId = id; ui.activeTab = "overview";
@@ -6806,6 +6847,11 @@ function createLeadFromScenario(data){
   if (addedDocs.length){
     lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
   }
+  if (lead.assignedTo && lead.assignedTo !== currentUser().id){
+    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id));
+    notifyLoNewLead(lead);
+  }
+  startAiEngagement(lead);
   ui.standalonePricer = null;
   ui.modal = null;
   showToast("Created " + lead.name + " from pricer scenario");
