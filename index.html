@@ -1267,6 +1267,7 @@ var CADENCE_MAX = 5;
    State
 --------------------------------------------------------------------- */
 var state = JSON.parse(document.getElementById("state-json").textContent);
+if (state.marketRates) applyAuthoritativeMarketRates(state.marketRates);
 
 var ui = {
   view: "today",
@@ -2453,6 +2454,7 @@ function hydrateFromSupabase(){
     if (res.data){
       var mr = {};
       res.data.forEach(function(r){ mr[r.key] = { label:r.label, previous:r.previous, current:r.current, updatedAt:r.updated_at }; });
+      applyAuthoritativeMarketRates(mr);
       state.marketRates = mr;
       render();
     }
@@ -4020,15 +4022,27 @@ function aiFlaggedDocs(){
   return out;
 }
 
-function updateMarketRate(key, newVal){
-  var r = state.marketRates[key];
-  if (!r || isNaN(newVal)) return;
-  if (newVal === r.current) return;
-  r.previous = r.current;
-  r.current = newVal;
-  r.updatedAt = todayISO();
-  showToast(r.label + " rate updated to " + fmtPct(newVal));
-  persist();
+// The "current" rate shown anywhere in the app (Today's call-list alerts,
+// Retargeting, win-back messages, Deal Analysis) always comes from here --
+// the same constants the real Pricer prices off of -- never from a
+// separately-editable value. That's the only way a displayed rate can
+// never drift out of sync with what the Pricer actually quotes: it can
+// only change when these constants change, i.e. when a real rate sheet is
+// loaded in. The DB's own "previous"/"current" columns still exist to
+// track the delta for "rates just dropped" messaging, but get overwritten
+// by these authoritative numbers on every load rather than trusted as-is.
+function applyAuthoritativeMarketRates(mr){
+  var rtlGoldBase = RTL_BASE_RATES["0.00"].gold;
+  var authoritative = {
+    dscr: DSCR_BASE_PAR_RATE,
+    portfolio: DSCR_BASE_PAR_RATE,
+    fixFlip: rtlGoldBase,
+    bridge: rtlGoldBase,
+    groundUp: Math.round((rtlGoldBase + 0.75) * 1000) / 1000
+  };
+  Object.keys(authoritative).forEach(function(key){
+    if (mr[key]) mr[key].current = authoritative[key];
+  });
 }
 
 /* ---------------------------------------------------------------------
@@ -5132,7 +5146,7 @@ function renderTabScenario(lead){
     field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderLoanDetailsEditor(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderScopeOfWork(lead);
+  '</div>' + renderLoanDetailsEditor(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
 }
 
 function renderPricingInputsEditor(lead){
@@ -5270,6 +5284,76 @@ function renderPricer(lead){
     '<div class="footnote" style="padding-top:8px">Live from Constructive Capital\'s current wholesale rate sheets — common-path pricing only (foreign national, IO/STR overlays not modeled). Internal use only, never shown to the borrower.</div>';
 }
 
+// Deal Analysis -- for short-term (Fix & Flip / Bridge / GUC) loans, models
+// the exit decision: sell now vs. refinance into a long-term DSCR loan.
+// Explicitly leans toward recommending refi (per Joe's direction) since it
+// keeps the client's equity working and is another loan for us -- but the
+// lean only flips a genuinely close call, never overrides real numbers
+// that clearly favor selling. All estimates, not underwriting.
+var DEAL_ANALYSIS_SELLING_COST_PCT = 0.08; // realtor + closing, blended estimate
+var DEAL_ANALYSIS_REFI_CLOSING_PCT = 0.02;
+function computeDealAnalysis(lead){
+  if (SHORT_TERM_TYPES.indexOf(lead.loanType) === -1) return null;
+  var arv = lead.arv || lead.currentValue;
+  if (!lead.purchasePrice || !lead.loanAmount || !arv) return null;
+
+  var holdingMonths = lead.termMonths || 12;
+  var rate = lead.rate != null ? lead.rate : 11.0;
+  var loanInterestCost = lead.loanAmount * (rate/100) * (holdingMonths/12);
+  var originationCost = lead.loanAmount * ((lead.pointsCharged||0)/100);
+  var sellingCosts = arv * DEAL_ANALYSIS_SELLING_COST_PCT;
+  var totalCostBasis = lead.purchasePrice + (lead.rehabBudget||0) + loanInterestCost + originationCost;
+  var sellProfit = Math.round(arv - totalCostBasis - sellingCosts);
+
+  var valueBasis = lead.currentValue || arv;
+  var ficoTier = DSCR_LTV_BY_FICO.filter(function(t){ return (lead.creditScore||0) >= t.minFico; })[0] || DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length-1];
+  var maxDscrLoan = Math.round(valueBasis * (ficoTier.cashOut/100));
+  var refiClosingCosts = Math.round(maxDscrLoan * DEAL_ANALYSIS_REFI_CLOSING_PCT);
+  var cashOutProceeds = Math.round(maxDscrLoan - lead.loanAmount - refiClosingCosts);
+  var dscrRateEstimate = (state.marketRates.dscr && state.marketRates.dscr.current) || DSCR_BASE_PAR_RATE;
+  var newPI = monthlyPayment(maxDscrLoan, dscrRateEstimate, 360);
+  var monthlyCashFlow = (lead.rentEstimate && newPI) ? Math.round(lead.rentEstimate - newPI - (lead.monthlyTaxes||0) - (lead.monthlyInsurance||0) - (lead.monthlyHoa||0)) : null;
+
+  // Lean refi: only recommend selling if it clearly and substantially wins
+  // (25%+ more net value) -- a close call goes to refi.
+  var recommendation = "refi";
+  if (sellProfit > 0 && cashOutProceeds != null && sellProfit > cashOutProceeds * 1.25){
+    recommendation = "sell";
+  }
+  if (cashOutProceeds < 0) recommendation = "sell"; // refi genuinely doesn't work, no real choice
+
+  var rateTrend = (state.marketRates.dscr && state.marketRates.dscr.current < state.marketRates.dscr.previous) ? "down" : "flat_or_up";
+
+  return {
+    sellProfit: sellProfit, sellingCosts: Math.round(sellingCosts), loanInterestCost: Math.round(loanInterestCost),
+    maxDscrLoan: maxDscrLoan, cashOutProceeds: cashOutProceeds, refiClosingCosts: refiClosingCosts,
+    dscrRateEstimate: dscrRateEstimate, monthlyCashFlow: monthlyCashFlow, recommendation: recommendation,
+    rateTrend: rateTrend, arv: arv
+  };
+}
+function renderDealAnalysis(lead){
+  var d = computeDealAnalysis(lead);
+  if (!d) return "";
+  var isRefi = d.recommendation === "refi";
+  return '<div class="section-head" style="margin-top:20px"><h2>Deal Analysis</h2></div>' +
+    '<div class="panel panel-pad">' +
+      '<div class="rail-title" style="margin-bottom:6px">Market Conditions</div>' +
+      '<div class="footnote" style="padding:0 0 12px">DSCR par rate currently ' + fmtPct(d.dscrRateEstimate) + (d.rateTrend==="down" ? " — trending down, a good window to refinance into" : "") + '.</div>' +
+      '<div class="field-grid">' +
+        field("Est. Profit If Sold", fmtUSD(d.sellProfit), true) +
+        field("Est. Cash-Out If Refi'd to DSCR", d.cashOutProceeds!=null ? fmtUSD(d.cashOutProceeds) : "—", true) +
+        field("New DSCR Loan Amount (est.)", fmtUSD(d.maxDscrLoan), true) +
+        (d.monthlyCashFlow!=null ? field("Est. Monthly Cash Flow After Refi", fmtUSD(d.monthlyCashFlow), true) : "") +
+      '</div>' +
+      '<div class="footnote" style="padding-top:6px">Sell estimate assumes ' + (DEAL_ANALYSIS_SELLING_COST_PCT*100) + '% selling costs and full-term interest carry. Refi estimate assumes ' + (DEAL_ANALYSIS_REFI_CLOSING_PCT*100) + '% closing costs at today\'s DSCR rate — real quote may differ once pulled through the Pricer.</div>' +
+      '<div style="margin-top:10px;padding:10px;border-radius:8px;background:var(--surface-2)">' +
+        '<b>' + (isRefi ? "Recommendation: Refinance to DSCR" : "Recommendation: Sell") + '</b>' +
+        '<div class="footnote" style="padding-top:4px">' + (isRefi
+          ? "Keeps the client in the deal, generating cash flow" + (d.monthlyCashFlow!=null && d.monthlyCashFlow>0 ? " (positive)" : "") + " while pulling out equity — and it's a new loan for us."
+          : "The sale nets meaningfully more than refinancing would right now.") + '</div>' +
+      '</div>' +
+    '</div>';
+}
 function renderScopeOfWork(lead){
   if (lead.loanType !== "Fix & Flip" && lead.loanType !== "Ground Up Construction") return "";
   var label = lead.loanType === "Ground Up Construction" ? "Construction Budget" : "Scope of Work";
@@ -5554,9 +5638,6 @@ function renderMarket(){
       '<td class="num">' + fmtPct(r.previous) + '</td>' +
       '<td class="num">' + fmtPct(r.current) + (dropped ? ' <span class="badge badge-gold">Dropped</span>' : '') + '</td>' +
       '<td>' + fmtDate(r.updatedAt) + '</td>' +
-      '<td>' + (isOwner() ?
-        ('<form data-form="rate" data-key="' + key + '" style="display:flex;gap:6px"><input class="input" style="width:90px" type="number" step="0.001" name="rate" placeholder="New %" required><button class="btn btn-sm" type="submit">Update</button></form>')
-        : '<span class="cell-sub">Owner only</span>') + '</td>' +
     '</tr>';
   }).join("");
 
@@ -5568,8 +5649,8 @@ function renderMarket(){
     '</div>' +
     '<div id="social-post-box" class="footnote" style="padding-top:8px;white-space:pre-wrap"></div>';
 
-  return topbar("Market Conditions", "When a rate drops, everyone who inquired about or closed that loan type is added to the call list.", "") +
-    '<div class="content"><div class="table-wrap"><table><thead><tr><th>Loan Type</th><th>Previous</th><th>Current</th><th>Updated</th><th>Update Rate</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+  return topbar("Market Conditions", "When a rate drops, everyone who inquired about or closed that loan type is added to the call list. Rates here always match the Pricer exactly — they only change when a real rate sheet is loaded in, never editable directly.", "") +
+    '<div class="content"><div class="table-wrap"><table><thead><tr><th>Loan Type</th><th>Previous</th><th>Current</th><th>Updated</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
     socialSection + '</div>';
 }
 
@@ -7692,9 +7773,6 @@ appEl.addEventListener("submit", function(e){
     setLoanDetails(form.dataset.lead, ldLoanAmount, ldRate, ldTerm);
   } else if (type === "pricing-inputs"){
     setPricingInputs(form.dataset.lead, fd);
-  } else if (type === "rate"){
-    updateMarketRate(form.dataset.key, Number(fd.get("rate")));
-    form.reset();
   } else if (type === "send-text"){
     var box = document.getElementById("text-message-box");
     logTextSent(form.dataset.lead, box ? box.value : "");
