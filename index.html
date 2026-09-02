@@ -1369,6 +1369,9 @@ function ownerOptions(currentId){
 function processorOptions(currentId){
   return allProcessors().map(function(u){ return '<option value="' + u.id + '"' + (u.id===currentId?" selected":"") + '>' + esc(u.name) + '</option>'; }).join("");
 }
+function allStaffOptions(currentId){
+  return state.users.map(function(u){ return '<option value="' + u.id + '"' + (u.id===currentId?" selected":"") + '>' + esc(u.name) + ' (' + (u.role==="owner"?"Owner":u.role==="processor"?"Processor":"LO") + ')</option>'; }).join("");
+}
 
 /* ---------------------------------------------------------------------
    Login / access
@@ -2433,6 +2436,17 @@ function hydrateFromSupabase(){
       render();
     }
   });
+  sb.from("payroll_entries").select("*").then(function(res){
+    if (res.error){ console.error("payroll entries fetch error", res.error); return; }
+    if (res.data){ state.payrollEntries = res.data.map(rowToPayrollEntry); render(); }
+  });
+}
+function rowToPayrollEntry(r){
+  return {
+    id: r.id, leadId: r.lead_id || null, personId: r.person_id, role: r.role,
+    fileLabel: r.file_label || null, amount: Number(r.amount), status: r.status,
+    note: r.note || "", entryDate: r.entry_date, createdBy: r.created_by || null
+  };
 }
 var syncTimer = null;
 function scheduleSync(){
@@ -5571,34 +5585,144 @@ function renderTeam(){
     '</div>';
 }
 
-function renderPayroll(){
-  var closed = state.leads.filter(function(l){ return l.status === "closed"; })
-    .sort(function(a,b){ return (b.closeDate||"").localeCompare(a.closeDate||""); });
-
-  var totalLo = 0, totalProc = 0;
-  var rows = closed.map(function(lead){
+function payrollRows(){
+  var closed = state.leads.filter(function(l){ return l.status === "closed"; });
+  var entries = state.payrollEntries || [];
+  var linked = entries.filter(function(e){ return e.leadId; });
+  var manual = entries.filter(function(e){ return !e.leadId; });
+  function findLinked(leadId, personId, role){
+    return linked.filter(function(e){ return e.leadId===leadId && e.personId===personId && e.role===role; })[0];
+  }
+  var rows = [];
+  closed.forEach(function(lead){
     var p = payrollFor(lead);
-    totalLo += p.loCommission;
-    totalProc += p.processorFee;
-    return '<tr data-action="select-lead" data-lead="' + lead.id + '" style="cursor:pointer">' +
-      '<td><div class="cell-name">' + esc(lead.name) + '</div><div class="cell-sub">' + esc(lead.loanType) + ' · ' + fmtUSD(lead.loanAmount) + '</div></td>' +
-      '<td>' + fmtDate(lead.closeDate) + '</td>' +
-      '<td>' + esc(p.loName) + '</td>' +
-      '<td class="num">' + (p.skipLo ? '<span class="hint">Your loan — n/a</span>' : ('<b>' + fmtUSD(p.loCommission) + '</b><div class="cell-sub">' + Math.round(originationSplitFor(lead)*100) + '% points' + (lead.source==="Self-Generated"?" (self-gen)":"") + ' + ' + Math.round(YSP_SPLIT*100) + '% YSP</div>')) + '</td>' +
-      '<td>' + esc(p.processorName) + '</td>' +
-      '<td class="num"><b>' + fmtUSD(p.processorFee) + '</b></td>' +
-    '</tr>';
-  }).join("");
+    if (!p.skipLo && p.loCommission){
+      var e = findLinked(lead.id, lead.assignedTo, "lo");
+      rows.push(e ? normalizeEntry(e) : {
+        id:null, leadId:lead.id, personId:lead.assignedTo, role:"lo", amount:p.loCommission, status:"outstanding",
+        fileLabel: lead.name + " · " + lead.loanType, entryDate: lead.closeDate, personName: p.loName
+      });
+    }
+    var proc = processingContact(lead);
+    if (proc && p.processorFee){
+      var ep = findLinked(lead.id, proc.id, "processor");
+      rows.push(ep ? normalizeEntry(ep) : {
+        id:null, leadId:lead.id, personId:proc.id, role:"processor", amount:p.processorFee, status:"outstanding",
+        fileLabel: lead.name + " · " + lead.loanType, entryDate: lead.closeDate, personName: p.processorName
+      });
+    }
+  });
+  manual.forEach(function(e){ rows.push(normalizeEntry(e)); });
+  rows.sort(function(a,b){ return (b.entryDate||"").localeCompare(a.entryDate||""); });
+  return rows;
+}
+function normalizeEntry(e){
+  var person = userById(e.personId);
+  return {
+    id: e.id, leadId: e.leadId, personId: e.personId, role: e.role, amount: e.amount, status: e.status,
+    fileLabel: e.leadId ? (leadById(e.leadId) ? (leadById(e.leadId).name + " · " + leadById(e.leadId).loanType) : e.fileLabel) : e.fileLabel,
+    entryDate: e.entryDate, personName: (person && person.name) || e.personId, note: e.note
+  };
+}
+function payrollRowHTML(r, showMarkPaid){
+  return '<tr' + (r.leadId ? (' data-action="select-lead" data-lead="' + r.leadId + '" style="cursor:pointer"') : '') + '>' +
+    '<td><div class="cell-name">' + esc(r.fileLabel||"—") + '</div>' + (r.note ? ('<div class="cell-sub">' + esc(r.note) + '</div>') : '') + '</td>' +
+    '<td>' + fmtDate(r.entryDate) + '</td>' +
+    '<td>' + esc(r.personName) + ' <span class="hint">(' + (r.role==="lo"?"LO":"Processor") + ')</span></td>' +
+    '<td class="num"><b>' + fmtUSD(r.amount) + '</b></td>' +
+    '<td>' + (showMarkPaid
+      ? ('<button class="btn btn-sm" type="button" data-action="mark-payroll-paid" data-entry-id="' + (r.id||"") + '" data-lead-id="' + (r.leadId||"") + '" data-person-id="' + esc(r.personId) + '" data-role="' + r.role + '" data-amount="' + r.amount + '" data-file-label="' + esc(r.fileLabel||"") + '">Mark Paid</button>')
+      : '<span class="badge badge-forest">Paid</span>') + '</td>' +
+  '</tr>';
+}
+function renderPayroll(){
+  var rows = payrollRows();
+  var outstanding = rows.filter(function(r){ return r.status === "outstanding"; });
+  var paid = rows.filter(function(r){ return r.status === "paid"; });
+  var totalOutstanding = outstanding.reduce(function(s,r){ return s + r.amount; }, 0);
+  var totalPaid = paid.reduce(function(s,r){ return s + r.amount; }, 0);
 
-  var table = closed.length ? (
-    '<div class="table-wrap"><table><thead><tr><th>Borrower</th><th>Closed</th><th>Loan Officer</th><th>LO Payout</th><th>Processor</th><th>Processing Fee (100%)</th></tr></thead><tbody>' +
-    rows +
-    '<tr style="font-weight:700;border-top:2px solid var(--border)"><td colspan="3">Total</td><td class="num">' + fmtUSD(totalLo) + '</td><td></td><td class="num">' + fmtUSD(totalProc) + '</td></tr>' +
+  var head = '<tr><th>File</th><th>Date</th><th>Person</th><th>Amount</th><th></th></tr>';
+  var outstandingTable = outstanding.length ? (
+    '<div class="table-wrap"><table><thead>' + head + '</thead><tbody>' +
+    outstanding.map(function(r){ return payrollRowHTML(r, true); }).join("") +
+    '<tr style="font-weight:700;border-top:2px solid var(--border)"><td colspan="3">Total Outstanding</td><td class="num">' + fmtUSD(totalOutstanding) + '</td><td></td></tr>' +
     '</tbody></table></div>'
-  ) : '<div class="empty">No closed loans yet.</div>';
+  ) : '<div class="empty">Nothing outstanding.</div>';
+  var paidTable = paid.length ? (
+    '<div class="table-wrap"><table><thead>' + head + '</thead><tbody>' +
+    paid.map(function(r){ return payrollRowHTML(r, false); }).join("") +
+    '<tr style="font-weight:700;border-top:2px solid var(--border)"><td colspan="3">Total Paid</td><td class="num">' + fmtUSD(totalPaid) + '</td><td></td></tr>' +
+    '</tbody></table></div>'
+  ) : '<div class="empty">Nothing marked paid yet.</div>';
 
-  return topbar("Payroll", "What you owe on every closed loan — loan officer commission (their negotiated split of points, 70% on self-generated business, always 50% of YSP) and processing fee (100% to processing).", "") +
-    '<div class="content">' + table + '</div>';
+  var addForm = '<div class="panel panel-pad" style="margin-bottom:20px;max-width:560px">' +
+    '<div class="rail-title" style="margin-bottom:8px">Add Historical / Manual Entry</div>' +
+    '<div class="footnote" style="padding:0 0 10px">For loans not in this CRM (e.g. entered in the old system) — link nothing, just record who\'s owed or was paid what.</div>' +
+    '<form data-form="add-payroll-entry">' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Person</label><select class="select" name="personId">' + allStaffOptions(null) + '</select></div>' +
+        '<div class="form-row"><label>Role</label><select class="select" name="role"><option value="lo">Loan Officer</option><option value="processor">Processor</option></select></div>' +
+      '</div>' +
+      '<div class="form-row"><label>File / Borrower Name</label><input class="input" name="fileLabel" placeholder="e.g. Juan Rosell" required></div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Amount</label><input class="input" type="number" step="0.01" name="amount" required></div>' +
+        '<div class="form-row"><label>Status</label><select class="select" name="status"><option value="outstanding">Outstanding</option><option value="paid">Paid</option></select></div>' +
+      '</div>' +
+      '<div class="form-row"><label>Note (optional)</label><input class="input" name="note" placeholder="e.g. Loan entered in old system, prior to this CRM"></div>' +
+      '<button class="btn btn-sm btn-primary" type="submit" style="margin-top:6px">Add Entry</button>' +
+    '</form>' +
+  '</div>';
+
+  return topbar("Payroll", "Who's owed what on every closed loan — loan officer commission (their negotiated split of points, 70% on self-generated business, always 50% of YSP) and processing fee (100% to processing) — plus any historical entries from before this CRM.", "") +
+    '<div class="content">' +
+      addForm +
+      '<div class="section-head"><h2>Outstanding</h2></div>' + outstandingTable +
+      '<div class="section-head" style="margin-top:24px"><h2>Paid</h2></div>' + paidTable +
+    '</div>';
+}
+function markPayrollEntryPaid(btn){
+  var d = btn.dataset;
+  if (!sb) return;
+  if (d.entryId){
+    sb.from("payroll_entries").update({ status:"paid" }).eq("id", d.entryId).then(function(res){
+      if (res.error){ showToast("Couldn't update — try again"); return; }
+      var e = (state.payrollEntries||[]).filter(function(x){ return x.id===d.entryId; })[0];
+      if (e) e.status = "paid";
+      showToast("Marked paid");
+      render();
+    });
+  } else {
+    var id = "pe-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
+    var row = {
+      id:id, lead_id: d.leadId||null, person_id: d.personId, role: d.role,
+      file_label: d.leadId ? null : d.fileLabel, amount: Number(d.amount), status:"paid",
+      note: null, entry_date: todayISO(), created_by: currentUser().id
+    };
+    sb.from("payroll_entries").insert(row).then(function(res){
+      if (res.error){ showToast("Couldn't save — try again"); return; }
+      state.payrollEntries = state.payrollEntries || [];
+      state.payrollEntries.push(rowToPayrollEntry(row));
+      showToast("Marked paid");
+      render();
+    });
+  }
+}
+function addManualPayrollEntry(fd){
+  if (!sb) return;
+  var id = "pe-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
+  var row = {
+    id:id, lead_id:null, person_id: fd.get("personId"), role: fd.get("role"),
+    file_label: fd.get("fileLabel"), amount: Number(fd.get("amount")), status: fd.get("status"),
+    note: fd.get("note") || null, entry_date: todayISO(), created_by: currentUser().id
+  };
+  sb.from("payroll_entries").insert(row).then(function(res){
+    if (res.error){ showToast("Couldn't save — try again"); return; }
+    state.payrollEntries = state.payrollEntries || [];
+    state.payrollEntries.push(rowToPayrollEntry(row));
+    showToast("Entry added");
+    render();
+  });
 }
 
 function loadAiChatHistory(){
@@ -7129,6 +7253,9 @@ appEl.addEventListener("click", function(e){
   else if (action === "view-term-sheet"){
     viewTermSheet(t.dataset.lead);
   }
+  else if (action === "mark-payroll-paid"){
+    markPayrollEntryPaid(t);
+  }
   else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
   else if (action === "send-borrower-portal"){ sendBorrowerPortalInvite(t.dataset.lead); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
@@ -7533,6 +7660,9 @@ appEl.addEventListener("submit", function(e){
     form.reset();
   } else if (type === "ai-command"){
     sendAiCommand(fd.get("message"));
+    form.reset();
+  } else if (type === "add-payroll-entry"){
+    addManualPayrollEntry(fd);
     form.reset();
   } else if (type === "save-signature"){
     var photoInput = form.querySelector('[name="photo"]');
