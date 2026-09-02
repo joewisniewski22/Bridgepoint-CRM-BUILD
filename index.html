@@ -480,7 +480,14 @@ function borrowerStageLabel(stageKey){
 var LOAN_TYPES = ["DSCR","Fix & Flip","Ground Up Construction","Portfolio/Blanket","Bridge","Mixed-Use"];
 var SOURCES = ["Meta Ads","Connected Investors","Referral","Repeat Client","Website","Self-Generated"];
 var ENTITY_TYPES = ["LLC","Individual","Corporation"];
-var PROPERTY_TYPES = ["SFR","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Land"];
+var PROPERTY_TYPES = ["SFR","Duplex","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Land"];
+// Constructive's matrix lists Duplex as its own named property type, but
+// prices it identically to the broader 2-4 Unit tier (no separate LTV/fee
+// row) -- normalize before any pricing table lookup so it's purely a
+// clearer label for staff/borrowers, not a new pricing tier.
+function pricingPropertyType(pt){
+  return pt === "Duplex" ? "2-4 Unit" : pt;
+}
 var EXIT_STRATEGIES = ["Sell","Refinance to DSCR","Hold/Rent","1031 Exchange"];
 var CITIZENSHIP_STATUSES = ["US Citizen","Permanent Resident","Foreign National","ITIN"];
 var TRANSACTION_TYPES = [
@@ -535,7 +542,7 @@ var ES_DICT = {
   "Interior Paint / Drywall":"Pintura Interior / Tablaroca", "Permits & Fees":"Permisos y Cuotas",
   "Contingency / Other":"Contingencia / Otro",
   "LLC":"LLC", "Individual":"Individual", "Corporation":"Corporación",
-  "SFR":"Casa Unifamiliar", "2-4 Unit":"2-4 Unidades", "Multifamily 5+":"Multifamiliar 5+",
+  "SFR":"Casa Unifamiliar", "Duplex":"Dúplex", "2-4 Unit":"2-4 Unidades", "Multifamily 5+":"Multifamiliar 5+",
   "Mixed-Use":"Uso Mixto", "Condo":"Condominio", "Land":"Terreno",
   "Sell":"Vender", "Refinance to DSCR":"Refinanciar a DSCR", "Hold/Rent":"Retener/Rentar", "1031 Exchange":"Intercambio 1031",
   "DSCR":"DSCR", "Fix & Flip":"Compra y Venta (Fix & Flip)", "Bridge":"Préstamo Puente", "Ground Up Construction":"Construcción desde Cero", "Portfolio/Blanket":"Portafolio/Global", "Mixed-Use":"Uso Mixto",
@@ -797,7 +804,7 @@ function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
     notes.push((txnKey === "cashout" ? "Cash-Out Refinance" : "Rate/Term Refinance") + " add-on +" + txnAdj.toFixed(2) + "%");
   }
   var fee = isGuc
-    ? (propertyType === "2-4 Unit" ? RTL_FEE_BY_PROJECT.guc_24 : RTL_FEE_BY_PROJECT.guc_sfr)
+    ? (pricingPropertyType(propertyType) === "2-4 Unit" ? RTL_FEE_BY_PROJECT.guc_24 : RTL_FEE_BY_PROJECT.guc_sfr)
     : RTL_FEE_BY_PROJECT[rehabClass(lead)];
   if (lead.termMonths && lead.termMonths > 12){
     var extraQuarters = Math.ceil((lead.termMonths - 12) / 3);
@@ -882,10 +889,18 @@ function dscrPriceForDelta(deltaFromPar){
   return DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate - tableRate) < 0.001; })[0] || null;
 }
 var DSCR_MAX_BUYUP = 1.125;
+function dscrValueBasis(lead, inputs){
+  // LTV for a refinance is against the property's current value, not
+  // whatever was paid for it (possibly years ago) -- purchase price is
+  // only the right basis for an actual purchase transaction.
+  var txnKey = (inputs && inputs.transactionType) || lead.transactionType || "purchase";
+  return (txnKey !== "purchase" && lead.currentValue) ? lead.currentValue : lead.purchasePrice;
+}
 function dscrParRate(lead, inputs){
-  if (!lead.creditScore || !lead.loanAmount || !lead.purchasePrice) return null;
-  var propertyType = (inputs && inputs.propertyType) || lead.propertyType;
-  var ltv = lead.loanAmount / lead.purchasePrice * 100;
+  var valueBasis = dscrValueBasis(lead, inputs);
+  if (!lead.creditScore || !lead.loanAmount || !valueBasis) return null;
+  var propertyType = pricingPropertyType((inputs && inputs.propertyType) || lead.propertyType);
+  var ltv = lead.loanAmount / valueBasis * 100;
   var col = dscrLtvCol(ltv);
   if (col === -1) return { ineligible:true, reason:"LTV of " + ltv.toFixed(0) + "% is above 80%, off this rate sheet." };
   var notes = [];
@@ -997,7 +1012,8 @@ function syncPricerRateToLead(leadId){
   if (!result || result.ineligible) return null;
   if (lead.rate != null) { render(); return result; } // never clobber a rate someone already locked in via Loan Details
   lead.rate = result.rate;
-  if (lead.purchasePrice && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/lead.purchasePrice)*1000)/10;
+  var syncValueBasis = dscrValueBasis(lead, inputs);
+  if (syncValueBasis && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/syncValueBasis)*1000)/10;
   persist();
   return result;
 }
@@ -1063,11 +1079,12 @@ function evaluateGuidelines(lead){
     check("Loan amount", lead.loanAmount>=50000 && lead.loanAmount<=2000000,
       fmtUSD(lead.loanAmount) + " — needs to be $50,000–$2,000,000");
     check("Credit score", (lead.creditScore||0) >= (isRural?720:660), (lead.creditScore||"—") + " — " + (isRural?"720":"660") + " minimum" + (isRural?" for rural properties":""));
-    if (lead.purchasePrice && lead.loanAmount){
-      var ltv = lead.loanAmount / lead.purchasePrice * 100;
+    var dscrGuidelineValueBasis = dscrValueBasis(lead, null);
+    if (dscrGuidelineValueBasis && lead.loanAmount){
+      var ltv = lead.loanAmount / dscrGuidelineValueBasis * 100;
       var tier = DSCR_LTV_BY_FICO.filter(function(t){ return (lead.creditScore||0) >= t.minFico; })[0];
       var maxLtv = isRural ? 65 : (tier ? tier.purchase : DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length-1].purchase);
-      check("LTV", ltv <= maxLtv, ltv.toFixed(0) + "% — max " + maxLtv + "%" + (isRural ? " for rural properties (65% cap regardless of credit score)" : " for this credit score band"));
+      check("LTV", ltv <= maxLtv, ltv.toFixed(0) + "% — max " + maxLtv + "%" + (isRural ? " for rural properties (65% cap regardless of credit score)" : " for this credit score band") + (lead.transactionType && lead.transactionType!=="purchase" ? " (against current value)" : ""));
     }
     if (isRural){
       check("Rural property notice", true, "Rural properties require 65% max LTV, DSCR > 1.20x, and FICO ≥ 720 per the DSCR Rental Matrix — confirm with underwriting before quoting");
@@ -1207,13 +1224,14 @@ function runGuidelineCheck(leadId, opts){
   var result = evaluateGuidelines(lead);
   lead.guidelineCheck = result;
   if (result && result.status === "review" && !(opts && opts.silent)){
-    var failed = result.checks.filter(function(c){ return !c.pass; }).map(function(c){ return c.label; }).join(", ");
+    var failedLabels = result.checks.filter(function(c){ return !c.pass; }).map(function(c){ return c.label; }).join(", ");
+    var failedDetail = result.checks.filter(function(c){ return !c.pass; }).map(function(c){ return c.label + ": " + c.detail; }).join(" · ");
     var owner = state.users.filter(function(u){ return u.role==="owner"; })[0];
     if (owner){
-      notifyUser(owner.id, leadId, "review", lead.name + "'s " + lead.loanType + " scenario needs review — " + failed);
+      notifyUser(owner.id, leadId, "review", lead.name + "'s " + lead.loanType + " scenario needs review — " + failedDetail);
     }
     lead.activity = lead.activity || [];
-    lead.activity.push({ date: todayISO(), type:"system", text:"Guideline check: needs review — " + failed, author:"System" });
+    lead.activity.push({ date: todayISO(), type:"system", text:"Guideline check: needs review — " + failedLabels, author:"System" });
   } else if (result && result.status === "pass" && !(opts && opts.silent)){
     lead.activity = lead.activity || [];
     lead.activity.push({ date: todayISO(), type:"system", text:"Guideline check: passed", author:"System" });
@@ -2237,7 +2255,7 @@ function leadToRow(l){
     loan_type: l.loanType, stage: l.stage, status: l.status, assigned_to: l.assignedTo, created_at: l.createdAt,
     entity_type: l.entityType, credit_score: l.creditScore, experience_deals: l.experienceDeals, liquidity: l.liquidity,
     property_address: l.propertyAddress, property_type: l.propertyType,
-    purchase_price: l.purchasePrice, arv: l.arv, rehab_budget: l.rehabBudget, rent_estimate: l.rentEstimate,
+    purchase_price: l.purchasePrice, current_value: l.currentValue || null, arv: l.arv, rehab_budget: l.rehabBudget, rent_estimate: l.rentEstimate,
     loan_amount: l.loanAmount, ltv: l.ltv, rate: l.rate, term_months: l.termMonths,
     exit_strategy: l.exitStrategy, close_date: l.closeDate, next_follow_up: l.nextFollowUp, next_follow_up_note: l.nextFollowUpNote,
     points_charged: l.pointsCharged, created_at_ts: l.createdAtTs, first_attempt_at: l.firstAttemptAt,
@@ -2270,7 +2288,7 @@ function rowToLead(r){
     loanType: r.loan_type, stage: r.stage, status: r.status, assignedTo: r.assigned_to, createdAt: r.created_at,
     entityType: r.entity_type, creditScore: r.credit_score, experienceDeals: r.experience_deals, liquidity: r.liquidity,
     propertyAddress: r.property_address, propertyType: r.property_type,
-    purchasePrice: r.purchase_price, arv: r.arv, rehabBudget: r.rehab_budget, rentEstimate: r.rent_estimate,
+    purchasePrice: r.purchase_price, currentValue: r.current_value || null, arv: r.arv, rehabBudget: r.rehab_budget, rentEstimate: r.rent_estimate,
     loanAmount: r.loan_amount, ltv: r.ltv, rate: r.rate, termMonths: r.term_months,
     exitStrategy: r.exit_strategy, closeDate: r.close_date, nextFollowUp: r.next_follow_up, nextFollowUpNote: r.next_follow_up_note,
     pointsCharged: r.points_charged, createdAtTs: r.created_at_ts, firstAttemptAt: r.first_attempt_at,
@@ -3130,7 +3148,7 @@ function setLoanDetails(leadId, loanAmount, rate, termMonths){
   showToast("Loan details updated");
   persist();
 }
-var PRICING_INPUT_KEYS = ["creditScore","purchasePrice","rentEstimate","experienceDeals","rehabBudget","propertyCount","citizenshipStatus"];
+var PRICING_INPUT_KEYS = ["creditScore","purchasePrice","currentValue","rentEstimate","experienceDeals","rehabBudget","propertyCount","citizenshipStatus"];
 function setPricingInputs(leadId, fd){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -3139,7 +3157,8 @@ function setPricingInputs(leadId, fd){
     if (!fd.has(k)) return;
     lead[k] = (k === "citizenshipStatus") ? (fd.get(k) || null) : numOrNull(k);
   });
-  if (lead.purchasePrice && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/lead.purchasePrice)*1000)/10;
+  var valueBasis = dscrValueBasis(lead, (ui.pricerInputs && ui.pricerInputs[leadId]) || null);
+  if (valueBasis && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/valueBasis)*1000)/10;
   showToast("Pricing inputs saved");
   persist();
 }
@@ -4604,10 +4623,10 @@ function renderTeamSnapshot(){
 }
 
 var STANDALONE_PRICER_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction","Portfolio/Blanket"];
-var STANDALONE_PRICER_NUMERIC_KEYS = ["creditScore","purchasePrice","rentEstimate","experienceDeals","rehabBudget","propertyCount","termMonths","arv"];
+var STANDALONE_PRICER_NUMERIC_KEYS = ["creditScore","purchasePrice","currentValue","rentEstimate","experienceDeals","rehabBudget","propertyCount","termMonths","arv"];
 function defaultStandalonePricer(){
   return {
-    loanType:"DSCR", propertyType:"SFR", creditScore:null, purchasePrice:null,
+    loanType:"DSCR", propertyType:"SFR", creditScore:null, purchasePrice:null, currentValue:null,
     propertyAddress:null, ruralStatus:null, arv:null,
     rentEstimate:null, experienceDeals:null, rehabBudget:null, propertyCount:null,
     citizenshipStatus:null, transactionType:"purchase", prepayTerm:"5yr", points:"0.00", termMonths:360,
@@ -4645,11 +4664,12 @@ function computeMaxLoanAmount(sp){
     return { amount: Math.max(0, Math.min.apply(null, caps)), stateAdj: stateAdj, tierName: tierName };
   }
   if (type === "DSCR" || type === "Portfolio/Blanket"){
-    if (!sp.purchasePrice || !sp.creditScore) return null;
+    var dscrValueBasisForCap = dscrValueBasis(sp, sp);
+    if (!dscrValueBasisForCap || !sp.creditScore) return null;
     var isRural = sp.ruralStatus === "rural";
     var fTier = DSCR_LTV_BY_FICO.filter(function(t){ return sp.creditScore >= t.minFico; })[0];
     var maxLtvPct = isRural ? 65 : (fTier ? fTier.purchase : DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length-1].purchase);
-    var ltvCap = sp.purchasePrice * (maxLtvPct/100);
+    var ltvCap = dscrValueBasisForCap * (maxLtvPct/100);
     var dscrCap = Infinity;
     if (sp.rentEstimate){
       var minDscr = isRural ? 1.20 : 1.0;
@@ -4696,6 +4716,7 @@ function renderStandalonePricer(){
       '<div class="form-row"><label>Credit Score</label><input class="input" type="number" min="300" max="850" name="creditScore" data-action="standalone-pricer-field" value="' + v(sp.creditScore) + '"></div>' +
       '<div class="form-row"><label>' + (isPortfolio?"Total ":"") + 'Purchase Price</label><input class="input" type="number" name="purchasePrice" data-action="standalone-pricer-field" value="' + v(sp.purchasePrice) + '"></div>' +
     '</div>' +
+    (isDSCR ? ('<div class="form-row"><label>Current Value <span class="hint">(refi LTV basis)</span></label><input class="input" type="number" name="currentValue" data-action="standalone-pricer-field" value="' + v(sp.currentValue) + '"></div>') : '') +
     '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" data-action="standalone-pricer-field" value="' + v(sp.termMonths) + '"></div>' +
     (isDSCR ? ('<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" data-action="standalone-pricer-field" value="' + v(sp.rentEstimate) + '"></div>') : '') +
     (isRTL ? ('<div class="form-two">' +
@@ -5094,6 +5115,7 @@ function renderTabScenario(lead){
     (lead.loanType === "Portfolio/Blanket" ? field("Number of Properties", lead.propertyCount||"—", true) : "") +
     field("Citizenship Status", esc(lead.citizenshipStatus||"—")) +
     field("Purchase Price", fmtUSD(lead.purchasePrice), true) +
+    (lead.currentValue ? field("Current Value", fmtUSD(lead.currentValue), true) : "") +
     field("After-Repair Value (ARV)", fmtUSD(lead.arv), true) +
     field("Rehab / Construction Budget", fmtUSD(lead.rehabBudget), true) +
     field("Monthly Rent Estimate", fmtUSD(lead.rentEstimate), true) +
@@ -5121,6 +5143,7 @@ function renderPricingInputsEditor(lead){
     '<form data-form="pricing-inputs" data-lead="' + lead.id + '" class="form-two" style="align-items:flex-end">' +
       '<div class="form-row"><label>Credit Score</label><input class="input" type="number" min="300" max="850" name="creditScore" value="' + v(lead.creditScore) + '"></div>' +
       '<div class="form-row"><label>' + (isPortfolio?"Total ":"") + 'Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+      (isDSCR ? ('<div class="form-row"><label>Current Value <span class="hint">(refi LTV basis)</span></label><input class="input" type="number" name="currentValue" value="' + v(lead.currentValue) + '"></div>') : '') +
       (isDSCR ? ('<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>') : '') +
       (isRTL ? ('<div class="form-row"><label>Investing Experience (deals)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '"></div>') : '') +
       (isRTL ? ('<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>') : '') +
