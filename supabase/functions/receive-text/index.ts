@@ -65,10 +65,32 @@ Deno.serve(async (req: Request) => {
       // Ignore delivery receipts for our own outbound sends.
       return new Response(JSON.stringify({ ok: true }), { headers: CORS_HEADERS });
     }
+    if (msg.text.indexOf(CRM_URL) !== -1) {
+      // This IS one of our own system-generated alerts (they always contain
+      // a CRM link) being echoed back by Quo as a "received" event on the
+      // recipient staff member's own line -- never real lead content. A
+      // real client would essentially never text us this exact link back.
+      // Without this check, alerting a staff member (whose number is also a
+      // monitored Quo line) can loop forever: alert -> Quo reports it as
+      // received -> we alert again about "receiving" our own alert.
+      console.log("receive-text: ignoring echo of our own system message");
+      return new Response(JSON.stringify({ ok: true, ignoredEcho: true }), { headers: CORS_HEADERS });
+    }
 
     const senderDigits = msg.from.replace(/\D/g, "");
+
+    // Check staff/system numbers BEFORE lead numbers -- if a sender number
+    // happens to also belong to a staff member (or is our shared send-from
+    // line), that takes priority so a coincidental overlap with a lead's
+    // phone can never misroute a staff/system message as borrower content.
+    const { data: staffRows } = await sb.from("users").select("id, name, phone, quo_phone_number");
+    const staffMatch = (staffRows || []).find((u: Record<string, unknown>) => {
+      const phones = [u.phone as string, u.quo_phone_number as string].filter(Boolean);
+      return phones.some((p) => p.replace(/\D/g, "").slice(-10) === senderDigits.slice(-10));
+    });
+
     const { data: leads } = await sb.from("leads").select("id, phone, name, activity, assigned_to, automation_paused, ai_stage");
-    const match = (leads || []).find((l: Record<string, unknown>) => {
+    const match = staffMatch ? undefined : (leads || []).find((l: Record<string, unknown>) => {
       const phone = (l.phone as string) || "";
       return phone.replace(/\D/g, "").slice(-10) === senderDigits.slice(-10);
     });
@@ -126,41 +148,34 @@ Deno.serve(async (req: Request) => {
           body: JSON.stringify({ leadId: match.id }),
         }).catch(() => {});
       }
-    } else {
-      // Not a borrower's own number -- check if a staff member is replying
-      // to a portal chat notification from their own phone/Quo line. SMS has
-      // no thread ID, so route to whichever of this staff member's leads
-      // most recently has an unanswered borrower portal message (the last
+    } else if (staffMatch) {
+      // Not a borrower's own number -- staff member replying to a portal
+      // chat notification from their own phone/Quo line. SMS has no thread
+      // ID, so route to whichever of this staff member's leads most
+      // recently has an unanswered borrower portal message (the last
       // portal_chat entry is still "from: borrower"). Imperfect if a staff
       // member has more than one open portal conversation at once, but it's
       // the best signal available without per-lead phone numbers.
-      const { data: users } = await sb.from("users").select("id, name, phone, quo_phone_number");
-      const staffMatch = (users || []).find((u: Record<string, unknown>) => {
-        const phones = [u.phone as string, u.quo_phone_number as string].filter(Boolean);
-        return phones.some((p) => p.replace(/\D/g, "").slice(-10) === senderDigits.slice(-10));
-      });
-      if (staffMatch) {
-        const { data: staffLeads } = await sb.from("leads").select("id, portal_chat").eq("assigned_to", staffMatch.id as string);
-        let target: Record<string, unknown> | null = null;
-        let targetTs = "";
-        for (const l of staffLeads || []) {
-          const chat = (l.portal_chat as Array<Record<string, unknown>>) || [];
-          const last = chat[chat.length - 1];
-          if (last && last.from === "borrower" && (last.ts as string) > targetTs) {
-            target = l;
-            targetTs = last.ts as string;
-          }
+      const { data: staffLeads } = await sb.from("leads").select("id, portal_chat").eq("assigned_to", staffMatch.id as string);
+      let target: Record<string, unknown> | null = null;
+      let targetTs = "";
+      for (const l of staffLeads || []) {
+        const chat = (l.portal_chat as Array<Record<string, unknown>>) || [];
+        const last = chat[chat.length - 1];
+        if (last && last.from === "borrower" && (last.ts as string) > targetTs) {
+          target = l;
+          targetTs = last.ts as string;
         }
-        if (target) {
-          const chat = ((target.portal_chat as unknown[]) || []).slice();
-          chat.push({ from: "lo", text: msg.text, ts: new Date().toISOString(), authorName: staffMatch.name });
-          await sb.from("leads").update({ portal_chat: chat }).eq("id", target.id as string);
-          return new Response(JSON.stringify({ ok: true, routedToPortalChat: target.id }), { headers: CORS_HEADERS });
-        }
-        console.log("receive-text: staff sender matched but no open portal thread", staffMatch.id);
-      } else {
-        console.log("receive-text: no lead or staff matched sender", msg.from);
       }
+      if (target) {
+        const chat = ((target.portal_chat as unknown[]) || []).slice();
+        chat.push({ from: "lo", text: msg.text, ts: new Date().toISOString(), authorName: staffMatch.name });
+        await sb.from("leads").update({ portal_chat: chat }).eq("id", target.id as string);
+        return new Response(JSON.stringify({ ok: true, routedToPortalChat: target.id }), { headers: CORS_HEADERS });
+      }
+      console.log("receive-text: staff sender matched but no open portal thread", staffMatch.id);
+    } else {
+      console.log("receive-text: no lead or staff matched sender", msg.from);
     }
 
     return new Response(JSON.stringify({ ok: true, matched: !!match }), { headers: CORS_HEADERS });
