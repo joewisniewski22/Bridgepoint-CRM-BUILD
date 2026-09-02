@@ -1080,6 +1080,9 @@ function evaluateGuidelines(lead){
       fmtUSD(lead.loanAmount) + " — needs to be $50,000–$2,000,000");
     check("Credit score", (lead.creditScore||0) >= (isRural?720:660), (lead.creditScore||"—") + " — " + (isRural?"720":"660") + " minimum" + (isRural?" for rural properties":""));
     var dscrGuidelineValueBasis = dscrValueBasis(lead, null);
+    if (dscrGuidelineValueBasis){
+      check("Minimum property value", dscrGuidelineValueBasis >= 75000, fmtUSD(dscrGuidelineValueBasis) + " — $75,000 minimum per the DSCR Rental Matrix");
+    }
     if (dscrGuidelineValueBasis && lead.loanAmount){
       var ltv = lead.loanAmount / dscrGuidelineValueBasis * 100;
       var tier = DSCR_LTV_BY_FICO.filter(function(t){ return (lead.creditScore||0) >= t.minFico; })[0];
