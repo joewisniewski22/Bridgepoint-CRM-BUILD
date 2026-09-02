@@ -4668,7 +4668,8 @@ function computeMaxLoanAmount(sp){
     if (!dscrValueBasisForCap || !sp.creditScore) return null;
     var isRural = sp.ruralStatus === "rural";
     var fTier = DSCR_LTV_BY_FICO.filter(function(t){ return sp.creditScore >= t.minFico; })[0];
-    var maxLtvPct = isRural ? 65 : (fTier ? fTier.purchase : DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length-1].purchase);
+    var ltvTierKey = sp.transactionType === "cashout" ? "cashOut" : (sp.transactionType === "ratetermrefi" ? "rateTerm" : "purchase");
+    var maxLtvPct = isRural ? 65 : (fTier ? fTier[ltvTierKey] : DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length-1][ltvTierKey]);
     var ltvCap = dscrValueBasisForCap * (maxLtvPct/100);
     var dscrCap = Infinity;
     if (sp.rentEstimate){
