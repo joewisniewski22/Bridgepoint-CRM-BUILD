@@ -663,7 +663,12 @@ var ES_DICT = {
   "Involved in bankruptcy or insolvency proceedings in the last 3 years?":"¿Ha estado involucrado en procesos de bancarrota o insolvencia en los últimos 3 años?",
   "Charged or convicted of a felony?":"¿Ha sido acusado o condenado por un delito grave (felonía)?",
   "Licensed General Contractor, Real Estate Broker/Salesperson, Lender, Appraiser, or involved in other real estate activities?":"¿Es Contratista General con licencia, Corredor/Agente de Bienes Raíces, Prestamista, Tasador, o está involucrado en otras actividades de bienes raíces?",
-  "View Term Sheet":"Ver Hoja de Términos"
+  "View Term Sheet":"Ver Hoja de Términos",
+  "Your Options When This Loan Comes Due":"Sus Opciones Cuando Este Préstamo Venza",
+  "Rough estimates — your loan officer can run exact numbers anytime.":"Estimados aproximados — su oficial de préstamos puede calcular cifras exactas cuando lo necesite.",
+  "Est. Proceeds If You Sell":"Ganancia Estimada Si Vende",
+  "Est. Cash-Out If You Refinance":"Efectivo Estimado Si Refinancia",
+  "Refinancing into a long-term DSCR loan lets you keep the property, pull cash out, and start collecting rent — without paying selling costs or losing the upside if the area keeps appreciating. Ask your loan officer about refinancing whenever you're ready.":"Refinanciar a un préstamo DSCR a largo plazo le permite conservar la propiedad, retirar efectivo y comenzar a cobrar renta — sin pagar costos de venta ni perder la ganancia futura si la zona sigue aumentando de valor. Pregúntele a su oficial de préstamos sobre refinanciar cuando esté listo."
 };
 function tr(text, lang){
   if (lang !== "es") return text;
@@ -4215,6 +4220,20 @@ function buildBorrowerPortalHTML(lead, opts){
     '</div>'
   ) : "";
 
+  var dealAnalysisCard = (function(){
+    var d = computeDealAnalysis(lead);
+    if (!d) return "";
+    return '<div class="portal-section">' +
+      '<div class="rail-title">' + L("Your Options When This Loan Comes Due") + '</div>' +
+      '<div class="footnote" style="padding:2px 0 8px">' + L("Rough estimates — your loan officer can run exact numbers anytime.") + '</div>' +
+      '<div class="field-grid">' +
+        field(L("Est. Proceeds If You Sell"), fmtUSD(d.sellProfit), true) +
+        field(L("Est. Cash-Out If You Refinance"), d.cashOutProceeds!=null ? fmtUSD(d.cashOutProceeds) : "—", true) +
+      '</div>' +
+      '<div class="footnote" style="padding-top:8px">' + L("Refinancing into a long-term DSCR loan lets you keep the property, pull cash out, and start collecting rent — without paying selling costs or losing the upside if the area keeps appreciating. Ask your loan officer about refinancing whenever you're ready.") + '</div>' +
+    '</div>';
+  })();
+
   var lo = userById(lead.assignedTo) || {};
   var loCard = '<div class="portal-section">' +
     '<div class="rail-title">' + L("Your Loan Officer") + '</div>' +
@@ -4308,7 +4327,7 @@ function buildBorrowerPortalHTML(lead, opts){
     '<div class="footnote" style="padding-top:6px">' + L("Your loan officer gets this as a text and can reply right from their phone.") + '</div>' +
   '</div>';
 
-  return header + termsCard + loCard + uwConditionsCard + docsCard + thirdPartiesCard + chatCard;
+  return header + termsCard + dealAnalysisCard + loCard + uwConditionsCard + docsCard + thirdPartiesCard + chatCard;
 }
 function renderLogin(){
   var brandBlock = '<div class="login-brand" style="justify-content:center"><img src="' + LOGO_URL + '" alt="Bridgepoint Lending" style="max-width:260px;width:100%;height:auto"></div>';
