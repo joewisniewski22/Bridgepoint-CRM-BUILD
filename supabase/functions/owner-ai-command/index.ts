@@ -24,14 +24,24 @@ const CORS_HEADERS = {
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-const SYSTEM_PROMPT =
-  "You are Joe's AI operations assistant for Bridgepoint Lending, embedded in his CRM (owner-only -- you're never shown to loan officers or borrowers). " +
-  "You currently have tools for: looking up recently closed deals, and drafting/publishing marketing content (recent-closing announcements, story posts) to the CRM's own public showcase page. " +
-  "This CRM is meant to eventually replace GoHighLevel entirely (which currently runs bplending.com) -- content you publish lives on the CRM's public page, not GoHighLevel. " +
-  "You do NOT yet have access to ad platforms (Meta/Facebook), payments, pricing, or other users' data -- if asked for something outside your current tools, say clearly that it isn't wired up yet rather than pretending to do it. " +
-  "When asked to post/publish something, always use create_content then publish_content -- never claim something is live unless publish_content reports success. " +
-  "When drafting closing announcements or stories, default to NOT naming the borrower and NOT including their exact street address (city/state only) unless Joe explicitly asks you to include the name -- these are real clients' financial details. " +
-  "Keep marketing copy in a warm, direct, non-corporate voice. Write body content as simple HTML (p, strong, br, a tags only). Be concise in your replies back to Joe -- confirm what you did, don't over-explain.";
+const LOAN_TYPES = ["DSCR", "Fix & Flip", "Ground Up Construction", "Portfolio/Blanket", "Bridge", "Mixed-Use"];
+const SOURCES = ["Meta Ads", "Connected Investors", "Referral", "Repeat Client", "Website", "Self-Generated"];
+const OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN"];
+
+async function buildSystemPrompt(): Promise<string> {
+  const { data: staff } = await sb.from("users").select("id,name,role").order("name");
+  const roster = (staff || []).map((u) => u.id + " = " + u.name + " (" + u.role + ")").join("; ");
+  return "You are Joe's AI operations assistant for Bridgepoint Lending, embedded in his CRM (owner-only -- you're never shown to loan officers or borrowers). " +
+    "This CRM is meant to eventually replace GoHighLevel entirely (which currently runs bplending.com) -- content you publish lives on the CRM's public page, not GoHighLevel. " +
+    "You do NOT yet have access to ad platforms (Meta/Facebook), payments, or pricing changes -- if asked for something outside your current tools, say clearly that it isn't wired up yet rather than pretending to do it. " +
+    "\n\nStaff roster (use these exact ids for assignedTo, never guess an id): " + roster +
+    "\n\nCAPABILITIES:\n" +
+    "1. Marketing content: create_content then publish_content to post recent-closing announcements or stories to the CRM's public showcase page. Never claim something is live unless publish_content reports success. Default to NOT naming the borrower and NOT including their exact street address (city/state only) unless Joe explicitly asks -- these are real clients' financial details. Write body as simple HTML (p, strong, br, a tags only).\n" +
+    "2. Loan file creation from a term sheet: when Joe pastes term sheet text or attaches a term sheet document/image, extract the real figures and call create_loan_file. Valid loanType values: " + LOAN_TYPES.join(", ") + ". Valid source values: " + SOURCES.join(", ") + " (use 'Referral' or the closest fit if unclear, never invent a new source). Valid outsideLender values: " + OUTSIDE_LENDERS.join(", ") + " or omit for in-house. NEVER guess a figure that isn't actually in the document -- omit any field you can't find rather than inventing a number, and tell Joe what's missing in your reply. If the assignee isn't stated, ASK rather than picking someone.\n" +
+    "3. Sending documents: to send a Pre-Approval Letter or Term Sheet to a borrower on an existing loan file, call send_document with the leadId and kind -- this actually emails/texts them for real, so only call it when Joe clearly asks to send (not just when he asks you to create a file).\n" +
+    "4. Looking up loans: list_closed_deals for recently funded loans.\n\n" +
+    "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success.";
+}
 
 const TOOLS = [
   {
@@ -71,6 +81,46 @@ const TOOLS = [
       type: "object",
       properties: { contentId: { type: "string" } },
       required: ["contentId"],
+    },
+  },
+  {
+    name: "create_loan_file",
+    description: "Create a new loan file from a term sheet Joe pasted or attached. Only include fields you actually found -- omit anything not clearly stated.",
+    input_schema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Borrower/guarantor full name" },
+        email: { type: "string" },
+        phone: { type: "string" },
+        loanType: { type: "string", enum: LOAN_TYPES },
+        source: { type: "string", enum: SOURCES },
+        assignedTo: { type: "string", description: "Staff user id from the roster" },
+        outsideLender: { type: "string", enum: OUTSIDE_LENDERS, description: "Omit if in-house" },
+        propertyAddress: { type: "string" },
+        propertyType: { type: "string" },
+        purchasePrice: { type: "number" },
+        loanAmount: { type: "number" },
+        rate: { type: "number", description: "Interest rate as a percent, e.g. 10.99" },
+        termMonths: { type: "integer" },
+        pointsCharged: { type: "number", description: "Total points as a percent, e.g. 4.44" },
+        creditScore: { type: "integer" },
+        entityLegalName: { type: "string" },
+        exitStrategy: { type: "string" },
+        notifyAssignee: { type: "boolean", description: "Whether to email the assigned staff member about this new file (default true)" },
+      },
+      required: ["name", "loanType"],
+    },
+  },
+  {
+    name: "send_document",
+    description: "Send a Pre-Approval Letter or Term Sheet to a borrower on an existing loan file -- real email + text. Only call this when Joe explicitly asks to send something, not when just creating a file.",
+    input_schema: {
+      type: "object",
+      properties: {
+        leadId: { type: "string" },
+        kind: { type: "string", enum: ["preapproval", "termSheet"] },
+      },
+      required: ["leadId", "kind"],
     },
   },
 ];
@@ -117,6 +167,55 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     if (updErr) return { ok: false, error: updErr.message };
     return { ok: true, url: "https://bridgepoint-crm-build.vercel.app/?showcase=1" };
   }
+  if (name === "create_loan_file") {
+    if (!LOAN_TYPES.includes(input.loanType as string)) return { error: "invalid_loan_type", validValues: LOAN_TYPES };
+    if (input.assignedTo) {
+      const { data: staffCheck } = await sb.from("users").select("id").eq("id", input.assignedTo).single();
+      if (!staffCheck) return { error: "invalid_assignedTo", detail: "No staff member with that id" };
+    }
+    const id = "L" + Math.random().toString(36).slice(2, 8).toUpperCase();
+    const today = new Date().toISOString().slice(0, 10);
+    const row: Record<string, unknown> = {
+      id, name: input.name, email: input.email || null, phone: input.phone || null,
+      source: input.source || "Referral", loan_type: input.loanType, stage: "new", status: "active",
+      assigned_to: input.assignedTo || null, created_at: today,
+      entity_type: "LLC", credit_score: input.creditScore || null,
+      property_address: input.propertyAddress || null, property_type: input.propertyType || null,
+      purchase_price: input.purchasePrice || null, loan_amount: input.loanAmount || null,
+      rate: input.rate || null, term_months: input.termMonths || null, points_charged: input.pointsCharged || null,
+      exit_strategy: input.exitStrategy || null, entity_legal_name: input.entityLegalName || null,
+      outside_lender: input.outsideLender || null,
+      application_token: crypto.randomUUID(),
+      activity: [{ date: today, type: "note", text: "Loan file created by AI from a term sheet", author: "AI Assistant" }],
+    };
+    const { error } = await sb.from("leads").insert(row);
+    if (error) return { error: error.message };
+    const link = "https://bridgepoint-crm-build.vercel.app/?lead=" + id;
+    if (input.notifyAssignee !== false && input.assignedTo) {
+      const { data: assignee } = await sb.from("users").select("email,phone,name,quo_phone_number").eq("id", input.assignedTo).single();
+      if (assignee?.email) {
+        fetch(SUPABASE_URL + "/functions/v1/send-email", {
+          method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+          body: JSON.stringify({ to: assignee.email, subject: "New loan file: " + input.name, text: "New loan file: " + input.name + " (" + input.loanType + ") — open & dial: " + link, fromName: "Bridgepoint CRM" }),
+        }).catch(() => {});
+      }
+      if (assignee?.phone) {
+        fetch(SUPABASE_URL + "/functions/v1/send-text", {
+          method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+          body: JSON.stringify({ to: assignee.phone, text: "🔥 New loan file: " + input.name + " (" + input.loanType + ") — open & dial: " + link, fromName: "Bridgepoint CRM" }),
+        }).catch(() => {});
+      }
+    }
+    return { ok: true, leadId: id, link };
+  }
+  if (name === "send_document") {
+    const { data: lead } = await sb.from("leads").select("id").eq("id", input.leadId).single();
+    if (!lead) return { error: "lead_not_found" };
+    if (input.kind !== "preapproval" && input.kind !== "termSheet") return { error: "invalid_kind" };
+    // Actual bilingual send happens client-side (reuses the CRM's tested
+    // send pipeline) -- this just validates and signals the frontend to do it.
+    return { ok: true, requiresFrontendAction: "send_document", leadId: input.leadId, kind: input.kind };
+  }
   return { error: "unknown_tool" };
 }
 
@@ -130,7 +229,10 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const message: string = body.message;
     const userId: string = body.userId || "owner";
-    if (!message) {
+    // Optional term sheet attachment (PDF or image), base64-encoded.
+    const attachmentBase64: string | null = body.attachmentBase64 || null;
+    const attachmentMediaType: string | null = body.attachmentMediaType || null;
+    if (!message && !attachmentBase64) {
       return new Response(JSON.stringify({ error: "missing_message" }), { status: 400, headers: CORS_HEADERS });
     }
 
@@ -138,15 +240,23 @@ Deno.serve(async (req: Request) => {
       .order("created_at", { ascending: false }).limit(20);
     const priorMessages = (history || []).reverse().map((m) => ({ role: m.role, content: m.content }));
 
-    const messages: Array<Record<string, unknown>> = [...priorMessages, { role: "user", content: message }];
+    const userContent: Array<Record<string, unknown>> = [];
+    if (attachmentBase64 && attachmentMediaType) {
+      const blockType = attachmentMediaType === "application/pdf" ? "document" : "image";
+      userContent.push({ type: blockType, source: { type: "base64", media_type: attachmentMediaType, data: attachmentBase64 } });
+    }
+    userContent.push({ type: "text", text: message || "Here's a term sheet -- create a loan file from it." });
+
+    const messages: Array<Record<string, unknown>> = [...priorMessages, { role: "user", content: userContent }];
     const actionsTaken: Array<Record<string, unknown>> = [];
+    const systemPrompt = await buildSystemPrompt();
 
     let finalText = "";
     for (let iter = 0; iter < 6; iter++) {
       const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM_PROMPT, messages, tools: TOOLS }),
+        body: JSON.stringify({ model: MODEL, max_tokens: 1536, system: systemPrompt, messages, tools: TOOLS }),
       });
       const aiData = await aiRes.json();
       if (!aiRes.ok) {
@@ -172,8 +282,9 @@ Deno.serve(async (req: Request) => {
       messages.push({ role: "user", content: toolResults });
     }
 
+    const historyText = (message || "") + (attachmentBase64 ? " [attached a document/image]" : "");
     await sb.from("ai_chat_messages").insert([
-      { id: "msg-" + crypto.randomUUID(), user_id: userId, role: "user", content: message },
+      { id: "msg-" + crypto.randomUUID(), user_id: userId, role: "user", content: historyText },
       { id: "msg-" + crypto.randomUUID(), user_id: userId, role: "assistant", content: finalText || "(no reply)" },
     ]);
 

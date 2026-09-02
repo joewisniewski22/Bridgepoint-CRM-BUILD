@@ -5761,43 +5761,62 @@ function loadAiChatHistory(){
     render();
   }).catch(function(){ render(); });
 }
-function sendAiCommand(message){
-  if (!sb || !message) return;
+function sendAiCommand(message, attachment){
+  if (!sb || (!message && !attachment)) return;
   var userId = currentUser().id;
   ui.aiChatLog = ui.aiChatLog || [];
-  ui.aiChatLog.push({ role:"user", content: message });
+  ui.aiChatLog.push({ role:"user", content: message + (attachment ? " 📎 " + attachment.name : "") });
   ui.aiCommandBusy = true;
   render();
-  sb.functions.invoke("owner-ai-command", { body: { message: message, userId: userId } }).then(function(res){
-    ui.aiCommandBusy = false;
-    if (res.error || !res.data || !res.data.ok){
+  function doSend(attachmentBase64, attachmentMediaType){
+    sb.functions.invoke("owner-ai-command", { body: { message: message, userId: userId, attachmentBase64: attachmentBase64||null, attachmentMediaType: attachmentMediaType||null } }).then(function(res){
+      ui.aiCommandBusy = false;
+      if (res.error || !res.data || !res.data.ok){
+        ui.aiChatLog.push({ role:"assistant", content:"Something went wrong — try again." });
+        render();
+        return;
+      }
+      ui.aiChatLog.push({ role:"assistant", content: res.data.reply || "(done)" });
+      render();
+      (res.data.actions||[]).forEach(function(a){
+        var r = a.result;
+        if (r && r.requiresFrontendAction === "send_document"){
+          sendDocumentBoth(r.leadId, r.kind);
+        }
+      });
+    }).catch(function(){
+      ui.aiCommandBusy = false;
       ui.aiChatLog.push({ role:"assistant", content:"Something went wrong — try again." });
       render();
-      return;
-    }
-    ui.aiChatLog.push({ role:"assistant", content: res.data.reply || "(done)" });
-    render();
-  }).catch(function(){
-    ui.aiCommandBusy = false;
-    ui.aiChatLog.push({ role:"assistant", content:"Something went wrong — try again." });
-    render();
-  });
+    });
+  }
+  if (attachment){
+    var reader = new FileReader();
+    reader.onload = function(){
+      var base64 = reader.result.split(",")[1];
+      doSend(base64, attachment.type);
+    };
+    reader.readAsDataURL(attachment);
+  } else {
+    doSend(null, null);
+  }
 }
 function renderAiAssistant(){
   var log = ui.aiChatLog;
   var bubbles = (log===undefined)
     ? '<div class="empty">Loading…</div>'
     : (log.length===0
-      ? '<div class="empty">Ask me to look up closed deals, or draft and publish a recent-closing or story post to bplending.com.<br>e.g. "post the Munoz deal as a recent closing" or "write a story about our fastest DSCR close this month"</div>'
+      ? '<div class="empty">Ask me to look up closed deals, draft and publish a recent-closing or story post to bplending.com, or paste/attach a term sheet to create a loan file.<br>e.g. "post the Munoz deal as a recent closing" · "create a loan file from this term sheet, assign to Fanis" · "send the term sheet to Jose Munoz"</div>'
       : log.map(function(m){
           return '<div class="ai-msg ai-msg-' + m.role + '"><div class="ai-msg-role">' + (m.role==="user" ? esc(currentUser().name) : "AI Assistant") + '</div><div class="ai-msg-body">' + esc(m.content) + '</div></div>';
         }).join(""));
-  return topbar("AI Assistant", "Owner-only. Handles marketing content (recent closings, stories) to bplending.com right now — ad spend and other integrations get added here once they're connected.", "") +
+  return topbar("AI Assistant", "Owner-only. Marketing content to bplending.com, creating loan files from term sheets, and sending documents — ad spend and other integrations get added here once they're connected.", "") +
     '<div class="content">' +
       '<div class="panel panel-pad" style="max-width:760px">' +
         '<div class="ai-chat-log" id="ai-chat-log">' + bubbles + '</div>' +
-        '<form data-form="ai-command" style="display:flex;gap:8px;margin-top:12px">' +
-          '<input class="input" type="text" name="message" placeholder="e.g. post the Munoz deal as a recent closing" style="flex:1" autocomplete="off"' + (ui.aiCommandBusy ? ' disabled' : '') + '>' +
+        '<form data-form="ai-command" style="display:flex;gap:8px;margin-top:12px;align-items:center">' +
+          '<label class="btn btn-ghost btn-sm" style="cursor:pointer" title="Attach a term sheet (PDF or image)">📎<input type="file" name="attachment" accept="application/pdf,image/*" style="display:none"></label>' +
+          '<input class="input" type="text" name="message" placeholder="e.g. create a loan file from this term sheet, assign to Fanis" style="flex:1" autocomplete="off"' + (ui.aiCommandBusy ? ' disabled' : '') + '>' +
           '<button class="btn btn-primary" type="submit"' + (ui.aiCommandBusy ? ' disabled' : '') + '>' + (ui.aiCommandBusy ? '…' : 'Send') + '</button>' +
         '</form>' +
       '</div>' +
@@ -7686,7 +7705,9 @@ appEl.addEventListener("submit", function(e){
     requestPortalCustomization(fd.get("prompt"));
     form.reset();
   } else if (type === "ai-command"){
-    sendAiCommand(fd.get("message"));
+    var attachmentInput = form.querySelector('[name="attachment"]');
+    var attachmentFile = attachmentInput && attachmentInput.files && attachmentInput.files[0];
+    sendAiCommand(fd.get("message"), attachmentFile || null);
     form.reset();
   } else if (type === "add-payroll-entry"){
     addManualPayrollEntry(fd);
