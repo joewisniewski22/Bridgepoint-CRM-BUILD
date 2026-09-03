@@ -2948,8 +2948,8 @@ function startAiEngagement(lead){
   var loName = lo.name || "your loan officer";
   var firstName = (lead.name || "there").split(" ")[0];
   var text = isBilingual
-    ? ("Hi " + firstName + "! It's " + loName + " with Bridgepoint Lending, following up on your " + (lead.loanType||"loan") + " inquiry. Would you prefer English or Spanish?\n\n¡Hola " + firstName + "! Soy " + loName + " de Bridgepoint Lending, dándole seguimiento a su consulta de préstamo. ¿Prefiere inglés o español?")
-    : ("Hi " + firstName + "! It's " + loName + " with Bridgepoint Lending, following up on your " + (lead.loanType||"loan") + " inquiry. What property are you looking to finance?");
+    ? ("Hi " + firstName + "! It's " + loName + " with Bridgepoint Lending, following up on your " + (lead.loanType||"loan") + " inquiry. Would you prefer English or Spanish? (Reply STOP to opt out)\n\n¡Hola " + firstName + "! Soy " + loName + " de Bridgepoint Lending, dándole seguimiento a su consulta de préstamo. ¿Prefiere inglés o español? (Responda STOP para cancelar)")
+    : ("Hi " + firstName + "! It's " + loName + " with Bridgepoint Lending, following up on your " + (lead.loanType||"loan") + " inquiry. What property are you looking to finance? (Reply STOP to opt out)");
   sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: loName, fromNumber: lo.quoPhoneNumber||null } }).then(function(res){
     if (res.error || !res.data || !res.data.ok) return;
     lead.aiStage = isBilingual ? "awaiting_language" : "engaging";

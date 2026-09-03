@@ -139,9 +139,27 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // Hand off to the AI conversion-texting automation, if this lead is
-      // enrolled (ai_stage set) and the LO hasn't hit Stop Automation.
-      if (match.ai_stage && !match.automation_paused) {
+      // TCPA opt-out: honor STOP-family keywords immediately, before any AI
+      // hand-off -- this overrides everything else, including a busy LO
+      // alert flow. Standard CTIA keywords, checked as the whole (trimmed)
+      // message, case-insensitive.
+      const isOptOut = /^(stop|stopall|unsubscribe|cancel|end|quit)$/i.test(msg.text.trim());
+      if (isOptOut) {
+        const optOutActivity = [...activity, {
+          date: new Date().toISOString().slice(0, 10), type: "system",
+          text: "Client replied STOP -- automation paused (TCPA opt-out)", author: "System",
+        }];
+        await sb.from("leads").update({ automation_paused: true, activity: optOutActivity }).eq("id", match.id as string);
+        if (match.phone) {
+          fetch(SUPABASE_URL + "/functions/v1/send-text", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+            body: JSON.stringify({ leadId: match.id, to: match.phone, text: "You've been unsubscribed from automated texts from Bridgepoint Lending. Reply if you'd like to speak with your loan officer directly." }),
+          }).catch(() => {});
+        }
+      } else if (match.ai_stage && !match.automation_paused) {
+        // Hand off to the AI conversion-texting automation, if this lead is
+        // enrolled (ai_stage set) and the LO hasn't hit Stop Automation.
         await fetch(SUPABASE_URL + "/functions/v1/ai-lead-engage", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
