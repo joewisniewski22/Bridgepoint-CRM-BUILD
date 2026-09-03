@@ -2302,6 +2302,7 @@ function leadToRow(l){
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
     automation_paused: !!l.automationPaused, ai_stage: l.aiStage || null,
     outside_lender: l.outsideLender || null,
+    referral_partner_id: l.referralPartnerId || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -2335,6 +2336,7 @@ function rowToLead(r){
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
     automationPaused: !!r.automation_paused, aiStage: r.ai_stage || null,
     outsideLender: r.outside_lender || null,
+    referralPartnerId: r.referral_partner_id || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
   };
 }
@@ -2482,12 +2484,30 @@ function hydrateFromSupabase(){
     if (res.error){ console.error("payroll entries fetch error", res.error); return; }
     if (res.data){ state.payrollEntries = res.data.map(rowToPayrollEntry); render(); }
   });
+  sb.from("referral_partners").select("*").then(function(res){
+    if (res.error){ console.error("referral partners fetch error", res.error); return; }
+    if (res.data){ state.referralPartners = res.data.map(rowToReferralPartner); render(); }
+  });
 }
 function rowToPayrollEntry(r){
   return {
     id: r.id, leadId: r.lead_id || null, personId: r.person_id, role: r.role,
     fileLabel: r.file_label || null, amount: Number(r.amount), status: r.status,
     note: r.note || "", entryDate: r.entry_date, createdBy: r.created_by || null
+  };
+}
+function rowToReferralPartner(r){
+  return {
+    id: r.id, name: r.name, company: r.company || "", role: r.role || "Other",
+    phone: r.phone || "", email: r.email || "", notes: r.notes || "",
+    createdAt: r.created_at, createdBy: r.created_by || null
+  };
+}
+function referralPartnerToRow(p){
+  return {
+    id: p.id, name: p.name, company: p.company || null, role: p.role || null,
+    phone: p.phone || null, email: p.email || null, notes: p.notes || null,
+    created_by: p.createdBy || null
   };
 }
 var syncTimer = null;
@@ -2847,6 +2867,7 @@ function moveStage(leadId, target){
         notifyUser("owner", lead.id, "payroll", lead.name + " closed — pay " + payoutParts.join(" and ") + ".");
       }
       sendReviewRequests(lead);
+      thankReferralPartner(lead);
       if (sb) sb.functions.invoke("auto-recent-closing", { body: { leadId: lead.id } }).catch(function(){});
     }
     (lead.thirdParties||[]).forEach(function(tp){
@@ -2967,6 +2988,7 @@ function addLead(data){
     rentEstimate:null, loanAmount:data.loanAmount||null, ltv:null, rate:null, termMonths:null,
     exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null, pointsCharged:null,
     callAttempts:[], documents:[], thirdParties:[], applicationToken: randomToken(),
+    referralPartnerId: data.referralPartnerId || null,
     activity:[{ date:d, type:"note", text:"Lead created via " + data.source, author: currentUser().name }]
   };
   state.leads.unshift(lead);
@@ -4507,6 +4529,7 @@ function renderShell(){
         (navVisible("comms") ? navItem("comms","✉","Communications") : "") +
         (navVisible("performance") ? navItem("performance","⚡","Speed & Conversion") : "") +
         (navVisible("retargeting") ? navItem("retargeting","↺","Retargeting", winbackCount||null) : "") +
+        (!isProcessor() && navVisible("referrals") ? navItem("referrals","🤝","Referral Partners") : "") +
         (navVisible("notifications") ? navItem("notifications","🔔","Notifications", notifCount||null) : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
@@ -4540,6 +4563,7 @@ function renderShell(){
   else if (ui.view === "comms") body = renderCommunications();
   else if (ui.view === "performance") body = renderPerformance();
   else if (ui.view === "retargeting") body = renderRetargeting();
+  else if (ui.view === "referrals") body = renderReferralPartners();
   else if (ui.view === "notifications") body = renderNotifications();
   else body = renderToday();
 
@@ -5864,6 +5888,88 @@ function addManualPayrollEntry(fd){
     showToast("Entry added");
     render();
   });
+}
+
+function referralPartnerOptions(selectedId){
+  var opts = '<option value="">— None —</option>';
+  (state.referralPartners||[]).forEach(function(p){
+    opts += '<option value="' + p.id + '"' + (p.id===selectedId?" selected":"") + '>' + esc(p.name) + (p.company ? " (" + esc(p.company) + ")" : "") + '</option>';
+  });
+  return opts;
+}
+function referralPartnerById(id){
+  return (state.referralPartners||[]).filter(function(p){ return p.id===id; })[0] || null;
+}
+function referralPartnerStats(partnerId){
+  var referred = state.leads.filter(function(l){ return l.referralPartnerId === partnerId; });
+  var closed = referred.filter(function(l){ return l.status === "closed" && l.stage !== "lost"; });
+  var volume = closed.reduce(function(s,l){ return s + (Number(l.loanAmount)||0); }, 0);
+  var lastDate = referred.reduce(function(max,l){ return (!max || l.createdAt > max) ? l.createdAt : max; }, null);
+  return { referredCount: referred.length, closedCount: closed.length, volume: volume, lastDate: lastDate, referred: referred };
+}
+function renderReferralPartners(){
+  var partners = (state.referralPartners||[]).slice().sort(function(a,b){ return referralPartnerStats(b.id).volume - referralPartnerStats(a.id).volume; });
+  var rows = partners.map(function(p){
+    var s = referralPartnerStats(p.id);
+    return '<tr>' +
+      '<td><strong>' + esc(p.name) + '</strong>' + (p.company ? '<div class="footnote">' + esc(p.company) + '</div>' : '') + '</td>' +
+      '<td>' + esc(p.role||"Other") + '</td>' +
+      '<td>' + (p.phone ? '<div>' + esc(p.phone) + '</div>' : '') + (p.email ? '<div class="footnote">' + esc(p.email) + '</div>' : '') + '</td>' +
+      '<td class="num">' + s.referredCount + '</td>' +
+      '<td class="num">' + s.closedCount + '</td>' +
+      '<td class="num">' + fmtUSD(s.volume) + '</td>' +
+      '<td>' + (s.lastDate ? fmtDate(s.lastDate) : '—') + '</td>' +
+    '</tr>';
+  }).join("");
+  var table = partners.length ? (
+    '<div class="table-wrap"><table><thead><tr><th>Partner</th><th>Type</th><th>Contact</th><th>Referred</th><th>Closed</th><th>Volume</th><th>Last Referral</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+  ) : '<div class="empty">No referral partners yet — add the realtors, wholesalers, and other lenders who send you business.</div>';
+
+  var addForm = '<div class="panel panel-pad" style="margin-bottom:20px;max-width:560px">' +
+    '<div class="rail-title" style="margin-bottom:8px">Add Referral Partner</div>' +
+    '<form data-form="add-referral-partner">' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Name</label><input class="input" name="name" required></div>' +
+        '<div class="form-row"><label>Company</label><input class="input" name="company"></div>' +
+      '</div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Type</label><select class="select" name="role">' +
+          ['Realtor','Wholesaler','Attorney','Other Lender','Title/Escrow','Other'].map(function(r){ return '<option value="' + r + '">' + r + '</option>'; }).join("") +
+        '</select></div>' +
+        '<div class="form-row"><label>Phone</label><input class="input" name="phone"></div>' +
+      '</div>' +
+      '<div class="form-row"><label>Email</label><input class="input" type="email" name="email"></div>' +
+      '<div class="form-row"><label>Notes</label><input class="input" name="notes" placeholder="How you met, what they usually send"></div>' +
+      '<button class="btn btn-sm btn-primary" type="submit" style="margin-top:6px">Add Partner</button>' +
+    '</form>' +
+  '</div>';
+
+  return topbar("Referral Partners", "Realtors, wholesalers, and other lenders who send you business — track who's referred what, and we'll auto-thank them by email when a linked deal closes.", "") +
+    '<div class="content">' + addForm + table + '</div>';
+}
+function addReferralPartner(fd){
+  if (!sb) return;
+  var id = "rp-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
+  var partner = {
+    id:id, name: fd.get("name"), company: fd.get("company")||"", role: fd.get("role")||"Other",
+    phone: fd.get("phone")||"", email: fd.get("email")||"", notes: fd.get("notes")||"", createdBy: currentUser().id
+  };
+  sb.from("referral_partners").insert(referralPartnerToRow(partner)).then(function(res){
+    if (res.error){ showToast("Couldn't save — try again"); return; }
+    state.referralPartners = state.referralPartners || [];
+    state.referralPartners.push(partner);
+    showToast("Partner added");
+    render();
+  });
+}
+function thankReferralPartner(lead){
+  var partner = lead.referralPartnerId ? referralPartnerById(lead.referralPartnerId) : null;
+  if (!partner || !partner.email || !sb) return;
+  var subject = "Thank you for the referral — " + lead.name;
+  var text = "Hi " + (partner.name||"") + ",\n\nJust wanted to say thanks for sending " + lead.name + " our way — that loan just closed. We appreciate you thinking of Bridgepoint Lending.\n\nLooking forward to the next one.\n\n— Bridgepoint Lending";
+  sb.functions.invoke("send-email", { body: { to: partner.email, subject: subject, text: text, fromName: "Bridgepoint Lending" } }).catch(function(){});
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text: "Thank-you email sent to referral partner " + partner.name, author: "System" });
 }
 
 function loadAiChatHistory(){
@@ -7264,6 +7370,7 @@ function modalAddLead(){
           assignField +
           '<div class="form-row"><label>Loan Amount (est.)</label><input class="input" type="number" name="loanAmount"></div>' +
         '</div>' +
+        '<div class="form-row"><label>Referral Partner (optional)</label><select class="select" name="referralPartnerId">' + referralPartnerOptions(null) + '</select></div>' +
         '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress"></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add Lead</button></div>' +
@@ -7662,7 +7769,8 @@ appEl.addEventListener("submit", function(e){
       name: fd.get("name"), email: fd.get("email"), phone: fd.get("phone"),
       source: fd.get("source"), loanType: fd.get("loanType"), assignedTo: fd.get("assignedTo"),
       loanAmount: fd.get("loanAmount") ? Number(fd.get("loanAmount")) : null,
-      propertyAddress: fd.get("propertyAddress")
+      propertyAddress: fd.get("propertyAddress"),
+      referralPartnerId: fd.get("referralPartnerId") || null
     });
   } else if (type === "create-lead-from-pricer"){
     createLeadFromScenario({
@@ -7822,6 +7930,9 @@ appEl.addEventListener("submit", function(e){
     form.reset();
   } else if (type === "add-payroll-entry"){
     addManualPayrollEntry(fd);
+    form.reset();
+  } else if (type === "add-referral-partner"){
+    addReferralPartner(fd);
     form.reset();
   } else if (type === "save-signature"){
     var photoInput = form.querySelector('[name="photo"]');
