@@ -6201,7 +6201,7 @@ function submitBooking(fd){
       id: "N" + Date.now().toString(36) + Math.floor(Math.random()*1000),
       to_user_id: pb.userId, lead_id: null, kind: "appointment", text: alertText,
       date: todayISO(), read:false
-    }).catch(function(){});
+    }).then(function(nres){ if (nres.error) console.error("appointment notification error", nres.error); });
     if (pb.host && pb.host.email){
       sb.functions.invoke("send-email", { body: { to: pb.host.email, subject: "New booking: " + appt.name, text: alertText, fromName: "Bridgepoint CRM" } }).catch(function(){});
     }
