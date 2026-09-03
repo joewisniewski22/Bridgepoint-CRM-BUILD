@@ -1781,6 +1781,48 @@ function funnelCounts(leads){
     };
   });
 }
+function computeStageVelocity(leads){
+  var totals = {}; // stageKey -> { sumDays, count }
+  STAGES.forEach(function(s){ totals[s.key] = { sumDays:0, count:0 }; });
+  leads.forEach(function(l){
+    var timeline = [{ key:"new", date: l.createdAt }];
+    (l.activity||[]).filter(function(a){ return a.type==="stage"; })
+      .slice()
+      .sort(function(a,b){ return (a.date||"").localeCompare(b.date||""); })
+      .forEach(function(a){
+        var m = /→\s*(.+)$/.exec(a.text||"");
+        if (!m) return;
+        var label = m[1].trim();
+        var match = STAGES.filter(function(s){ return s.label === label; })[0];
+        if (match) timeline.push({ key: match.key, date: a.date });
+      });
+    for (var i=0; i<timeline.length-1; i++){
+      var d1 = new Date(timeline[i].date), d2 = new Date(timeline[i+1].date);
+      if (isNaN(d1) || isNaN(d2)) continue;
+      var days = (d2-d1) / 86400000;
+      if (days < 0) continue;
+      var bucket = totals[timeline[i].key];
+      if (bucket){ bucket.sumDays += days; bucket.count++; }
+    }
+  });
+  var byStage = STAGES.filter(function(s){ return s.key !== "postclosing"; }).map(function(s){
+    var t = totals[s.key];
+    return { key:s.key, label:s.label, avgDays: t.count ? (t.sumDays/t.count) : null, count: t.count };
+  });
+
+  var closedLeads = leads.filter(function(l){ return l.status==="closed" && l.stage!=="lost" && l.createdAt && l.closeDate; });
+  var closeDaysSum = closedLeads.reduce(function(s,l){
+    var d = (new Date(l.closeDate) - new Date(l.createdAt)) / 86400000;
+    return s + (d>0 ? d : 0);
+  }, 0);
+  var avgDaysToClose = closedLeads.length ? (closeDaysSum/closedLeads.length) : null;
+
+  var everReachedApp = leads.filter(function(l){ return furthestStageIndex(l) >= stageIndex("app_completed"); }).length;
+  var closedCount = leads.filter(function(l){ return l.status==="closed" && l.stage!=="lost"; }).length;
+  var pullThroughRate = everReachedApp ? Math.round((closedCount/everReachedApp)*100) : null;
+
+  return { byStage:byStage, avgDaysToClose:avgDaysToClose, pullThroughRate:pullThroughRate, everReachedApp:everReachedApp, closedCount:closedCount };
+}
 function conversionBySource(leads){
   var bySource = {};
   SOURCES.forEach(function(s){ bySource[s] = { source:s, total:0, closed:0, active:0, lostCold:0, closedValue:0 }; });
@@ -6204,6 +6246,15 @@ function renderPerformance(){
     }).join("") +
     '</tbody></table></div>';
 
+  var velocity = computeStageVelocity(leads);
+  var velocityHTML = '<div class="table-wrap"><table><thead><tr><th>Stage</th><th>Avg. Time Before Advancing</th><th>Based On</th></tr></thead><tbody>' +
+    velocity.byStage.map(function(s){
+      return '<tr><td><b>' + esc(s.label) + '</b></td>' +
+        '<td class="num">' + (s.avgDays===null ? '—' : fmtDuration(s.avgDays*86400000)) + '</td>' +
+        '<td class="num">' + (s.count ? (s.count + ' transition' + (s.count===1?'':'s')) : '—') + '</td></tr>';
+    }).join("") +
+    '</tbody></table></div>';
+
   var convRows = conversionBySource(leads);
   var convHTML = '<div class="table-wrap"><table><thead><tr><th>Source</th><th>Total Leads</th><th>Closed</th><th>Conversion Rate</th><th>Active</th><th>Lost / Cold</th><th>Closed Volume</th></tr></thead><tbody>' +
     (convRows.length ? convRows.map(function(b){
@@ -6219,12 +6270,15 @@ function renderPerformance(){
         '<div class="kpi"><div class="kpi-label">Avg. Speed to Lead</div><div class="kpi-value num">' + fmtDuration(stl.avgMs) + '</div><div class="kpi-sub">' + stl.contactedCount + ' lead(s) contacted</div></div>' +
         '<div class="kpi"><div class="kpi-label">Contacted Within 1 Hr</div><div class="kpi-value num">' + (stl.pctWithin1hr===null?"—":stl.pctWithin1hr+"%") + '</div><div class="kpi-sub">Fast follow-up sets the odds of a call-back</div></div>' +
         '<div class="kpi"><div class="kpi-label">Still Waiting</div><div class="kpi-value num">' + stl.uncontactedCount + '</div><div class="kpi-sub">Active leads with no attempt logged yet</div></div>' +
+        '<div class="kpi"><div class="kpi-label">Avg. Days to Close</div><div class="kpi-value num">' + (velocity.avgDaysToClose===null?"—":(Math.round(velocity.avgDaysToClose*10)/10)) + '</div><div class="kpi-sub">Lead created → funded, closed loans only</div></div>' +
+        '<div class="kpi"><div class="kpi-label">Pull-Through Rate</div><div class="kpi-value num">' + (velocity.pullThroughRate===null?"—":velocity.pullThroughRate+"%") + '</div><div class="kpi-sub">Of ' + velocity.everReachedApp + ' completed application(s), ' + velocity.closedCount + ' closed</div></div>' +
       '</div>' +
       loRankingHTML +
       '<div class="section"><div class="section-head"><h2>Speed to Lead — by Lead</h2><span class="hint">First call/text attempt after creation</span></div>' +
         '<div class="table-wrap"><table><thead><tr><th>Lead</th>' + (isOwner() ? '<th>Loan Officer</th>' : '') + '<th>Source</th><th>Created</th><th>Speed to Lead</th></tr></thead><tbody>' + stlRows + '</tbody></table></div>' +
       '</div>' +
       '<div class="section"><div class="section-head"><h2>Funnel — Where Leads Drop Off</h2><span class="hint">"Reached" counts every lead that ever got at least this far, even if later lost/cold</span></div>' + funnelHTML + '</div>' +
+      '<div class="section"><div class="section-head"><h2>Pipeline Velocity — Time Spent Per Stage</h2><span class="hint">Average time between entering a stage and advancing to the next, across every lead that\'s made that move</span></div>' + velocityHTML + '</div>' +
       '<div class="section"><div class="section-head"><h2>Conversion by Marketing Source</h2><span class="hint">Includes Self-Generated leads</span></div>' + convHTML + '</div>' +
     '</div>';
 }
