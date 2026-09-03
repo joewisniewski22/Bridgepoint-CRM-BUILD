@@ -4530,6 +4530,7 @@ function renderShell(){
         (navVisible("performance") ? navItem("performance","⚡","Speed & Conversion") : "") +
         (navVisible("retargeting") ? navItem("retargeting","↺","Retargeting", winbackCount||null) : "") +
         (!isProcessor() && navVisible("referrals") ? navItem("referrals","🤝","Referral Partners") : "") +
+        (!isProcessor() && navVisible("repeat") ? navItem("repeat","👥","Repeat Clients") : "") +
         (navVisible("notifications") ? navItem("notifications","🔔","Notifications", notifCount||null) : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
@@ -4564,6 +4565,7 @@ function renderShell(){
   else if (ui.view === "performance") body = renderPerformance();
   else if (ui.view === "retargeting") body = renderRetargeting();
   else if (ui.view === "referrals") body = renderReferralPartners();
+  else if (ui.view === "repeat") body = renderRepeatClients();
   else if (ui.view === "notifications") body = renderNotifications();
   else body = renderToday();
 
@@ -5970,6 +5972,66 @@ function thankReferralPartner(lead){
   sb.functions.invoke("send-email", { body: { to: partner.email, subject: subject, text: text, fromName: "Bridgepoint Lending" } }).catch(function(){});
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"system", text: "Thank-you email sent to referral partner " + partner.name, author: "System" });
+}
+
+function borrowerGroupKey(l){
+  var phoneDigits = (l.phone||"").replace(/\D/g,"").slice(-10);
+  if (phoneDigits.length === 10) return "p:" + phoneDigits;
+  var email = (l.email||"").trim().toLowerCase();
+  if (email) return "e:" + email;
+  return null;
+}
+function computeRepeatClients(){
+  var groups = {};
+  state.leads.forEach(function(l){
+    var key = borrowerGroupKey(l);
+    if (!key) return;
+    groups[key] = groups[key] || [];
+    groups[key].push(l);
+  });
+  var out = [];
+  Object.keys(groups).forEach(function(key){
+    var leads = groups[key];
+    if (leads.length < 2) return;
+    leads.sort(function(a,b){ return (b.createdAt||"").localeCompare(a.createdAt||""); });
+    var closed = leads.filter(function(l){ return l.status === "closed" && l.stage !== "lost"; });
+    var active = leads.filter(function(l){ return l.status === "active"; });
+    var closedVolume = closed.reduce(function(s,l){ return s + (Number(l.loanAmount)||0); }, 0);
+    var activeVolume = active.reduce(function(s,l){ return s + (Number(l.loanAmount)||0); }, 0);
+    out.push({
+      key: key, name: leads[0].name, leads: leads,
+      totalLoans: leads.length, closedCount: closed.length,
+      closedVolume: closedVolume, activeVolume: activeVolume,
+      lastLoanDate: leads[0].createdAt
+    });
+  });
+  out.sort(function(a,b){ return b.totalLoans - a.totalLoans || b.closedVolume - a.closedVolume; });
+  return out;
+}
+function renderRepeatClients(){
+  var clients = computeRepeatClients();
+  var rows = clients.map(function(c){
+    var loanLinks = c.leads.map(function(l){
+      return '<button class="btn btn-ghost btn-sm" data-action="select-lead" data-lead="' + l.id + '" style="margin:0 4px 4px 0">' +
+        esc(l.loanType||"Loan") + ' · ' + fmtUSD(l.loanAmount||0) + ' · ' + esc(stageLabel(l.stage)) +
+      '</button>';
+    }).join("");
+    return '<tr>' +
+      '<td><strong>' + esc(c.name) + '</strong></td>' +
+      '<td class="num">' + c.totalLoans + '</td>' +
+      '<td class="num">' + c.closedCount + '</td>' +
+      '<td class="num">' + fmtUSD(c.closedVolume) + '</td>' +
+      '<td class="num">' + fmtUSD(c.activeVolume) + '</td>' +
+      '<td>' + fmtDate(c.lastLoanDate) + '</td>' +
+      '<td>' + loanLinks + '</td>' +
+    '</tr>';
+  }).join("");
+  var table = clients.length ? (
+    '<div class="table-wrap"><table><thead><tr><th>Borrower</th><th>Loans</th><th>Closed</th><th>Closed Volume</th><th>Active Pipeline</th><th>Most Recent</th><th>Loans</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+  ) : '<div class="empty">No repeat borrowers yet — this fills in automatically once someone closes (or opens) a second loan with the same phone number or email.</div>';
+
+  return topbar("Repeat Clients", "Borrowers with more than one loan on file (matched by phone or email) — your best source of easy repeat business. Reach out before they go looking for another lender.", "") +
+    '<div class="content">' + table + '</div>';
 }
 
 function loadAiChatHistory(){

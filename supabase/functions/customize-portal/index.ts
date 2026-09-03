@@ -15,7 +15,7 @@ const CORS_HEADERS = {
   "Content-Type": "application/json",
 };
 
-const HIDEABLE_NAV_ITEMS = ["pricer", "pipeline", "comms", "performance", "retargeting", "notifications", "portal"];
+const HIDEABLE_NAV_ITEMS = ["pricer", "pipeline", "comms", "performance", "retargeting", "referrals", "repeat", "notifications", "portal"];
 
 const SYSTEM_PROMPT = "You customize the visual appearance of one loan officer's own personal dashboard view in a lending CRM, based on what they type. " +
   "You can ONLY ever change: an accent color, which nav sections are hidden for them personally, a short personal welcome note shown on their Today page, and layout density. " +
