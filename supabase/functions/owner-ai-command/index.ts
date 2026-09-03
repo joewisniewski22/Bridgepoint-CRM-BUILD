@@ -27,6 +27,8 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const LOAN_TYPES = ["DSCR", "Fix & Flip", "Ground Up Construction", "Portfolio/Blanket", "Bridge", "Mixed-Use"];
 const SOURCES = ["Meta Ads", "Connected Investors", "Referral", "Repeat Client", "Website", "Self-Generated"];
 const OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN"];
+const CITIZENSHIP_STATUSES = ["US Citizen", "Permanent Resident", "Foreign National", "ITIN"];
+const PREPAY_TERMS = ["5yr", "3yr", "2yr", "1yr", "none"];
 
 async function buildSystemPrompt(): Promise<string> {
   const { data: staff } = await sb.from("users").select("id,name,role").order("name");
@@ -37,9 +39,10 @@ async function buildSystemPrompt(): Promise<string> {
     "\n\nStaff roster (use these exact ids for assignedTo, never guess an id): " + roster +
     "\n\nCAPABILITIES:\n" +
     "1. Marketing content: create_content then publish_content to post recent-closing announcements or stories to the CRM's public showcase page. Never claim something is live unless publish_content reports success. Default to NOT naming the borrower and NOT including their exact street address (city/state only) unless Joe explicitly asks -- these are real clients' financial details. Write body as simple HTML (p, strong, br, a tags only).\n" +
-    "2. Loan file creation from a term sheet: when Joe pastes term sheet text or attaches a term sheet document/image, extract the real figures and call create_loan_file. Valid loanType values: " + LOAN_TYPES.join(", ") + ". Valid source values: " + SOURCES.join(", ") + " (use 'Referral' or the closest fit if unclear, never invent a new source). Valid outsideLender values: " + OUTSIDE_LENDERS.join(", ") + " or omit for in-house. NEVER guess a figure that isn't actually in the document -- omit any field you can't find rather than inventing a number, and tell Joe what's missing in your reply. If the assignee isn't stated, ASK rather than picking someone.\n" +
-    "3. Sending documents: to send a Pre-Approval Letter or Term Sheet to a borrower on an existing loan file, call send_document with the leadId and kind -- this actually emails/texts them for real, so only call it when Joe clearly asks to send (not just when he asks you to create a file).\n" +
-    "4. Looking up loans: list_closed_deals for recently funded loans.\n\n" +
+    "2. Loan file creation from a term sheet: when Joe pastes term sheet text or attaches a term sheet document/image for a BRAND NEW loan (not already in the CRM), extract the real figures and call create_loan_file. Valid loanType values: " + LOAN_TYPES.join(", ") + ". Valid source values: " + SOURCES.join(", ") + " (use 'Referral' or the closest fit if unclear, never invent a new source). Valid outsideLender values: " + OUTSIDE_LENDERS.join(", ") + " or omit for in-house. NEVER guess a figure that isn't actually in the document -- omit any field you can't find rather than inventing a number, and tell Joe what's missing in your reply. If the assignee isn't stated, ASK rather than picking someone.\n" +
+    "3. Updating an EXISTING loan file: when Joe gets a new/real quote back (e.g. a lender's pricing terms sheet) for a loan already in the CRM, call update_loan_file with the leadId and only the fields that changed -- extract real figures the same way as create_loan_file, never guess. If Joe doesn't give you the leadId, ask for it (or ask for the borrower's name and use list_closed_deals / say you need the id -- you have no generic lead-search tool yet). Always write a one-sentence changeSummary describing what changed and why (e.g. citing a pricing/quote ID if the source document has one) -- it gets logged to the loan's activity history.\n" +
+    "4. Sending documents: to send a Pre-Approval Letter or Term Sheet to a borrower on an existing loan file, call send_document with the leadId and kind -- this actually emails/texts them for real, so only call it when Joe clearly asks to send (not just when he asks you to create or update a file).\n" +
+    "5. Looking up loans: list_closed_deals for recently funded loans.\n\n" +
     "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success.";
 }
 
@@ -109,6 +112,38 @@ const TOOLS = [
         notifyAssignee: { type: "boolean", description: "Whether to email the assigned staff member about this new file (default true)" },
       },
       required: ["name", "loanType"],
+    },
+  },
+  {
+    name: "update_loan_file",
+    description: "Update fields on an EXISTING loan file already in the CRM -- e.g. after Joe gets a real quote/pricing terms sheet back for a loan. Only include fields you actually found in the new document; anything omitted is left untouched.",
+    input_schema: {
+      type: "object",
+      properties: {
+        leadId: { type: "string", description: "The loan file id to update -- ask Joe for this if he hasn't given it" },
+        propertyAddress: { type: "string" },
+        propertyType: { type: "string" },
+        transactionType: { type: "string", enum: ["purchase", "ratetermrefi", "cashout"] },
+        purchasePrice: { type: "number" },
+        currentValue: { type: "number", description: "As-is value -- used instead of purchase price for refinance LTV" },
+        arv: { type: "number", description: "After-repair value, for rehab/construction loans" },
+        rehabBudget: { type: "number" },
+        rentEstimate: { type: "number", description: "Monthly rental income, for DSCR loans" },
+        monthlyTaxes: { type: "number" },
+        monthlyInsurance: { type: "number" },
+        monthlyHoa: { type: "number" },
+        loanAmount: { type: "number" },
+        rate: { type: "number", description: "Interest rate as a percent, e.g. 6.975" },
+        termMonths: { type: "integer" },
+        pointsCharged: { type: "number", description: "Total points Bridgepoint is actually charging, as a percent -- use what Joe tells you to charge, not necessarily whatever number is printed on an outside quote" },
+        creditScore: { type: "integer" },
+        prepayTerm: { type: "string", enum: PREPAY_TERMS },
+        citizenshipStatus: { type: "string", enum: CITIZENSHIP_STATUSES },
+        exitStrategy: { type: "string" },
+        changeSummary: { type: "string", description: "One short sentence for the activity log describing what changed and why (cite a pricing/quote ID from the source document if there is one)" },
+        notifyAssignee: { type: "boolean", description: "Whether to text/email the assigned loan officer that terms changed (default true)" },
+      },
+      required: ["leadId"],
     },
   },
   {
@@ -207,6 +242,70 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
       }
     }
     return { ok: true, leadId: id, link };
+  }
+  if (name === "update_loan_file") {
+    const leadId = input.leadId as string;
+    if (!leadId) return { error: "missing_leadId" };
+    const { data: existing, error: fetchErr } = await sb.from("leads").select("*").eq("id", leadId).single();
+    if (fetchErr || !existing) return { error: "lead_not_found" };
+
+    const fieldMap: Record<string, string> = {
+      propertyAddress: "property_address", propertyType: "property_type", transactionType: "transaction_type",
+      purchasePrice: "purchase_price", currentValue: "current_value", arv: "arv", rehabBudget: "rehab_budget",
+      rentEstimate: "rent_estimate", monthlyTaxes: "monthly_taxes", monthlyInsurance: "monthly_insurance",
+      monthlyHoa: "monthly_hoa", loanAmount: "loan_amount", rate: "rate", termMonths: "term_months",
+      pointsCharged: "points_charged", creditScore: "credit_score", prepayTerm: "prepay_term",
+      citizenshipStatus: "citizenship_status", exitStrategy: "exit_strategy",
+    };
+    const patch: Record<string, unknown> = {};
+    const changedLabels: string[] = [];
+    for (const [key, col] of Object.entries(fieldMap)) {
+      const v = input[key];
+      if (v !== undefined && v !== null && v !== "") {
+        patch[col] = v;
+        changedLabels.push(key + " = " + v);
+      }
+    }
+    if (Object.keys(patch).length === 0) return { error: "no_fields_provided" };
+
+    const merged = { ...existing, ...patch } as Record<string, unknown>;
+    const txnType = merged.transaction_type as string | null;
+    const valueBasis = (txnType && txnType !== "purchase" && merged.current_value)
+      ? (merged.current_value as number) : (merged.purchase_price as number | null);
+    if (valueBasis && merged.loan_amount) {
+      patch.ltv = Math.round(((merged.loan_amount as number) / valueBasis) * 1000) / 10;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const activity = Array.isArray(existing.activity) ? existing.activity as unknown[] : [];
+    activity.push({
+      date: today, type: "note",
+      text: (input.changeSummary as string) || ("Loan scenario updated by AI: " + changedLabels.join(", ")),
+      author: "AI Assistant",
+    });
+    patch.activity = activity;
+
+    const { error: updErr } = await sb.from("leads").update(patch).eq("id", leadId);
+    if (updErr) return { error: updErr.message };
+
+    const link = "https://bridgepoint-crm-build.vercel.app/?lead=" + leadId;
+    if (input.notifyAssignee !== false && existing.assigned_to) {
+      const { data: assignee } = await sb.from("users").select("email,phone,name").eq("id", existing.assigned_to as string).single();
+      const alertText = (existing.name as string) + "'s loan terms were updated: " + changedLabels.join(", ") + " — " + link;
+      if (assignee?.email) {
+        fetch(SUPABASE_URL + "/functions/v1/send-email", {
+          method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+          body: JSON.stringify({ to: assignee.email, subject: "Loan terms updated: " + existing.name, text: alertText, fromName: "Bridgepoint CRM" }),
+        }).catch(() => {});
+      }
+      if (assignee?.phone) {
+        fetch(SUPABASE_URL + "/functions/v1/send-text", {
+          method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+          body: JSON.stringify({ to: assignee.phone, text: alertText, fromName: "Bridgepoint CRM" }),
+        }).catch(() => {});
+      }
+    }
+    return { ok: true, leadId, link, changedFields: changedLabels };
   }
   if (name === "send_document") {
     const { data: lead } = await sb.from("leads").select("id").eq("id", input.leadId).single();
