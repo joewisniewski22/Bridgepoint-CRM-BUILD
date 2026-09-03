@@ -1322,6 +1322,7 @@ try {
   var applyId = qp.get("apply");
   var applyToken = qp.get("t");
   var deepLinkLead = qp.get("lead");
+  var bookUserId = qp.get("book");
   if (deepLinkLead) ui.pendingDeepLinkLead = deepLinkLead;
   if (qp.get("showcase")){
     ui.publicShowcase = { status:"loading", items:[] };
@@ -1329,6 +1330,9 @@ try {
   } else if (applyId && applyToken){
     ui.publicApply = { leadId:applyId, token:applyToken, status:"loading" };
     loadPublicApplication(applyId, applyToken);
+  } else if (bookUserId){
+    ui.publicBooking = { userId:bookUserId, status:"loading" };
+    loadPublicBooking(bookUserId);
   } else if (sessionWasRestored){
     hydrateFromSupabase();
   }
@@ -2530,6 +2534,14 @@ function hydrateFromSupabase(){
     if (res.error){ console.error("referral partners fetch error", res.error); return; }
     if (res.data){ state.referralPartners = res.data.map(rowToReferralPartner); render(); }
   });
+  sb.from("availability_rules").select("*").then(function(res){
+    if (res.error){ console.error("availability rules fetch error", res.error); return; }
+    if (res.data){ state.availabilityRules = res.data.map(rowToAvailabilityRule); render(); }
+  });
+  sb.from("appointments").select("*").order("start_at").then(function(res){
+    if (res.error){ console.error("appointments fetch error", res.error); return; }
+    if (res.data){ state.appointments = res.data.map(rowToAppointment); render(); }
+  });
 }
 function rowToPayrollEntry(r){
   return {
@@ -2551,6 +2563,18 @@ function referralPartnerToRow(p){
     phone: p.phone || null, email: p.email || null, notes: p.notes || null,
     created_by: p.createdBy || null
   };
+}
+function rowToAvailabilityRule(r){
+  return { id:r.id, userId:r.user_id, dayOfWeek:r.day_of_week, startMinutes:r.start_minutes, endMinutes:r.end_minutes, slotMinutes:r.slot_minutes };
+}
+function availabilityRuleToRow(a){
+  return { id:a.id, user_id:a.userId, day_of_week:a.dayOfWeek, start_minutes:a.startMinutes, end_minutes:a.endMinutes, slot_minutes:a.slotMinutes };
+}
+function rowToAppointment(r){
+  return { id:r.id, userId:r.user_id, leadId:r.lead_id||null, name:r.name, phone:r.phone||"", email:r.email||"", notes:r.notes||"", startAt:r.start_at, endAt:r.end_at, status:r.status, createdAt:r.created_at };
+}
+function appointmentToRow(a){
+  return { id:a.id, user_id:a.userId, lead_id:a.leadId||null, name:a.name, phone:a.phone||null, email:a.email||null, notes:a.notes||null, start_at:a.startAt, end_at:a.endAt, status:a.status||"scheduled" };
 }
 var syncTimer = null;
 function scheduleSync(){
@@ -4188,6 +4212,12 @@ function render(){
     initSignaturePads();
     return;
   }
+  if (ui.publicBooking){
+    app.innerHTML = renderPublicBooking();
+    var toastHostPB = ui.toast ? ('<div class="toast" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+    app.insertAdjacentHTML("beforeend", toastHostPB);
+    return;
+  }
   if (!ui.loggedIn){
     app.innerHTML = renderLogin();
     var toastHost0 = document.getElementById("toast-host");
@@ -4586,6 +4616,7 @@ function renderShell(){
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">' +
             (isDemo() ? '<button class="btn btn-sm btn-primary" style="flex:1" data-action="restart-tour">▶ Replay Tour</button>' : '<button class="btn btn-sm" style="flex:1" data-action="open-modal" data-modal="changePin">Change PIN</button>') +
             (isDemo() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="editSignature">Signature</button>') +
+            (isDemo() || isProcessor() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="mySchedule">My Schedule</button>') +
             '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="logout">Log Out</button>' +
           '</div>' +
         '</div>' +
@@ -6016,6 +6047,226 @@ function thankReferralPartner(lead){
   lead.activity.push({ date: todayISO(), type:"system", text: "Thank-you email sent to referral partner " + partner.name, author: "System" });
 }
 
+function generateAvailableSlots(userId, days){
+  days = days || 21;
+  var rules = (state.availabilityRules||[]).filter(function(r){ return r.userId===userId; });
+  var existing = (state.appointments||[]).filter(function(a){ return a.userId===userId && a.status!=="canceled"; });
+  var now = new Date();
+  var out = [];
+  for (var d=0; d<days; d++){
+    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate()+d);
+    var dow = day.getDay();
+    var dayRules = rules.filter(function(r){ return r.dayOfWeek===dow; });
+    if (!dayRules.length) continue;
+    var slots = [];
+    dayRules.forEach(function(r){
+      for (var m=r.startMinutes; m+r.slotMinutes<=r.endMinutes; m+=r.slotMinutes){
+        var slotStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, m);
+        var slotEnd = new Date(slotStart.getTime() + r.slotMinutes*60000);
+        if (slotStart <= now) continue;
+        var overlaps = existing.some(function(a){
+          var aStart = new Date(a.startAt), aEnd = new Date(a.endAt);
+          return slotStart < aEnd && slotEnd > aStart;
+        });
+        if (!overlaps) slots.push({ start: slotStart, end: slotEnd });
+      }
+    });
+    slots.sort(function(a,b){ return a.start - b.start; });
+    if (slots.length) out.push({ date: day, slots: slots });
+  }
+  return out;
+}
+function addAvailabilityRule(fd){
+  if (!sb) return;
+  var toMin = function(t){ var p=(t||"0:0").split(":"); return Number(p[0])*60+Number(p[1]); };
+  var startMinutes = toMin(fd.get("startTime")), endMinutes = toMin(fd.get("endTime"));
+  if (endMinutes <= startMinutes){ showToast("End time must be after start time"); return; }
+  var id = "av-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
+  var rule = {
+    id:id, userId: currentUser().id, dayOfWeek: Number(fd.get("dayOfWeek")),
+    startMinutes: startMinutes, endMinutes: endMinutes, slotMinutes: Number(fd.get("slotMinutes"))||30
+  };
+  sb.from("availability_rules").insert(availabilityRuleToRow(rule)).then(function(res){
+    if (res.error){ showToast("Couldn't save — try again"); return; }
+    state.availabilityRules = state.availabilityRules || [];
+    state.availabilityRules.push(rule);
+    showToast("Availability added");
+    render();
+  });
+}
+function deleteAvailabilityRule(id){
+  if (!sb) return;
+  sb.from("availability_rules").delete().eq("id", id).then(function(res){
+    if (res.error){ showToast("Couldn't delete — try again"); return; }
+    state.availabilityRules = (state.availabilityRules||[]).filter(function(r){ return r.id!==id; });
+    showToast("Removed");
+    render();
+  });
+}
+function cancelAppointment(id){
+  if (!sb) return;
+  sb.from("appointments").update({status:"canceled"}).eq("id", id).then(function(res){
+    if (res.error){ showToast("Couldn't cancel — try again"); return; }
+    var a = (state.appointments||[]).filter(function(x){ return x.id===id; })[0];
+    if (a) a.status = "canceled";
+    showToast("Appointment canceled");
+    render();
+  });
+}
+function fmtClockMinutes(m){
+  var h = Math.floor(m/60), mm = m%60;
+  var ap = h>=12 ? "PM" : "AM";
+  var h12 = h%12; if (h12===0) h12 = 12;
+  return h12 + (mm ? (":" + (mm<10?"0":"") + mm) : "") + ap;
+}
+function modalMySchedule(){
+  var uid = currentUser().id;
+  var myRules = (state.availabilityRules||[]).filter(function(r){ return r.userId===uid; }).sort(function(a,b){ return a.dayOfWeek-b.dayOfWeek || a.startMinutes-b.startMinutes; });
+  var DOW = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  var rulesHTML = myRules.length ? myRules.map(function(r){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-soft)">' +
+      '<span>' + DOW[r.dayOfWeek] + ' ' + fmtClockMinutes(r.startMinutes) + '–' + fmtClockMinutes(r.endMinutes) + ' <span class="footnote">(' + r.slotMinutes + ' min slots)</span></span>' +
+      '<button class="btn btn-ghost btn-sm" type="button" data-action="delete-availability-rule" data-id="' + r.id + '">Remove</button>' +
+    '</div>';
+  }).join("") : '<div class="empty">No availability set yet — add a window below.</div>';
+
+  var bookingLink = window.location.origin + window.location.pathname + "?book=" + uid;
+  var nowTsVal = Date.now();
+  var upcoming = (state.appointments||[]).filter(function(a){ return a.userId===uid && a.status!=="canceled" && new Date(a.startAt).getTime() >= nowTsVal; }).sort(function(a,b){ return new Date(a.startAt)-new Date(b.startAt); });
+  var upcomingHTML = upcoming.length ? upcoming.map(function(a){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-soft)">' +
+      '<span><b>' + esc(a.name) + '</b> — ' + new Date(a.startAt).toLocaleString([], {weekday:"short", month:"short", day:"numeric", hour:"numeric", minute:"2-digit"}) + (a.phone?(' · ' + esc(a.phone)):'') + '</span>' +
+      '<button class="btn btn-ghost btn-sm" type="button" data-action="cancel-appointment" data-id="' + a.id + '">Cancel</button>' +
+    '</div>';
+  }).join("") : '<div class="empty">No upcoming appointments.</div>';
+
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1" style="max-width:560px">' +
+      '<div class="modal-head"><h3>My Schedule</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="form-row"><label>Your Booking Link</label><div style="display:flex;gap:6px"><input class="input" readonly value="' + esc(bookingLink) + '"><button class="btn btn-sm" type="button" data-action="copy-booking-link" data-link="' + esc(bookingLink) + '">Copy</button></div></div>' +
+        '<div class="rail-title" style="margin:14px 0 6px">Weekly Availability</div>' +
+        rulesHTML +
+        '<form data-form="add-availability-rule" style="margin-top:10px">' +
+          '<div class="form-two">' +
+            '<div class="form-row"><label>Day</label><select class="select" name="dayOfWeek">' + DOW.map(function(d,i){ return '<option value="'+i+'">'+d+'</option>'; }).join("") + '</select></div>' +
+            '<div class="form-row"><label>Slot Length</label><select class="select" name="slotMinutes"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></div>' +
+          '</div>' +
+          '<div class="form-two">' +
+            '<div class="form-row"><label>Start Time</label><input class="input" type="time" name="startTime" value="09:00" required></div>' +
+            '<div class="form-row"><label>End Time</label><input class="input" type="time" name="endTime" value="17:00" required></div>' +
+          '</div>' +
+          '<button class="btn btn-sm btn-primary" type="submit">Add Window</button>' +
+        '</form>' +
+        '<div class="rail-title" style="margin:14px 0 6px">Upcoming Appointments</div>' +
+        upcomingHTML +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Close</button></div>' +
+    '</div></div>';
+}
+function loadPublicBooking(userId){
+  if (!sb){ ui.publicBooking.status = "invalid"; render(); return; }
+  sb.rpc("list_users").then(function(res){
+    var u = (res.data||[]).filter(function(x){ return x.id===userId; })[0];
+    if (!u){ ui.publicBooking.status = "invalid"; render(); return; }
+    ui.publicBooking.host = u;
+    Promise.all([
+      sb.from("availability_rules").select("*").eq("user_id", userId),
+      sb.from("appointments").select("*").eq("user_id", userId).neq("status","canceled")
+    ]).then(function(results){
+      state.availabilityRules = (results[0].data||[]).map(rowToAvailabilityRule);
+      state.appointments = (results[1].data||[]).map(rowToAppointment);
+      ui.publicBooking.status = "ready";
+      render();
+    });
+  });
+}
+function submitBooking(fd){
+  var pb = ui.publicBooking;
+  if (!pb || !pb.selectedSlot || !sb) return;
+  var id = "apt-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
+  var appt = {
+    id:id, userId: pb.userId, leadId:null,
+    name: fd.get("name"), phone: fd.get("phone")||"", email: fd.get("email")||"", notes: fd.get("notes")||"",
+    startAt: pb.selectedSlot.start, endAt: pb.selectedSlot.end, status:"scheduled"
+  };
+  sb.from("appointments").insert(appointmentToRow(appt)).then(function(res){
+    if (res.error){ showToast("Couldn't book — try again"); return; }
+    state.appointments = state.appointments || [];
+    state.appointments.push(appt);
+    var when = new Date(appt.startAt).toLocaleString([], {weekday:"long", month:"long", day:"numeric", hour:"numeric", minute:"2-digit"});
+    var alertText = appt.name + " booked a time with you: " + when + (appt.phone ? (" — " + appt.phone) : "");
+    pushStaffAlert(pb.userId, alertText);
+    sb.from("notifications").insert({
+      id: "N" + Date.now().toString(36) + Math.floor(Math.random()*1000),
+      to_user_id: pb.userId, lead_id: null, kind: "appointment", text: alertText,
+      date: todayISO(), read:false
+    }).catch(function(){});
+    if (pb.host && pb.host.email){
+      sb.functions.invoke("send-email", { body: { to: pb.host.email, subject: "New booking: " + appt.name, text: alertText, fromName: "Bridgepoint CRM" } }).catch(function(){});
+    }
+    pb.status = "confirmed";
+    pb.confirmedAppointment = appt;
+    render();
+  });
+}
+function renderPublicBooking(){
+  var pb = ui.publicBooking;
+  var wrap = function(inner){ return '<div class="login-screen"><div class="login-card" style="max-width:520px">' + inner + '</div></div>'; };
+  if (pb.status === "loading") return wrap('<div class="empty">Loading availability…</div>');
+  if (pb.status === "invalid") return wrap('<div class="empty">This scheduling link isn\'t valid or is no longer active.</div>');
+  if (pb.status === "confirmed"){
+    var a = pb.confirmedAppointment;
+    return wrap(
+      '<div class="rail-title" style="margin-bottom:8px">You\'re booked ✓</div>' +
+      '<div class="footnote" style="padding:0 0 10px">' + esc(a.name) + ', your time with ' + esc(pb.host.name) + ' is confirmed for:</div>' +
+      '<div class="panel panel-pad" style="margin-bottom:10px"><b>' + new Date(a.startAt).toLocaleString([], {weekday:"long", month:"long", day:"numeric", hour:"numeric", minute:"2-digit"}) + '</b></div>' +
+      '<div class="footnote">A confirmation has been sent to ' + esc(pb.host.name) + '. They\'ll reach out if anything changes.</div>'
+    );
+  }
+  var slotsByDay = generateAvailableSlots(pb.userId, 21);
+  if (pb.selectedSlot){
+    var s = pb.selectedSlot;
+    return wrap(
+      '<div class="rail-title" style="margin-bottom:4px">Confirm your time</div>' +
+      '<div class="footnote" style="padding:0 0 10px">' + new Date(s.start).toLocaleString([], {weekday:"long", month:"long", day:"numeric", hour:"numeric", minute:"2-digit"}) + ' with ' + esc(pb.host.name) + '</div>' +
+      '<form data-form="submit-booking">' +
+        '<div class="form-row"><label>Your Name</label><input class="input" name="name" required></div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Phone</label><input class="input" name="phone"></div>' +
+          '<div class="form-row"><label>Email</label><input class="input" type="email" name="email"></div>' +
+        '</div>' +
+        '<div class="form-row"><label>What would you like to discuss? (optional)</label><textarea class="textarea" name="notes" rows="2"></textarea></div>' +
+        '<button class="btn btn-primary" type="submit" style="margin-top:6px">Confirm Booking</button>' +
+        '<button class="btn btn-ghost btn-sm" type="button" data-action="booking-back-to-slots" style="margin-top:6px;margin-left:6px">← Back</button>' +
+      '</form>'
+    );
+  }
+  if (pb.selectedDate){
+    var day = slotsByDay.filter(function(d){ return d.date.toDateString() === pb.selectedDate; })[0];
+    var slotBtns = day ? day.slots.map(function(s){
+      return '<button class="btn btn-sm" type="button" data-action="select-booking-slot" data-start="' + s.start.toISOString() + '" data-end="' + s.end.toISOString() + '" style="margin:0 6px 6px 0">' +
+        s.start.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) + '</button>';
+    }).join("") : '';
+    return wrap(
+      '<div class="rail-title" style="margin-bottom:4px">Pick a time</div>' +
+      '<div class="footnote" style="padding:0 0 10px">' + (day ? day.date.toLocaleDateString([], {weekday:"long", month:"long", day:"numeric"}) : "") + ' with ' + esc(pb.host.name) + '</div>' +
+      '<div>' + slotBtns + '</div>' +
+      '<button class="btn btn-ghost btn-sm" type="button" data-action="booking-back-to-days" style="margin-top:10px">← Choose a different day</button>'
+    );
+  }
+  var dayBtns = slotsByDay.map(function(d){
+    return '<button class="btn btn-sm" type="button" data-action="select-booking-day" data-date="' + d.date.toDateString() + '" style="margin:0 6px 6px 0">' +
+      d.date.toLocaleDateString([], {weekday:"short", month:"short", day:"numeric"}) + ' <span class="footnote">(' + d.slots.length + ')</span>' +
+    '</button>';
+  }).join("");
+  return wrap(
+    '<div class="rail-title" style="margin-bottom:4px">Book a time with ' + esc(pb.host.name) + '</div>' +
+    '<div class="footnote" style="padding:0 0 10px">Bridgepoint Lending</div>' +
+    (slotsByDay.length ? ('<div>' + dayBtns + '</div>') : '<div class="empty">No open times in the next few weeks — please call or text directly.</div>')
+  );
+}
+
 function borrowerGroupKey(l){
   var phoneDigits = (l.phone||"").replace(/\D/g,"").slice(-10);
   if (phoneDigits.length === 10) return "p:" + phoneDigits;
@@ -6380,6 +6631,7 @@ function renderModal(){
   if (ui.modal.type === "dialer") return modalDialer();
   if (ui.modal.type === "scopeOfWork") return modalScopeOfWork(ui.modal.leadId);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
+  if (ui.modal.type === "mySchedule") return modalMySchedule();
   return "";
 }
 function modalSendBack(leadId){
@@ -7639,6 +7891,18 @@ appEl.addEventListener("click", function(e){
   else if (action === "mark-payroll-paid"){
     markPayrollEntryPaid(t);
   }
+  else if (action === "delete-availability-rule"){ deleteAvailabilityRule(t.dataset.id); }
+  else if (action === "cancel-appointment"){ cancelAppointment(t.dataset.id); }
+  else if (action === "copy-booking-link"){
+    var linkVal = t.dataset.link;
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(linkVal).then(function(){ showToast("Link copied"); }).catch(function(){ showToast("Couldn't copy — copy it manually"); });
+    } else { showToast("Couldn't copy — copy it manually"); }
+  }
+  else if (action === "select-booking-day"){ ui.publicBooking.selectedDate = t.dataset.date; render(); }
+  else if (action === "booking-back-to-days"){ ui.publicBooking.selectedDate = null; render(); }
+  else if (action === "select-booking-slot"){ ui.publicBooking.selectedSlot = { start:t.dataset.start, end:t.dataset.end }; render(); }
+  else if (action === "booking-back-to-slots"){ ui.publicBooking.selectedSlot = null; render(); }
   else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
   else if (action === "send-borrower-portal"){ sendBorrowerPortalInvite(t.dataset.lead); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
@@ -8050,6 +8314,11 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "add-referral-partner"){
     addReferralPartner(fd);
     form.reset();
+  } else if (type === "add-availability-rule"){
+    addAvailabilityRule(fd);
+    form.reset();
+  } else if (type === "submit-booking"){
+    submitBooking(fd);
   } else if (type === "save-signature"){
     var photoInput = form.querySelector('[name="photo"]');
     var photoFile = photoInput && photoInput.files && photoInput.files[0];
