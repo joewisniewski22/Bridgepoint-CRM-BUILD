@@ -1260,6 +1260,193 @@ function runGuidelineCheck(leadId, opts){
   }
   persist();
 }
+
+/* ---------------------------------------------------------------------
+   Outside-lender fit estimator -- RCN Capital ("Products & Guidelines",
+   internally dated 8.7.2026, provided by Joe as of 9.2.26). Owner-only:
+   on a Needs-Review file, estimates what RCN would likely offer so Joe
+   can decide whether to place it outside instead of forcing an in-house
+   exception -- default bias is always to stay in-house. The granular
+   RTL rehab-type/experience matrix (Stabilized/Light/Moderate/Heavy) is
+   from RCN's detailed underwriting matrix; Ground Up Construction uses
+   the simpler flat "75% ARV or 90% LTC, no experience required" policy
+   from the summary sheet instead, since that sheet explicitly states no
+   experience minimum, superseding the older tiered GUC rows also seen
+   on the detailed matrix. Kiavi and RELIP guideline sheets haven't been
+   provided yet -- OUTSIDE_LENDER_FIT_EVALUATORS below is where they'd
+   plug in once Joe uploads them; until then only RCN is evaluated.
+--------------------------------------------------------------------- */
+var RCN_BLOCKED_STATES = ["AK","ND","SD","NV","VT","UT"];
+var RCN_DSCR_BLOCKED_CITIES = ["baltimore","cape coral","lakeland"];
+var RCN_DSCR_LTV_1_4 = [
+  { minFico:740, purchase:80, rateTerm:80, cashOut:75 },
+  { minFico:720, purchase:80, rateTerm:80, cashOut:75 },
+  { minFico:700, purchase:80, rateTerm:80, cashOut:75 },
+  { minFico:680, purchase:75, rateTerm:75, cashOut:70 },
+  { minFico:660, purchase:65, rateTerm:65, cashOut:60 }
+];
+var RCN_DSCR_LTV_FN = { purchase:70, rateTerm:70, cashOut:65 };
+var RCN_DSCR_LTV_MULTI = { purchase:70, rateTerm:70, cashOut:65 };
+var RCN_DSCR_LTV_PORTFOLIO = { purchase:80, rateTerm:80, cashOut:75 };
+var RCN_RTL_MATRIX = {
+  "1-4": {
+    stabilized: { "0":{aiLtv:75}, "1-4":{aiLtv:75}, "5+":{aiLtv:80} },
+    light:      { "0":{iLtc:85,arLtv:70,tLtc:90}, "1-4":{iLtc:90,arLtv:75,tLtc:95}, "5+":{iLtc:95,arLtv:75,tLtc:100}, "10+":{iLtc:100,arLtv:75,tLtc:100} },
+    moderate:   { "0":{iLtc:85,arLtv:70,tLtc:90}, "1-4":{iLtc:90,arLtv:72.5,tLtc:92.5}, "5+":{iLtc:92.5,arLtv:75,tLtc:95}, "10+":{iLtc:100,arLtv:75,tLtc:100} },
+    heavy:      { "0":{aiLtv:70,arLtv:60,tLtc:80}, "1-4":{aiLtv:80,arLtv:65,tLtc:87.5}, "5+":{aiLtv:85,arLtv:70,tLtc:90} }
+  },
+  multi: {
+    stabilized: { "0":{aiLtv:75}, "1-4":{aiLtv:75}, "5+":{aiLtv:75} },
+    light:      { "0":{aiLtv:70,arLtv:65,tLtc:82.5}, "1-4":{aiLtv:80,arLtv:70,tLtc:87.5}, "5+":{aiLtv:80,arLtv:70,tLtc:90} },
+    moderate:   { "0":{aiLtv:70,arLtv:65,tLtc:82.5}, "1-4":{aiLtv:75,arLtv:70,tLtc:85}, "5+":{aiLtv:75,arLtv:70,tLtc:87.5} },
+    heavy:      { "1-4":{aiLtv:70,arLtv:65,tLtc:85}, "5+":{aiLtv:70,arLtv:65,tLtc:85} }
+  }
+};
+function rcnExperienceBucket(deals, allowTen){
+  deals = deals || 0;
+  if (allowTen && deals >= 10) return "10+";
+  if (deals >= 5) return "5+";
+  if (deals >= 1) return "1-4";
+  return "0";
+}
+function rcnRehabClass(lead){
+  if (!lead.rehabBudget || !lead.purchasePrice) return "stabilized";
+  var ratio = lead.rehabBudget / lead.purchasePrice;
+  if (ratio <= 0) return "stabilized";
+  if (ratio < 0.25) return "light";
+  if (ratio < 0.50) return "moderate";
+  return "heavy";
+}
+function evaluateRcnFit(lead){
+  var type = lead.loanType;
+  if (GUIDELINE_LOAN_TYPES.indexOf(type) === -1) return null;
+  var reasons = [], notes = [];
+  var state = stateFromAddress(lead.propertyAddress);
+  if (state && RCN_BLOCKED_STATES.indexOf(state) !== -1) reasons.push("RCN doesn't lend in " + state);
+  if (lead.ruralStatus === "rural") reasons.push("RCN's guidelines are non-rural areas only");
+  if (lead.entityType === "Individual") reasons.push("RCN requires closing in an entity (LLC/Corp), not individually");
+
+  var isMulti = lead.propertyType === "Multifamily 5+";
+  var isFN = lead.citizenshipStatus === "Foreign National";
+  var txnKey = lead.transactionType === "cashout" ? "cashOut" : (lead.transactionType === "ratetermrefi" ? "rateTerm" : "purchase");
+  var program = null, maxLtvPct = null, valueBasis = null, estMaxLoan = null;
+
+  if (type === "DSCR" || type === "Portfolio/Blanket"){
+    if (type === "DSCR"){
+      program = isMulti ? "RCN 30yr DSCR — Multifamily (5-9 units)" : "RCN 30yr DSCR — 1-4 Family";
+      var addrLower = (lead.propertyAddress||"").toLowerCase();
+      if (RCN_DSCR_BLOCKED_CITIES.some(function(c){ return addrLower.indexOf(c) !== -1; })){
+        reasons.push("RCN doesn't do DSCR loans in Baltimore, Cape Coral, or Lakeland");
+      }
+      valueBasis = dscrValueBasis(lead, null);
+      if (isMulti){
+        if ((lead.creditScore||0) < 700) reasons.push("Below RCN's 700 minimum FICO for Multifamily");
+        if (lead.loanAmount && (lead.loanAmount < 250000 || lead.loanAmount > 3000000)) reasons.push("Outside RCN's $250K–$3M Multifamily loan size range");
+        maxLtvPct = RCN_DSCR_LTV_MULTI[txnKey];
+      } else {
+        var minFico = 660;
+        if ((lead.creditScore||0) < minFico) reasons.push("Below RCN's " + minFico + " minimum FICO for DSCR");
+        var minPropVal = isFN ? 125000 : 115000;
+        if (valueBasis && valueBasis < minPropVal) reasons.push("Below RCN's " + fmtUSD(minPropVal) + " minimum property value" + (isFN?" (Foreign National)":""));
+        if (lead.loanAmount && (lead.loanAmount < 70000 || lead.loanAmount > 2000000)) reasons.push("Outside RCN's $70K–$2M DSCR loan size range");
+        maxLtvPct = isFN ? RCN_DSCR_LTV_FN[txnKey] : (function(){
+          var tier = RCN_DSCR_LTV_1_4.filter(function(t){ return (lead.creditScore||0) >= t.minFico; })[0];
+          return tier ? tier[txnKey] : null;
+        })();
+      }
+      var rcnRate = isMulti ? 6.25 : 5.25;
+      var minDscr = isMulti ? 1.25 : 1.00;
+      if (lead.rentEstimate && valueBasis && maxLtvPct){
+        var pi = monthlyPayment(Math.round(valueBasis*maxLtvPct/100), rcnRate, 360);
+        if (pi){
+          var hasExp = lead.monthlyTaxes!=null || lead.monthlyInsurance!=null;
+          var pitia = hasExp ? pi + (lead.monthlyTaxes||0) + (lead.monthlyInsurance||0) + (lead.monthlyHoa||0) : pi*1.2;
+          var dscrEst = lead.rentEstimate / pitia;
+          notes.push("Est. DSCR at RCN's " + rcnRate + "% starting rate: " + dscrEst.toFixed(2) + "x (needs " + minDscr.toFixed(2) + "x+)");
+          if (dscrEst < minDscr) reasons.push("Estimated DSCR below RCN's " + minDscr.toFixed(2) + "x minimum at their starting rate (a higher actual note rate would lower this further)");
+        }
+      }
+    } else {
+      program = "RCN Portfolio (2+ properties)";
+      var propCount = lead.propertyCount || 0;
+      if (propCount && propCount < 2) reasons.push("RCN Portfolio requires 2+ properties");
+      if ((lead.creditScore||0) < 660) reasons.push("Below RCN's 660 minimum FICO for Portfolio");
+      if (lead.loanAmount && (lead.loanAmount < 150000 || lead.loanAmount > 2000000)) reasons.push("Outside RCN's $150K–$2M Portfolio loan size range");
+      valueBasis = dscrValueBasis(lead, null);
+      if (propCount && lead.purchasePrice){
+        var avgVal = lead.purchasePrice / propCount;
+        if (avgVal < 115000) notes.push("Avg. property value " + fmtUSD(avgVal) + " is below RCN's stated $115K+ average — may need an underwriting exception");
+      }
+      maxLtvPct = RCN_DSCR_LTV_PORTFOLIO[txnKey];
+    }
+    if (valueBasis && maxLtvPct) estMaxLoan = Math.round(valueBasis * maxLtvPct / 100);
+  } else if (type === "Fix & Flip" || type === "Bridge"){
+    program = "RCN Bridge (9–18mo Fix & Flip/Rehab)";
+    if ((lead.creditScore||0) < 650) reasons.push("Below RCN's 650 minimum FICO for Bridge");
+    var bridgeMin = isMulti ? 250000 : 70000, bridgeMax = isMulti ? 3000000 : 2000000;
+    if (lead.loanAmount && (lead.loanAmount < bridgeMin || lead.loanAmount > bridgeMax)) reasons.push("Outside RCN's " + fmtUSD(bridgeMin) + "–" + fmtUSD(bridgeMax) + " loan size range for this property type");
+    var bucketTable = isMulti ? RCN_RTL_MATRIX.multi : RCN_RTL_MATRIX["1-4"];
+    var rClass = rcnRehabClass(lead);
+    var allowTen = (rClass === "light" || rClass === "moderate") && !isMulti;
+    var bucket = rcnExperienceBucket(lead.experienceDeals, allowTen);
+    var cell = bucketTable[rClass] && bucketTable[rClass][bucket];
+    if (!cell){
+      reasons.push("No RCN pricing tier found for this rehab scope / experience combination — needs a manual quote");
+    } else {
+      notes.push("RCN tier: " + rClass.charAt(0).toUpperCase()+rClass.slice(1) + " rehab, " + bucket + " completed deal(s)");
+      if (lead.purchasePrice && lead.loanAmount){
+        if (cell.aiLtv != null){
+          var aiLtvActual = lead.loanAmount / lead.purchasePrice * 100;
+          if (aiLtvActual > cell.aiLtv) reasons.push("As-is LTV " + aiLtvActual.toFixed(0) + "% exceeds RCN's " + cell.aiLtv + "% cap for this tier");
+        }
+        if (cell.iLtc != null && lead.rehabBudget){
+          var iLtcActual = (lead.loanAmount - lead.rehabBudget) / lead.purchasePrice * 100;
+          if (iLtcActual > cell.iLtc) reasons.push("Initial LTC " + iLtcActual.toFixed(0) + "% exceeds RCN's " + cell.iLtc + "% cap for this tier");
+        }
+        if (cell.tLtc != null && lead.rehabBudget){
+          var tLtcActual = lead.loanAmount / (lead.purchasePrice + lead.rehabBudget) * 100;
+          if (tLtcActual > cell.tLtc) reasons.push("Total LTC " + tLtcActual.toFixed(0) + "% exceeds RCN's " + cell.tLtc + "% cap for this tier");
+        }
+      }
+      if (lead.arv && cell.arLtv != null){
+        estMaxLoan = Math.round(lead.arv * cell.arLtv / 100);
+        maxLtvPct = cell.arLtv;
+      } else if (cell.tLtc != null && lead.purchasePrice && lead.rehabBudget){
+        estMaxLoan = Math.round((lead.purchasePrice + lead.rehabBudget) * cell.tLtc / 100);
+        maxLtvPct = cell.tLtc;
+      } else if (cell.aiLtv != null && lead.purchasePrice){
+        estMaxLoan = Math.round(lead.purchasePrice * cell.aiLtv / 100);
+        maxLtvPct = cell.aiLtv;
+      }
+    }
+  } else if (type === "Ground Up Construction"){
+    program = "RCN Ground Up Construction";
+    if ((lead.creditScore||0) < 650) reasons.push("Below RCN's 650 minimum FICO for Ground Up");
+    if (lead.loanAmount && (lead.loanAmount < 100000 || lead.loanAmount > 2000000)) reasons.push("Outside RCN's $100K–$2M Ground Up loan size range");
+    notes.push("No experience minimum required per RCN's guidelines");
+    var estByArv = lead.arv!=null ? Math.round(lead.arv * 0.75) : null;
+    var estByLtc = (lead.purchasePrice!=null && lead.rehabBudget!=null) ? Math.round((lead.purchasePrice + lead.rehabBudget) * 0.90) : null;
+    if (estByArv!=null && estByLtc!=null) estMaxLoan = Math.min(estByArv, estByLtc);
+    else estMaxLoan = estByArv!=null ? estByArv : estByLtc;
+  }
+
+  return { lender:"RCN", program:program, eligible: reasons.length===0, reasons:reasons, notes:notes, estMaxLoan:estMaxLoan, maxLtvPct:maxLtvPct };
+}
+var OUTSIDE_LENDER_FIT_EVALUATORS = { RCN: evaluateRcnFit, Kiavi: null, RELIP: null };
+function rcnRecommendation(lead, fit){
+  if (!fit) return null;
+  if (!fit.eligible){
+    return { verdict:"decline", text: fit.lender + " would likely decline too — " + fit.reasons[0] + (fit.reasons.length>1 ? (" (+" + (fit.reasons.length-1) + " more reason(s))") : "") + ". Stays in-house needing an exception, or try another outside lender." };
+  }
+  if (fit.estMaxLoan && lead.loanAmount){
+    if (fit.estMaxLoan >= lead.loanAmount){
+      return { verdict:"send", text: fit.lender + " would likely cover the full " + fmtUSD(lead.loanAmount) + " requested (est. max ~" + fmtUSD(fit.estMaxLoan) + "). Worth sending out — otherwise this needs an in-house exception." };
+    }
+    var gap = lead.loanAmount - fit.estMaxLoan;
+    return { verdict:"partial", text: fit.lender + " would likely max out around " + fmtUSD(fit.estMaxLoan) + " — " + fmtUSD(gap) + " short of the " + fmtUSD(lead.loanAmount) + " requested. Borrower would need to bring more cash, or this stays in-house." };
+  }
+  return { verdict:"unknown", text: fit.lender + " looks eligible on paper, but there isn't enough loan data yet (purchase price / ARV / loan amount) to estimate a max loan." };
+}
 var CALL_OUTCOMES = [
   { key:"no-answer", label:"No answer" },
   { key:"left-voicemail", label:"Left voicemail" },
@@ -5204,10 +5391,38 @@ function renderGuidelineCheck(lead){
        '<div id="guideline-explain-box" class="footnote" style="padding-top:8px;white-space:pre-wrap"></div></div>')
     : '';
   var outsideLenderSection = (gc.status === "review" && canViewOutsideLender()) ? renderOutsideLenderBox(lead) : '';
+  var rcnFitSection = gc.status === "review" ? renderOutsideLenderFitBox(lead) : '';
   return header +
     '<div style="margin-bottom:10px">' + badge + ' <span class="hint">as of ' + fmtDate(gc.evaluatedAt) + '</span></div>' +
-    rows + explainSection + outsideLenderSection +
+    rows + explainSection + outsideLenderSection + rcnFitSection +
     '<div class="footnote" style="padding-top:8px">Preliminary check against BPL/Constructive Loans matrices — not a substitute for full underwriting. Internal use only, never shown to the borrower.</div>';
+}
+function renderOutsideLenderFitBox(lead){
+  if (!isOwner()) return '';
+  var evaluators = Object.keys(OUTSIDE_LENDER_FIT_EVALUATORS).filter(function(k){ return typeof OUTSIDE_LENDER_FIT_EVALUATORS[k] === "function"; });
+  if (!evaluators.length) return '';
+  var blocks = evaluators.map(function(name){
+    var fit = OUTSIDE_LENDER_FIT_EVALUATORS[name](lead);
+    if (!fit) return '';
+    var rec = rcnRecommendation(lead, fit);
+    var statusBadge = fit.eligible ? '<span class="badge badge-forest">Likely Eligible</span>' : '<span class="badge badge-rust">Likely Decline</span>';
+    var reasonsHTML = fit.reasons.length ? ('<div class="footnote" style="padding-top:4px">' + fit.reasons.map(esc).join(' · ') + '</div>') : '';
+    var notesHTML = fit.notes.length ? ('<div class="footnote" style="padding-top:4px">' + fit.notes.map(esc).join(' · ') + '</div>') : '';
+    return '<div style="' + (name !== evaluators[0] ? 'margin-top:12px;padding-top:12px;border-top:1px solid var(--border-soft)' : '') + '">' +
+      '<div style="margin-bottom:4px">' + statusBadge + ' <b>' + esc(name) + '</b> <span class="hint">' + esc(fit.program||"") + '</span></div>' +
+      (fit.estMaxLoan ? ('<div><b>Est. Max Loan: ' + fmtUSD(fit.estMaxLoan) + '</b>' + (fit.maxLtvPct ? (' (' + fit.maxLtvPct + '% LTV/LTC)') : '') + '</div>') : '') +
+      reasonsHTML + notesHTML +
+      (rec ? ('<div style="margin-top:6px"><b>' + esc(rec.text) + '</b></div>') : '') +
+    '</div>';
+  }).join("");
+  var missing = Object.keys(OUTSIDE_LENDER_FIT_EVALUATORS).filter(function(k){ return !OUTSIDE_LENDER_FIT_EVALUATORS[k]; });
+  return '<div class="panel panel-pad" style="margin-top:10px;border-color:var(--brand)">' +
+    '<div class="rail-title" style="margin-bottom:4px">Outside Lender Fit (Owner Only)</div>' +
+    '<div class="footnote" style="padding-bottom:6px">Only you can see this — not shown to loan officers or processors.</div>' +
+    blocks +
+    (missing.length ? ('<div class="footnote" style="padding-top:10px">' + missing.join(", ") + ' guidelines not loaded yet — upload their rate sheet to add ' + (missing.length>1?"them":"it") + ' here.</div>') : '') +
+    '<div class="footnote" style="padding-top:8px">Estimate only, from each lender\'s published guidelines — not a submitted quote.</div>' +
+  '</div>';
 }
 var OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN"];
 function canManageOutsideLender(){ return ui.viewAs==="owner" || ui.viewAs==="lo-fiore"; }
