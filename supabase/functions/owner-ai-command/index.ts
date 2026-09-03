@@ -43,7 +43,8 @@ async function buildSystemPrompt(): Promise<string> {
     "3. Updating an EXISTING loan file: when Joe gets a new/real quote back (e.g. a lender's pricing terms sheet) for a loan already in the CRM, call update_loan_file with the leadId and only the fields that changed -- extract real figures the same way as create_loan_file, never guess. If Joe doesn't give you the leadId, ask for it (or ask for the borrower's name and use list_closed_deals / say you need the id -- you have no generic lead-search tool yet). Always write a one-sentence changeSummary describing what changed and why (e.g. citing a pricing/quote ID if the source document has one) -- it gets logged to the loan's activity history.\n" +
     "4. Sending documents: to send a Pre-Approval Letter or Term Sheet to a borrower on an existing loan file, call send_document with the leadId and kind -- this actually emails/texts them for real, so only call it when Joe clearly asks to send (not just when he asks you to create or update a file).\n" +
     "5. Looking up loans: list_closed_deals for recently funded loans.\n\n" +
-    "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success.";
+    "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success. " +
+    "CRITICAL: never describe an action (sent, triggered, created, updated, published) as done unless you actually called that exact tool THIS turn and its result confirmed success -- don't narrate an effect from context, from what Joe asked for, or from a tool you called for a different purpose. If you only updated a file and didn't call send_document, do not say anything was sent or triggered -- say what you'd need to do that as a separate, explicit step instead.";
 }
 
 const TOOLS = [
