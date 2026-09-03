@@ -668,7 +668,20 @@ var ES_DICT = {
   "Rough estimates — your loan officer can run exact numbers anytime.":"Estimados aproximados — su oficial de préstamos puede calcular cifras exactas cuando lo necesite.",
   "Est. Proceeds If You Sell":"Ganancia Estimada Si Vende",
   "Est. Cash-Out If You Refinance":"Efectivo Estimado Si Refinancia",
-  "Refinancing into a long-term DSCR loan lets you keep the property, pull cash out, and start collecting rent — without paying selling costs or losing the upside if the area keeps appreciating. Ask your loan officer about refinancing whenever you're ready.":"Refinanciar a un préstamo DSCR a largo plazo le permite conservar la propiedad, retirar efectivo y comenzar a cobrar renta — sin pagar costos de venta ni perder la ganancia futura si la zona sigue aumentando de valor. Pregúntele a su oficial de préstamos sobre refinanciar cuando esté listo."
+  "Refinancing into a long-term DSCR loan lets you keep the property, pull cash out, and start collecting rent — without paying selling costs or losing the upside if the area keeps appreciating. Ask your loan officer about refinancing whenever you're ready.":"Refinanciar a un préstamo DSCR a largo plazo le permite conservar la propiedad, retirar efectivo y comenzar a cobrar renta — sin pagar costos de venta ni perder la ganancia futura si la zona sigue aumentando de valor. Pregúntele a su oficial de préstamos sobre refinanciar cuando esté listo.",
+  "Automatic Payment Authorization (ACH)":"Autorización de Pago Automático (ACH)",
+  "Required on every loan — authorizes your monthly payment to draft automatically. Fill it in and sign below.":"Requerido en todos los préstamos — autoriza que su pago mensual se debite automáticamente. Complete y firme abajo.",
+  "Account Holder Name":"Nombre del Titular de la Cuenta",
+  "Financial Institution Name":"Nombre de la Institución Financiera",
+  "Bank City, State, ZIP":"Ciudad, Estado y Código Postal del Banco",
+  "ABA / Routing Number":"Número ABA / de Ruta",
+  "Account Number":"Número de Cuenta",
+  "Account Type":"Tipo de Cuenta", "Checking":"Cuenta de Cheques", "Savings":"Cuenta de Ahorros",
+  "Preferred Draft Date":"Fecha de Cargo Preferida",
+  "1st of the month":"El día 1 del mes", "3rd of the month":"El día 3 del mes", "5th of the month":"El día 5 del mes",
+  "Additional Draft Amount (optional, applied to principal)":"Monto Adicional de Cargo (opcional, aplicado al capital)",
+  "Sign Here to Authorize":"Firme Aquí para Autorizar",
+  "Clear Signature":"Borrar Firma"
 };
 function tr(text, lang){
   if (lang !== "es") return text;
@@ -6483,11 +6496,11 @@ function extractTrackRecordFromForm(fd){
    signature already drawn survives re-renders of everything else on
    the page as long as that canvas itself isn't replaced.
 --------------------------------------------------------------------- */
-function sigPadHTML(id, label){
+function sigPadHTML(id, label, lang){
   return '<div class="form-row">' +
     '<label>' + esc(label) + '</label>' +
     '<canvas id="' + id + '" data-sigpad="1" width="500" height="140" style="border:1px solid var(--border);border-radius:8px;width:100%;max-width:500px;height:140px;touch-action:none;cursor:crosshair;background:#fff;display:block"></canvas>' +
-    '<button class="btn btn-sm btn-ghost" type="button" data-action="clear-signature" data-canvas="' + id + '" style="margin-top:6px">Clear Signature</button>' +
+    '<button class="btn btn-sm btn-ghost" type="button" data-action="clear-signature" data-canvas="' + id + '" style="margin-top:6px">' + esc(tr("Clear Signature", lang||"en")) + '</button>' +
   '</div>';
 }
 function initSignaturePad(canvasId){
@@ -6561,7 +6574,7 @@ function buildAchFieldsHTML(lead, lang){
       '</select></div>' +
     '</div>' +
     '<div class="form-row"><label>' + L("Additional Draft Amount (optional, applied to principal)") + '</label><input class="input" type="number" name="achAdditionalAmount" value="' + v(a.additionalAmount) + '"></div>' +
-    sigPadHTML("sig-ach-" + lead.id, L("Sign Here to Authorize"));
+    sigPadHTML("sig-ach-" + lead.id, L("Sign Here to Authorize"), lang);
 }
 function extractAchFromForm(fd, signatureDataUrl, existing){
   var num = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
@@ -6776,7 +6789,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Certification") + '</b></div>' +
     '<div class="footnote" style="padding:0 0 8px">' + L("By signing, you certify that everything in this application is true and complete, and authorize Bridgepoint Lending / BPL Mortgage, LLC and its investors to verify this information and pull credit.") + '</div>' +
-    sigPadHTML("sig-rtlapp-" + lead.id, L("Sign Here to Certify"));
+    sigPadHTML("sig-rtlapp-" + lead.id, L("Sign Here to Certify"), lang);
 }
 function extractRtlApplicationFromForm(fd, signatureDataUrl, existing){
   if (!fd.has("rtlOwnRent") && !fd.has("scheduleACount")) return null;
@@ -7021,7 +7034,7 @@ function buildDscrApplicationFieldsHTML(lead, lang){
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Certification") + '</b></div>' +
     '<div class="footnote" style="padding:0 0 8px">' + L("By signing, you certify that everything in this application is true and complete, and authorize Bridgepoint Lending / BPL Mortgage, LLC and its investors to verify this information and pull credit.") + '</div>' +
-    sigPadHTML("sig-dscrapp-" + lead.id, L("Sign Here to Certify"));
+    sigPadHTML("sig-dscrapp-" + lead.id, L("Sign Here to Certify"), lang);
 }
 function extractDscrApplicationFromForm(fd, signatureDataUrl, existing){
   if (!fd.has("dscrOwnRent")) return null;
