@@ -3107,7 +3107,10 @@ function moveStage(leadId, target){
   } else {
     var oldLabel = stageLabel(lead.stage);
     lead.stage = target;
-    if (target==="docs") ensureProcessorAssigned(lead);
+    if (target==="docs"){
+      ensureProcessorAssigned(lead);
+      if (!lead.applicationSentAt) sendBorrowerPortalInvite(lead.id);
+    }
     lead.status = (target==="closed" || target==="postclosing") ? "closed" : "active";
     if (target==="closed" && !lead.closeDate) lead.closeDate = d;
     lead.activity.push({ date:d, type:"stage", text:"Stage moved: " + oldLabel + " → " + stageLabel(target), author: currentUser().name });
