@@ -5537,7 +5537,20 @@ function renderTabScenario(lead){
     field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderLoanDetailsEditor(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
+  '</div>' + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
+}
+function renderOutsideTermSheetUpload(lead){
+  if (!isOwner()) return '';
+  return '<div class="section-head" style="margin-top:20px"><h2>Upload Outside Term Sheet (Owner Only)</h2></div>' +
+    '<div class="panel panel-pad">' +
+      '<div class="footnote" style="padding:0 0 8px">Got a real quote back from RCN, Kiavi, or anyone else? Upload it here — AI reads the actual figures and updates this loan\'s terms automatically. Nothing else on the site changes.</div>' +
+      '<form data-form="outside-term-sheet" data-lead="' + lead.id + '">' +
+        '<div class="form-row"><label>Term Sheet (PDF or image)</label><input class="input" type="file" name="termSheetFile" accept="application/pdf,image/*" required></div>' +
+        '<div class="form-row"><label>Notes for the AI (optional)</label><input class="input" name="termSheetNotes" placeholder="e.g. charge 2.5 points instead of what\'s shown"></div>' +
+        '<button class="btn btn-sm btn-primary" type="submit">Process Term Sheet</button>' +
+      '</form>' +
+      '<div id="term-sheet-result-' + lead.id + '" class="footnote" style="padding-top:8px;white-space:pre-wrap"></div>' +
+    '</div>';
 }
 
 function renderPricingInputsEditor(lead){
@@ -6636,6 +6649,33 @@ function sendAiCommand(message, attachment){
   } else {
     doSend(null, null);
   }
+}
+function processOutsideTermSheet(leadId, file, notes){
+  if (!sb || !file) return;
+  var lead = leadById(leadId);
+  var resultBox = document.getElementById("term-sheet-result-" + leadId);
+  if (resultBox) resultBox.textContent = "Reading term sheet…";
+  var reader = new FileReader();
+  reader.onload = function(){
+    var base64 = reader.result.split(",")[1];
+    var message = "Update loan file " + leadId + " (" + (lead ? lead.name : "") + ") with the real terms from this attached outside term sheet. Only use figures actually shown in the document -- never guess or invent a number. " +
+      (notes ? ("Additional instructions from Joe: " + notes + ". ") : "") +
+      "After updating, tell me exactly what changed, and call out anything on the document you weren't able to apply.";
+    sb.functions.invoke("owner-ai-command", { body: { message: message, userId: currentUser().id, attachmentBase64: base64, attachmentMediaType: file.type } }).then(function(res){
+      if (res.error || !res.data || !res.data.ok){
+        if (resultBox) resultBox.textContent = "Couldn't process the term sheet — try again.";
+        showToast("Couldn't process the term sheet — try again");
+        return;
+      }
+      if (resultBox) resultBox.textContent = res.data.reply || "Done.";
+      showToast("Term sheet processed");
+      hydrateFromSupabase();
+    }).catch(function(){
+      if (resultBox) resultBox.textContent = "Couldn't process the term sheet — try again.";
+      showToast("Couldn't process the term sheet — try again");
+    });
+  };
+  reader.readAsDataURL(file);
 }
 function renderAiAssistant(){
   var log = ui.aiChatLog;
@@ -8537,6 +8577,11 @@ appEl.addEventListener("submit", function(e){
     form.reset();
   } else if (type === "request-doc"){
     requestDoc(form.dataset.lead, fd.get("name"));
+    form.reset();
+  } else if (type === "outside-term-sheet"){
+    var tsFileInput = form.querySelector('[name="termSheetFile"]');
+    var tsFile = tsFileInput && tsFileInput.files && tsFileInput.files[0];
+    if (tsFile) processOutsideTermSheet(form.dataset.lead, tsFile, fd.get("termSheetNotes"));
     form.reset();
   } else if (type === "add-uw-condition"){
     var uwFileInput = form.querySelector('[name="file"]');
