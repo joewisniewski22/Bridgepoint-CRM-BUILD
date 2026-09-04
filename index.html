@@ -5606,12 +5606,33 @@ function renderLoanDetailsEditor(lead){
       '<div class="form-row"><button class="btn btn-sm btn-primary" type="submit">Save Terms</button></div>' +
     '</form>';
 }
+function renderPropertyAddressEditor(lead){
+  return '<div class="section-head"><h2>Property Address</h2></div>' +
+    '<form data-form="property-address" data-lead="' + lead.id + '" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">' +
+      '<div class="form-row" style="flex:1;min-width:260px"><label>Address</label>' +
+        '<input class="input" name="propertyAddress" value="' + esc(lead.propertyAddress||"") + '" list="address-suggest-' + lead.id + '" autocomplete="off" data-action="address-lookup" data-lead="' + lead.id + '">' +
+        '<datalist id="address-suggest-' + lead.id + '"></datalist>' +
+        '<div id="rural-alert-' + lead.id + '"></div>' +
+      '</div>' +
+      '<div class="form-row"><button class="btn btn-sm btn-primary" type="submit">Save Address</button></div>' +
+    '</form>';
+}
+function setPropertyAddress(leadId, address){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  address = (address||"").trim();
+  if (!address || address === lead.propertyAddress) return;
+  lead.propertyAddress = address;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text:"Property address updated to " + address, author: currentUser().name });
+  showToast("Address updated");
+  persist();
+}
 function renderTabScenario(lead){
   var ruralBanner = lead.ruralStatus === "rural"
     ? '<div class="hint" style="color:var(--c-rust);margin-bottom:12px">⚠️ This property appears to be in a rural area (checked ' + fmtDate(lead.ruralCheckedAt) + ') — confirm eligibility and any overlay pricing with underwriting before quoting.</div>'
     : "";
-  return ruralBanner + '<div class="field-grid">' +
-    field("Property Address", esc(lead.propertyAddress||"—")) +
+  return ruralBanner + renderPropertyAddressEditor(lead) + '<div class="field-grid">' +
     field("Property Type", esc(lead.propertyType||"—")) +
     (lead.loanType === "Portfolio/Blanket" ? field("Number of Properties", lead.propertyCount||"—", true) : "") +
     field("Citizenship Status", esc(lead.citizenshipStatus||"—")) +
@@ -8699,6 +8720,8 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "request-doc"){
     requestDoc(form.dataset.lead, fd.get("name"));
     form.reset();
+  } else if (type === "property-address"){
+    setPropertyAddress(form.dataset.lead, fd.get("propertyAddress"));
   } else if (type === "submit-for-review"){
     submitForReview(form.dataset.lead, fd.get("reviewNote"));
     form.reset();
