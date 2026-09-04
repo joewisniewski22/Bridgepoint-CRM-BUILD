@@ -6,9 +6,13 @@
 // always preserves the full raw payload in the activity log, so nothing is
 // silently lost even for fields we don't have a dedicated mapping for yet.
 //
-// Same deliberate choice as the Meta webhook: no LO routing here, every
-// lead defaults to the owner until the source-based routing rule is
-// actually built (see [[project-lead-routing-rules]] equivalent).
+// Routing: this specific webhook is wired to Joe's Spanish-language
+// Facebook ad workflow in HighLevel only (confirmed 2026-09-04) -- every
+// lead through this endpoint gets weighted-random routed 70% to Fanis,
+// 30% to David, per Joe's explicit instruction. If this same webhook
+// endpoint ever gets reused for a different, non-Spanish-ad HighLevel
+// source, this routing needs to be revisited (e.g. gated on an explicit
+// tag HighLevel sends), not assumed to still apply.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -24,6 +28,12 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",
 };
+
+// Weighted-random 70/30 split (Fanis/David) -- probabilistic per Joe's own
+// phrasing ("70% to Fanis, 30% to David"), not a strict rotating quota.
+function pickSpanishAdLO(): string {
+  return Math.random() < 0.7 ? "lo-fanis" : "lo-david";
+}
 
 function firstOf(obj: Record<string, unknown>, ...keys: string[]): string | null {
   for (const k of keys) {
@@ -55,17 +65,18 @@ Deno.serve(async (req: Request) => {
       [firstName, lastName].filter(Boolean).join(" ") || "HighLevel Lead";
     const email = firstOf(body, "email", "email_address");
     const phone = firstOf(body, "phone", "phone_number", "phoneNumber");
-    const sourceTag = firstOf(body, "source", "lead_source", "contact_source") || "Website";
+    const sourceTag = firstOf(body, "source", "lead_source", "contact_source") || "Meta Ads";
+    const assignedTo = pickSpanishAdLO();
 
     const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
     const today = new Date().toISOString().slice(0, 10);
     const row = {
       id, name: fullName, email: email || null, phone: phone || null,
       source: sourceTag, loan_type: null, stage: "new", status: "active",
-      assigned_to: "owner", created_at: today,
+      assigned_to: assignedTo, created_at: today,
       entity_type: "LLC", application_token: crypto.randomUUID(),
       activity: [
-        { date: today, type: "note", text: "Lead captured from GoHighLevel via webhook", author: "System" },
+        { date: today, type: "note", text: "Lead captured from GoHighLevel via webhook (Spanish Facebook ad) — auto-routed to " + assignedTo, author: "System" },
         { date: today, type: "note", text: "Raw payload: " + JSON.stringify(body), author: "System" },
       ],
     };
@@ -77,22 +88,22 @@ Deno.serve(async (req: Request) => {
     }
 
     const link = CRM_URL + "?lead=" + id;
-    const alertText = "🔥 New HighLevel lead: " + fullName + " — open & dial: " + link;
+    const alertText = "🔥 New Facebook lead (Spanish ad): " + fullName + " — open & dial: " + link;
     await sb.from("notifications").insert({
-      id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: "owner", lead_id: id,
+      id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: assignedTo, lead_id: id,
       kind: "hot-lead", text: alertText, date: today, read: false,
     });
-    const { data: owner } = await sb.from("users").select("phone,email").eq("id", "owner").single();
-    if (owner?.phone) {
+    const { data: assignee } = await sb.from("users").select("phone,email,name,quo_phone_number").eq("id", assignedTo).single();
+    if (assignee?.phone) {
       fetch(SUPABASE_URL + "/functions/v1/send-text", {
         method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-        body: JSON.stringify({ to: owner.phone, text: alertText, fromName: "Bridgepoint CRM" }),
+        body: JSON.stringify({ to: assignee.phone, text: alertText, fromName: "Bridgepoint CRM" }),
       }).catch(() => {});
     }
-    if (owner?.email) {
+    if (assignee?.email) {
       fetch(SUPABASE_URL + "/functions/v1/send-email", {
         method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-        body: JSON.stringify({ to: owner.email, subject: "New HighLevel lead: " + fullName, text: alertText, fromName: "Bridgepoint CRM" }),
+        body: JSON.stringify({ to: assignee.email, subject: "New lead: " + fullName, text: alertText, fromName: "Bridgepoint CRM" }),
       }).catch(() => {});
     }
 
