@@ -8143,9 +8143,10 @@ appEl.addEventListener("click", function(e){
   else if (action === "cancel-appointment"){ cancelAppointment(t.dataset.id); }
   else if (action === "copy-booking-link" || action === "copy-link"){
     var linkVal = t.dataset.link;
+    var fallback = function(){ window.prompt("Couldn't copy automatically — select and copy this link:", linkVal); };
     if (navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(linkVal).then(function(){ showToast("Link copied"); }).catch(function(){ showToast("Couldn't copy — copy it manually"); });
-    } else { showToast("Couldn't copy — copy it manually"); }
+      navigator.clipboard.writeText(linkVal).then(function(){ showToast("Link copied"); }).catch(fallback);
+    } else { fallback(); }
   }
   else if (action === "select-booking-day"){ ui.publicBooking.selectedDate = t.dataset.date; render(); }
   else if (action === "booking-back-to-days"){ ui.publicBooking.selectedDate = null; render(); }
