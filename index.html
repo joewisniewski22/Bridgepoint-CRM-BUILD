@@ -5924,7 +5924,8 @@ function renderRail(lead){
           (canEditApplication(lead) ? (
             '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
             '<button class="btn btn-sm" data-action="open-modal" data-modal="takeApplication" data-lead="' + lead.id + '">Take Application by Phone' + (lead.applicationTakenByPhone ? ' ✓' : '') + '</button>' +
-            '<button class="btn btn-sm" data-action="send-borrower-portal" data-lead="' + lead.id + '" title="Sends the same link by both email and text right now — no modal, no picking a channel">Send Borrower Portal</button>'
+            '<button class="btn btn-sm" data-action="send-borrower-portal" data-lead="' + lead.id + '" title="Sends the same link by both email and text right now — no modal, no picking a channel">Send Borrower Portal</button>' +
+            '<button class="btn btn-sm btn-ghost" type="button" data-action="copy-link" data-link="' + esc(applicationLink(lead)) + '" title="Copy the borrower portal / application link to send yourself, any way you want">🔗 Copy Link</button>'
           ) : '') +
           '<a class="btn btn-sm" href="' + XACTUS_PORTAL_URL + '" target="_blank" rel="noopener" data-action="order-credit" data-lead="' + lead.id + '">Order Credit' + (lead.creditOrderedAt ? ' ✓' : '') + '</a>'
         ) +
@@ -8140,7 +8141,7 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "delete-availability-rule"){ deleteAvailabilityRule(t.dataset.id); }
   else if (action === "cancel-appointment"){ cancelAppointment(t.dataset.id); }
-  else if (action === "copy-booking-link"){
+  else if (action === "copy-booking-link" || action === "copy-link"){
     var linkVal = t.dataset.link;
     if (navigator.clipboard && navigator.clipboard.writeText){
       navigator.clipboard.writeText(linkVal).then(function(){ showToast("Link copied"); }).catch(function(){ showToast("Couldn't copy — copy it manually"); });
