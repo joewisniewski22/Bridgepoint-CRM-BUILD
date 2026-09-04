@@ -79,6 +79,7 @@ Deno.serve(async (req: Request) => {
 
     const guidance = DOC_GUIDANCE[docName] || DEFAULT_GUIDANCE;
     const promptText = "You are reviewing a loan document for a hard-money/DSCR real estate lender.\n\n" +
+      "IMPORTANT CONTEXT: this lender only makes business-purpose loans to investment entities on non-owner-occupied property -- the borrower/guarantor never lives at the subject property. Their government ID, EIN letter, entity documents, and bank statements will almost always show a personal or business mailing address that's completely different from the property address below. That is normal and expected for every single file -- NEVER flag an address on the borrower's ID, entity docs, or EIN letter as inconsistent just because it doesn't match the property address. Only flag address-related issues within a document type where that document's own guidance below explicitly calls for an address check (e.g. a purchase contract's address should match the property).\n\n" +
       "Document type: " + docName + "\n" +
       "What to check: " + guidance + "\n\n" +
       "Loan file details:\n" +
