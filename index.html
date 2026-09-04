@@ -1156,6 +1156,9 @@ function evaluateGuidelines(lead){
       }
     }
   } else if (type === "Fix & Flip" || type === "Bridge"){
+    if (type === "Fix & Flip" && (lead.propertyAddress||"").toLowerCase().indexOf("baltimore") !== -1){
+      check("City eligibility", false, "Baltimore, MD — Constructive Capital is no longer doing Fix & Flip loans in Baltimore (as of 2026-09-04) — needs an outside lender or in-house exception");
+    }
     check("Loan amount", lead.loanAmount>=75000 && lead.loanAmount<=2000000,
       fmtUSD(lead.loanAmount) + " — needs to be $75,000–$2,000,000");
     check("Credit score", (lead.creditScore||0) >= 680, (lead.creditScore||"—") + " — 680 minimum");
