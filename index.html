@@ -425,6 +425,7 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
   .detail-grid{grid-template-columns:1fr}
   .board{max-height:none}
 }
+.pac-container{z-index:9999 !important}
 </style>
 <div id="app"></div>
 <script id="state-json" type="application/json">{"company":{"name":"Bridgepoint Lending","tagline":"Real Estate Financing Solutions"},"marketRates":{"dscr":{"label":"DSCR","previous":6.625,"current":6.375,"updatedAt":"2026-08-29"},"fixFlip":{"label":"Fix & Flip","previous":9.25,"current":8.75,"updatedAt":"2026-08-29"},"groundUp":{"label":"Ground Up Construction","previous":10.0,"current":9.5,"updatedAt":"2026-08-29"},"portfolio":{"label":"Portfolio / Blanket","previous":6.625,"current":6.375,"updatedAt":"2026-08-29"},"bridge":{"label":"Bridge","previous":9.25,"current":8.75,"updatedAt":"2026-08-29"},"mixedUse":{"label":"Mixed-Use","previous":9.75,"current":9.75,"updatedAt":"2026-06-01"}},"users":[],"notifications":[],"leads":[]}</script>
@@ -2144,6 +2145,14 @@ function computeQueue(userId){
       }
     }
 
+    if (userId==="owner" && lead.pricingReviewRequestedAt && !lead.pricingReviewResolvedAt){
+      items.push({
+        type:"review-request", leadId:lead.id, priority:5,
+        label:"Pricing review requested" + (lead.pricingReviewNote ? (" — " + lead.pricingReviewNote) : ""),
+        reason:"Requested by " + userName(lead.pricingReviewRequestedBy) + " on " + fmtDate((lead.pricingReviewRequestedAt||"").slice(0,10))
+      });
+    }
+
     var rk = RATE_KEY_BY_LOAN_TYPE[lead.loanType];
     if (rk && state.marketRates[rk]){
       var r = state.marketRates[rk];
@@ -2580,6 +2589,8 @@ function leadToRow(l){
     automation_paused: !!l.automationPaused, ai_stage: l.aiStage || null,
     outside_lender: l.outsideLender || null,
     referral_partner_id: l.referralPartnerId || null,
+    pricing_review_requested_at: l.pricingReviewRequestedAt || null, pricing_review_note: l.pricingReviewNote || null,
+    pricing_review_requested_by: l.pricingReviewRequestedBy || null, pricing_review_resolved_at: l.pricingReviewResolvedAt || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -2614,7 +2625,9 @@ function rowToLead(r){
     automationPaused: !!r.automation_paused, aiStage: r.ai_stage || null,
     outsideLender: r.outside_lender || null,
     referralPartnerId: r.referral_partner_id || null,
-    callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[]
+    callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[],
+    pricingReviewRequestedAt: r.pricing_review_requested_at || null, pricingReviewNote: r.pricing_review_note || null,
+    pricingReviewRequestedBy: r.pricing_review_requested_by || null, pricingReviewResolvedAt: r.pricing_review_resolved_at || null
   };
 }
 function notifToRow(n){
@@ -2833,6 +2846,48 @@ function geocodeAddress(address, onDone){
   sb.functions.invoke("geocode-address", { body: { address: address } }).then(function(res){
     onDone((res.data && res.data.ok) ? res.data : null);
   }).catch(function(){ onDone(null); });
+}
+// Real live-suggestion typeahead (Google Places), layered on top of the
+// address-lookup input handler below rather than replacing it -- selecting
+// a suggestion fills the input and dispatches a real "input" event, so the
+// existing debounced Census geocode call still runs and rural-status
+// detection keeps working exactly as before. Loaded lazily/once since it's
+// not needed until an address field is actually on screen.
+var googleMapsPlacesPromise = null;
+function loadGoogleMapsPlaces(){
+  if (googleMapsPlacesPromise) return googleMapsPlacesPromise;
+  googleMapsPlacesPromise = new Promise(function(resolve, reject){
+    if (window.google && window.google.maps && window.google.maps.places){ resolve(); return; }
+    window.__gmapsPlacesReady = function(){ resolve(); };
+    var s = document.createElement("script");
+    s.src = "https://maps.googleapis.com/maps/api/js?key=" + GOOGLE_MAPS_API_KEY + "&libraries=places&callback=__gmapsPlacesReady&loading=async";
+    s.async = true;
+    s.onerror = function(){ googleMapsPlacesPromise = null; reject(new Error("Google Maps failed to load")); };
+    document.head.appendChild(s);
+  });
+  return googleMapsPlacesPromise;
+}
+function initPlacesAutocomplete(){
+  var inputs = document.querySelectorAll('input[data-action="address-lookup"]');
+  if (!inputs.length || !GOOGLE_MAPS_API_KEY) return;
+  loadGoogleMapsPlaces().then(function(){
+    inputs.forEach(function(input){
+      if (input.dataset.placesBound) return;
+      input.dataset.placesBound = "1";
+      var ac = new google.maps.places.Autocomplete(input, {
+        types: ["address"],
+        componentRestrictions: { country: "us" },
+        fields: ["formatted_address"]
+      });
+      ac.addListener("place_changed", function(){
+        var place = ac.getPlace();
+        var addr = place && place.formatted_address;
+        if (!addr) return;
+        input.value = addr;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    });
+  }).catch(function(){ /* falls back to the existing single-match datalist suggestion */ });
 }
 function isBirthdayToday(lead){
   if (!lead.birthday) return false;
@@ -3578,6 +3633,29 @@ function pushStaffAlert(userId, text){
   var phone = u && (u.phone || u.quoPhoneNumber);
   if (!phone) return;
   sb.functions.invoke("send-text", { body: { to: phone, text: "Bridgepoint CRM: " + text } }).catch(function(){});
+}
+function submitForReview(leadId, note){
+  var lead = leadById(leadId);
+  if (!lead || !isLO()) return;
+  lead.pricingReviewRequestedAt = new Date().toISOString();
+  lead.pricingReviewNote = (note||"").trim();
+  lead.pricingReviewRequestedBy = ui.viewAs;
+  lead.pricingReviewResolvedAt = null;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"notify", text:"Submitted for pricing review" + (lead.pricingReviewNote ? (" — " + lead.pricingReviewNote) : ""), author: currentUser().name });
+  var details = "Pricing review requested on " + lead.name + " (" + (lead.loanType||"Loan") + " " + fmtUSD(lead.loanAmount) + ") by " + currentUser().name + (lead.pricingReviewNote ? (" — " + lead.pricingReviewNote) : "");
+  notifyUser("owner", leadId, "review-request", details);
+  showToast("Sent to Joe for review");
+  persist();
+}
+function resolveReview(leadId){
+  var lead = leadById(leadId);
+  if (!lead || !isOwner()) return;
+  lead.pricingReviewResolvedAt = new Date().toISOString();
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text:"Pricing review marked reviewed", author: currentUser().name });
+  showToast("Marked reviewed");
+  persist();
 }
 function markNotificationRead(id){
   var n = (state.notifications||[]).filter(function(x){ return x.id===id; })[0];
@@ -4487,6 +4565,7 @@ function render(){
   var toastHTML = ui.toast ? ('<div class="toast" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
   app.insertAdjacentHTML("beforeend", toastHTML);
   initSignaturePads();
+  initPlacesAutocomplete();
 }
 
 function renderPublicApply(){
@@ -5229,7 +5308,8 @@ function renderToday(){
       var lead = leadById(item.leadId);
       if (!lead) return "";
       var typeCls = "type-" + item.type;
-      var typeBadge = item.type==="hot" ? '<span class="badge badge-hot">🔥 Hot Lead</span>'
+      var typeBadge = item.type==="review-request" ? '<span class="badge badge-hot">📋 Review Requested</span>'
+        : item.type==="hot" ? '<span class="badge badge-hot">🔥 Hot Lead</span>'
         : item.type==="rate-drop" ? '<span class="badge badge-gold">Rate Alert</span>'
         : item.type==="refi" ? '<span class="badge badge-forest">Refi Radar</span>'
         : item.type==="followup" ? '<span class="badge badge-rust">Follow-up</span>'
@@ -5245,7 +5325,7 @@ function renderToday(){
             (isOwner() ? ('<span>LO: ' + esc(userName(lead.assignedTo)) + '</span>') : '') + '</div>' +
         '</div>' +
         '<div class="queue-actions">' +
-          '<button class="btn btn-sm btn-primary" data-action="open-modal" data-modal="logCall" data-lead="' + lead.id + '">Log Call</button>' +
+          (item.type==="review-request" ? '<button class="btn btn-sm btn-primary" data-action="resolve-review" data-lead="' + lead.id + '">Mark Reviewed</button>' : '<button class="btn btn-sm btn-primary" data-action="open-modal" data-modal="logCall" data-lead="' + lead.id + '">Log Call</button>') +
           '<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View</button>' +
         '</div>' +
       '</div>';
@@ -5549,11 +5629,35 @@ function renderTabScenario(lead){
     field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
+  '</div>' + renderSubmitForReview(lead) + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
+}
+function renderSubmitForReview(lead){
+  if (isLO()){
+    var pending = lead.pricingReviewRequestedAt && !lead.pricingReviewResolvedAt;
+    return '<div class="panel panel-pad" style="margin-top:20px">' +
+      '<div class="rail-title" style="margin-bottom:6px">Pricing Review</div>' +
+      (pending
+        ? ('<div class="footnote">Sent to Joe ' + fmtDate((lead.pricingReviewRequestedAt||"").slice(0,10)) + (lead.pricingReviewNote ? (' — "' + esc(lead.pricingReviewNote) + '"') : '') + ' — waiting on his review.</div>')
+        : ('<div class="footnote" style="padding-bottom:8px">Want Joe to double-check pricing before you quote this? Send it straight to his daily list.</div>' +
+           '<form data-form="submit-for-review" data-lead="' + lead.id + '" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">' +
+             '<div class="form-row" style="flex:1;min-width:200px"><label>Note for Joe (optional)</label><input class="input" name="reviewNote" placeholder="what you need help with"></div>' +
+             '<button class="btn btn-sm btn-primary" type="submit">Submit for Review</button>' +
+           '</form>')
+      ) +
+    '</div>';
+  }
+  if (isOwner() && lead.pricingReviewRequestedAt && !lead.pricingReviewResolvedAt){
+    return '<div class="panel panel-pad" style="margin-top:20px;border-color:var(--brand)">' +
+      '<div class="rail-title" style="margin-bottom:6px">📋 Pricing Review Requested</div>' +
+      '<div class="footnote" style="padding-bottom:8px">' + esc(userName(lead.pricingReviewRequestedBy)) + ' asked for a review' + (lead.pricingReviewNote ? (': "' + esc(lead.pricingReviewNote) + '"') : '') + '</div>' +
+      '<button class="btn btn-sm btn-primary" data-action="resolve-review" data-lead="' + lead.id + '">Mark Reviewed</button>' +
+    '</div>';
+  }
+  return '';
 }
 function renderOutsideTermSheetUpload(lead){
-  if (!isOwner()) return '';
-  return '<div class="section-head" style="margin-top:20px"><h2>Upload Outside Term Sheet (Owner Only)</h2></div>' +
+  if (!canManageOutsideLender()) return '';
+  return '<div class="section-head" style="margin-top:20px"><h2>Upload Outside Term Sheet</h2></div>' +
     '<div class="panel panel-pad">' +
       '<div class="footnote" style="padding:0 0 8px">Got a real quote back from RCN, Kiavi, or anyone else? Upload it here — AI reads the actual figures and updates this loan\'s terms automatically. Nothing else on the site changes.</div>' +
       '<form data-form="outside-term-sheet" data-lead="' + lead.id + '">' +
@@ -8170,6 +8274,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
   else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
   else if (action === "delete-lead"){ deleteLead(t.dataset.lead, t.dataset.name); }
+  else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
   else if (action === "toggle-automation-paused"){ toggleAutomationPaused(t.dataset.lead); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
@@ -8593,6 +8698,9 @@ appEl.addEventListener("submit", function(e){
     form.reset();
   } else if (type === "request-doc"){
     requestDoc(form.dataset.lead, fd.get("name"));
+    form.reset();
+  } else if (type === "submit-for-review"){
+    submitForReview(form.dataset.lead, fd.get("reviewNote"));
     form.reset();
   } else if (type === "outside-term-sheet"){
     var tsFileInput = form.querySelector('[name="termSheetFile"]');
