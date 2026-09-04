@@ -1521,7 +1521,25 @@ try {
     ui.publicBooking = { userId:bookUserId, status:"loading" };
     loadPublicBooking(bookUserId);
   } else if (sessionWasRestored){
-    hydrateFromSupabase();
+    if (isDemoAccountId(ui.viewAs)){
+      hydrateFromSupabase();
+    } else if (sb && sb.auth) {
+      sb.auth.getSession().then(function(res){
+        if (!res.data || !res.data.session){
+          // Real staff session expired or missing -- fail closed (force
+          // re-login) rather than silently falling back to the broad
+          // anon-key access, which would defeat the whole point of the
+          // per-role RLS this session is supposed to carry.
+          ui.loggedIn = false;
+          try { localStorage.removeItem("bp_authed_for"); } catch(e){}
+          render();
+        } else {
+          hydrateFromSupabase();
+        }
+      });
+    } else {
+      hydrateFromSupabase();
+    }
   }
 })();
 
@@ -1623,29 +1641,39 @@ function attemptLogin(username, pin){
   if (!sb){ ui.loginError = "Can't reach the login service right now."; render(); return; }
   ui.loginBusy = true;
   render();
-  sb.rpc("login", { p_username: username||"", p_pin: pin||"" }).then(function(res){
+  sb.functions.invoke("staff-login", { body: { username: username||"", pin: pin||"" } }).then(function(res){
     ui.loginBusy = false;
-    if (res.error || !res.data){
+    if (res.error || !res.data || !res.data.ok){
       ui.loginError = "Incorrect username or PIN.";
       render();
       return;
     }
-    var u = res.data;
-    upsertLocalUser(u);
-    ui.viewAs = u.id;
-    ui.loggedIn = true;
-    ui.loginError = null;
-    ui.loginSelectedUser = null;
-    ui.loginUsername = "";
-    if (isDemoAccountId(u.id)){ ui.view = "tour"; ui.tourStep = 0; }
-    else { ui.view = u.onboarded ? "today" : "onboardSignature"; }
-    ui.selectedLeadId = null;
-    try { localStorage.setItem("bp_view_as", u.id); localStorage.setItem("bp_authed_for", u.id); } catch(e){}
-    render();
-    sb.rpc("list_users").then(function(res2){
-      if (res2.data){ state.users = res2.data; render(); }
-    });
-    hydrateFromSupabase();
+    var u = res.data.user;
+    var session = res.data.session;
+    var finishLogin = function(){
+      upsertLocalUser(u);
+      ui.viewAs = u.id;
+      ui.loggedIn = true;
+      ui.loginError = null;
+      ui.loginSelectedUser = null;
+      ui.loginUsername = "";
+      if (isDemoAccountId(u.id)){ ui.view = "tour"; ui.tourStep = 0; }
+      else { ui.view = u.onboarded ? "today" : "onboardSignature"; }
+      ui.selectedLeadId = null;
+      try { localStorage.setItem("bp_view_as", u.id); localStorage.setItem("bp_authed_for", u.id); } catch(e){}
+      render();
+      sb.rpc("list_users").then(function(res2){
+        if (res2.data){ state.users = res2.data; render(); }
+      });
+      hydrateFromSupabase();
+    };
+    if (session){
+      sb.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token }).then(function(){
+        finishLogin();
+      });
+    } else {
+      finishLogin();
+    }
   });
 }
 function logout(){
@@ -1654,6 +1682,7 @@ function logout(){
   ui.loginError = null;
   ui.loginUsername = "";
   try { localStorage.removeItem("bp_authed_for"); } catch(e){}
+  if (sb && sb.auth) sb.auth.signOut().catch(function(){});
   render();
 }
 function uploadUserPhoto(userId, base64, contentType, onDone){
