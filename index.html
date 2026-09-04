@@ -3479,7 +3479,8 @@ function setLoanDetails(leadId, loanAmount, rate, termMonths){
   showToast("Loan details updated");
   persist();
 }
-var PRICING_INPUT_KEYS = ["creditScore","purchasePrice","currentValue","rentEstimate","experienceDeals","rehabBudget","propertyCount","citizenshipStatus"];
+var PRICING_INPUT_KEYS = ["creditScore","purchasePrice","currentValue","rentEstimate","experienceDeals","rehabBudget","arv","propertyCount","citizenshipStatus"];
+var RTL_AUTO_LOAN_TYPES = ["Fix & Flip","Bridge","Ground Up Construction"];
 function setPricingInputs(leadId, fd){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -3488,6 +3489,14 @@ function setPricingInputs(leadId, fd){
     if (!fd.has(k)) return;
     lead[k] = (k === "citizenshipStatus") ? (fd.get(k) || null) : numOrNull(k);
   });
+  // RTL loan amount is driven by the guideline max, not typed in separately --
+  // recompute it every time the underlying deal numbers (purchase price,
+  // rehab budget, ARV, experience) change, so it never drifts out of sync
+  // with what the matrix actually allows.
+  if (RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1){
+    var maxInfo = computeMaxLoanAmount(lead);
+    if (maxInfo && maxInfo.amount > 0) lead.loanAmount = Math.floor(maxInfo.amount);
+  }
   var valueBasis = dscrValueBasis(lead, (ui.pricerInputs && ui.pricerInputs[leadId]) || null);
   if (valueBasis && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/valueBasis)*1000)/10;
   showToast("Pricing inputs saved");
@@ -5544,6 +5553,7 @@ function renderPricingInputsEditor(lead){
       (isDSCR ? ('<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>') : '') +
       (isRTL ? ('<div class="form-row"><label>Investing Experience (deals)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '"></div>') : '') +
       (isRTL ? ('<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>') : '') +
+      (isRTL ? ('<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>') : '') +
       (isPortfolio ? ('<div class="form-row"><label>Number of Properties</label><input class="input" type="number" min="1" name="propertyCount" value="' + v(lead.propertyCount) + '"></div>') : '') +
       '<div class="form-row"><label>Citizenship Status</label><select class="select" name="citizenshipStatus">' + citizenshipOptions + '</select></div>' +
       '<div class="form-row"><button class="btn btn-sm btn-primary" type="submit">Save Pricing Inputs</button></div>' +
