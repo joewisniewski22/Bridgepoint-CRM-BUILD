@@ -1679,6 +1679,18 @@ function attemptLogin(username, pin){
     }
   });
 }
+function deleteLead(leadId, name){
+  if (!sb || !isOwner()) return;
+  var confirmed = window.confirm('Permanently delete "' + name + '"? This cannot be undone — the file, its documents, and its activity history will all be gone for good.');
+  if (!confirmed) return;
+  sb.from("leads").delete().eq("id", leadId).then(function(res){
+    if (res.error){ showToast("Couldn't delete — try again"); return; }
+    state.leads = state.leads.filter(function(l){ return l.id !== leadId; });
+    ui.view = "leads"; ui.selectedLeadId = null;
+    showToast(name + " deleted");
+    render();
+  });
+}
 function logout(){
   ui.loggedIn = false;
   ui.loginSelectedUser = null;
@@ -5909,6 +5921,9 @@ function renderRail(lead){
   if (isProcessor() || isOwner()){
     statusRow += '<button class="btn btn-sm' + (lead.onHold ? ' btn-primary' : '') + '" data-action="toggle-on-hold" data-lead="' + lead.id + '">' + (lead.onHold ? "Remove Hold" : "⏸ Put On Hold") + '</button>';
   }
+  if (isOwner()){
+    statusRow += '<button class="btn btn-sm btn-danger" data-action="delete-lead" data-lead="' + lead.id + '" data-name="' + esc(lead.name) + '" title="Permanently deletes this file — cannot be undone">🗑 Delete File</button>';
+  }
 
   return '<div class="panel" style="align-self:flex-start">' +
     '<div class="rail-block">' +
@@ -8154,6 +8169,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "import-back"){ ui.importState = null; render(); }
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
   else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
+  else if (action === "delete-lead"){ deleteLead(t.dataset.lead, t.dataset.name); }
   else if (action === "toggle-automation-paused"){ toggleAutomationPaused(t.dataset.lead); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
