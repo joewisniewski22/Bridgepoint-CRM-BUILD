@@ -74,6 +74,13 @@ Deno.serve(async (req: Request) => {
       id, name: fullName, email: email || null, phone: phone || null,
       source: sourceTag, loan_type: null, stage: "new", status: "active",
       assigned_to: assignedTo, created_at: today,
+      // This webhook is wired to Joe's Spanish-language Facebook ad workflow
+      // only (see routing comment above) -- every message the CRM's own
+      // templates build for this lead (outreach texts, term sheet,
+      // pre-approval, portal invite) branches on this flag, so tagging it
+      // here is what actually makes first contact and everything after go
+      // out in Spanish instead of silently defaulting to English.
+      preferred_language: "es",
       entity_type: "LLC", application_token: crypto.randomUUID(),
       activity: [
         { date: today, type: "note", text: "Lead captured from GoHighLevel via webhook (Spanish Facebook ad) — auto-routed to " + assignedTo, author: "System" },
