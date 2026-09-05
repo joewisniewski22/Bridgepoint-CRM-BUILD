@@ -2691,6 +2691,24 @@ function ensureStaffLeadPolling(leadId){
     });
   }, 15000);
 }
+var teamChatPollTimer = null;
+function ensureTeamChatPolling(){
+  if (teamChatPollTimer) return;
+  teamChatPollTimer = setInterval(function(){
+    if (!sb || ui.view !== "teamchat"){
+      clearInterval(teamChatPollTimer);
+      teamChatPollTimer = null;
+      return;
+    }
+    sb.from("team_messages").select("*").order("created_at").then(function(res){
+      if (res.error || !res.data) return;
+      var fresh = res.data.map(rowToTeamMessage);
+      if (JSON.stringify(state.teamMessages||[]) === JSON.stringify(fresh)) return;
+      state.teamMessages = fresh;
+      render();
+    });
+  }, 8000);
+}
 function startPortalPolling(leadId, token){
   // No realtime channel wired up for the public portal, so poll quietly in
   // the background for new chat replies / stage changes while the borrower
@@ -2793,6 +2811,16 @@ function hydrateFromSupabase(){
     if (res.error){ console.error("appointments fetch error", res.error); return; }
     if (res.data){ state.appointments = res.data.map(rowToAppointment); render(); }
   });
+  sb.from("team_messages").select("*").order("created_at").then(function(res){
+    if (res.error){ console.error("team messages fetch error", res.error); return; }
+    if (res.data){ state.teamMessages = res.data.map(rowToTeamMessage); render(); }
+  });
+}
+function rowToTeamMessage(r){
+  return { id:r.id, fromUserId:r.from_user_id, toUserId:r.to_user_id, body:r.body, createdAt:r.created_at, read:r.read };
+}
+function teamMessageToRow(m){
+  return { id:m.id, from_user_id:m.fromUserId, to_user_id:m.toUserId, body:m.body, created_at:m.createdAt, read:!!m.read };
 }
 function rowToPayrollEntry(r){
   return {
@@ -2909,6 +2937,9 @@ function syncToSupabase(){
   }
   if (state.notifications && state.notifications.length){
     sb.from("notifications").upsert(state.notifications.map(notifToRow)).then(function(res){ if (res.error) console.error("notification sync error", res.error); });
+  }
+  if (state.teamMessages && state.teamMessages.length){
+    sb.from("team_messages").upsert(state.teamMessages.map(teamMessageToRow)).then(function(res){ if (res.error) console.error("team message sync error", res.error); });
   }
 }
 
@@ -4958,6 +4989,7 @@ function renderShell(){
         (!isProcessor() && navVisible("referrals") ? navItem("referrals","🤝","Referral Partners") : "") +
         (!isProcessor() && navVisible("repeat") ? navItem("repeat","👥","Repeat Clients") : "") +
         (navVisible("notifications") ? navItem("notifications","🔔","Notifications", notifCount||null) : "") +
+        navItem("teamchat","💬","Team Chat", unreadTeamChatTotal(ui.viewAs)||null) +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
         (isOwner() ? navItem("ai-assistant","🤖","AI Assistant") : "") +
@@ -4994,6 +5026,7 @@ function renderShell(){
   else if (ui.view === "referrals") body = renderReferralPartners();
   else if (ui.view === "repeat") body = renderRepeatClients();
   else if (ui.view === "notifications") body = renderNotifications();
+  else if (ui.view === "teamchat") body = renderTeamChat();
   else body = renderToday();
 
   return sidebar + '<div class="main"' + accentStyle + '>' + (prefs.welcomeNote && ui.view==="today" ? ('<div class="panel panel-pad" style="margin:16px 16px 0;border-color:var(--brand)">✨ ' + esc(prefs.welcomeNote) + '</div>') : '') + body + '</div>';
@@ -7070,6 +7103,88 @@ function renderNotifications(){
 }
 
 /* ---------------------------------------------------------------------
+   Team Chat — internal staff-to-staff direct messages
+--------------------------------------------------------------------- */
+function teammatesForChat(){
+  return state.users.filter(function(u){ return u.id !== ui.viewAs && !isDemoAccountId(u.id); });
+}
+function threadWith(userId){
+  return (state.teamMessages||[]).filter(function(m){
+    return (m.fromUserId===ui.viewAs && m.toUserId===userId) || (m.fromUserId===userId && m.toUserId===ui.viewAs);
+  }).sort(function(a,b){ return new Date(a.createdAt) - new Date(b.createdAt); });
+}
+function unreadTeamChatCount(fromUserId, toUserId){
+  return (state.teamMessages||[]).filter(function(m){ return m.fromUserId===fromUserId && m.toUserId===toUserId && !m.read; }).length;
+}
+function unreadTeamChatTotal(userId){
+  return (state.teamMessages||[]).filter(function(m){ return m.toUserId===userId && !m.read; }).length;
+}
+function openChatWith(userId){
+  ui.teamChatWith = userId;
+  var thread = threadWith(userId);
+  var changed = false;
+  thread.forEach(function(m){ if (m.toUserId===ui.viewAs && !m.read){ m.read = true; changed = true; } });
+  render();
+  if (changed) scheduleSync();
+}
+function sendTeamMessage(toUserId, body){
+  body = (body||"").trim();
+  if (!body || !toUserId) return;
+  state.teamMessages = state.teamMessages || [];
+  state.teamMessages.push({
+    id: "tm" + Date.now().toString(36) + Math.floor(Math.random()*1000),
+    fromUserId: ui.viewAs, toUserId: toUserId, body: body,
+    createdAt: new Date().toISOString(), read: false
+  });
+  persist();
+}
+function renderTeamChat(){
+  ensureTeamChatPolling();
+  var mates = teammatesForChat();
+  if (!ui.teamChatWith || mates.every(function(u){ return u.id !== ui.teamChatWith; })){
+    ui.teamChatWith = mates[0] ? mates[0].id : null;
+  }
+  var list = mates.map(function(u){
+    var thread = threadWith(u.id);
+    var last = thread[thread.length-1];
+    var unread = unreadTeamChatCount(u.id, ui.viewAs);
+    var active = u.id === ui.teamChatWith;
+    return '<div class="doc-row" style="cursor:pointer;' + (active ? 'background:var(--brand-tint)' : '') + '" data-action="open-team-chat" data-user="' + u.id + '">' +
+      '<div>' +
+        '<div>' + esc(u.name) + (unread ? (' <span class="badge badge-hot">' + unread + '</span>') : '') + '</div>' +
+        '<div class="cell-sub">' + esc(last ? (last.body.slice(0,60) + (last.body.length>60?"…":"")) : "No messages yet") + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+  var activeUser = userById(ui.teamChatWith);
+  var thread = ui.teamChatWith ? threadWith(ui.teamChatWith) : [];
+  var msgs = thread.map(function(m){
+    var mine = m.fromUserId === ui.viewAs;
+    return '<div style="display:flex;' + (mine ? 'justify-content:flex-end' : '') + ';margin-bottom:8px">' +
+      '<div style="max-width:70%;padding:8px 12px;border-radius:10px;background:' + (mine ? 'var(--brand)' : 'var(--surface-2,var(--border-soft))') + ';color:' + (mine ? 'var(--brand-ink)' : 'inherit') + '">' +
+        '<div style="white-space:pre-wrap">' + esc(m.body) + '</div>' +
+        '<div class="footnote" style="padding-top:2px;opacity:.8">' + fmtDate((m.createdAt||"").slice(0,10)) + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+  var chatPane = activeUser
+    ? ('<div style="display:flex;flex-direction:column;height:100%">' +
+        '<div class="section-head"><h2>' + esc(activeUser.name) + '</h2></div>' +
+        '<div style="flex:1;overflow-y:auto;padding:4px 4px 12px">' + (msgs || '<div class="empty">No messages yet — say hi.</div>') + '</div>' +
+        '<form data-form="team-chat-send" data-to="' + activeUser.id + '" style="display:flex;gap:8px">' +
+          '<input class="input" name="body" placeholder="Message ' + esc(activeUser.name) + '…" autocomplete="off" style="flex:1" required>' +
+          '<button class="btn btn-primary" type="submit">Send</button>' +
+        '</form>' +
+      '</div>')
+    : '<div class="empty">No teammates to message yet.</div>';
+  return topbar("Team Chat", "Direct messages between staff — internal only, never seen by borrowers.", "") +
+    '<div class="content" style="display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start">' +
+      '<div class="panel panel-pad">' + (list || '<div class="empty">No teammates yet.</div>') + '</div>' +
+      '<div class="panel panel-pad" style="height:60vh">' + chatPane + '</div>' +
+    '</div>';
+}
+
+/* ---------------------------------------------------------------------
    Borrower portal
 --------------------------------------------------------------------- */
 function renderPortal(){
@@ -8374,6 +8489,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
   else if (action === "delete-lead"){ deleteLead(t.dataset.lead, t.dataset.name); }
   else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
+  else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
   else if (action === "toggle-automation-paused"){ toggleAutomationPaused(t.dataset.lead); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
@@ -8810,6 +8926,9 @@ appEl.addEventListener("submit", function(e){
     form.reset();
   } else if (type === "property-address"){
     setPropertyAddress(form.dataset.lead, fd.get("propertyAddress"));
+  } else if (type === "team-chat-send"){
+    sendTeamMessage(form.dataset.to, fd.get("body"));
+    form.reset();
   } else if (type === "submit-for-review"){
     submitForReview(form.dataset.lead, fd.get("reviewNote"));
     form.reset();
