@@ -2360,6 +2360,50 @@ function reallySendBorrowerPortalInvite(leadId){
     persist();
   });
 }
+function bookingLinkFor(userId){
+  return window.location.origin + window.location.pathname + "?book=" + userId;
+}
+function sendSchedulingLink(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
+  ui.modal = { type:"sendPreview", leadId: leadId, kind: "scheduling" };
+  render();
+}
+function reallySendSchedulingLink(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (!sb){ showToast("Send service unavailable"); return; }
+  if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
+  var me = currentUser();
+  var link = bookingLinkFor(me.id);
+  var isEs = (lead.preferredLanguage||"en") === "es";
+  var firstName = (lead.name||"").split(" ")[0];
+  var text = isEs
+    ? ("Hola " + firstName + ", puede reservar una hora conmigo directamente aquí, cuando le convenga: " + link)
+    : ("Hi " + firstName + ", you can grab a time on my calendar directly here, whatever works best for you: " + link);
+  var subject = isEs ? "Bridgepoint Lending — Agende una Llamada" : "Bridgepoint Lending — Schedule a Call";
+  showToast("Sending scheduling link…");
+  var calls = [];
+  if (lead.email){
+    calls.push(sb.functions.invoke("send-email", {
+      body: { leadId: lead.id, to: lead.email, subject: subject, text: text, fromName: me.name, fromAddress: me.email, fromUserId: me.id, fromPhotoUrl: me.photoUrl||null }
+    }).then(function(res){ return { channel:"email", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"email", ok:false }; }));
+  }
+  if (lead.phone){
+    calls.push(sb.functions.invoke("send-text", {
+      body: { leadId: lead.id, to: lead.phone, text: text, fromName: me.name, fromNumber: me.quoPhoneNumber || null }
+    }).then(function(res){ return { channel:"text", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
+  }
+  Promise.all(calls).then(function(results){
+    var sentVia = results.filter(function(r){ return r.ok; }).map(function(r){ return r.channel; });
+    if (!sentVia.length){ showToast("Couldn't send — try again"); return; }
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"notify", text: "Scheduling link sent to " + lead.name + " via " + sentVia.join(" + "), author: me.name });
+    showToast("Scheduling link sent via " + sentVia.join(" + "));
+    persist();
+  });
+}
 function signoffFor(userId){
   var u = userById(userId);
   return (u && u.textSignoff) ? ("\n\n" + u.textSignoff) : "";
@@ -5018,7 +5062,7 @@ function renderShell(){
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">' +
             (isDemo() ? '<button class="btn btn-sm btn-primary" style="flex:1" data-action="restart-tour">▶ Replay Tour</button>' : '<button class="btn btn-sm" style="flex:1" data-action="open-modal" data-modal="changePin">Change PIN</button>') +
             (isDemo() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="editSignature">Signature</button>') +
-            (isDemo() || isProcessor() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="mySchedule">My Schedule</button>') +
+            (isDemo() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="mySchedule">My Schedule</button>') +
             '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="logout">Log Out</button>' +
           '</div>' +
         '</div>' +
@@ -6168,6 +6212,7 @@ function renderRail(lead){
         '<a class="btn btn-sm" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Call</a>' +
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<a class="btn btn-sm" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — " + lead.loanType) + '&body=' + encodeURIComponent(defaultOutreachMessage(lead)) + '" data-action="log-email" data-lead="' + lead.id + '">Email</a>' +
+        '<button class="btn btn-sm" data-action="send-scheduling-link" data-lead="' + lead.id + '" title="Sends your personal booking link by email and text so they can grab a time with you directly">📅 Schedule Appointment</button>' +
         (isProcessor() ? '' :
           (canEditApplication(lead) ? (
             '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
@@ -7339,6 +7384,17 @@ function modalSendPreview(leadId, kind){
       : ("Hi " + firstName + ", you can check your loan status, upload documents, and message " + (lo.name||"your loan officer") + " anytime here: " + link);
     smsMsg = emailBody;
     showPdfBtn = false;
+  } else if (kind === "scheduling"){
+    var me = currentUser();
+    var schedLink = bookingLinkFor(me.id);
+    var firstNameSched = (lead.name||"").split(" ")[0];
+    title = "Preview — Send Scheduling Link";
+    subject = isEs ? "Bridgepoint Lending — Agende una Llamada" : "Bridgepoint Lending — Schedule a Call";
+    emailBody = isEs
+      ? ("Hola " + firstNameSched + ", puede reservar una hora conmigo directamente aquí, cuando le convenga: " + schedLink)
+      : ("Hi " + firstNameSched + ", you can grab a time on my calendar directly here, whatever works best for you: " + schedLink);
+    smsMsg = emailBody;
+    showPdfBtn = false;
   } else {
     var isTerm = kind === "termSheet";
     var label = isTerm ? "Term Sheet" : "Pre-Approval Letter";
@@ -7359,8 +7415,8 @@ function modalSendPreview(leadId, kind){
       '<div class="modal-body">' +
         '<div class="footnote" style="padding:0 0 8px">Going out via ' + (channels.length ? channels.join(" and ") : "no channel — add an email or phone first") + '. Review below before it sends for real.</div>' +
         '<div class="form-row"><label>Email subject</label><div class="val">' + esc(subject) + '</div></div>' +
-        '<div class="form-row"><label>Email body' + (kind!=="portal" ? " (also attached as a PDF)" : "") + '</label><textarea class="textarea" rows="10" readonly>' + esc(emailBody) + '</textarea></div>' +
-        (kind !== "portal" ? '<div class="form-row"><label>Text heads-up</label><textarea class="textarea" rows="3" readonly>' + esc(smsMsg) + '</textarea></div>' : '') +
+        '<div class="form-row"><label>Email body' + (showPdfBtn ? " (also attached as a PDF)" : "") + '</label><textarea class="textarea" rows="10" readonly>' + esc(emailBody) + '</textarea></div>' +
+        (showPdfBtn ? '<div class="form-row"><label>Text heads-up</label><textarea class="textarea" rows="3" readonly>' + esc(smsMsg) + '</textarea></div>' : '') +
         (showPdfBtn ? '<div class="form-row"><button class="btn btn-sm" type="button" data-action="preview-document-pdf" data-lead="' + lead.id + '" data-kind="' + kind + '">View Exact PDF</button></div>' : '') +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button>' +
@@ -7406,6 +7462,9 @@ function modalEditSignature(){
       '<form data-form="save-signature">' +
       '<div class="modal-body">' +
         '<div class="form-row"><label>Email signature</label><textarea class="textarea" name="emailSignature" rows="5">' + esc(u.emailSignature || defaultEmailSig) + '</textarea></div>' +
+        '<div class="form-row"><label>Your Booking Link</label><div style="display:flex;gap:6px"><input class="input mono" readonly value="' + esc(bookingLinkFor(u.id)) + '"><button class="btn btn-sm" type="button" data-action="copy-booking-link" data-link="' + esc(bookingLinkFor(u.id)) + '">Copy</button></div>' +
+          '<div class="footnote" style="padding-top:4px">Paste this into your email signature above so clients can book time with you directly — set your available hours under My Schedule first.</div>' +
+        '</div>' +
         '<div class="form-row"><label>Text message sign-off</label><input class="input" name="textSignoff" value="' + esc(u.textSignoff || defaultText) + '"></div>' +
         '<div class="form-row"><label>Your Quo phone number</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
         '<div class="footnote" style="padding:0">Find this in the Quo app under your own line. Texts you send from the CRM will go out from this number instead of the shared office line.</div>' +
@@ -8645,6 +8704,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "confirm-send-preview"){
     var csKind = t.dataset.kind;
     if (csKind === "portal") reallySendBorrowerPortalInvite(t.dataset.lead);
+    else if (csKind === "scheduling") reallySendSchedulingLink(t.dataset.lead);
     else reallySendDocumentBoth(t.dataset.lead, csKind);
     ui.modal = null;
     render();
@@ -8667,6 +8727,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "booking-back-to-slots"){ ui.publicBooking.selectedSlot = null; render(); }
   else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
   else if (action === "send-borrower-portal"){ sendBorrowerPortalInvite(t.dataset.lead); }
+  else if (action === "send-scheduling-link"){ sendSchedulingLink(t.dataset.lead); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }
