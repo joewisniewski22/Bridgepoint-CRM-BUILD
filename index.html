@@ -2832,8 +2832,36 @@ function sendBorrowerPortalFollowUp(lead){
     sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name, fromNumber: lo.quoPhoneNumber||null } }).catch(function(){});
   }
 }
+var globalPollTimer = null;
+function ensureGlobalPolling(){
+  // Nothing on Today, Leads & Loans, Pipeline, or Notifications ever
+  // refreshed itself -- a new lead, a status change from another staff
+  // member, or a new notification only ever showed up after a manual
+  // browser reload. This polls the two highest-signal tables in the
+  // background and only re-renders when something actually changed, same
+  // pattern already used for the lead-detail/team-chat/email polling.
+  if (globalPollTimer || !sb) return;
+  globalPollTimer = setInterval(function(){
+    if (!ui.loggedIn || ui.publicApply || ui.publicBooking || ui.publicShowcase) return;
+    sb.from("leads").select("*").then(function(res){
+      if (res.error || !res.data) return;
+      var fresh = res.data.map(rowToLead);
+      if (JSON.stringify(state.leads||[]) === JSON.stringify(fresh)) return;
+      state.leads = fresh;
+      render();
+    });
+    sb.from("notifications").select("*").then(function(res){
+      if (res.error || !res.data) return;
+      var fresh = res.data.map(rowToNotif);
+      if (JSON.stringify(state.notifications||[]) === JSON.stringify(fresh)) return;
+      state.notifications = fresh;
+      render();
+    });
+  }, 25000);
+}
 function hydrateFromSupabase(){
   if (!sb) return;
+  ensureGlobalPolling();
   sb.rpc("list_users").then(function(res){
     if (res.data){ state.users = res.data; render(); }
   });
@@ -4718,7 +4746,32 @@ function render(){
   app.insertAdjacentHTML("beforeend", toastHTML);
   initSignaturePads();
   initPlacesAutocomplete();
+  syncHistory();
 }
+var lastHistoryKey = null;
+function syncHistory(){
+  // Every screen change in this app is just a JS state change (ui.view /
+  // ui.selectedLeadId / ui.activeTab), never a real page load, so the
+  // browser's own Back button had nothing to go back to -- refresh was
+  // the only way to leave a screen. This pushes a real history entry
+  // whenever the visible screen actually changes (not for modals/toasts,
+  // which shouldn't be their own "page"), and a popstate listener below
+  // restores the previous screen when Back is pressed.
+  var key = ui.view + "|" + (ui.selectedLeadId||"") + "|" + (ui.activeTab||"");
+  if (key === lastHistoryKey) return;
+  if (lastHistoryKey === null) history.replaceState({ view: ui.view, leadId: ui.selectedLeadId, tab: ui.activeTab }, "");
+  else history.pushState({ view: ui.view, leadId: ui.selectedLeadId, tab: ui.activeTab }, "");
+  lastHistoryKey = key;
+}
+window.addEventListener("popstate", function(e){
+  if (!e.state || !ui.loggedIn || ui.publicApply || ui.publicBooking || ui.publicShowcase) return;
+  ui.view = e.state.view || "today";
+  ui.selectedLeadId = e.state.leadId || null;
+  ui.activeTab = e.state.tab || "overview";
+  ui.modal = null;
+  lastHistoryKey = ui.view + "|" + (ui.selectedLeadId||"") + "|" + (ui.activeTab||"");
+  render();
+});
 
 function renderPublicApply(){
   var pa = ui.publicApply;
