@@ -12,6 +12,7 @@ const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const MODEL = "claude-sonnet-5";
+const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -87,9 +88,11 @@ Deno.serve(async (req: Request) => {
     const knownFields = Object.keys(FIELD_MAP).filter((k) => lead[FIELD_MAP[k]] != null && lead[FIELD_MAP[k]] !== "");
     const missingFields = Object.keys(FIELD_MAP).filter((k) => !knownFields.includes(k));
 
+    const bookingLink = CRM_URL + "?book=" + lead.assigned_to;
     const systemPrompt =
       "You are texting on behalf of " + loName + " at Bridgepoint Lending, a hard-money/DSCR real estate lender, with a prospective borrower named " + (lead.name || "the lead") + " who came in via " + (lead.source || "an ad") + " for a " + (lead.loan_type || "loan") + " inquiry. " +
-      "Your single goal is CONVERSION: get them to complete our loan application or agree to a call with " + loName + ". Keep every message short (1-3 sentences), casual real-texting style, never corporate or salesy. No more than one question per message. " +
+      "Your single goal is CONVERSION: get them to complete our loan application or book a specific time with " + loName + ". Keep every message short (1-3 sentences), casual real-texting style, never corporate or salesy. No more than one question per message. " +
+      "Once they seem ready to talk (or if the conversation has gone back and forth a couple times with no clear next step), send them this exact booking link so they can grab a real time slot themselves instead of a vague \"let's hop on a call\": " + bookingLink + " -- don't send it on literally the first message unless they ask to schedule directly. " +
       (rateNote ? (rateNote + " ") : "") +
       (awaitingLanguage
         ? "Your last message already asked (in both languages) whether they prefer English or Spanish. Read their latest reply and figure out which they picked -- look for \"spanish\", \"espanol\", \"español\", or a close misspelling/typo of those => Spanish; otherwise assume English. Then write your NEXT message already in that language, moving the conversation forward (e.g. ask about the property or their timeline)."
