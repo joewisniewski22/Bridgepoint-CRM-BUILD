@@ -5409,6 +5409,28 @@ function buildStandalonePricerOutputHTML(sp){
     (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
     '<div style="margin-top:14px"><button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button></div>';
 }
+function renderMyCalendarWidget(){
+  if (isDemo()) return "";
+  var uid = currentUser().id;
+  var link = bookingLinkFor(uid);
+  var nowTsVal = Date.now();
+  var upcoming = (state.appointments||[]).filter(function(a){ return a.userId===uid && a.status!=="canceled" && new Date(a.startAt).getTime() >= nowTsVal; }).sort(function(a,b){ return new Date(a.startAt)-new Date(b.startAt); });
+  var next3 = upcoming.slice(0,3).map(function(a){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-soft)">' +
+      '<span><b>' + esc(a.name) + '</b> — ' + new Date(a.startAt).toLocaleString([], {weekday:"short", month:"short", day:"numeric", hour:"numeric", minute:"2-digit"}) + '</span>' +
+    '</div>';
+  }).join("");
+  return '<div class="panel panel-pad" style="margin-bottom:16px;border-color:var(--brand)">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
+      '<div class="rail-title">📅 My Calendar' + (upcoming.length ? (' — ' + upcoming.length + ' upcoming') : '') + '</div>' +
+      '<div style="display:flex;gap:6px">' +
+        '<button class="btn btn-sm" type="button" data-action="copy-booking-link" data-link="' + esc(link) + '">🔗 Copy My Booking Link</button>' +
+        '<button class="btn btn-sm btn-ghost" type="button" data-action="open-modal" data-modal="mySchedule">My Schedule</button>' +
+      '</div>' +
+    '</div>' +
+    (next3 || '<div class="hint" style="padding-top:4px">Nothing booked yet — share your link above so clients can grab a time.</div>') +
+  '</div>';
+}
 function renderToday(){
   var leads = scopedLeads();
   var k = kpisFor(leads);
@@ -5423,7 +5445,7 @@ function renderToday(){
 
   if (isProcessor()){
     return topbar("Today", "Your processing to-do list — everything an LO has ordered or routed to you.", "") +
-      '<div class="content">' + kpis +
+      '<div class="content">' + kpis + renderMyCalendarWidget() +
         '<div class="section"><div class="section-head"><h2>Processing to-do</h2></div>' + renderProcessingTodo() + '</div>' +
       '</div>';
   }
@@ -5490,7 +5512,7 @@ function renderToday(){
 
   var dialerBtn = queue.length ? '<button class="btn btn-sm btn-primary" data-action="start-dialer">▶ Start Power Dialer</button>' : '';
   return topbar("Today", "Call list generated from new-lead cadence, market rate moves, and refinance timing.", "") +
-    '<div class="content">' + kpis + companyPerfHTML + teamSnapshotHTML + commissionHTML +
+    '<div class="content">' + kpis + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML +
       '<div class="section"><div class="section-head"><h2>Priority call list</h2>' +
         '<div style="display:flex;align-items:center;gap:10px"><span class="hint">' + queue.length + ' item(s)</span>' + dialerBtn + '</div>' +
       '</div>' + list + '</div>' +
