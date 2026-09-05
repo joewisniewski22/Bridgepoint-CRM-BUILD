@@ -2815,6 +2815,21 @@ function hydrateFromSupabase(){
     if (res.error){ console.error("team messages fetch error", res.error); return; }
     if (res.data){ state.teamMessages = res.data.map(rowToTeamMessage); render(); }
   });
+  sb.from("emails").select("*").order("created_at", { ascending:false }).then(function(res){
+    if (res.error){ console.error("emails fetch error", res.error); return; }
+    if (res.data){ state.emails = res.data.map(rowToEmailRecord); render(); }
+  });
+}
+function rowToEmailRecord(r){
+  return { id:r.id, leadId:r.lead_id||null, direction:r.direction, fromAddress:r.from_address, toAddress:r.to_address, subject:r.subject, body:r.body, sentBy:r.sent_by||null, createdAt:r.created_at };
+}
+function refreshEmails(){
+  if (!sb) return;
+  sb.from("emails").select("*").order("created_at", { ascending:false }).then(function(res){
+    if (res.error || !res.data) return;
+    state.emails = res.data.map(rowToEmailRecord);
+    render();
+  });
 }
 function rowToTeamMessage(r){
   return { id:r.id, fromUserId:r.from_user_id, toUserId:r.to_user_id, body:r.body, createdAt:r.created_at, read:r.read };
@@ -4990,6 +5005,7 @@ function renderShell(){
         (!isProcessor() && navVisible("repeat") ? navItem("repeat","👥","Repeat Clients") : "") +
         (navVisible("notifications") ? navItem("notifications","🔔","Notifications", notifCount||null) : "") +
         navItem("teamchat","💬","Team Chat", unreadTeamChatTotal(ui.viewAs)||null) +
+        navItem("email","📧","Email") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
         (isOwner() ? navItem("ai-assistant","🤖","AI Assistant") : "") +
@@ -5027,6 +5043,7 @@ function renderShell(){
   else if (ui.view === "repeat") body = renderRepeatClients();
   else if (ui.view === "notifications") body = renderNotifications();
   else if (ui.view === "teamchat") body = renderTeamChat();
+  else if (ui.view === "email") body = renderEmailInbox();
   else body = renderToday();
 
   return sidebar + '<div class="main"' + accentStyle + '>' + (prefs.welcomeNote && ui.view==="today" ? ('<div class="panel panel-pad" style="margin:16px 16px 0;border-color:var(--brand)">✨ ' + esc(prefs.welcomeNote) + '</div>') : '') + body + '</div>';
@@ -7185,6 +7202,88 @@ function renderTeamChat(){
 }
 
 /* ---------------------------------------------------------------------
+   Email inbox — real per-user mailbox, backed by the existing emails
+   table (already fed by send-email/receive-email, just never surfaced)
+--------------------------------------------------------------------- */
+var emailPollTimer = null;
+function ensureEmailPolling(){
+  if (emailPollTimer) return;
+  emailPollTimer = setInterval(function(){
+    if (!sb || ui.view !== "email"){
+      clearInterval(emailPollTimer);
+      emailPollTimer = null;
+      return;
+    }
+    refreshEmails();
+  }, 15000);
+}
+function myEmails(){
+  var all = state.emails || [];
+  if (isOwner()) return all;
+  var myAddr = (currentUser().email||"").toLowerCase();
+  return all.filter(function(e){
+    if (e.sentBy === ui.viewAs) return true;
+    var lead = e.leadId ? leadById(e.leadId) : null;
+    if (lead && lead.assignedTo === ui.viewAs) return true;
+    if (!lead && (e.toAddress||"").toLowerCase() === myAddr) return true;
+    return false;
+  });
+}
+function sendComposedEmail(leadId, to, subject, body){
+  if (!sb || !to || !subject || !body) return;
+  var me = currentUser();
+  showToast("Sending…");
+  sb.functions.invoke("send-email", { body: {
+    leadId: leadId || null, to: to, subject: subject, text: body,
+    fromName: me.name, fromAddress: me.email, fromUserId: me.id, fromPhotoUrl: me.photoUrl || null
+  } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){ showToast("Couldn't send — try again"); return; }
+    showToast("Email sent");
+    refreshEmails();
+  }).catch(function(){ showToast("Couldn't send — try again"); });
+}
+function renderEmailInbox(){
+  ensureEmailPolling();
+  var emails = myEmails();
+  var rows = emails.map(function(e){
+    var lead = e.leadId ? leadById(e.leadId) : null;
+    var expanded = ui.expandedEmailId === e.id;
+    var dirBadge = e.direction === "inbound" ? '<span class="badge badge-forest">Received</span>' : '<span class="badge badge-slate">Sent</span>';
+    var otherParty = e.direction === "inbound" ? e.fromAddress : e.toAddress;
+    return '<div class="queue-card">' +
+      '<div class="queue-main" data-action="toggle-email" data-id="' + e.id + '" style="cursor:pointer">' +
+        '<div class="queue-title">' + dirBadge + ' ' + esc(e.subject||"(no subject)") + '</div>' +
+        '<div class="queue-reason">' + (e.direction==="inbound"?"From ":"To ") + esc(otherParty||"") + (lead ? (' · ' + esc(lead.name)) : '') + '</div>' +
+        '<div class="queue-meta"><span>' + fmtDate((e.createdAt||"").slice(0,10)) + '</span></div>' +
+        (expanded ? ('<div class="footnote" style="white-space:pre-wrap;padding-top:8px;border-top:1px solid var(--border-soft);margin-top:8px">' + esc(e.body||"") + '</div>') : '') +
+      '</div>' +
+      '<div class="queue-actions">' +
+        (lead ? ('<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View Loan</button>') : '') +
+        '<button class="btn btn-sm" data-action="reply-email" data-id="' + e.id + '">Reply</button>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+  return topbar("Email", "Every email you've sent or received through the CRM — click one to read it, or start a new one.", '<button class="btn btn-primary" data-action="open-modal" data-modal="composeEmail">✉ Compose</button>') +
+    '<div class="content">' + (rows || '<div class="empty">No emails yet.</div>') + '</div>';
+}
+function modalComposeEmail(prefill){
+  prefill = prefill || {};
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Compose Email</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="compose-email" data-lead="' + esc(prefill.leadId||"") + '">' +
+      '<div class="modal-body">' +
+        '<div class="form-row"><label>To</label><input class="input" type="email" name="to" value="' + esc(prefill.to||"") + '" required></div>' +
+        '<div class="form-row"><label>Subject</label><input class="input" name="subject" value="' + esc(prefill.subject||"") + '" required></div>' +
+        '<div class="form-row"><label>Message</label><textarea class="textarea" name="body" rows="8" required>' + esc(prefill.body||"") + '</textarea></div>' +
+        '<div class="footnote" style="padding:0">Sends for real from your own address (' + esc(currentUser().email||"") + ').</div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Send</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+
+/* ---------------------------------------------------------------------
    Borrower portal
 --------------------------------------------------------------------- */
 function renderPortal(){
@@ -7221,6 +7320,7 @@ function renderModal(){
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   if (ui.modal.type === "mySchedule") return modalMySchedule();
   if (ui.modal.type === "sendPreview") return modalSendPreview(ui.modal.leadId, ui.modal.kind);
+  if (ui.modal.type === "composeEmail") return modalComposeEmail(ui.modal);
   return "";
 }
 function modalSendPreview(leadId, kind){
@@ -8490,6 +8590,20 @@ appEl.addEventListener("click", function(e){
   else if (action === "delete-lead"){ deleteLead(t.dataset.lead, t.dataset.name); }
   else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
+  else if (action === "toggle-email"){ ui.expandedEmailId = ui.expandedEmailId===t.dataset.id ? null : t.dataset.id; render(); }
+  else if (action === "reply-email"){
+    var replySrc = (state.emails||[]).find(function(x){ return x.id===t.dataset.id; });
+    if (replySrc){
+      ui.modal = {
+        type:"composeEmail",
+        to: replySrc.direction==="inbound" ? replySrc.fromAddress : replySrc.toAddress,
+        subject: /^re:/i.test(replySrc.subject||"") ? replySrc.subject : ("Re: " + (replySrc.subject||"")),
+        body: "",
+        leadId: replySrc.leadId
+      };
+      render();
+    }
+  }
   else if (action === "toggle-automation-paused"){ toggleAutomationPaused(t.dataset.lead); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
@@ -8926,6 +9040,10 @@ appEl.addEventListener("submit", function(e){
     form.reset();
   } else if (type === "property-address"){
     setPropertyAddress(form.dataset.lead, fd.get("propertyAddress"));
+  } else if (type === "compose-email"){
+    sendComposedEmail(form.dataset.lead || null, fd.get("to"), fd.get("subject"), fd.get("body"));
+    ui.modal = null;
+    render();
   } else if (type === "team-chat-send"){
     sendTeamMessage(form.dataset.to, fd.get("body"));
     form.reset();
