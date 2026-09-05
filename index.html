@@ -6233,16 +6233,42 @@ function renderTabDocuments(lead){
 
 var ACTIVITY_ICON_CLASS = { call:"call", stage:"stage", notify:"notify", document:"document", text:"text", email:"email", application:"application", credit:"credit" };
 function renderTabActivity(lead){
+  var convo = renderConversationThread(lead);
   var items = (lead.activity||[]).slice().reverse().map(function(a){
     var cls = ACTIVITY_ICON_CLASS[a.type] || "";
     return '<div class="activity-item ' + cls + '"><div class="activity-dot"></div>' +
       '<div class="activity-text">' + esc(a.text) + '<div class="activity-date">' + fmtDate(a.date) + (a.author ? (" · " + esc(a.author)) : "") + '</div></div></div>';
   }).join("");
-  return '<div>' + (items || '<div class="empty">No activity yet.</div>') + '</div>' +
+  return convo + '<div>' + (items || '<div class="empty">No activity yet.</div>') + '</div>' +
     '<form data-form="add-note" data-lead="' + lead.id + '" style="margin-top:14px">' +
       '<textarea class="textarea" name="note" placeholder="Add a note…"></textarea>' +
       '<button class="btn btn-sm" type="submit" style="margin-top:8px">Add Note</button>' +
     '</form>';
+}
+function renderConversationThread(lead){
+  var msgs = (lead.activity||[]).filter(function(a){
+    return a.type === "text" && typeof a.text === "string" &&
+      (a.text.indexOf("Received (via Quo):") === 0 || a.text.indexOf("Texted (via Quo):") === 0);
+  });
+  if (!msgs.length) return "";
+  var expanded = ui.expandedConversationLead === lead.id;
+  var bubbles = msgs.map(function(a){
+    var inbound = a.text.indexOf("Received (via Quo):") === 0;
+    var body = a.text.replace(/^(Received|Texted) \(via Quo\):\s*/, "");
+    return '<div style="display:flex;' + (inbound ? '' : 'justify-content:flex-end') + ';margin-bottom:8px">' +
+      '<div style="max-width:75%;padding:8px 12px;border-radius:10px;background:' + (inbound ? 'var(--surface-2,var(--border-soft))' : 'var(--brand)') + ';color:' + (inbound ? 'inherit' : 'var(--brand-ink)') + '">' +
+        '<div style="white-space:pre-wrap">' + esc(body) + '</div>' +
+        '<div class="footnote" style="padding-top:2px;opacity:.8">' + (inbound ? esc(lead.name) : esc(a.author||"Us")) + ' · ' + fmtDate(a.date) + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+  return '<div class="panel panel-pad" style="margin-bottom:14px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" data-action="toggle-conversation" data-lead="' + lead.id + '">' +
+      '<div class="rail-title">💬 Text Conversation (' + msgs.length + ' message' + (msgs.length>1?'s':'') + ')</div>' +
+      '<span class="hint">' + (expanded ? '▲ Hide' : '▼ View') + '</span>' +
+    '</div>' +
+    (expanded ? ('<div style="margin-top:10px">' + bubbles + '</div>') : '') +
+  '</div>';
 }
 
 function renderTabThirdParties(lead){
@@ -8775,6 +8801,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
   else if (action === "toggle-email"){ ui.expandedEmailId = ui.expandedEmailId===t.dataset.id ? null : t.dataset.id; render(); }
+  else if (action === "toggle-conversation"){ ui.expandedConversationLead = ui.expandedConversationLead===t.dataset.lead ? null : t.dataset.lead; render(); }
   else if (action === "reply-email"){
     var replySrc = (state.emails||[]).find(function(x){ return x.id===t.dataset.id; });
     if (replySrc){
