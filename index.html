@@ -2807,7 +2807,12 @@ function submitPublicApplication(leadId, patch){
   lead.activity = lead.activity || [];
   lead.activity.push({ date:d, type:"application", text:"Application submitted online by " + lead.name, author: lead.name });
   if (lead.assignedTo){
-    notifyUser(lead.assignedTo, lead.id, "application", lead.name + " completed their application online.");
+    var appLink = crmLeadLink(lead.id);
+    notifyUser(lead.assignedTo, lead.id, "application", lead.name + " completed their application online — open & dial: " + appLink);
+    var appLo = userById(lead.assignedTo);
+    if (appLo && appLo.email && sb){
+      sb.functions.invoke("send-email", { body: { leadId: lead.id, to: appLo.email, subject: lead.name + " completed their application", text: lead.name + " just completed their loan application online. Open the file here: " + appLink, fromName: "Bridgepoint CRM" } }).catch(function(){});
+    }
   }
   ui.publicApply.status = "submitted";
   runGuidelineCheck(leadId);
