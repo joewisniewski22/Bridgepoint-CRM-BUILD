@@ -52,21 +52,32 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const email = fieldValue(fields, "email");
   const phone = fieldValue(fields, "phone_number", "phone");
 
-  // Everything Meta collected, in case the form has custom questions we
-  // don't have a dedicated CRM field for yet -- nothing gets silently lost.
-  const rawAnswers = fields.map((f) => f.name + ": " + (f.values || []).join(", ")).join(" | ");
+  // Everything else Meta collected, in case the form has custom questions
+  // with no dedicated CRM field yet -- kept as one readable note, not a
+  // raw dump, matching how the HighLevel webhook handles the same problem.
+  const dedicated = new Set(["full_name", "first_name", "last_name", "email", "phone_number", "phone"]);
+  const extraAnswers = fields.filter((f) => !dedicated.has(f.name.toLowerCase()) && f.values && f.values.length)
+    .map((f) => f.name + ": " + f.values.join(", ")).join(" · ");
 
   const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
   const today = new Date().toISOString().slice(0, 10);
+  const activity: Record<string, string>[] = [
+    { date: today, type: "note", text: "Lead captured from Facebook/Instagram Lead Ad (form " + formId + ", ad " + adId + ")", author: "System" },
+  ];
+  if (extraAnswers) activity.push({ date: today, type: "note", text: "Form answers — " + extraAnswers, author: "System" });
   const row = {
     id, name: fullName, email: email || null, phone: phone || null,
     source: "Meta Ads", loan_type: null, stage: "new", status: "active",
     assigned_to: "owner", created_at: today,
+    // Enrolls this lead in the same AI conversion-texting automation every
+    // other inbound source uses (see index.html's startAiEngagement / the
+    // highlevel-leads-webhook) -- routing here still defaults everyone to
+    // owner (see file header), so this stays English-first like any other
+    // non-Spanish-specific source; the automation asks language itself if
+    // the assignee ever becomes a bilingual LO.
+    ai_stage: "engaging",
     entity_type: "LLC", application_token: crypto.randomUUID(),
-    activity: [
-      { date: today, type: "note", text: "Lead captured from Facebook/Instagram Lead Ad (form " + formId + ", ad " + adId + ")", author: "System" },
-      { date: today, type: "note", text: "Raw answers: " + rawAnswers, author: "System" },
-    ],
+    activity,
   };
 
   const { error } = await sb.from("leads").insert(row);

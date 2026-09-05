@@ -26,6 +26,7 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 // Only ever fills a field when it's currently empty -- never overwrites a
 // value someone (or a prior AI turn) already set.
 const FIELD_MAP: Record<string, string> = {
+  loanType: "loan_type",
   propertyAddress: "property_address",
   purchasePrice: "purchase_price",
   loanAmount: "loan_amount",
@@ -38,6 +39,21 @@ const RATE_KEY_BY_LOAN_TYPE: Record<string, string> = {
   "DSCR": "dscr", "Fix & Flip": "fixFlip", "Ground Up Construction": "groundUp",
   "Portfolio/Blanket": "portfolio", "Bridge": "bridge", "Mixed-Use": "mixedUse",
 };
+const KNOWN_LOAN_TYPES = ["DSCR", "Fix & Flip", "Bridge", "Ground Up Construction", "Portfolio/Blanket", "Mixed-Use"];
+function normalizeLoanType(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const t = String(text).toLowerCase();
+  if (t.includes("fix") && t.includes("flip")) return "Fix & Flip";
+  if (t.includes("dscr") || t.includes("rental")) return "DSCR";
+  if (t.includes("bridge")) return "Bridge";
+  if (t.includes("ground up") || t.includes("construction")) return "Ground Up Construction";
+  if (t.includes("portfolio") || t.includes("blanket")) return "Portfolio/Blanket";
+  if (t.includes("mixed")) return "Mixed-Use";
+  return null;
+}
+function applicationLink(leadId: string, token: string): string {
+  return CRM_URL.replace(/\/$/, "") + "/?apply=" + leadId + "&t=" + (token || "");
+}
 
 function marketRateContext(loanType: string, rates: Array<Record<string, unknown>>): string {
   const key = RATE_KEY_BY_LOAN_TYPE[loanType];
@@ -89,17 +105,24 @@ Deno.serve(async (req: Request) => {
     const missingFields = Object.keys(FIELD_MAP).filter((k) => !knownFields.includes(k));
 
     const bookingLink = CRM_URL + "?book=" + lead.assigned_to;
+    const hasLoanType = !!lead.loan_type;
+    const alreadyApplied = !!lead.application_sent_at;
     const systemPrompt =
       "You are texting on behalf of " + loName + " at Bridgepoint Lending, a hard-money/DSCR real estate lender, with a prospective borrower named " + (lead.name || "the lead") + " who came in via " + (lead.source || "an ad") + " for a " + (lead.loan_type || "loan") + " inquiry. " +
-      "Your single goal is CONVERSION: get them to complete our loan application or book a specific time with " + loName + ". Keep every message short (1-3 sentences), casual real-texting style, never corporate or salesy. No more than one question per message. " +
-      "Once they seem ready to talk (or if the conversation has gone back and forth a couple times with no clear next step), send them this exact booking link so they can grab a real time slot themselves instead of a vague \"let's hop on a call\": " + bookingLink + " -- don't send it on literally the first message unless they ask to schedule directly. " +
+      "Your goals, in priority order: (1) get them to agree to fill out our loan application -- this is the strongest outcome, don't settle for less if they seem willing; (2) if they're not ready for the full application yet, get them to book a specific time with " + loName + "; (3) at minimum, keep the conversation moving naturally and learn more about what they need. Keep every message short (1-3 sentences), casual real-texting style, never corporate or salesy. No more than one question per message -- this is a conversation, not an interrogation, so don't ask for everything at once. " +
+      (alreadyApplied
+        ? "The application was already sent to them earlier in this conversation -- don't offer to send it again, just help with whatever they're asking now."
+        : (hasLoanType
+            ? "Their loan type is already known: " + lead.loan_type + ". If they clearly agree to fill out an application (or ask for one), set readyForApplication true in your response and tell them in your reply that you're sending it now."
+            : "Their loan type is NOT yet known. Before offering or sending an application, find out what type of financing they need (fix & flip, DSCR/rental, ground-up construction, etc.) -- never set readyForApplication true and never offer to send the application until you know this, since sending the wrong application type would confuse them.")) +
+      " Once they seem ready to talk (or if the conversation has gone back and forth a couple times with no clear next step), send them this exact booking link so they can grab a real time slot themselves instead of a vague \"let's hop on a call\": " + bookingLink + " -- don't send it on literally the first message unless they ask to schedule directly. " +
       (rateNote ? (rateNote + " ") : "") +
       (awaitingLanguage
         ? "Your last message already asked (in both languages) whether they prefer English or Spanish. Read their latest reply and figure out which they picked -- look for \"spanish\", \"espanol\", \"español\", or a close misspelling/typo of those => Spanish; otherwise assume English. Then write your NEXT message already in that language, moving the conversation forward (e.g. ask about the property or their timeline)."
         : "Continue the conversation in " + lang + ". Use the transcript below for context -- don't repeat questions already answered.") +
-      " If their latest message clearly states any of these details, extract them: " + missingFields.join(", ") + (missingFields.length ? "" : " (none outstanding)") + ". Never guess or infer a field they didn't actually state. " +
+      " If their latest message clearly states any of these details, extract them: " + missingFields.join(", ") + (missingFields.length ? "" : " (none outstanding)") + ". For loanType, only use one of: DSCR, Fix & Flip, Bridge, Ground Up Construction, Portfolio/Blanket, Mixed-Use. Never guess or infer a field they didn't actually state. " +
       "Output ONLY a JSON object, no markdown fences, no commentary: " +
-      '{"language": "en"|"es"|null, "reply": "next text message", "extractedFields": {"fieldName": "value", ...only fields explicitly stated, from the outstanding list above}}';
+      '{"language": "en"|"es"|null, "reply": "next text message", "readyForApplication": true|false, "extractedFields": {"fieldName": "value", ...only fields explicitly stated, from the outstanding list above}}';
 
     const userMessage = "Conversation so far (chronological):\n" + (transcript || "(no prior messages)");
 
@@ -135,7 +158,11 @@ Deno.serve(async (req: Request) => {
       if (!col || knownFields.includes(key)) continue; // whitelist only, never overwrite
       const val = extracted[key];
       if (val == null || val === "") continue;
-      if ((key === "purchasePrice" || key === "loanAmount" || key === "creditScore")) {
+      if (key === "loanType") {
+        const normalized = normalizeLoanType(String(val));
+        if (!normalized || !KNOWN_LOAN_TYPES.includes(normalized)) continue; // never store an unrecognized loan type
+        updates[col] = normalized;
+      } else if (key === "purchasePrice" || key === "loanAmount" || key === "creditScore") {
         const num = Number(String(val).replace(/[^0-9.]/g, ""));
         if (!Number.isFinite(num) || num <= 0) continue;
         updates[col] = num;
@@ -146,17 +173,49 @@ Deno.serve(async (req: Request) => {
     }
 
     const replyText = typeof parsed.reply === "string" ? parsed.reply.slice(0, 600) : null;
+    const effectiveLoanType = (updates.loan_type as string) || (lead.loan_type as string) || null;
+    const sendApplication = parsed.readyForApplication === true && !!effectiveLoanType && !lead.application_sent_at;
+    if (sendApplication) {
+      updates.application_sent_at = new Date().toISOString().slice(0, 10);
+      updates.stage = "app_sent";
+    }
 
     if (Object.keys(updates).length) {
       await sb.from("leads").update(updates).eq("id", leadId);
     }
-    if (filledNotes.length) {
+    if (filledNotes.length || sendApplication) {
       const activity = (lead.activity as unknown[]) || [];
-      activity.push({
-        date: new Date().toISOString().slice(0, 10), type: "system",
-        text: "AI auto-filled from conversation — " + filledNotes.join("; "), author: "AI Assistant",
-      });
+      if (filledNotes.length) {
+        activity.push({
+          date: new Date().toISOString().slice(0, 10), type: "system",
+          text: "AI auto-filled from conversation — " + filledNotes.join("; "), author: "AI Assistant",
+        });
+      }
+      if (sendApplication) {
+        activity.push({
+          date: new Date().toISOString().slice(0, 10), type: "application",
+          text: "Application link sent to " + lead.name + " via AI conversation (confirmed " + effectiveLoanType + ")", author: "AI Assistant",
+        });
+      }
       await sb.from("leads").update({ activity }).eq("id", leadId);
+    }
+    if (sendApplication) {
+      const link = applicationLink(leadId, lead.application_token as string);
+      const appMsg = (lang === "Spanish"
+        ? "Aquí tiene el enlace para completar su solicitud — toma unos 5 minutos: "
+        : "Here's the link to complete your application — takes about 5 minutes: ") + link;
+      if (lead.phone) {
+        await fetch(SUPABASE_URL + "/functions/v1/send-text", {
+          method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+          body: JSON.stringify({ leadId, to: lead.phone, text: appMsg, fromName: loName, fromNumber: (lo && lo.quo_phone_number) || null }),
+        }).catch(() => {});
+      }
+      if (lead.email) {
+        await fetch(SUPABASE_URL + "/functions/v1/send-email", {
+          method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+          body: JSON.stringify({ leadId, to: lead.email, subject: "Bridgepoint Lending — Your Application", text: appMsg, fromName: loName, fromAddress: (lo && lo.email) || null }),
+        }).catch(() => {});
+      }
     }
 
     let sendResult: Record<string, unknown> = { ok: false, error: "no_phone" };

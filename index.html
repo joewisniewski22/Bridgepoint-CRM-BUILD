@@ -2809,6 +2809,28 @@ function submitPublicApplication(leadId, patch){
   }
   ui.publicApply.status = "submitted";
   runGuidelineCheck(leadId);
+  sendBorrowerPortalFollowUp(lead);
+}
+function sendBorrowerPortalFollowUp(lead){
+  // Joe: once they finish the application, they should get a follow-up
+  // pointing them to their Borrower Portal -- same link as the
+  // application (it becomes their status/docs/messaging view once
+  // submitted), just reframed now that there's something to check on.
+  if (!sb || (!lead.email && !lead.phone)) return;
+  var link = applicationLink(lead);
+  var isEs = (lead.preferredLanguage||"en") === "es";
+  var lo = docLoanOfficer(lead);
+  var firstName = (lead.name||"").split(" ")[0];
+  var text = isEs
+    ? ("¡Gracias, " + firstName + "! Recibimos su solicitud. Use este mismo enlace en cualquier momento para ver el estado de su préstamo, subir documentos, o enviarle un mensaje a " + (lo.name||"su oficial de préstamos") + ": " + link)
+    : ("Thanks, " + firstName + "! We've got your application. Use this same link anytime to check your loan status, upload documents, or message " + (lo.name||"your loan officer") + ": " + link);
+  var subject = isEs ? "Bridgepoint Lending — Su Portal de Cliente" : "Bridgepoint Lending — Your Borrower Portal";
+  if (lead.email){
+    sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lead.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null } }).catch(function(){});
+  }
+  if (lead.phone){
+    sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name, fromNumber: lo.quoPhoneNumber||null } }).catch(function(){});
+  }
 }
 function hydrateFromSupabase(){
   if (!sb) return;
@@ -3068,6 +3090,14 @@ function logCall(leadId, outcome, notes){
       lead.activity.push({ date:d, type:"system", text:"Reactivated via win-back outreach", author: currentUser().name });
     } else if (lead.stage==="new" || lead.stage==="attempting"){
       lead.stage = "qualifying";
+    }
+    // A real human just connected with this client -- the AI conversion
+    // automation should stand down so it doesn't keep texting on top of
+    // whatever the LO and client just agreed to on the call.
+    if (lead.aiStage && !lead.automationPaused){
+      lead.automationPaused = true;
+      lead.activity.push({ date:d, type:"system", text:"AI automation paused — you connected with the client directly, follow up per your call", author:"System" });
+      notifyUser(currentUser().id, leadId, "note", "Automation paused for " + lead.name + " since you just connected — make sure to follow up yourself as planned.", { skipText:true });
     }
   } else {
     var unanswered = lead.callAttempts.filter(function(a){ return a.outcome!=="connected"; }).length;
