@@ -2319,6 +2319,13 @@ function sendBorrowerPortalInvite(leadId){
   var lead = leadById(leadId);
   if (!lead) return;
   if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
+  ui.modal = { type:"sendPreview", leadId: leadId, kind: "portal" };
+  render();
+}
+function reallySendBorrowerPortalInvite(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
   var link = applicationLink(lead);
   var lang = lead.preferredLanguage || "en";
   var lo = docLoanOfficer(lead);
@@ -3071,6 +3078,13 @@ function docPdfFilename(lead, label){
 function sendDocumentBoth(leadId, kind){
   var lead = leadById(leadId);
   if (!lead) return;
+  if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
+  ui.modal = { type:"sendPreview", leadId: leadId, kind: kind };
+  render();
+}
+function reallySendDocumentBoth(leadId, kind){
+  var lead = leadById(leadId);
+  if (!lead) return;
   if (!sb){ showToast("Send service unavailable"); return; }
   if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
   var isTerm = kind === "termSheet";
@@ -3132,6 +3146,24 @@ function viewTermSheet(leadId){
     window.open(url, "_blank");
     setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
   }).catch(function(){ showToast(isEs ? "No se pudo generar" : "Couldn't generate term sheet"); });
+}
+function previewDocumentPdf(leadId, kind){
+  var lead = leadById(leadId);
+  if (!lead || !sb) return;
+  var isTerm = kind === "termSheet";
+  var label = isTerm ? "Term Sheet" : "Pre-Approval Letter";
+  var body = isTerm ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
+  showToast("Preparing PDF…");
+  sb.functions.invoke("generate-doc-pdf", { body: { text: body, label: label } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){ showToast("Couldn't generate PDF"); return; }
+    var bytes = atob(res.data.pdfBase64);
+    var arr = new Uint8Array(bytes.length);
+    for (var i=0;i<bytes.length;i++) arr[i] = bytes.charCodeAt(i);
+    var blob = new Blob([arr], { type: "application/pdf" });
+    var url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+  }).catch(function(){ showToast("Couldn't generate PDF"); });
 }
 function downloadMismoExport(leadId){
   var lead = leadById(leadId);
@@ -3208,7 +3240,7 @@ function moveStage(leadId, target){
     lead.stage = target;
     if (target==="docs"){
       ensureProcessorAssigned(lead);
-      if (!lead.applicationSentAt) sendBorrowerPortalInvite(lead.id);
+      if (!lead.applicationSentAt) reallySendBorrowerPortalInvite(lead.id);
     }
     lead.status = (target==="closed" || target==="postclosing") ? "closed" : "active";
     if (target==="closed" && !lead.closeDate) lead.closeDate = d;
@@ -7073,7 +7105,53 @@ function renderModal(){
   if (ui.modal.type === "scopeOfWork") return modalScopeOfWork(ui.modal.leadId);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   if (ui.modal.type === "mySchedule") return modalMySchedule();
+  if (ui.modal.type === "sendPreview") return modalSendPreview(ui.modal.leadId, ui.modal.kind);
   return "";
+}
+function modalSendPreview(leadId, kind){
+  var lead = leadById(leadId);
+  if (!lead) return "";
+  var isEs = (lead.preferredLanguage||"en") === "es";
+  var firstName = (lead.name||"").split(" ")[0];
+  var lo = docLoanOfficer(lead);
+  var title, subject, emailBody, smsMsg, showPdfBtn;
+  if (kind === "portal"){
+    var link = applicationLink(lead);
+    title = "Preview — Send Borrower Portal";
+    subject = isEs ? "Bridgepoint Lending — Su Portal de Cliente" : "Bridgepoint Lending — Your Borrower Portal";
+    emailBody = isEs
+      ? ("Hola " + firstName + ", puede revisar el estado de su préstamo, subir documentos y enviar mensajes a " + (lo.name||"su oficial de préstamos") + " en cualquier momento aquí: " + link)
+      : ("Hi " + firstName + ", you can check your loan status, upload documents, and message " + (lo.name||"your loan officer") + " anytime here: " + link);
+    smsMsg = emailBody;
+    showPdfBtn = false;
+  } else {
+    var isTerm = kind === "termSheet";
+    var label = isTerm ? "Term Sheet" : "Pre-Approval Letter";
+    title = "Preview — Send " + (isTerm ? "Term Sheet" : "Pre-Approval");
+    subject = "Bridgepoint Lending — Your " + label;
+    emailBody = isTerm ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
+    smsMsg = isEs
+      ? ("Hola " + firstName + ", es " + (lo.name||"") + " de Bridgepoint Lending — le acabo de enviar por correo electrónico su " + (isTerm ? "hoja de términos" : "carta de preaprobación") + " con todos los detalles. Revise su bandeja de entrada (" + (lead.email||"su correo") + ") y avíseme si tiene preguntas.")
+      : ("Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your " + label.toLowerCase() + " with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!");
+    showPdfBtn = true;
+  }
+  var channels = [];
+  if (lead.email) channels.push("email (" + lead.email + ")");
+  if (lead.phone) channels.push("text (" + lead.phone + ")");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>' + title + ' — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0 0 8px">Going out via ' + (channels.length ? channels.join(" and ") : "no channel — add an email or phone first") + '. Review below before it sends for real.</div>' +
+        '<div class="form-row"><label>Email subject</label><div class="val">' + esc(subject) + '</div></div>' +
+        '<div class="form-row"><label>Email body' + (kind!=="portal" ? " (also attached as a PDF)" : "") + '</label><textarea class="textarea" rows="10" readonly>' + esc(emailBody) + '</textarea></div>' +
+        (kind !== "portal" ? '<div class="form-row"><label>Text heads-up</label><textarea class="textarea" rows="3" readonly>' + esc(smsMsg) + '</textarea></div>' : '') +
+        (showPdfBtn ? '<div class="form-row"><button class="btn btn-sm" type="button" data-action="preview-document-pdf" data-lead="' + lead.id + '" data-kind="' + kind + '">View Exact PDF</button></div>' : '') +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button>' +
+        '<button class="btn btn-primary" type="button" data-action="confirm-send-preview" data-lead="' + lead.id + '" data-kind="' + kind + '"' + (channels.length ? '' : ' disabled') + '>Send Now</button>' +
+      '</div>' +
+    '</div></div>';
 }
 function modalSendBack(leadId){
   var lead = leadById(leadId);
@@ -8330,6 +8408,16 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "view-term-sheet"){
     viewTermSheet(t.dataset.lead);
+  }
+  else if (action === "preview-document-pdf"){
+    previewDocumentPdf(t.dataset.lead, t.dataset.kind);
+  }
+  else if (action === "confirm-send-preview"){
+    var csKind = t.dataset.kind;
+    if (csKind === "portal") reallySendBorrowerPortalInvite(t.dataset.lead);
+    else reallySendDocumentBoth(t.dataset.lead, csKind);
+    ui.modal = null;
+    render();
   }
   else if (action === "mark-payroll-paid"){
     markPayrollEntryPaid(t);
