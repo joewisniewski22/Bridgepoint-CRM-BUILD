@@ -160,11 +160,27 @@ Deno.serve(async (req: Request) => {
       } else if (match.ai_stage && !match.automation_paused) {
         // Hand off to the AI conversion-texting automation, if this lead is
         // enrolled (ai_stage set) and the LO hasn't hit Stop Automation.
-        await fetch(SUPABASE_URL + "/functions/v1/ai-lead-engage", {
+        // A failed handoff here used to fail silently -- the client's text
+        // would sit unanswered with zero trace of anything going wrong.
+        // Now logs (visible in this function's Supabase logs) so a bad
+        // batch is at least discoverable, and retries once after a beat in
+        // case it was a transient blip (cold start, momentary API error).
+        const engage = () => fetch(SUPABASE_URL + "/functions/v1/ai-lead-engage", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
           body: JSON.stringify({ leadId: match.id }),
-        }).catch(() => {});
+        });
+        let engageRes = await engage().catch((e) => { console.error("receive-text: ai-lead-engage handoff failed (attempt 1)", String(e)); return null; });
+        let engageData = engageRes ? await engageRes.json().catch(() => null) : null;
+        if (!engageRes || !engageRes.ok || !engageData || engageData.error) {
+          console.error("receive-text: ai-lead-engage handoff bad result, retrying once", JSON.stringify(engageData));
+          await new Promise((r) => setTimeout(r, 1500));
+          engageRes = await engage().catch((e) => { console.error("receive-text: ai-lead-engage handoff failed (attempt 2)", String(e)); return null; });
+          engageData = engageRes ? await engageRes.json().catch(() => null) : null;
+          if (!engageRes || !engageRes.ok || !engageData || engageData.error) {
+            console.error("receive-text: ai-lead-engage handoff failed twice for lead", match.id, JSON.stringify(engageData));
+          }
+        }
       }
     } else if (staffMatch) {
       // Not a borrower's own number -- staff member replying to a portal
