@@ -7049,6 +7049,9 @@ function sendAiCommand(message, attachment){
         var r = a.result;
         if (r && r.requiresFrontendAction === "send_document"){
           sendDocumentBoth(r.leadId, r.kind);
+        } else if (r && (r.requiresFrontendAction === "email_team" || r.requiresFrontendAction === "text_team")){
+          ui.modal = { type:"sendTeamMessage", channel: r.requiresFrontendAction === "email_team" ? "email" : "text", staff: r.staff, subject: r.subject, body: r.body };
+          render();
         }
       });
     }).catch(function(){
@@ -7462,6 +7465,45 @@ function renderEmailInbox(){
   return topbar("Email", "Every email you've sent or received through the CRM — click one to read it, or start a new one.", '<button class="btn btn-primary" data-action="open-modal" data-modal="composeEmail">✉ Compose</button>') +
     '<div class="content">' + (rows || '<div class="empty">No emails yet.</div>') + '</div>';
 }
+function modalSendTeamMessage(m){
+  var names = (m.staff||[]).map(function(s){ return s.name; }).join(", ");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Preview — ' + (m.channel==="email"?"Team Email":"Team Text") + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="form-row"><label>To (' + (m.staff||[]).length + ')</label><div class="val">' + esc(names) + '</div></div>' +
+        (m.channel==="email" ? ('<div class="form-row"><label>Subject</label><div class="val">' + esc(m.subject||"") + '</div></div>') : '') +
+        '<div class="form-row"><label>Message</label><textarea class="textarea" rows="8" readonly>' + esc(m.body||"") + '</textarea></div>' +
+        '<div class="footnote" style="padding:0">Sent from you (Joseph Wisniewski) once you confirm — nothing has gone out yet.</div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="button" data-action="confirm-team-message">Send Now</button></div>' +
+    '</div></div>';
+}
+function sendTeamMessage(){
+  var m = ui.modal;
+  if (!m || !sb) return;
+  var calls = [];
+  (m.staff||[]).forEach(function(s){
+    var u = userById(s.id);
+    if (!u) return;
+    if (m.channel === "email" && u.email){
+      calls.push(sb.functions.invoke("send-email", { body:{ to:u.email, subject:m.subject, text:m.body, fromName:"Joseph Wisniewski", fromAddress:"joe@bplending.com" } }));
+    } else if (m.channel === "text" && u.phone){
+      calls.push(sb.functions.invoke("send-text", { body:{ to:u.phone, text:m.body, fromName:"Joseph Wisniewski" } }));
+    }
+  });
+  if (!calls.length){ showToast("No valid recipients"); ui.modal = null; render(); return; }
+  showToast("Sending…");
+  Promise.all(calls).then(function(){
+    showToast("Sent to " + calls.length + " team member(s)");
+    ui.modal = null;
+    render();
+  }).catch(function(){
+    showToast("Some sends may have failed — check with the team");
+    ui.modal = null;
+    render();
+  });
+}
 function modalComposeEmail(prefill){
   prefill = prefill || {};
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
@@ -7517,6 +7559,7 @@ function renderModal(){
   if (ui.modal.type === "mySchedule") return modalMySchedule();
   if (ui.modal.type === "sendPreview") return modalSendPreview(ui.modal.leadId, ui.modal.kind);
   if (ui.modal.type === "composeEmail") return modalComposeEmail(ui.modal);
+  if (ui.modal.type === "sendTeamMessage") return modalSendTeamMessage(ui.modal);
   return "";
 }
 function modalSendPreview(leadId, kind){
@@ -8802,6 +8845,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
   else if (action === "toggle-email"){ ui.expandedEmailId = ui.expandedEmailId===t.dataset.id ? null : t.dataset.id; render(); }
   else if (action === "toggle-conversation"){ ui.expandedConversationLead = ui.expandedConversationLead===t.dataset.lead ? null : t.dataset.lead; render(); }
+  else if (action === "confirm-team-message"){ sendTeamMessage(); }
   else if (action === "reply-email"){
     var replySrc = (state.emails||[]).find(function(x){ return x.id===t.dataset.id; });
     if (replySrc){

@@ -42,7 +42,10 @@ async function buildSystemPrompt(): Promise<string> {
     "2. Loan file creation from a term sheet: when Joe pastes term sheet text or attaches a term sheet document/image for a BRAND NEW loan (not already in the CRM), extract the real figures and call create_loan_file. Valid loanType values: " + LOAN_TYPES.join(", ") + ". Valid source values: " + SOURCES.join(", ") + " (use 'Referral' or the closest fit if unclear, never invent a new source). Valid outsideLender values: " + OUTSIDE_LENDERS.join(", ") + " or omit for in-house. NEVER guess a figure that isn't actually in the document -- omit any field you can't find rather than inventing a number, and tell Joe what's missing in your reply. If the assignee isn't stated, ASK rather than picking someone.\n" +
     "3. Updating an EXISTING loan file: when Joe gets a new/real quote back (e.g. a lender's pricing terms sheet) for a loan already in the CRM, call update_loan_file with the leadId and only the fields that changed -- extract real figures the same way as create_loan_file, never guess. If Joe doesn't give you the leadId, ask for it (or ask for the borrower's name and use list_closed_deals / say you need the id -- you have no generic lead-search tool yet). Always write a one-sentence changeSummary describing what changed and why (e.g. citing a pricing/quote ID if the source document has one) -- it gets logged to the loan's activity history.\n" +
     "4. Sending documents: to send a Pre-Approval Letter or Term Sheet to a borrower on an existing loan file, call send_document with the leadId and kind -- this actually emails/texts them for real, so only call it when Joe clearly asks to send (not just when he asks you to create or update a file).\n" +
-    "5. Looking up loans: list_closed_deals for recently funded loans.\n\n" +
+    "5. Looking up loans: list_closed_deals for recently funded loans, or search_leads / get_lead_details to find and inspect any loan file by name/phone/email or id.\n" +
+    "6. Team communication: email_team and text_team send a REAL email/text to staff -- team-wide announcements, reminders, or a message to one specific person. Only call these when Joe clearly asks you to send/tell/email/text someone or the team, not as a side effect of something else.\n" +
+    "7. reassign_lead to change who a loan file is assigned to. add_lead_note to log a note on a loan file's activity history.\n\n" +
+    "You still do NOT have: ad platform access, payments/spend, or any destructive/irreversible action (no deleting files, no changing pricing/guidelines). If asked for one of those, say plainly it isn't wired up rather than pretending.\n\n" +
     "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success. " +
     "CRITICAL: never describe an action (sent, triggered, created, updated, published) as done unless you actually called that exact tool THIS turn and its result confirmed success -- don't narrate an effect from context, from what Joe asked for, or from a tool you called for a different purpose. If you only updated a file and didn't call send_document, do not say anything was sent or triggered -- say what you'd need to do that as a separate, explicit step instead.";
 }
@@ -145,6 +148,75 @@ const TOOLS = [
         notifyAssignee: { type: "boolean", description: "Whether to text/email the assigned loan officer that terms changed (default true)" },
       },
       required: ["leadId"],
+    },
+  },
+  {
+    name: "search_leads",
+    description: "Find loan file(s) by borrower name, phone, or email -- returns matching ids so you can then use get_lead_details, update_loan_file, reassign_lead, etc.",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "Name, phone, or email to search for" } },
+      required: ["query"],
+    },
+  },
+  {
+    name: "get_lead_details",
+    description: "Get full details of one loan file by its id.",
+    input_schema: {
+      type: "object",
+      properties: { leadId: { type: "string" } },
+      required: ["leadId"],
+    },
+  },
+  {
+    name: "reassign_lead",
+    description: "Change which staff member a loan file is assigned to.",
+    input_schema: {
+      type: "object",
+      properties: {
+        leadId: { type: "string" },
+        assignedTo: { type: "string", description: "Staff user id from the roster" },
+      },
+      required: ["leadId", "assignedTo"],
+    },
+  },
+  {
+    name: "add_lead_note",
+    description: "Log a note on a loan file's activity history.",
+    input_schema: {
+      type: "object",
+      properties: {
+        leadId: { type: "string" },
+        note: { type: "string" },
+      },
+      required: ["leadId", "note"],
+    },
+  },
+  {
+    name: "email_team",
+    description: "Prepare a real email to some or all staff members -- announcements, reminders, or a message to one specific person. Does not send immediately -- Joe reviews and confirms in the CRM before it actually goes out, same as document sends.",
+    input_schema: {
+      type: "object",
+      properties: {
+        recipients: { type: "string", enum: ["all_staff", "loan_officers", "processors", "specific"], description: "Who to send to. Use 'specific' with staffIds for one or a few people." },
+        staffIds: { type: "array", items: { type: "string" }, description: "Required when recipients is 'specific' -- staff user ids from the roster" },
+        subject: { type: "string" },
+        body: { type: "string", description: "Plain text email body" },
+      },
+      required: ["recipients", "subject", "body"],
+    },
+  },
+  {
+    name: "text_team",
+    description: "Prepare a real text message to some or all staff members. Keep it short, SMS-appropriate. Does not send immediately -- Joe reviews and confirms in the CRM before it actually goes out, same as document sends.",
+    input_schema: {
+      type: "object",
+      properties: {
+        recipients: { type: "string", enum: ["all_staff", "loan_officers", "processors", "specific"], description: "Who to send to. Use 'specific' with staffIds for one or a few people." },
+        staffIds: { type: "array", items: { type: "string" }, description: "Required when recipients is 'specific' -- staff user ids from the roster" },
+        text: { type: "string" },
+      },
+      required: ["recipients", "text"],
     },
   },
   {
@@ -307,6 +379,64 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
       }
     }
     return { ok: true, leadId, link, changedFields: changedLabels };
+  }
+  if (name === "search_leads") {
+    const query = ((input.query as string) || "").trim();
+    if (!query) return { error: "missing_query" };
+    const { data, error } = await sb.from("leads")
+      .select("id,name,phone,email,loan_type,stage,assigned_to")
+      .or(`name.ilike.%${query}%,phone.ilike.%${query}%,email.ilike.%${query}%`)
+      .limit(10);
+    if (error) return { error: error.message };
+    return { matches: data || [] };
+  }
+  if (name === "get_lead_details") {
+    const { data, error } = await sb.from("leads").select("*").eq("id", input.leadId as string).single();
+    if (error || !data) return { error: "lead_not_found" };
+    return { lead: data };
+  }
+  if (name === "reassign_lead") {
+    const { data: staffCheck } = await sb.from("users").select("id,name").eq("id", input.assignedTo as string).single();
+    if (!staffCheck) return { error: "invalid_assignedTo" };
+    const { data: existing } = await sb.from("leads").select("id,name,activity").eq("id", input.leadId as string).single();
+    if (!existing) return { error: "lead_not_found" };
+    const today = new Date().toISOString().slice(0, 10);
+    const activity = Array.isArray(existing.activity) ? existing.activity as unknown[] : [];
+    activity.push({ date: today, type: "system", text: "Reassigned to " + staffCheck.name + " by AI Assistant", author: "AI Assistant" });
+    const { error } = await sb.from("leads").update({ assigned_to: input.assignedTo, activity }).eq("id", input.leadId as string);
+    if (error) return { error: error.message };
+    return { ok: true, leadId: input.leadId, assignedTo: staffCheck.name };
+  }
+  if (name === "add_lead_note") {
+    const { data: existing } = await sb.from("leads").select("id,activity").eq("id", input.leadId as string).single();
+    if (!existing) return { error: "lead_not_found" };
+    const today = new Date().toISOString().slice(0, 10);
+    const activity = Array.isArray(existing.activity) ? existing.activity as unknown[] : [];
+    activity.push({ date: today, type: "note", text: input.note as string, author: "AI Assistant" });
+    const { error } = await sb.from("leads").update({ activity }).eq("id", input.leadId as string);
+    if (error) return { error: error.message };
+    return { ok: true, leadId: input.leadId };
+  }
+  if (name === "email_team" || name === "text_team") {
+    let query = sb.from("users").select("id,name,email,phone,quo_phone_number,role").neq("id", "demo").neq("id", "demo-processor");
+    const recipients = input.recipients as string;
+    if (recipients === "loan_officers") query = query.eq("role", "loan_officer");
+    else if (recipients === "processors") query = query.eq("role", "processor");
+    else if (recipients === "specific") {
+      const ids = (input.staffIds as string[]) || [];
+      if (!ids.length) return { error: "missing_staffIds" };
+      query = query.in("id", ids);
+    } else if (recipients !== "all_staff") return { error: "invalid_recipients" };
+    const { data: staffList, error } = await query;
+    if (error) return { error: error.message };
+    if (!staffList || !staffList.length) return { error: "no_matching_staff" };
+    return {
+      ok: true,
+      requiresFrontendAction: name,
+      staff: staffList.map((s) => ({ id: s.id, name: s.name })),
+      subject: input.subject || null,
+      body: name === "email_team" ? input.body : input.text,
+    };
   }
   if (name === "send_document") {
     const { data: lead } = await sb.from("leads").select("id").eq("id", input.leadId).single();
