@@ -2079,7 +2079,16 @@ function conversionBySource(leads){
    Power dialer
 --------------------------------------------------------------------- */
 function startDialer(){
-  var ids = computeQueue(ui.viewAs).map(function(i){ return i.leadId; });
+  // The Today page's queue is team-wide for the owner (real, useful
+  // oversight), but the dialer itself is a personal calling session --
+  // Joe works his own leads too, and dialing into someone else's client
+  // by accident is exactly what this guards against. Always scope to
+  // leads actually assigned to whoever's using it, owner included.
+  var myId = currentUser().id;
+  var ids = computeQueue(ui.viewAs).filter(function(i){
+    var l = leadById(i.leadId);
+    return l && l.assignedTo === myId;
+  }).map(function(i){ return i.leadId; });
   var seen = {}, uniq = [];
   ids.forEach(function(id){ if (!seen[id]){ seen[id]=true; uniq.push(id); } });
   if (!uniq.length){ showToast("No calls queued right now"); return; }
