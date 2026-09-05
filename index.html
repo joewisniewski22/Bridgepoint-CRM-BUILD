@@ -2322,10 +2322,11 @@ function sendBorrowerPortalInvite(leadId){
   ui.modal = { type:"sendPreview", leadId: leadId, kind: "portal" };
   render();
 }
-function reallySendBorrowerPortalInvite(leadId){
+function reallySendBorrowerPortalInvite(leadId, channels){
   var lead = leadById(leadId);
   if (!lead) return;
   if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
+  channels = channels || ["email","text"];
   var link = applicationLink(lead);
   var lang = lead.preferredLanguage || "en";
   var lo = docLoanOfficer(lead);
@@ -2335,18 +2336,19 @@ function reallySendBorrowerPortalInvite(leadId){
     : ("Hi " + firstName + ", you can check your loan status, upload documents, and message " + (lo.name||"your loan officer") + " anytime here: " + link);
   var subject = lang === "es" ? "Bridgepoint Lending — Su Portal de Cliente" : "Bridgepoint Lending — Your Borrower Portal";
   if (!sb){ showToast("Send service unavailable"); return; }
-  showToast("Sending portal link…");
   var calls = [];
-  if (lead.email){
+  if (channels.indexOf("email") !== -1 && lead.email){
     calls.push(sb.functions.invoke("send-email", {
       body: { leadId: lead.id, to: lead.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
     }).then(function(res){ return { channel:"email", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"email", ok:false }; }));
   }
-  if (lead.phone){
+  if (channels.indexOf("text") !== -1 && lead.phone){
     calls.push(sb.functions.invoke("send-text", {
       body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
     }).then(function(res){ return { channel:"text", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
   }
+  if (!calls.length){ showToast("Add an email or phone number first"); return; }
+  showToast("Sending portal link…");
   Promise.all(calls).then(function(results){
     var sentVia = results.filter(function(r){ return r.ok; }).map(function(r){ return r.channel; });
     if (!sentVia.length){
@@ -3200,6 +3202,39 @@ function sendApplicationAction(leadId, channel){
   lead.activity.push({ date:d, type:"application", text:"Application link sent to " + lead.name + (channel ? (" via " + channel) : ""), author: currentUser().name });
   showToast("Application marked as sent");
   persist();
+}
+function reallySendApplication(leadId, channels){
+  var lead = leadById(leadId);
+  if (!lead || !sb) return;
+  var msgBox = document.getElementById("app-message-box");
+  var msg = (msgBox && msgBox.value) ? msgBox.value : ("Hi " + (lead.name||"").split(" ")[0] + ", please complete your Bridgepoint Lending application here: " + applicationLink(lead) + " — takes about 5 minutes.");
+  var lo = docLoanOfficer(lead);
+  var calls = [];
+  if (channels.indexOf("email") !== -1 && lead.email){
+    calls.push(sb.functions.invoke("send-email", {
+      body: { leadId: lead.id, to: lead.email, subject: "Bridgepoint Lending — Complete Your Application", text: msg, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
+    }).then(function(res){ return { channel:"email", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"email", ok:false }; }));
+  }
+  if (channels.indexOf("text") !== -1 && lead.phone){
+    calls.push(sb.functions.invoke("send-text", {
+      body: { leadId: lead.id, to: lead.phone, text: msg, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
+    }).then(function(res){ return { channel:"text", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
+  }
+  if (!calls.length){ showToast("Add an email or phone number first"); return; }
+  showToast("Sending…");
+  Promise.all(calls).then(function(results){
+    var sentVia = results.filter(function(r){ return r.ok; }).map(function(r){ return r.channel; });
+    if (!sentVia.length){ showToast("Couldn't send — try again"); return; }
+    var d = todayISO();
+    lead.applicationSentAt = d;
+    var idx = stageIndex(lead.stage);
+    if (idx >= 0 && idx < stageIndex("app_sent")) lead.stage = "app_sent";
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date:d, type:"application", text:"Application link sent to " + lead.name + " via " + sentVia.join(" + "), author: lo.name || currentUser().name });
+    showToast("Application sent via " + sentVia.join(" + ") + (sentVia.length < results.length ? " (one channel failed)" : ""));
+    ui.modal = null;
+    persist();
+  });
 }
 function submitPhoneApplication(leadId, patch){
   var lead = leadById(leadId);
@@ -7613,8 +7648,15 @@ function modalSendPreview(leadId, kind){
         (showPdfBtn ? '<div class="form-row"><label>Text heads-up</label><textarea class="textarea" rows="3" readonly>' + esc(smsMsg) + '</textarea></div>' : '') +
         (showPdfBtn ? '<div class="form-row"><button class="btn btn-sm" type="button" data-action="preview-document-pdf" data-lead="' + lead.id + '" data-kind="' + kind + '">View Exact PDF</button></div>' : '') +
       '</div>' +
-      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button>' +
-        '<button class="btn btn-primary" type="button" data-action="confirm-send-preview" data-lead="' + lead.id + '" data-kind="' + kind + '"' + (channels.length ? '' : ' disabled') + '>Send Now</button>' +
+      '<div class="modal-foot" style="flex-wrap:wrap"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button>' +
+        (kind === "portal"
+          ? (
+              '<button class="btn" type="button" data-action="confirm-send-preview" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channels="email"' + (lead.email ? '' : ' disabled') + '>Email It</button>' +
+              '<button class="btn" type="button" data-action="confirm-send-preview" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channels="text"' + (lead.phone ? '' : ' disabled') + '>Text It</button>' +
+              '<button class="btn btn-primary" type="button" data-action="confirm-send-preview" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channels="email,text"' + (channels.length ? '' : ' disabled') + '>Text + Email It</button>'
+            )
+          : ('<button class="btn btn-primary" type="button" data-action="confirm-send-preview" data-lead="' + lead.id + '" data-kind="' + kind + '"' + (channels.length ? '' : ' disabled') + '>Send Now</button>')
+        ) +
       '</div>' +
     '</div></div>';
 }
@@ -7765,9 +7807,10 @@ function modalSendApplication(leadId){
       '</div>' +
       '<div class="modal-foot" style="flex-wrap:wrap">' +
         '<button class="btn" type="button" data-action="copy-app-link">Copy Link</button>' +
-        '<a class="btn" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — Complete Your Application") + '&body=' + encodeURIComponent(msg) + '" data-action="send-application" data-lead="' + lead.id + '" data-channel="email">Email It</a>' +
-        '<a class="btn" href="sms:' + esc(digits) + '?&body=' + encodeURIComponent(msg) + '" data-action="send-application" data-lead="' + lead.id + '" data-channel="text">Text It</a>' +
-        '<button class="btn btn-primary" type="button" data-action="send-application" data-lead="' + lead.id + '" data-channel="manually">Mark as Sent</button>' +
+        '<button class="btn" type="button" data-action="really-send-application" data-lead="' + lead.id + '" data-channels="email">Email It</button>' +
+        '<button class="btn" type="button" data-action="really-send-application" data-lead="' + lead.id + '" data-channels="text">Text It</button>' +
+        '<button class="btn btn-primary" type="button" data-action="really-send-application" data-lead="' + lead.id + '" data-channels="email,text">Text + Email It</button>' +
+        '<button class="btn btn-ghost" type="button" data-action="send-application" data-lead="' + lead.id + '" data-channel="manually">Mark as Sent (sent another way)</button>' +
       '</div>' +
     '</div></div>';
 }
@@ -8882,6 +8925,9 @@ appEl.addEventListener("click", function(e){
     sendApplicationAction(t.dataset.lead, t.dataset.channel);
     if (t.dataset.channel === "manually"){ ui.modal = null; render(); }
   }
+  else if (action === "really-send-application"){
+    reallySendApplication(t.dataset.lead, t.dataset.channels.split(","));
+  }
   else if (action === "send-document-both"){
     sendDocumentBoth(t.dataset.lead, t.dataset.kind);
   }
@@ -8899,7 +8945,7 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "confirm-send-preview"){
     var csKind = t.dataset.kind;
-    if (csKind === "portal") reallySendBorrowerPortalInvite(t.dataset.lead);
+    if (csKind === "portal") reallySendBorrowerPortalInvite(t.dataset.lead, t.dataset.channels ? t.dataset.channels.split(",") : null);
     else if (csKind === "scheduling") reallySendSchedulingLink(t.dataset.lead);
     else reallySendDocumentBoth(t.dataset.lead, csKind);
     ui.modal = null;
