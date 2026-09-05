@@ -8657,7 +8657,7 @@ function modalCreateLeadFromPricer(){
           '<div class="form-row"><label>Source</label><select class="select" name="source">' + srcOptions + '</select></div>' +
           '<div class="form-row"><label>Assign to</label><select class="select" name="assignedTo">' + loOptions + '</select></div>' +
         '</div>' +
-        '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress" value="' + esc(spAddr) + '"></div>' +
+        '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress" value="' + esc(spAddr) + '" autocomplete="off" data-action="address-lookup" data-lead="new-lead"></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Create Lead</button></div>' +
       '</form>' +
@@ -8726,7 +8726,7 @@ function modalAddLead(){
           '<div class="form-row"><label>Loan Amount (est.)</label><input class="input" type="number" name="loanAmount"></div>' +
         '</div>' +
         '<div class="form-row"><label>Referral Partner (optional)</label><select class="select" name="referralPartnerId">' + referralPartnerOptions(null) + '</select></div>' +
-        '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress"></div>' +
+        '<div class="form-row"><label>Property Address</label><input class="input" name="propertyAddress" autocomplete="off" data-action="address-lookup" data-lead="new-lead"></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add Lead</button></div>' +
       '</form>' +
