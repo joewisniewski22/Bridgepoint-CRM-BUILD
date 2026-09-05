@@ -6617,23 +6617,36 @@ function generateAvailableSlots(userId, days){
   }
   return out;
 }
-function addAvailabilityRule(fd){
+function bulkSetAvailability(fd){
   if (!sb) return;
   var toMin = function(t){ var p=(t||"0:0").split(":"); return Number(p[0])*60+Number(p[1]); };
   var startMinutes = toMin(fd.get("startTime")), endMinutes = toMin(fd.get("endTime"));
   if (endMinutes <= startMinutes){ showToast("End time must be after start time"); return; }
-  var id = "av-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
-  var rule = {
-    id:id, userId: currentUser().id, dayOfWeek: Number(fd.get("dayOfWeek")),
-    startMinutes: startMinutes, endMinutes: endMinutes, slotMinutes: Number(fd.get("slotMinutes"))||30
-  };
-  sb.from("availability_rules").insert(availabilityRuleToRow(rule)).then(function(res){
-    if (res.error){ showToast("Couldn't save — try again"); return; }
-    state.availabilityRules = state.availabilityRules || [];
-    state.availabilityRules.push(rule);
-    showToast("Availability added");
-    render();
+  var slotMinutes = Number(fd.get("slotMinutes"))||30;
+  var days = fd.getAll("days").map(Number);
+  if (!days.length){ showToast("Pick at least one day"); return; }
+  var uid = currentUser().id;
+  var idsToDelete = (state.availabilityRules||[]).filter(function(r){ return r.userId===uid && days.indexOf(r.dayOfWeek)!==-1; }).map(function(r){ return r.id; });
+  var newRules = days.map(function(d){
+    return {
+      id: "av-" + Date.now().toString(36) + Math.floor(Math.random()*10000) + "-" + d,
+      userId: uid, dayOfWeek: d, startMinutes: startMinutes, endMinutes: endMinutes, slotMinutes: slotMinutes
+    };
   });
+  showToast("Saving hours…");
+  (idsToDelete.length ? sb.from("availability_rules").delete().in("id", idsToDelete) : Promise.resolve({error:null}))
+    .then(function(delRes){
+      if (delRes && delRes.error){ showToast("Couldn't save — try again"); return null; }
+      return sb.from("availability_rules").insert(newRules.map(availabilityRuleToRow));
+    })
+    .then(function(res){
+      if (!res) return;
+      if (res.error){ showToast("Couldn't save — try again"); return; }
+      state.availabilityRules = (state.availabilityRules||[]).filter(function(r){ return idsToDelete.indexOf(r.id)===-1; }).concat(newRules);
+      showToast("Hours saved for " + days.length + " day" + (days.length>1?"s":""));
+      render();
+    })
+    .catch(function(){ showToast("Couldn't save — try again"); });
 }
 function deleteAvailabilityRule(id){
   if (!sb) return;
@@ -6688,16 +6701,21 @@ function modalMySchedule(){
         '<div class="form-row"><label>Your Booking Link</label><div style="display:flex;gap:6px"><input class="input" readonly value="' + esc(bookingLink) + '"><button class="btn btn-sm" type="button" data-action="copy-booking-link" data-link="' + esc(bookingLink) + '">Copy</button></div></div>' +
         '<div class="rail-title" style="margin:14px 0 6px">Weekly Availability</div>' +
         rulesHTML +
-        '<form data-form="add-availability-rule" style="margin-top:10px">' +
-          '<div class="form-two">' +
-            '<div class="form-row"><label>Day</label><select class="select" name="dayOfWeek">' + DOW.map(function(d,i){ return '<option value="'+i+'">'+d+'</option>'; }).join("") + '</select></div>' +
-            '<div class="form-row"><label>Slot Length</label><select class="select" name="slotMinutes"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></div>' +
+        '<form data-form="bulk-set-availability" style="margin-top:10px">' +
+          '<div class="rail-title" style="margin-bottom:6px;font-size:12px">Set Your Hours</div>' +
+          '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">' +
+            DOW.map(function(d,i){
+              var checked = i>=1 && i<=5;
+              return '<label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer"><input type="checkbox" name="days" value="' + i + '"' + (checked?' checked':'') + '>' + d.slice(0,3) + '</label>';
+            }).join("") +
           '</div>' +
           '<div class="form-two">' +
             '<div class="form-row"><label>Start Time</label><input class="input" type="time" name="startTime" value="09:00" required></div>' +
             '<div class="form-row"><label>End Time</label><input class="input" type="time" name="endTime" value="17:00" required></div>' +
           '</div>' +
-          '<button class="btn btn-sm btn-primary" type="submit">Add Window</button>' +
+          '<div class="form-row"><label>Slot Length</label><select class="select" name="slotMinutes"><option value="15">15 min</option><option value="30" selected>30 min</option><option value="45">45 min</option><option value="60">60 min</option></select></div>' +
+          '<button class="btn btn-sm btn-primary" type="submit">Set Hours</button>' +
+          '<div class="footnote" style="padding-top:6px">Checking a day you already have hours on replaces it with these — set your whole week in one go, or just tweak one day.</div>' +
         '</form>' +
         '<div class="rail-title" style="margin:14px 0 6px">Upcoming Appointments</div>' +
         upcomingHTML +
@@ -6756,30 +6774,32 @@ function renderPublicBooking(){
   var wrap = function(inner){ return '<div class="login-screen"><div class="login-card" style="max-width:520px">' + inner + '</div></div>'; };
   if (pb.status === "loading") return wrap('<div class="empty">Loading availability…</div>');
   if (pb.status === "invalid") return wrap('<div class="empty">This scheduling link isn\'t valid or is no longer active.</div>');
+  var bilingual = !!(pb.host && pb.host.speaksSpanish);
+  var two = function(en, es){ return bilingual ? (en + ' <span style="opacity:.7">/ ' + es + '</span>') : en; };
   if (pb.status === "confirmed"){
     var a = pb.confirmedAppointment;
     return wrap(
-      '<div class="rail-title" style="margin-bottom:8px">You\'re booked ✓</div>' +
-      '<div class="footnote" style="padding:0 0 10px">' + esc(a.name) + ', your time with ' + esc(pb.host.name) + ' is confirmed for:</div>' +
+      '<div class="rail-title" style="margin-bottom:8px">' + two("You're booked ✓", "Reservado ✓") + '</div>' +
+      '<div class="footnote" style="padding:0 0 10px">' + esc(a.name) + ', ' + two("your time with " + esc(pb.host.name) + " is confirmed for:", "su hora con " + esc(pb.host.name) + " está confirmada para:") + '</div>' +
       '<div class="panel panel-pad" style="margin-bottom:10px"><b>' + new Date(a.startAt).toLocaleString([], {weekday:"long", month:"long", day:"numeric", hour:"numeric", minute:"2-digit"}) + '</b></div>' +
-      '<div class="footnote">A confirmation has been sent to ' + esc(pb.host.name) + '. They\'ll reach out if anything changes.</div>'
+      '<div class="footnote">' + two("A confirmation has been sent to " + esc(pb.host.name) + ". They'll reach out if anything changes.", "Se ha enviado una confirmación a " + esc(pb.host.name) + ". Se pondrán en contacto si algo cambia.") + '</div>'
     );
   }
   var slotsByDay = generateAvailableSlots(pb.userId, 21);
   if (pb.selectedSlot){
     var s = pb.selectedSlot;
     return wrap(
-      '<div class="rail-title" style="margin-bottom:4px">Confirm your time</div>' +
-      '<div class="footnote" style="padding:0 0 10px">' + new Date(s.start).toLocaleString([], {weekday:"long", month:"long", day:"numeric", hour:"numeric", minute:"2-digit"}) + ' with ' + esc(pb.host.name) + '</div>' +
+      '<div class="rail-title" style="margin-bottom:4px">' + two("Confirm your time", "Confirme su hora") + '</div>' +
+      '<div class="footnote" style="padding:0 0 10px">' + new Date(s.start).toLocaleString([], {weekday:"long", month:"long", day:"numeric", hour:"numeric", minute:"2-digit"}) + ' ' + two("with", "con") + ' ' + esc(pb.host.name) + '</div>' +
       '<form data-form="submit-booking">' +
-        '<div class="form-row"><label>Your Name</label><input class="input" name="name" required></div>' +
+        '<div class="form-row"><label>' + two("Your Name", "Su Nombre") + '</label><input class="input" name="name" required></div>' +
         '<div class="form-two">' +
-          '<div class="form-row"><label>Phone</label><input class="input" name="phone"></div>' +
-          '<div class="form-row"><label>Email</label><input class="input" type="email" name="email"></div>' +
+          '<div class="form-row"><label>' + two("Phone", "Teléfono") + '</label><input class="input" name="phone"></div>' +
+          '<div class="form-row"><label>' + two("Email", "Correo Electrónico") + '</label><input class="input" type="email" name="email"></div>' +
         '</div>' +
-        '<div class="form-row"><label>What would you like to discuss? (optional)</label><textarea class="textarea" name="notes" rows="2"></textarea></div>' +
-        '<button class="btn btn-primary" type="submit" style="margin-top:6px">Confirm Booking</button>' +
-        '<button class="btn btn-ghost btn-sm" type="button" data-action="booking-back-to-slots" style="margin-top:6px;margin-left:6px">← Back</button>' +
+        '<div class="form-row"><label>' + two("What would you like to discuss? (optional)", "¿Qué le gustaría discutir? (opcional)") + '</label><textarea class="textarea" name="notes" rows="2"></textarea></div>' +
+        '<button class="btn btn-primary" type="submit" style="margin-top:6px">' + two("Confirm Booking", "Confirmar Reserva") + '</button>' +
+        '<button class="btn btn-ghost btn-sm" type="button" data-action="booking-back-to-slots" style="margin-top:6px;margin-left:6px">' + two("← Back", "← Atrás") + '</button>' +
       '</form>'
     );
   }
@@ -6790,10 +6810,10 @@ function renderPublicBooking(){
         s.start.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) + '</button>';
     }).join("") : '';
     return wrap(
-      '<div class="rail-title" style="margin-bottom:4px">Pick a time</div>' +
-      '<div class="footnote" style="padding:0 0 10px">' + (day ? day.date.toLocaleDateString([], {weekday:"long", month:"long", day:"numeric"}) : "") + ' with ' + esc(pb.host.name) + '</div>' +
+      '<div class="rail-title" style="margin-bottom:4px">' + two("Pick a time", "Elija una hora") + '</div>' +
+      '<div class="footnote" style="padding:0 0 10px">' + (day ? day.date.toLocaleDateString([], {weekday:"long", month:"long", day:"numeric"}) : "") + ' ' + two("with", "con") + ' ' + esc(pb.host.name) + '</div>' +
       '<div>' + slotBtns + '</div>' +
-      '<button class="btn btn-ghost btn-sm" type="button" data-action="booking-back-to-days" style="margin-top:10px">← Choose a different day</button>'
+      '<button class="btn btn-ghost btn-sm" type="button" data-action="booking-back-to-days" style="margin-top:10px">' + two("← Choose a different day", "← Elegir otro día") + '</button>'
     );
   }
   var dayBtns = slotsByDay.map(function(d){
@@ -6802,9 +6822,9 @@ function renderPublicBooking(){
     '</button>';
   }).join("");
   return wrap(
-    '<div class="rail-title" style="margin-bottom:4px">Book a time with ' + esc(pb.host.name) + '</div>' +
+    '<div class="rail-title" style="margin-bottom:4px">' + two("Book a time with " + esc(pb.host.name), "Reserve una hora con " + esc(pb.host.name)) + '</div>' +
     '<div class="footnote" style="padding:0 0 10px">Bridgepoint Lending</div>' +
-    (slotsByDay.length ? ('<div>' + dayBtns + '</div>') : '<div class="empty">No open times in the next few weeks — please call or text directly.</div>')
+    (slotsByDay.length ? ('<div>' + dayBtns + '</div>') : ('<div class="empty">' + two("No open times in the next few weeks — please call or text directly.", "No hay horarios disponibles en las próximas semanas — por favor llame o envíe un mensaje de texto directamente.") + '</div>'))
   );
 }
 
@@ -9154,9 +9174,8 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "add-referral-partner"){
     addReferralPartner(fd);
     form.reset();
-  } else if (type === "add-availability-rule"){
-    addAvailabilityRule(fd);
-    form.reset();
+  } else if (type === "bulk-set-availability"){
+    bulkSetAvailability(fd);
   } else if (type === "submit-booking"){
     submitBooking(fd);
   } else if (type === "save-signature"){
