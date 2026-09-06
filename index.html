@@ -2929,6 +2929,13 @@ function hydrateFromSupabase(){
     if (res.error){ console.error("emails fetch error", res.error); return; }
     if (res.data){ state.emails = res.data.map(rowToEmailRecord); render(); }
   });
+  sb.from("coaching_notes").select("*").order("created_at", { ascending:false }).then(function(res){
+    if (res.error){ console.error("coaching notes fetch error", res.error); return; }
+    if (res.data){ state.coachingNotes = res.data.map(rowToCoachingNote); render(); }
+  });
+}
+function rowToCoachingNote(r){
+  return { id:r.id, leadId:r.lead_id, staffId:r.staff_id, source:r.source, note:r.note, createdAt:r.created_at, read:r.read };
 }
 function rowToEmailRecord(r){
   return { id:r.id, leadId:r.lead_id||null, direction:r.direction, fromAddress:r.from_address, toAddress:r.to_address, subject:r.subject, body:r.body, sentBy:r.sent_by||null, createdAt:r.created_at };
@@ -3429,6 +3436,9 @@ function moveStage(leadId, target){
   } else if (target === "lost"){
     lead.status = "lost"; lead.stage = "lost";
     lead.activity.push({ date:d, type:"system", text:"Marked lost / dead", author: currentUser().name });
+    if (sb && lead.assignedTo){
+      sb.functions.invoke("generate-coaching-note", { body:{ leadId: lead.id, staffId: lead.assignedTo, source:"lost_deal" } }).catch(function(){});
+    }
   } else if (target === "reactivate"){
     lead.status = "active";
     lead.activity.push({ date:d, type:"system", text:"Reactivated", author: currentUser().name });
@@ -5182,6 +5192,7 @@ function renderShell(){
         (navVisible("notifications") ? navItem("notifications","🔔","Notifications", notifCount||null) : "") +
         navItem("teamchat","💬","Team Chat", unreadTeamChatTotal(ui.viewAs)||null) +
         navItem("email","📧","Email") +
+        (!isProcessor() ? navItem("coaching","🎯","Coaching") : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
         (isOwner() ? navItem("ai-assistant","🤖","AI Assistant") : "") +
@@ -5220,6 +5231,7 @@ function renderShell(){
   else if (ui.view === "notifications") body = renderNotifications();
   else if (ui.view === "teamchat") body = renderTeamChat();
   else if (ui.view === "email") body = renderEmailInbox();
+  else if (ui.view === "coaching") body = renderCoaching();
   else body = renderToday();
 
   return sidebar + '<div class="main"' + accentStyle + '>' + (prefs.welcomeNote && ui.view==="today" ? ('<div class="panel panel-pad" style="margin:16px 16px 0;border-color:var(--brand)">✨ ' + esc(prefs.welcomeNote) + '</div>') : '') + body + '</div>';
@@ -5510,6 +5522,26 @@ function buildStandalonePricerOutputHTML(sp){
     (maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.needsManualCheck ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">NY property — county-specific leverage reduction applies (-15% for the five boroughs, -5% Suffolk/Nassau). Verify manually, not applied here.</div>' : '') +
     (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
     '<div style="margin-top:14px"><button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button></div>';
+}
+function renderCoaching(){
+  var all = state.coachingNotes || [];
+  var mine = isOwner() ? all : all.filter(function(n){ return n.staffId === ui.viewAs; });
+  var sourceLabel = { call:"📞 Real Call", lost_deal:"💔 Lost Deal", next_time:"💡 Next-Call Tip" };
+  var rows = mine.map(function(n){
+    var lead = leadById(n.leadId);
+    return '<div class="queue-card">' +
+      '<div class="queue-main">' +
+        '<div class="queue-title"><span class="badge badge-slate">' + (sourceLabel[n.source]||n.source) + '</span> ' + (lead ? esc(lead.name) : "") + (isOwner() ? (' · ' + esc(userName(n.staffId))) : '') + '</div>' +
+        '<div class="queue-reason" style="white-space:pre-wrap">' + esc(n.note) + '</div>' +
+        '<div class="queue-meta"><span>' + fmtDate((n.createdAt||"").slice(0,10)) + '</span></div>' +
+      '</div>' +
+      '<div class="queue-actions">' +
+        (lead ? ('<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View Loan</button>') : '') +
+      '</div>' +
+    '</div>';
+  }).join("");
+  return topbar("Coaching", isOwner() ? "AI coaching notes across the team — real calls, lost deals, and next-conversation tips." : "Your AI coaching notes — real calls, lost deals, and tips for your next conversation with each client.", "") +
+    '<div class="content">' + (rows || '<div class="empty">No coaching notes yet — they show up after real calls come in from Quo, when a deal is marked lost, or when you click Get Tip on a lead.</div>') + '</div>';
 }
 function renderMyCalendarWidget(){
   if (isDemo()) return "";
@@ -6386,6 +6418,7 @@ function renderRail(lead){
         '</select>'
       ) : ('<div>' + esc(lead.assignedProcessor ? userName(lead.assignedProcessor) : "Not yet assigned") + '</div>')) +
     '</div>') : '') +
+    (isProcessor() ? '' : renderCoachingTip(lead.id)) +
     '<div class="rail-block">' +
       '<div class="rail-title">Contact</div>' +
       '<div class="contact-row">' +
@@ -7778,6 +7811,35 @@ function modalSendInvite(user){
       '</div>' +
     '</div></div>';
 }
+function renderCoachingTip(leadId){
+  if (isProcessor()) return "";
+  var notes = (state.coachingNotes||[]).filter(function(n){ return n.leadId===leadId; });
+  var latest = notes[0]; // already sorted newest-first from hydrate
+  var busy = ui.coachingTipBusy === leadId;
+  return '<div class="panel panel-pad" style="margin:10px 0;background:var(--brand-tint)">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
+      '<div class="rail-title" style="margin:0">💡 Coaching Tip</div>' +
+      '<button class="btn btn-sm" type="button" data-action="request-coaching-tip" data-lead="' + leadId + '"' + (busy?' disabled':'') + '>' + (busy?'Thinking…':(latest?'Refresh':'Get Tip')) + '</button>' +
+    '</div>' +
+    (latest ? ('<div style="padding-top:6px;white-space:pre-wrap">' + esc(latest.note) + '</div>') : '<div class="footnote" style="padding-top:4px">No tip yet for this client — click Get Tip before you call.</div>') +
+  '</div>';
+}
+function requestCoachingTip(leadId){
+  if (!sb) return;
+  ui.coachingTipBusy = leadId;
+  render();
+  sb.functions.invoke("generate-coaching-note", { body:{ leadId: leadId, staffId: currentUser().id, source:"next_time" } }).then(function(res){
+    ui.coachingTipBusy = null;
+    if (res.error || !res.data || !res.data.ok){ showToast("Couldn't generate a tip — try again"); render(); return; }
+    state.coachingNotes = state.coachingNotes || [];
+    state.coachingNotes.unshift({ id: res.data.id, leadId: leadId, staffId: currentUser().id, source:"next_time", note: res.data.note, createdAt: new Date().toISOString(), read:false });
+    render();
+  }).catch(function(){
+    ui.coachingTipBusy = null;
+    showToast("Couldn't generate a tip — try again");
+    render();
+  });
+}
 function modalDialer(){
   if (!ui.dialer) return "";
   var id = ui.dialer.queueIds[ui.dialer.index];
@@ -7797,6 +7859,7 @@ function modalDialer(){
       '<div class="modal-body">' +
         '<div class="rail-name" style="font-size:1.15rem">' + esc(lead.name) + '</div>' +
         '<div class="footnote" style="padding:0">' + esc(lead.loanType) + ' · ' + fmtUSD(lead.loanAmount) + '</div>' +
+        renderCoachingTip(lead.id) +
         '<a class="btn btn-primary" style="width:100%;justify-content:center;font-size:1.05rem;padding:13px" href="tel:' + esc(digits) + '">📞 Call ' + esc(lead.phone||"") + '</a>' +
         '<div class="form-row"><label>Outcome</label><select class="select" name="outcome">' + outOptions + '</select></div>' +
         '<div class="form-row"><label>Notes</label><textarea class="textarea" name="notes" rows="2" placeholder="What did you discuss?"></textarea></div>' +
@@ -8903,6 +8966,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "toggle-email"){ ui.expandedEmailId = ui.expandedEmailId===t.dataset.id ? null : t.dataset.id; render(); }
   else if (action === "toggle-conversation"){ ui.expandedConversationLead = ui.expandedConversationLead===t.dataset.lead ? null : t.dataset.lead; render(); }
   else if (action === "confirm-team-message"){ sendTeamMessage(); }
+  else if (action === "request-coaching-tip"){ requestCoachingTip(t.dataset.lead); }
   else if (action === "reply-email"){
     var replySrc = (state.emails||[]).find(function(x){ return x.id===t.dataset.id; });
     if (replySrc){
