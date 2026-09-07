@@ -523,6 +523,7 @@ var ES_DICT = {
   "Rehab / Construction Budget":"Presupuesto de Remodelación / Construcción",
   "Rehab Budget":"Presupuesto de Remodelación", "Construction Budget":"Presupuesto de Construcción",
   "Loan Amount Requested":"Monto de Préstamo Solicitado", "Term (months)":"Plazo (meses)",
+  "Monthly Payment":"Pago Mensual", "interest only":"solo interés",
   "Number of Properties":"Número de Propiedades", "Total Purchase Price / Value":"Precio / Valor Total de Compra",
   "Total Monthly Rent Estimate":"Renta Mensual Total Estimada",
   "Total Monthly Tax + Insurance + HOA":"Impuesto + Seguro + HOA Mensual Total",
@@ -4924,6 +4925,7 @@ function buildBorrowerPortalHTML(lead, opts){
         (lead.loanAmount ? field(L("Loan Amount"), fmtUSD(lead.loanAmount), true) : "") +
         (lead.rate ? field(L("Rate"), fmtPct(lead.rate), true) : "") +
         (lead.termMonths ? field(L("Term"), lead.termMonths + " " + L("months"), true) : "") +
+        (termSheetMonthlyPayment(lead) ? field(L("Monthly Payment") + (RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType)!==-1 ? (" (" + L("interest only") + ")") : ""), fmtUSD(termSheetMonthlyPayment(lead)), true) : "") +
       '</div>' +
       '<button class="btn btn-sm" type="button" style="margin-top:10px" data-action="view-term-sheet" data-lead="' + lead.id + '">📄 ' + L("View Term Sheet") + '</button>' +
     '</div>'
@@ -5975,6 +5977,7 @@ function renderTabScenario(lead){
     field("LTV / LTC", lead.ltv ? lead.ltv + "%" : "—", true) +
     field("Rate", fmtPct(lead.rate), true) +
     field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
+    field("Monthly Payment" + (RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType)!==-1 ? " (interest only)" : " (P&I)"), termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
   '</div>' + renderSubmitForReview(lead) + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
