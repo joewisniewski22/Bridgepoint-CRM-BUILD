@@ -478,11 +478,25 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     const leadIds = input.leadIds as string[] | undefined;
     if (!assignedTo && (!leadIds || !leadIds.length)) return { error: "missing_target", detail: "Provide assignedTo or leadIds" };
 
-    let q = sb.from("leads").select("id,name,email,phone,loan_type,assigned_to").eq("status", "active");
+    let q = sb.from("leads").select("id,name,email,phone,loan_type,assigned_to,activity").eq("status", "active");
     q = assignedTo ? q.eq("assigned_to", assignedTo) : q.in("id", leadIds as string[]);
-    const { data: leads, error } = await q.limit(500);
+    const { data: leadsRaw, error } = await q.limit(500);
     if (error) return { error: error.message };
-    if (!leads || !leads.length) return { error: "no_matching_leads" };
+    if (!leadsRaw || !leadsRaw.length) return { error: "no_matching_leads" };
+
+    // Real TCPA opt-outs (a genuine "replied STOP" record in activity) are
+    // never texted again, full stop -- this is a distinct thing from the
+    // automation_paused flag, which is also set on leads that were simply
+    // imported without enrolling them in the autonomous AI texting bot and
+    // does NOT mean they opted out of ever hearing from a real person.
+    const optedOut = new Set(
+      leadsRaw.filter((l) => (Array.isArray(l.activity) ? l.activity : []).some((a: Record<string, unknown>) =>
+        typeof a.text === "string" && a.text.toLowerCase().includes("tcpa opt-out")
+      )).map((l) => l.id)
+    );
+    const skippedForOptOut = optedOut.size;
+    const leads = leadsRaw.filter((l) => !optedOut.has(l.id));
+    if (!leads.length) return { error: "no_matching_leads", detail: "All matching leads have opted out of texts (TCPA)." };
 
     const loIds = [...new Set(leads.map((l) => l.assigned_to).filter(Boolean))] as string[];
     const { data: staffRows } = loIds.length
@@ -509,10 +523,15 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
       });
     if (!recipients.length) return { error: "no_contactable_recipients" };
 
+    // Guaranteed A2P/TCPA-compliant opt-out language on every text, appended
+    // server-side rather than trusted to the drafted copy.
+    let textBodyTemplate = (input.textBodyTemplate as string) || "";
+    if (!/reply stop/i.test(textBodyTemplate)) textBodyTemplate = textBodyTemplate.trim() + " Reply STOP to opt out.";
+
     return {
       ok: true, requiresFrontendAction: "review_campaign", channel,
-      emailSubject: input.emailSubject, emailBodyTemplate: input.emailBodyTemplate, textBodyTemplate: input.textBodyTemplate,
-      recipients, count: recipients.length,
+      emailSubject: input.emailSubject, emailBodyTemplate: input.emailBodyTemplate, textBodyTemplate,
+      recipients, count: recipients.length, skippedForOptOut,
     };
   }
   return { error: "unknown_tool" };
