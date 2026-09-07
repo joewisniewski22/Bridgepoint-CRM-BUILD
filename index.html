@@ -6541,14 +6541,15 @@ function renderMarket(){
 }
 
 function renderTeam(){
-  var rows = loanOfficers().map(function(u){
+  var teamMembers = state.users.filter(function(u){ return u.role==="owner" && !isDemoAccountId(u.id); }).concat(loanOfficers());
+  var rows = teamMembers.map(function(u){
     var mine = state.leads.filter(function(l){ return l.assignedTo===u.id; });
     var active = mine.filter(function(l){ return l.status==="active"; });
     var closed = mine.filter(function(l){ return l.status==="closed"; });
     var value = active.reduce(function(s,l){ return s + (l.loanAmount||0); }, 0);
-    var due = computeQueue(u.id).length;
+    var due = computeQueue(u.id).filter(function(item){ var l = leadById(item.leadId); return l && l.assignedTo===u.id; }).length;
     var cs = commissionSummaryFor(u.id);
-    return '<tr><td><b>' + esc(u.name) + '</b><div class="cell-sub">' + esc(u.title||"") + '</div></td>' +
+    return '<tr><td><b>' + esc(u.name) + '</b><div class="cell-sub">' + esc(u.title || (u.role==="owner"?"Owner":"")) + '</div></td>' +
       '<td class="num">' + active.length + '</td><td class="num">' + due + '</td><td class="num">' + fmtUSD(value) + '</td><td class="num">' + closed.length + '</td>' +
       '<td class="num">' + fmtUSD(cs.earned) + '</td><td class="num">' + fmtUSD(cs.potential) + '</td></tr>';
   }).join("");
