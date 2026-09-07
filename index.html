@@ -281,8 +281,10 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .col-head{display:flex;align-items:center;justify-content:space-between;padding:12px 12px 8px;font-size:12.5px;font-weight:600;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.03em}
 .col-head .n{font-weight:600;color:var(--ink-faint);text-transform:none}
 .col-cards{display:flex;flex-direction:column;gap:8px;padding:0 10px 10px;overflow-y:auto}
-.pcard{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;cursor:pointer;box-shadow:var(--shadow-card)}
+.pcard{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;cursor:grab;box-shadow:var(--shadow-card)}
 .pcard:hover{border-color:var(--ink-faint)}
+.pcard.dragging{opacity:.4}
+.col.drag-over{border-color:var(--brand);background:var(--surface)}
 .pcard .nm{font-weight:600;font-size:13px}
 .pcard .ty{font-size:12px;color:var(--ink-muted);margin-top:2px}
 .pcard .amt{font-family:var(--font-mono);font-size:12.5px;margin-top:5px}
@@ -5681,26 +5683,26 @@ function renderPipeline(){
   var cols = STAGES.map(function(s){
     var inStage = leads.filter(function(l){ return l.stage===s.key && l.status!=="cold" && l.status!=="lost"; });
     var cards = inStage.map(function(l){
-      return '<div class="pcard" data-action="select-lead" data-lead="' + l.id + '">' +
+      return '<div class="pcard" draggable="true" data-action="select-lead" data-lead="' + l.id + '">' +
         '<div class="nm">' + esc(l.name) + '</div>' +
         '<div class="ty">' + esc(l.loanType) + '</div>' +
         '<div class="amt">' + fmtUSD(l.loanAmount) + '</div>' +
         '<div class="lo">' + esc(userName(l.assignedTo)) + '</div>' +
       '</div>';
     }).join("");
-    return '<div class="col"><div class="col-head"><span class="name">' + s.label + '</span><span class="n num">' + inStage.length + '</span></div>' +
+    return '<div class="col" data-stage="' + s.key + '"><div class="col-head"><span class="name">' + s.label + '</span><span class="n num">' + inStage.length + '</span></div>' +
       '<div class="col-cards">' + (cards || '') + '</div></div>';
   }).join("");
 
   var coldLost = leads.filter(function(l){ return l.status==="cold" || l.status==="lost"; });
   var coldCards = coldLost.map(function(l){
-    return '<div class="pcard" data-action="select-lead" data-lead="' + l.id + '">' +
+    return '<div class="pcard" draggable="true" data-action="select-lead" data-lead="' + l.id + '">' +
       '<div class="nm">' + esc(l.name) + '</div>' +
       '<div class="ty">' + esc(l.loanType) + '</div>' +
       badgeForStage(l) +
     '</div>';
   }).join("");
-  cols += '<div class="col" style="background:var(--c-rust-bg)"><div class="col-head"><span class="name">Cold / Lost</span><span class="n num">' + coldLost.length + '</span></div><div class="col-cards">' + (coldCards||'') + '</div></div>';
+  cols += '<div class="col" data-stage="lost" style="background:var(--c-rust-bg)"><div class="col-head"><span class="name">Cold / Lost</span><span class="n num">' + coldLost.length + '</span></div><div class="col-cards">' + (coldCards||'') + '</div></div>';
 
   return topbar("Pipeline", "Lead intake through post-closing, in one board.", "") +
     '<div class="content"><div class="board">' + cols + '</div></div>';
@@ -8970,6 +8972,41 @@ function modalLogCall(leadId){
    Event delegation
 --------------------------------------------------------------------- */
 var appEl = document.getElementById("app");
+
+appEl.addEventListener("dragstart", function(e){
+  var card = e.target.closest && e.target.closest(".pcard");
+  if (!card || !card.dataset.lead) return;
+  e.dataTransfer.setData("text/plain", card.dataset.lead);
+  e.dataTransfer.effectAllowed = "move";
+  card.classList.add("dragging");
+});
+appEl.addEventListener("dragend", function(e){
+  var card = e.target.closest && e.target.closest(".pcard");
+  if (card) card.classList.remove("dragging");
+});
+appEl.addEventListener("dragover", function(e){
+  var col = e.target.closest && e.target.closest(".col[data-stage]");
+  if (!col) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  col.classList.add("drag-over");
+});
+appEl.addEventListener("dragleave", function(e){
+  var col = e.target.closest && e.target.closest(".col[data-stage]");
+  if (col && !col.contains(e.relatedTarget)) col.classList.remove("drag-over");
+});
+appEl.addEventListener("drop", function(e){
+  var col = e.target.closest && e.target.closest(".col[data-stage]");
+  if (!col) return;
+  e.preventDefault();
+  col.classList.remove("drag-over");
+  var leadId = e.dataTransfer.getData("text/plain");
+  var targetStage = col.dataset.stage;
+  if (!leadId || !targetStage) return;
+  var lead = leadById(leadId);
+  if (!lead || lead.stage === targetStage) return;
+  moveStage(leadId, targetStage);
+});
 
 appEl.addEventListener("click", function(e){
   var backdrop = e.target.closest && e.target.closest("[data-action='backdrop']");
