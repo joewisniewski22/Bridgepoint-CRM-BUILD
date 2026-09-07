@@ -1060,6 +1060,16 @@ function monthlyPayment(principal, annualRatePct, termMonths){
   var r = (annualRatePct/100) / 12;
   return principal * r / (1 - Math.pow(1+r, -termMonths));
 }
+function interestOnlyPayment(principal, annualRatePct){
+  if (!principal || !annualRatePct) return null;
+  return principal * (annualRatePct/100) / 12;
+}
+function termSheetMonthlyPayment(lead){
+  var isInterestOnly = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
+  return isInterestOnly
+    ? interestOnlyPayment(lead.loanAmount, lead.rate)
+    : monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths);
+}
 function stateFromAddress(address){
   if (!address) return null;
   var m = /,\s*([A-Za-z]{2})\s*\d{0,5}\s*$/.exec(address.trim());
@@ -2558,6 +2568,7 @@ function buildTermSheet(lead){
   var today = todayISO();
   var expires = addDaysISO(today, 15);
   var lang = lead.preferredLanguage || "en";
+  var isRehabType = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
   var commission = (lead.pointsCharged!=null && lead.loanAmount) ? fmtUSD(pointsRevenue(lead)) : (lang==="es" ? "Por determinar" : "TBD");
   var lines = [];
   if (lang === "es"){
@@ -2574,7 +2585,7 @@ function buildTermSheet(lead){
     lines.push("Tasa: " + (lead.rate ? fmtPct(lead.rate) : "Por determinar — sujeta a bloqueo de tasa"));
     lines.push("Plazo: " + (lead.termMonths ? (lead.termMonths + " meses") : "Por determinar"));
     lines.push("Relación Préstamo-Valor: " + (lead.ltv ? (lead.ltv + "%") : "Por determinar"));
-    lines.push("Pago Mensual (capital e interés): " + (monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths) ? fmtUSD(monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths)) : "Por determinar"));
+    lines.push((isRehabType ? "Pago Mensual (solo interés): " : "Pago Mensual (capital e interés): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "Por determinar"));
     lines.push("Originación: " + commission);
     lines.push("");
     lines.push("PROPIEDAD");
@@ -2600,7 +2611,7 @@ function buildTermSheet(lead){
     lines.push("Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
     lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
     lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
-    lines.push("Monthly Payment (principal & interest): " + (monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths) ? fmtUSD(monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths)) : "TBD"));
+    lines.push((isRehabType ? "Monthly Payment (interest only): " : "Monthly Payment (principal & interest): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "TBD"));
     lines.push("Origination: " + commission);
     lines.push("");
     lines.push("PROPERTY");
