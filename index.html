@@ -2574,6 +2574,7 @@ function buildTermSheet(lead){
     lines.push("Tasa: " + (lead.rate ? fmtPct(lead.rate) : "Por determinar — sujeta a bloqueo de tasa"));
     lines.push("Plazo: " + (lead.termMonths ? (lead.termMonths + " meses") : "Por determinar"));
     lines.push("Relación Préstamo-Valor: " + (lead.ltv ? (lead.ltv + "%") : "Por determinar"));
+    lines.push("Pago Mensual (capital e interés): " + (monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths) ? fmtUSD(monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths)) : "Por determinar"));
     lines.push("Originación: " + commission);
     lines.push("");
     lines.push("PROPIEDAD");
@@ -2599,6 +2600,7 @@ function buildTermSheet(lead){
     lines.push("Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
     lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
     lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
+    lines.push("Monthly Payment (principal & interest): " + (monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths) ? fmtUSD(monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths)) : "TBD"));
     lines.push("Origination: " + commission);
     lines.push("");
     lines.push("PROPERTY");
