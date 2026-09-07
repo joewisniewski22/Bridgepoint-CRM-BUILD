@@ -2806,8 +2806,9 @@ function submitPublicApplication(leadId, patch){
   if (!lead) return;
   var d = todayISO();
   Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
-  if (patch.purchasePrice && patch.loanAmount){
-    lead.ltv = Math.round((patch.loanAmount / patch.purchasePrice) * 1000) / 10;
+  var ltvBasis = (patch.transactionType && patch.transactionType !== "purchase" && patch.currentValue) ? patch.currentValue : patch.purchasePrice;
+  if (ltvBasis && patch.loanAmount){
+    lead.ltv = Math.round((patch.loanAmount / ltvBasis) * 1000) / 10;
   }
   lead.applicationSentAt = lead.applicationSentAt || d;
   lead.applicationTakenAt = d;
@@ -3262,8 +3263,9 @@ function submitPhoneApplication(leadId, patch){
   if (!lead) return;
   var d = todayISO();
   Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
-  if (patch.purchasePrice && patch.loanAmount){
-    lead.ltv = Math.round((patch.loanAmount / patch.purchasePrice) * 1000) / 10;
+  var ltvBasis = (patch.transactionType && patch.transactionType !== "purchase" && patch.currentValue) ? patch.currentValue : patch.purchasePrice;
+  if (ltvBasis && patch.loanAmount){
+    lead.ltv = Math.round((patch.loanAmount / ltvBasis) * 1000) / 10;
   }
   lead.applicationSentAt = lead.applicationSentAt || d;
   lead.applicationTakenByPhone = true;
@@ -7921,6 +7923,7 @@ function buildScenarioFieldsHTML(lead, lang){
   if (isDSCR){
     return '<div class="form-two">' +
         '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
+        '<div class="form-row"><label>' + L("Current Value") + ' <span class="hint">(' + L("refi LTV basis") + ')</span></label><input class="input" type="number" name="currentValue" value="' + v(lead.currentValue) + '"></div>' +
         '<div class="form-row"><label>' + L("Monthly Rent Estimate") + '</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
       '</div>' +
       '<div class="form-two">' +
@@ -9324,6 +9327,7 @@ appEl.addEventListener("submit", function(e){
       propertyType: fd.get("propertyType"),
       exitStrategy: fd.get("exitStrategy"),
       purchasePrice: numOrNull("purchasePrice"),
+      currentValue: numOrNull("currentValue"),
       arv: numOrNull("arv"),
       rehabBudget: numOrNull("rehabBudget"),
       rentEstimate: numOrNull("rentEstimate"),
@@ -9369,6 +9373,7 @@ appEl.addEventListener("submit", function(e){
       propertyType: fd.get("propertyType"),
       exitStrategy: fd.get("exitStrategy"),
       purchasePrice: numOrNullPub("purchasePrice"),
+      currentValue: numOrNullPub("currentValue"),
       arv: numOrNullPub("arv"),
       rehabBudget: numOrNullPub("rehabBudget"),
       rentEstimate: numOrNullPub("rentEstimate"),
