@@ -7628,15 +7628,19 @@ function sendTeamMessage(){
     render();
   });
 }
-function renderCampaignField(tpl, r){
+var CAMPAIGN_CTA_MARKER = "@@CTA_LINK@@";
+function renderCampaignField(tpl, r, opts){
+  opts = opts || {};
   var loanTypeLine = r.loanType
-    ? ("I know you'd looked into " + r.loanType + " financing with us — if that's still something you're working on, ")
-    : "Whatever real estate financing you're working on, ";
+    ? ("I know you'd looked into " + r.loanType + " financing with us before — if that's still active, I'd love to help you move it forward.")
+    : "Whatever real estate financing you're working on, I'd love to help however I can.";
+  var linkValue = r.bookingLink || "";
+  if (opts.email) linkValue = opts.forSend ? CAMPAIGN_CTA_MARKER : "HERE";
   return (tpl || "")
     .split("{{firstName}}").join(r.firstName || "there")
     .split("{{loName}}").join(r.loName || "your Bridgepoint contact")
     .split("{{loPhone}}").join(r.loPhone || "")
-    .split("{{bookingLink}}").join(r.bookingLink || "")
+    .split("{{bookingLink}}").join(linkValue)
     .split("{{loanTypeLine}}").join(loanTypeLine);
 }
 function modalCampaignPreview(m){
@@ -7645,8 +7649,8 @@ function modalCampaignPreview(m){
   var sampleHTML = samples.map(function(r){
     return '<div class="panel panel-pad" style="margin-bottom:8px">' +
       '<div class="rail-title" style="margin-bottom:4px">' + esc(r.name) + '</div>' +
-      (m.channel !== "text" ? ('<div class="footnote" style="padding:0 0 4px"><b>Email</b> — ' + esc(m.emailSubject) + '</div><div style="white-space:pre-wrap;font-size:13px;margin-bottom:6px">' + esc(renderCampaignField(m.emailBodyTemplate, r)) + '</div>') : '') +
-      (m.channel !== "email" ? ('<div class="footnote" style="padding:0 0 4px"><b>Text</b></div><div style="white-space:pre-wrap;font-size:13px">' + esc(renderCampaignField(m.textBodyTemplate, r)) + '</div>') : '') +
+      (m.channel !== "text" ? ('<div class="footnote" style="padding:0 0 4px"><b>Email</b> — ' + esc(m.emailSubject) + '</div><div style="white-space:pre-wrap;font-size:13px;margin-bottom:6px">' + esc(renderCampaignField(m.emailBodyTemplate, r, {email:true})) + '</div>') : '') +
+      (m.channel !== "email" ? ('<div class="footnote" style="padding:0 0 4px"><b>Text</b></div><div style="white-space:pre-wrap;font-size:13px">' + esc(renderCampaignField(m.textBodyTemplate, r, {email:false})) + '</div>') : '') +
     '</div>';
   }).join("");
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
@@ -7673,12 +7677,12 @@ function sendCampaign(){
     var calls = [];
     if ((m.channel === "email" || m.channel === "both") && r.email){
       calls.push(sb.functions.invoke("send-email", {
-        body: { leadId: r.leadId, to: r.email, subject: m.emailSubject, text: renderCampaignField(m.emailBodyTemplate, r), fromName: r.loName, fromUserId: r.loId }
+        body: { leadId: r.leadId, to: r.email, subject: m.emailSubject, text: renderCampaignField(m.emailBodyTemplate, r, {email:true, forSend:true}), ctaUrl: r.bookingLink || null, fromName: r.loName, fromUserId: r.loId }
       }));
     }
     if ((m.channel === "text" || m.channel === "both") && r.phone){
       calls.push(sb.functions.invoke("send-text", {
-        body: { leadId: r.leadId, to: r.phone, text: renderCampaignField(m.textBodyTemplate, r), fromName: r.loName, fromNumber: r.loPhone || null }
+        body: { leadId: r.leadId, to: r.phone, text: renderCampaignField(m.textBodyTemplate, r, {email:false}), fromName: r.loName, fromNumber: r.loPhone || null }
       }));
     }
     return Promise.all(calls).then(function(results){

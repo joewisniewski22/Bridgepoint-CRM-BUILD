@@ -23,8 +23,17 @@ function insertPlusTag(address: string, tag: string): string {
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-function buildHtmlBody(text: string, photoUrl?: string | null): string {
-  const lines = escapeHtml(text).split("\n").map((l) => l || "&nbsp;").join("<br>\n");
+// ctaUrl is always a real, code-constructed URL (never raw AI/template
+// output) -- the marker survives escapeHtml untouched (no <, >, or &) and
+// is swapped for a real anchor afterward, so this can never inject
+// arbitrary HTML from a template body.
+const CTA_MARKER = "@@CTA_LINK@@";
+function buildHtmlBody(text: string, photoUrl?: string | null, ctaUrl?: string | null): string {
+  var escaped = escapeHtml(text);
+  if (ctaUrl) {
+    escaped = escaped.split(CTA_MARKER).join('<a href="' + ctaUrl + '" style="color:#1b2a47;font-weight:600;text-decoration:underline">HERE</a>');
+  }
+  const lines = escaped.split("\n").map((l) => l || "&nbsp;").join("<br>\n");
   const photoImg = photoUrl
     ? '<img src="' + photoUrl + '" alt="" width="64" height="64" style="border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:12px">'
     : "";
@@ -60,11 +69,16 @@ Deno.serve(async (req: Request) => {
     const attachmentBase64: string | null = body.attachmentBase64 || null;
     const attachmentName: string | null = body.attachmentName || null;
     const attachmentContentType: string = body.attachmentContentType || "application/pdf";
+    // Optional call-to-action link -- if the caller put the CTA_MARKER
+    // token in `text` (instead of a raw URL), the HTML version renders it
+    // as a real "HERE" hyperlink; the plain-text fallback just gets the URL.
+    const ctaUrl: string | null = body.ctaUrl || null;
 
     if (!to || !subject || !text) {
       return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400, headers: CORS_HEADERS });
     }
 
+    const plainText = ctaUrl ? text.split(CTA_MARKER).join(ctaUrl) : text;
     const replyTo = leadId ? insertPlusTag(INBOUND_ADDRESS, leadId) : INBOUND_ADDRESS;
 
     const pmRes = await fetch("https://api.postmarkapp.com/email", {
@@ -79,8 +93,8 @@ Deno.serve(async (req: Request) => {
         To: to,
         ReplyTo: replyTo,
         Subject: subject,
-        TextBody: text,
-        HtmlBody: buildHtmlBody(text, fromPhotoUrl),
+        TextBody: plainText,
+        HtmlBody: buildHtmlBody(text, fromPhotoUrl, ctaUrl),
         MessageStream: "outbound",
         ...(attachmentBase64 && attachmentName ? {
           Attachments: [{ Name: attachmentName, Content: attachmentBase64, ContentType: attachmentContentType }],
@@ -102,7 +116,7 @@ Deno.serve(async (req: Request) => {
       from_address: fromAddress,
       to_address: to,
       subject: subject,
-      body: text,
+      body: plainText,
       sent_by: fromUserId,
       postmark_message_id: pmData.MessageID,
     });
