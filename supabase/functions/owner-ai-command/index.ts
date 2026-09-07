@@ -44,7 +44,8 @@ async function buildSystemPrompt(): Promise<string> {
     "4. Sending documents: to send a Pre-Approval Letter or Term Sheet to a borrower on an existing loan file, call send_document with the leadId and kind -- this actually emails/texts them for real, so only call it when Joe clearly asks to send (not just when he asks you to create or update a file).\n" +
     "5. Looking up loans: list_closed_deals for recently funded loans, or search_leads / get_lead_details to find and inspect any loan file by name/phone/email or id.\n" +
     "6. Team communication: email_team and text_team send a REAL email/text to staff -- team-wide announcements, reminders, or a message to one specific person. Only call these when Joe clearly asks you to send/tell/email/text someone or the team, not as a side effect of something else.\n" +
-    "7. reassign_lead to change who a loan file is assigned to. add_lead_note to log a note on a loan file's activity history.\n\n" +
+    "7. reassign_lead to change who a loan file is assigned to. add_lead_note to log a note on a loan file's activity history.\n" +
+    "8. Retargeting campaigns: start_retargeting_campaign drafts a personalized email/text batch send to a group of existing leads (e.g. 'all of Taeya's leads', or a specific list), aimed at getting them on the phone with their assigned LO. Write genuinely good, specific copy yourself -- introduce the LO by name as the borrower's real point of contact, reference their loan interest when known (via {{loanTypeLine}}), and drive toward booking a call ({{bookingLink}}) or calling/texting the LO directly ({{loPhone}}). Keep texts SMS-short. This never sends anything itself -- it resolves the real recipient list and returns a preview for Joe to review and confirm in the CRM.\n\n" +
     "You still do NOT have: ad platform access, payments/spend, or any destructive/irreversible action (no deleting files, no changing pricing/guidelines). If asked for one of those, say plainly it isn't wired up rather than pretending.\n\n" +
     "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success. " +
     "CRITICAL: never describe an action (sent, triggered, created, updated, published) as done unless you actually called that exact tool THIS turn and its result confirmed success -- don't narrate an effect from context, from what Joe asked for, or from a tool you called for a different purpose. If you only updated a file and didn't call send_document, do not say anything was sent or triggered -- say what you'd need to do that as a separate, explicit step instead.";
@@ -230,6 +231,22 @@ const TOOLS = [
         kind: { type: "string", enum: ["preapproval", "termSheet"] },
       },
       required: ["leadId", "kind"],
+    },
+  },
+  {
+    name: "start_retargeting_campaign",
+    description: "Draft a personalized email + text retargeting campaign to a batch of existing leads, aimed at getting them on the phone with their assigned loan officer. Write real, specific, warm copy yourself (not generic marketing filler) using merge fields -- this does NOT send anything itself. It resolves the real recipient list server-side and returns requiresFrontendAction: review_campaign; Joe previews it in the CRM and must click Send before anything actually goes out, same as email_team/text_team.",
+    input_schema: {
+      type: "object",
+      properties: {
+        assignedTo: { type: "string", description: "Staff id to target every one of their active leads (use this for 'all of X's leads')" },
+        leadIds: { type: "array", items: { type: "string" }, description: "Specific lead ids to target, instead of assignedTo" },
+        channel: { type: "string", enum: ["email", "text", "both"] },
+        emailSubject: { type: "string", description: "Required if channel includes email" },
+        emailBodyTemplate: { type: "string", description: "Email body. Use merge fields: {{firstName}} {{loName}} {{loPhone}} {{bookingLink}} {{loanTypeLine}} (a full sentence about their specific loan interest if known, empty string if not -- write emailBodyTemplate so it still reads naturally either way)." },
+        textBodyTemplate: { type: "string", description: "SMS body, keep it short (under ~300 chars). Same merge fields as emailBodyTemplate." },
+      },
+      required: ["channel", "emailSubject", "emailBodyTemplate", "textBodyTemplate"],
     },
   },
 ];
@@ -453,6 +470,50 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     // Actual bilingual send happens client-side (reuses the CRM's tested
     // send pipeline) -- this just validates and signals the frontend to do it.
     return { ok: true, requiresFrontendAction: "send_document", leadId: input.leadId, kind: input.kind };
+  }
+  if (name === "start_retargeting_campaign") {
+    const channel = input.channel as string;
+    if (!["email", "text", "both"].includes(channel)) return { error: "invalid_channel" };
+    const assignedTo = input.assignedTo as string | undefined;
+    const leadIds = input.leadIds as string[] | undefined;
+    if (!assignedTo && (!leadIds || !leadIds.length)) return { error: "missing_target", detail: "Provide assignedTo or leadIds" };
+
+    let q = sb.from("leads").select("id,name,email,phone,loan_type,assigned_to").eq("status", "active");
+    q = assignedTo ? q.eq("assigned_to", assignedTo) : q.in("id", leadIds as string[]);
+    const { data: leads, error } = await q.limit(500);
+    if (error) return { error: error.message };
+    if (!leads || !leads.length) return { error: "no_matching_leads" };
+
+    const loIds = [...new Set(leads.map((l) => l.assigned_to).filter(Boolean))] as string[];
+    const { data: staffRows } = loIds.length
+      ? await sb.from("users").select("id,name,phone,quo_phone_number").in("id", loIds)
+      : { data: [] as Record<string, unknown>[] };
+    const staffMap: Record<string, { name?: string; phone?: string; quo_phone_number?: string }> = {};
+    (staffRows || []).forEach((s) => { staffMap[s.id as string] = s as { name?: string; phone?: string; quo_phone_number?: string }; });
+
+    const recipients = leads
+      .map((l) => {
+        const lo = staffMap[l.assigned_to as string] || {};
+        return {
+          leadId: l.id, name: l.name, firstName: (l.name || "there").split(" ")[0],
+          email: l.email || null, phone: l.phone || null, loanType: l.loan_type || null,
+          loId: l.assigned_to || null, loName: lo.name || "your Bridgepoint contact",
+          loPhone: lo.quo_phone_number || lo.phone || "",
+          bookingLink: "https://bridgepoint-crm-build.vercel.app/?book=" + (l.assigned_to || "owner"),
+        };
+      })
+      .filter((r) => {
+        if (channel === "email") return !!r.email;
+        if (channel === "text") return !!r.phone;
+        return !!r.email || !!r.phone;
+      });
+    if (!recipients.length) return { error: "no_contactable_recipients" };
+
+    return {
+      ok: true, requiresFrontendAction: "review_campaign", channel,
+      emailSubject: input.emailSubject, emailBodyTemplate: input.emailBodyTemplate, textBodyTemplate: input.textBodyTemplate,
+      recipients, count: recipients.length,
+    };
   }
   return { error: "unknown_tool" };
 }
