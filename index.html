@@ -1804,12 +1804,18 @@ function addTeamMember(data){
     var inviteEmail = inviteEmailFor(newUser);
     var inviter = currentUser();
     if (newUser.email){
-      sb.functions.invoke("send-email", {
-        body: { to: newUser.email, subject: inviteEmail.subject, text: inviteEmail.body, fromName: inviter.name, fromAddress: inviter.email, fromUserId: inviter.id, fromPhotoUrl: inviter.photoUrl||null }
+      var authProvisionOk = true;
+      sb.functions.invoke("provision-staff-auth", { body: { userId: newUser.id } }).catch(function(){ return { error: true }; }).then(function(res3){
+        authProvisionOk = !(res3 && (res3.error || !res3.data || !res3.data.ok));
+        return sb.functions.invoke("send-email", {
+          body: { to: newUser.email, subject: inviteEmail.subject, text: inviteEmail.body, fromName: inviter.name, fromAddress: inviter.email, fromUserId: inviter.id, fromPhotoUrl: inviter.photoUrl||null }
+        });
       }).then(function(res2){
-        showToast((res2.error || !res2.data || !res2.data.ok)
-          ? ("Added " + data.name + " — couldn't auto-send the invite, use the buttons below")
-          : ("Added " + data.name + " — invite emailed to " + newUser.email));
+        var emailOk = !(res2.error || !res2.data || !res2.data.ok);
+        var msg = "Added " + data.name;
+        msg += emailOk ? (" — invite emailed to " + newUser.email) : " — couldn't auto-send the invite, use the buttons below";
+        if (!authProvisionOk) msg += ". Their real login isn't set up yet, though — they won't be able to log in until that's fixed. Try again from Team, or ask Claude.";
+        showToast(msg);
         render();
       }).catch(function(){
         showToast("Added " + data.name + " — couldn't auto-send the invite, use the buttons below");
