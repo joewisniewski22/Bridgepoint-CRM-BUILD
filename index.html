@@ -7162,7 +7162,7 @@ function sendAiCommand(message, attachment){
           ui.modal = { type:"sendTeamMessage", channel: r.requiresFrontendAction === "email_team" ? "email" : "text", staff: r.staff, subject: r.subject, body: r.body };
           render();
         } else if (r && r.requiresFrontendAction === "review_campaign"){
-          ui.modal = { type:"campaignPreview", channel: r.channel, emailSubject: r.emailSubject, emailBodyTemplate: r.emailBodyTemplate, textBodyTemplate: r.textBodyTemplate, recipients: r.recipients, skippedForOptOut: r.skippedForOptOut||0 };
+          ui.modal = { type:"campaignPreview", channel: r.channel, emailSubject: r.emailSubject, emailBodyTemplate: r.emailBodyTemplate, textBodyTemplate: r.textBodyTemplate, recipients: r.recipients, skippedForOptOut: r.skippedForOptOut||0, skippedForOptOutMeaning: r.skippedForOptOutMeaning };
           render();
         }
       });
@@ -7658,7 +7658,7 @@ function modalCampaignPreview(m){
       '<div class="modal-head"><h3>Preview — Retargeting Campaign</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
       '<div class="modal-body">' +
         '<div class="form-row"><label>Recipients</label><div class="val">' + recipients.length + ' lead(s) — ' + esc(m.channel) + '</div></div>' +
-        (m.skippedForOptOut ? ('<div class="footnote" style="padding:0 0 6px;color:var(--c-rust)">' + m.skippedForOptOut + ' lead(s) skipped — previously replied STOP (TCPA opt-out).</div>') : '') +
+        (m.skippedForOptOut ? ('<div class="footnote" style="padding:0 0 6px;color:var(--c-rust)">' + m.skippedForOptOut + ' lead(s) previously replied STOP — ' + (m.skippedForOptOutMeaning === "excluded entirely" ? "excluded entirely." : "kept in for email, text suppressed for them only.") + '</div>') : '') +
         '<div class="footnote" style="padding:0 0 10px">Sample of how this personalizes per person (showing ' + samples.length + ' of ' + recipients.length + '):</div>' +
         sampleHTML +
         '<div class="footnote" style="padding:8px 0 0">Nothing has gone out yet. Sent for real, per person, once you confirm.</div>' +

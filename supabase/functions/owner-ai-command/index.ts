@@ -485,18 +485,23 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     if (!leadsRaw || !leadsRaw.length) return { error: "no_matching_leads" };
 
     // Real TCPA opt-outs (a genuine "replied STOP" record in activity) are
-    // never texted again, full stop -- this is a distinct thing from the
-    // automation_paused flag, which is also set on leads that were simply
-    // imported without enrolling them in the autonomous AI texting bot and
-    // does NOT mean they opted out of ever hearing from a real person.
-    const optedOut = new Set(
+    // never texted again -- but TCPA/STOP governs calls and texts, not
+    // email (that's CAN-SPAM, a separate opt-out mechanism), so a text
+    // opt-out should never block email or getting called. Distinct from
+    // automation_paused, which is also set on leads simply imported without
+    // enrolling them in the autonomous AI texting bot -- not an opt-out.
+    const textOptedOut = new Set(
       leadsRaw.filter((l) => (Array.isArray(l.activity) ? l.activity : []).some((a: Record<string, unknown>) =>
         typeof a.text === "string" && a.text.toLowerCase().includes("tcpa opt-out")
       )).map((l) => l.id)
     );
-    const skippedForOptOut = optedOut.size;
-    const leads = leadsRaw.filter((l) => !optedOut.has(l.id));
-    if (!leads.length) return { error: "no_matching_leads", detail: "All matching leads have opted out of texts (TCPA)." };
+    let leads = leadsRaw;
+    let skippedForOptOut = 0;
+    if (channel === "text") {
+      leads = leadsRaw.filter((l) => !textOptedOut.has(l.id));
+      skippedForOptOut = textOptedOut.size;
+      if (!leads.length) return { error: "no_matching_leads", detail: "All matching leads have opted out of texts (TCPA)." };
+    }
 
     const loIds = [...new Set(leads.map((l) => l.assigned_to).filter(Boolean))] as string[];
     const { data: staffRows } = loIds.length
@@ -508,9 +513,13 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     const recipients = leads
       .map((l) => {
         const lo = staffMap[l.assigned_to as string] || {};
+        // channel "both" + a text opt-out: keep the email, drop only the phone
+        // so this person still gets emailed but is never texted again.
+        const phoneAllowed = channel !== "both" || !textOptedOut.has(l.id);
+        if (channel === "both" && textOptedOut.has(l.id)) skippedForOptOut++;
         return {
           leadId: l.id, name: l.name, firstName: (l.name || "there").split(" ")[0],
-          email: l.email || null, phone: l.phone || null, loanType: l.loan_type || null,
+          email: l.email || null, phone: phoneAllowed ? (l.phone || null) : null, loanType: l.loan_type || null,
           loId: l.assigned_to || null, loName: lo.name || "your Bridgepoint contact",
           loPhone: lo.quo_phone_number || lo.phone || "",
           bookingLink: "https://bridgepoint-crm-build.vercel.app/?book=" + (l.assigned_to || "owner"),
@@ -532,6 +541,7 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
       ok: true, requiresFrontendAction: "review_campaign", channel,
       emailSubject: input.emailSubject, emailBodyTemplate: input.emailBodyTemplate, textBodyTemplate,
       recipients, count: recipients.length, skippedForOptOut,
+      skippedForOptOutMeaning: channel === "both" ? "kept for email, text suppressed only" : "excluded entirely",
     };
   }
   return { error: "unknown_tool" };
