@@ -46,7 +46,8 @@ async function buildSystemPrompt(): Promise<string> {
     "6. Team communication: email_team and text_team send a REAL email/text to staff -- team-wide announcements, reminders, or a message to one specific person. Only call these when Joe clearly asks you to send/tell/email/text someone or the team, not as a side effect of something else.\n" +
     "7. reassign_lead to change who a loan file is assigned to. add_lead_note to log a note on a loan file's activity history.\n" +
     "8. Retargeting campaigns: start_retargeting_campaign drafts a personalized email/text batch send to a group of existing leads (e.g. 'all of Taeya's leads', or a specific list), aimed at getting them on the phone with their assigned LO. Write genuinely good, specific copy yourself -- introduce the LO by name as the borrower's real point of contact, reference their loan interest when known (via {{loanTypeLine}}), and drive toward booking a call ({{bookingLink}}) or calling/texting the LO directly ({{loPhone}}). Keep texts SMS-short. This never sends anything itself -- it resolves the real recipient list and returns a preview for Joe to review and confirm in the CRM.\n" +
-    "9. Learning from real performance: when Joe asks you to 'look at engagement' or 'look and adjust' (he does not want to track this himself), this is ALWAYS a two-tool-call task, never one. Step 1: call analyze_engagement_performance. Step 2, in that same turn after seeing the results: you must do exactly one of (a) call apply_engagement_adjustment for real, or (b) write your reply stating plainly that nothing in the data supports a change. There is no third option -- never write a reply that describes, summarizes, or claims a specific adjustment (a guidance change, a cadence change) as something you did unless that exact apply_engagement_adjustment tool call is present in this turn's actions. If you're weighing whether to make a change, resolve that by calling the tool or by concluding no -- never resolve it by narrating an intention. Weight changes to how thin the data is, and say so plainly rather than overclaiming a pattern from a handful of leads. Always cite the actual numbers.\n\n" +
+    "9. Learning from real performance: when Joe asks you to 'look at engagement' or 'look and adjust' (he does not want to track this himself), this is ALWAYS a two-tool-call task, never one. Step 1: call analyze_engagement_performance. Step 2, in that same turn after seeing the results: you must do exactly one of (a) call apply_engagement_adjustment for real, or (b) write your reply stating plainly that nothing in the data supports a change. There is no third option -- never write a reply that describes, summarizes, or claims a specific adjustment (a guidance change, a cadence change) as something you did unless that exact apply_engagement_adjustment tool call is present in this turn's actions. If you're weighing whether to make a change, resolve that by calling the tool or by concluding no -- never resolve it by narrating an intention. Weight changes to how thin the data is, and say so plainly rather than overclaiming a pattern from a handful of leads. Always cite the actual numbers.\n" +
+    "10. Growth advising: Joe wants ongoing, business-manager-style guidance toward a real funded-volume goal (call analyze_growth_progress for the current target/deadline/pace and real pipeline/lead/revenue numbers -- never assume the goal, always look it up fresh). Ground spend/channel recommendations in real revenue (points-based revenue on the active pipeline and any closed volume) so a recommendation like 'increase Facebook spend' is actually affordable, not just a lead-volume guess -- his own words: 'you'll know my budget because you should see earnings based on what we already built.' If he tells you a goal, deadline, or baseline changed (ad spend, CIX volume, a month hit the target), call update_growth_goal for real, same discipline as tool 9 -- narrating it isn't enough. For pricing/rate competitiveness questions, call analyze_pricing_competitiveness -- there is no external competitor-rate feed, so frame guidance around Bridgepoint's own margin over its real wholesale par rate, and say explicitly that you don't have live competitor pricing if asked to compare against a specific competitor.\n\n" +
     "You still do NOT have: ad platform access, payments/spend, or any destructive/irreversible action (no deleting files, no changing pricing/guidelines). If asked for one of those, say plainly it isn't wired up rather than pretending.\n\n" +
     "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success. " +
     "CRITICAL: never describe an action (sent, triggered, created, updated, published) as done unless you actually called that exact tool THIS turn and its result confirmed success -- don't narrate an effect from context, from what Joe asked for, or from a tool you called for a different purpose. If you only updated a file and didn't call send_document, do not say anything was sent or triggered -- say what you'd need to do that as a separate, explicit step instead.";
@@ -267,6 +268,34 @@ const TOOLS = [
       },
       required: ["reason"],
     },
+  },
+  {
+    name: "analyze_growth_progress",
+    description: "Pull the real growth goal (target monthly funded volume, deadline, consecutive-months requirement) plus actual current pipeline data: leads this month by source (CIX vs Facebook vs self-generated vs referral), pipeline stage breakdown, real average loan size, and funded volume this month. Use this whenever Joe asks how the business is tracking toward the goal, or asks for spend/channel recommendations ('like a business manager'). Always ground recommendations in the real numbers this returns, not assumptions -- if funded volume is $0 or data is thin, say so plainly.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "update_growth_goal",
+    description: "Update the growth goal record -- target amount, deadline, consecutive-months requirement, or the known lead-source baselines (cixLeadsPerMonth, dailyFbSpend) when Joe tells you those changed (e.g. he raised ad spend, or CIX volume changed). Also use this to log consecutiveMonthsHit when a target month is confirmed funded.",
+    input_schema: {
+      type: "object",
+      properties: {
+        currentTargetMonthly: { type: "number" },
+        consecutiveMonthsRequired: { type: "integer" },
+        consecutiveMonthsHit: { type: "integer" },
+        nextTargetMonthly: { type: "number" },
+        targetDeadlineMonths: { type: "integer" },
+        cixLeadsPerMonth: { type: "integer" },
+        dailyFbSpend: { type: "number" },
+        notes: { type: "string" },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "analyze_pricing_competitiveness",
+    description: "Compare Bridgepoint's actual charged rates/points against the current wholesale par rates (market_rates table) by loan type, using real active and closed loan files. This shows Bridgepoint's own margin/yield-spread on real deals -- there is NO external competitor-rate data feed, so never claim to know a competitor's or 'the industry's' actual current pricing; frame guidance around par-rate margin and general market-rate-shift context only, and say so explicitly if asked to compare to a specific competitor.",
+    input_schema: { type: "object", properties: {}, required: [] },
   },
 ];
 
@@ -608,6 +637,84 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     const { error } = await sb.from("engagement_config").update(patch).eq("id", "default");
     if (error) return { error: error.message };
     return { ok: true, applied: patch };
+  }
+  if (name === "analyze_growth_progress") {
+    const { data: goal } = await sb.from("growth_goals").select("*").eq("id", "default").single();
+    const { data: leads } = await sb.from("leads").select("id,source,loan_amount,points_charged,rate,loan_type,stage,status,created_at,close_date");
+    const rows = leads || [];
+
+    const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    const thisMonth = rows.filter((l) => l.created_at && new Date(l.created_at as string) >= monthStart);
+    const bySource: Record<string, number> = {};
+    thisMonth.forEach((l) => { const s = (l.source as string) || "unknown"; bySource[s] = (bySource[s] || 0) + 1; });
+
+    const closedThisMonth = rows.filter((l) => (l.stage === "closed" || l.stage === "postclosing") && l.close_date && new Date(l.close_date as string) >= monthStart);
+    const fundedVolumeThisMonth = closedThisMonth.reduce((s, l) => s + ((l.loan_amount as number) || 0), 0);
+
+    const active = rows.filter((l) => l.status === "active");
+    const activePipelineVolume = active.reduce((s, l) => s + ((l.loan_amount as number) || 0), 0);
+    const withAmount = rows.filter((l) => l.loan_amount);
+    const avgLoanSize = withAmount.length ? withAmount.reduce((s, l) => s + (l.loan_amount as number), 0) / withAmount.length : null;
+
+    const pointsRevenue = (l: Record<string, unknown>) => (l.points_charged && l.loan_amount) ? (l.loan_amount as number) * ((l.points_charged as number) / 100) : 0;
+    const activePointsRevenue = active.reduce((s, l) => s + pointsRevenue(l), 0);
+    const closedPointsRevenueThisMonth = closedThisMonth.reduce((s, l) => s + pointsRevenue(l), 0);
+
+    const stageBreakdown: Record<string, number> = {};
+    rows.forEach((l) => { const st = (l.stage as string) || "unknown"; stageBreakdown[st] = (stageBreakdown[st] || 0) + 1; });
+
+    const goalStart = goal?.goal_start_date ? new Date(goal.goal_start_date as string) : new Date();
+    const monthsElapsed = Math.max(1, Math.round((Date.now() - goalStart.getTime()) / (30 * 24 * 3600 * 1000)));
+
+    return {
+      goal: {
+        currentTargetMonthly: goal?.current_target_monthly, consecutiveMonthsRequired: goal?.consecutive_months_required,
+        consecutiveMonthsHit: goal?.consecutive_months_hit, nextTargetMonthly: goal?.next_target_monthly,
+        deadlineMonths: goal?.target_deadline_months, monthsElapsedSinceGoalStart: monthsElapsed,
+        knownBaseline: { cixLeadsPerMonth: goal?.cix_leads_per_month, dailyFbSpend: goal?.daily_fb_spend, monthlyFbSpend: (goal?.daily_fb_spend || 0) * 30 },
+      },
+      fundedVolumeThisMonth, fundedLoansThisMonth: closedThisMonth.length,
+      totalLeadsAllTime: rows.length, leadsThisMonth: thisMonth.length, leadsThisMonthBySource: bySource,
+      activePipelineCount: active.length, activePipelineVolume, avgLoanSize,
+      revenue: { activePipelinePointsRevenue: Math.round(activePointsRevenue), closedPointsRevenueThisMonth: Math.round(closedPointsRevenueThisMonth), note: "Points-based revenue only (loan_amount x points_charged%) -- YSP on DSCR/Portfolio loans is priced live in the app's own Pricer and not independently recomputed here to avoid duplicating/drifting from that logic." },
+      pipelineByStage: stageBreakdown,
+      caveat: "If fundedVolumeThisMonth is 0 or leadsThisMonth is small, the system is early and this is a thin/unreliable sample for pacing math -- say so plainly rather than projecting confidently from noise.",
+    };
+  }
+  if (name === "update_growth_goal") {
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    const map: Record<string, string> = {
+      currentTargetMonthly: "current_target_monthly", consecutiveMonthsRequired: "consecutive_months_required",
+      consecutiveMonthsHit: "consecutive_months_hit", nextTargetMonthly: "next_target_monthly",
+      targetDeadlineMonths: "target_deadline_months", cixLeadsPerMonth: "cix_leads_per_month",
+      dailyFbSpend: "daily_fb_spend", notes: "notes",
+    };
+    for (const [key, col] of Object.entries(map)) { if (input[key] !== undefined) patch[col] = input[key]; }
+    if (Object.keys(patch).length === 1) return { error: "no_fields_provided" };
+    const { error } = await sb.from("growth_goals").update(patch).eq("id", "default");
+    if (error) return { error: error.message };
+    return { ok: true, applied: patch };
+  }
+  if (name === "analyze_pricing_competitiveness") {
+    const { data: rates } = await sb.from("market_rates").select("key,label,current,previous");
+    const { data: leads } = await sb.from("leads").select("loan_type,rate,points_charged,loan_amount,stage,status").not("rate", "is", null);
+    const rows = leads || [];
+    const byType: Record<string, { count: number; avgRate: number; avgPoints: number; parRate: number | null }> = {};
+    (rates || []).forEach((r) => {
+      const typeLeads = rows.filter((l) => (l.loan_type as string) === r.label || (l.loan_type as string)?.toLowerCase() === (r.key as string)?.toLowerCase());
+      if (!typeLeads.length) return;
+      byType[r.label as string] = {
+        count: typeLeads.length,
+        avgRate: Math.round((typeLeads.reduce((s, l) => s + ((l.rate as number) || 0), 0) / typeLeads.length) * 1000) / 1000,
+        avgPoints: Math.round((typeLeads.reduce((s, l) => s + ((l.points_charged as number) || 0), 0) / typeLeads.length) * 100) / 100,
+        parRate: r.current as number,
+      };
+    });
+    return {
+      byLoanType: byType,
+      allParRates: (rates || []).map((r) => ({ type: r.label, par: r.current, previous: r.previous })),
+      caveat: "There is NO external competitor/industry rate-comparison feed in this system -- this only shows Bridgepoint's own actual charged rate/points vs its own wholesale par rate (i.e. real margin), never claim to know what a competitor or 'the industry' is actually charging right now.",
+    };
   }
   return { error: "unknown_tool" };
 }
