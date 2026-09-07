@@ -8,7 +8,7 @@
 // code/SQL execution, no ad-spend or payment tools yet (those get added
 // only once those integrations are actually connected). Never claims an
 // action succeeded unless the corresponding tool call reported success.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -40,7 +40,7 @@ async function buildSystemPrompt(): Promise<string> {
     "\n\nCAPABILITIES:\n" +
     "1. Marketing content: create_content then publish_content to post recent-closing announcements or stories to the CRM's public showcase page. Never claim something is live unless publish_content reports success. Default to NOT naming the borrower and NOT including their exact street address (city/state only) unless Joe explicitly asks -- these are real clients' financial details. Write body as simple HTML (p, strong, br, a tags only).\n" +
     "2. Loan file creation from a term sheet: when Joe pastes term sheet text or attaches a term sheet document/image for a BRAND NEW loan (not already in the CRM), extract the real figures and call create_loan_file. Valid loanType values: " + LOAN_TYPES.join(", ") + ". Valid source values: " + SOURCES.join(", ") + " (use 'Referral' or the closest fit if unclear, never invent a new source). Valid outsideLender values: " + OUTSIDE_LENDERS.join(", ") + " or omit for in-house. NEVER guess a figure that isn't actually in the document -- omit any field you can't find rather than inventing a number, and tell Joe what's missing in your reply. If the assignee isn't stated, ASK rather than picking someone.\n" +
-    "3. Updating an EXISTING loan file: when Joe gets a new/real quote back (e.g. a lender's pricing terms sheet) for a loan already in the CRM, call update_loan_file with the leadId and only the fields that changed -- extract real figures the same way as create_loan_file, never guess. If Joe doesn't give you the leadId, ask for it (or ask for the borrower's name and use list_closed_deals / say you need the id -- you have no generic lead-search tool yet). Always write a one-sentence changeSummary describing what changed and why (e.g. citing a pricing/quote ID if the source document has one) -- it gets logged to the loan's activity history.\n" +
+    "3. Updating an EXISTING loan file: when Joe gets a new/real quote back (e.g. a lender's pricing terms sheet) for a loan already in the CRM, call update_loan_file with the leadId and only the fields that changed -- extract real figures the same way as create_loan_file, never guess. This updates BOTH the loan scenario/pricing AND, for DSCR loans, the loan product name on the actual application (via loanProduct) -- our generated term sheet, the borrower portal, and the application all read from these same fields, so one call keeps everything in sync. If Joe doesn't give you the leadId, use search_leads with the borrower's name/phone/email first rather than asking him for it. Always write a one-sentence changeSummary describing what changed and why (e.g. citing a pricing/quote ID if the source document has one) -- it gets logged to the loan's activity history.\n" +
     "4. Sending documents: to send a Pre-Approval Letter or Term Sheet to a borrower on an existing loan file, call send_document with the leadId and kind -- this actually emails/texts them for real, so only call it when Joe clearly asks to send (not just when he asks you to create or update a file).\n" +
     "5. Looking up loans: list_closed_deals for recently funded loans, or search_leads / get_lead_details to find and inspect any loan file by name/phone/email or id.\n" +
     "6. Team communication: email_team and text_team send a REAL email/text to staff -- team-wide announcements, reminders, or a message to one specific person. Only call these when Joe clearly asks you to send/tell/email/text someone or the team, not as a side effect of something else.\n" +
@@ -142,6 +142,7 @@ const TOOLS = [
         pointsCharged: { type: "number", description: "Total points Bridgepoint is actually charging, as a percent -- use what Joe tells you to charge, not necessarily whatever number is printed on an outside quote" },
         creditScore: { type: "integer" },
         prepayTerm: { type: "string", enum: PREPAY_TERMS },
+        loanProduct: { type: "string", description: "DSCR loans only -- the actual loan product/amortization named on the term sheet, e.g. '30 Year Fixed', '5/1 ARM', 'Interest Only'. Merged into the application, not just the pricing." },
         citizenshipStatus: { type: "string", enum: CITIZENSHIP_STATUSES },
         exitStrategy: { type: "string" },
         changeSummary: { type: "string", description: "One short sentence for the activity log describing what changed and why (cite a pricing/quote ID from the source document if there is one)" },
@@ -339,6 +340,13 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
         changedLabels.push(key + " = " + v);
       }
     }
+    const loanProduct = input.loanProduct as string | undefined;
+    if (loanProduct) {
+      const dscrApp = (existing.dscr_app && typeof existing.dscr_app === "object") ? { ...existing.dscr_app as Record<string, unknown> } : {};
+      dscrApp.loanProduct = loanProduct;
+      patch.dscr_app = dscrApp;
+      changedLabels.push("loanProduct = " + loanProduct);
+    }
     if (Object.keys(patch).length === 0) return { error: "no_fields_provided" };
 
     const merged = { ...existing, ...patch } as Record<string, unknown>;
@@ -486,7 +494,7 @@ Deno.serve(async (req: Request) => {
       const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: MODEL, max_tokens: 1536, system: systemPrompt, messages, tools: TOOLS }),
+        body: JSON.stringify({ model: MODEL, max_tokens: 4096, system: systemPrompt, messages, tools: TOOLS }),
       });
       const aiData = await aiRes.json();
       if (!aiRes.ok) {
@@ -497,8 +505,11 @@ Deno.serve(async (req: Request) => {
       const textParts = content.filter((c: Record<string, unknown>) => c.type === "text").map((c: Record<string, unknown>) => c.text).join("\n");
       const toolUses = content.filter((c: Record<string, unknown>) => c.type === "tool_use");
 
-      if (aiData.stop_reason !== "tool_use" || toolUses.length === 0) {
+      if (toolUses.length === 0) {
         finalText = textParts;
+        if (aiData.stop_reason === "max_tokens" && !finalText) {
+          finalText = "Ran out of room thinking about that one -- try again, maybe with a shorter/simpler request.";
+        }
         break;
       }
 
