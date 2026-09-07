@@ -7510,6 +7510,18 @@ function myEmails(){
     return false;
   });
 }
+function prefersOutlook(){
+  // Erika prefers working out of her own Outlook rather than the CRM's
+  // internal send pipeline -- every other action still goes through the
+  // real internal sends, this is scoped to her alone.
+  return ui.viewAs === "proc-erika";
+}
+function openMailto(to, subject, body){
+  var qp = [];
+  if (subject) qp.push("subject=" + encodeURIComponent(subject));
+  if (body) qp.push("body=" + encodeURIComponent(body));
+  window.location.href = "mailto:" + (to||"") + (qp.length ? ("?" + qp.join("&")) : "");
+}
 function sendComposedEmail(leadId, to, subject, body){
   if (!sb || !to || !subject || !body) return;
   var me = currentUser();
@@ -8955,7 +8967,10 @@ appEl.addEventListener("click", function(e){
     if (t.dataset.tab === "scenario" && ui.selectedLeadId) syncPricerRateToLead(ui.selectedLeadId);
     render();
   }
-  else if (action === "open-modal"){ ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null }; ui.teamMemberError = null; if (t.dataset.modal === "importLeads") ui.importState = null; render(); }
+  else if (action === "open-modal"){
+    if (t.dataset.modal === "composeEmail" && prefersOutlook()){ openMailto("", "", ""); return; }
+    ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null }; ui.teamMemberError = null; if (t.dataset.modal === "importLeads") ui.importState = null; render();
+  }
   else if (action === "close-modal"){ ui.modal = null; ui.importState = null; render(); }
   else if (action === "import-back"){ ui.importState = null; render(); }
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
@@ -8970,13 +8985,10 @@ appEl.addEventListener("click", function(e){
   else if (action === "reply-email"){
     var replySrc = (state.emails||[]).find(function(x){ return x.id===t.dataset.id; });
     if (replySrc){
-      ui.modal = {
-        type:"composeEmail",
-        to: replySrc.direction==="inbound" ? replySrc.fromAddress : replySrc.toAddress,
-        subject: /^re:/i.test(replySrc.subject||"") ? replySrc.subject : ("Re: " + (replySrc.subject||"")),
-        body: "",
-        leadId: replySrc.leadId
-      };
+      var replyTo = replySrc.direction==="inbound" ? replySrc.fromAddress : replySrc.toAddress;
+      var replySubject = /^re:/i.test(replySrc.subject||"") ? replySrc.subject : ("Re: " + (replySrc.subject||""));
+      if (prefersOutlook()){ openMailto(replyTo, replySubject, ""); return; }
+      ui.modal = { type:"composeEmail", to: replyTo, subject: replySubject, body: "", leadId: replySrc.leadId };
       render();
     }
   }
