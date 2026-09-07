@@ -45,7 +45,8 @@ async function buildSystemPrompt(): Promise<string> {
     "5. Looking up loans: list_closed_deals for recently funded loans, or search_leads / get_lead_details to find and inspect any loan file by name/phone/email or id.\n" +
     "6. Team communication: email_team and text_team send a REAL email/text to staff -- team-wide announcements, reminders, or a message to one specific person. Only call these when Joe clearly asks you to send/tell/email/text someone or the team, not as a side effect of something else.\n" +
     "7. reassign_lead to change who a loan file is assigned to. add_lead_note to log a note on a loan file's activity history.\n" +
-    "8. Retargeting campaigns: start_retargeting_campaign drafts a personalized email/text batch send to a group of existing leads (e.g. 'all of Taeya's leads', or a specific list), aimed at getting them on the phone with their assigned LO. Write genuinely good, specific copy yourself -- introduce the LO by name as the borrower's real point of contact, reference their loan interest when known (via {{loanTypeLine}}), and drive toward booking a call ({{bookingLink}}) or calling/texting the LO directly ({{loPhone}}). Keep texts SMS-short. This never sends anything itself -- it resolves the real recipient list and returns a preview for Joe to review and confirm in the CRM.\n\n" +
+    "8. Retargeting campaigns: start_retargeting_campaign drafts a personalized email/text batch send to a group of existing leads (e.g. 'all of Taeya's leads', or a specific list), aimed at getting them on the phone with their assigned LO. Write genuinely good, specific copy yourself -- introduce the LO by name as the borrower's real point of contact, reference their loan interest when known (via {{loanTypeLine}}), and drive toward booking a call ({{bookingLink}}) or calling/texting the LO directly ({{loPhone}}). Keep texts SMS-short. This never sends anything itself -- it resolves the real recipient list and returns a preview for Joe to review and confirm in the CRM.\n" +
+    "9. Learning from real performance: when Joe asks you to 'look at engagement' or 'look and adjust' (he does not want to track this himself), this is ALWAYS a two-tool-call task, never one. Step 1: call analyze_engagement_performance. Step 2, in that same turn after seeing the results: you must do exactly one of (a) call apply_engagement_adjustment for real, or (b) write your reply stating plainly that nothing in the data supports a change. There is no third option -- never write a reply that describes, summarizes, or claims a specific adjustment (a guidance change, a cadence change) as something you did unless that exact apply_engagement_adjustment tool call is present in this turn's actions. If you're weighing whether to make a change, resolve that by calling the tool or by concluding no -- never resolve it by narrating an intention. Weight changes to how thin the data is, and say so plainly rather than overclaiming a pattern from a handful of leads. Always cite the actual numbers.\n\n" +
     "You still do NOT have: ad platform access, payments/spend, or any destructive/irreversible action (no deleting files, no changing pricing/guidelines). If asked for one of those, say plainly it isn't wired up rather than pretending.\n\n" +
     "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success. " +
     "CRITICAL: never describe an action (sent, triggered, created, updated, published) as done unless you actually called that exact tool THIS turn and its result confirmed success -- don't narrate an effect from context, from what Joe asked for, or from a tool you called for a different purpose. If you only updated a file and didn't call send_document, do not say anything was sent or triggered -- say what you'd need to do that as a separate, explicit step instead.";
@@ -247,6 +248,24 @@ const TOOLS = [
         textBodyTemplate: { type: "string", description: "SMS body, keep it short (under ~300 chars). Same merge fields, except {{bookingLink}} in a text renders as the literal URL (SMS can't do custom link text) -- write it naturally as a URL, e.g. '...book a time here: {{bookingLink}}'." },
       },
       required: ["channel", "emailSubject", "emailBodyTemplate", "textBodyTemplate"],
+    },
+  },
+  {
+    name: "analyze_engagement_performance",
+    description: "Pull real conversion data across all leads that went through the automated AI texting engagement or the manual call cadence -- reply rates, conversion to application/booked call, opt-out rate, time-to-first-contact, and recent coaching notes. Use this before recommending or applying any adjustment via apply_engagement_adjustment -- never adjust based on a guess. With a young or small dataset, say so plainly and recommend smaller/more cautious changes (or none yet) rather than overclaiming a pattern from a handful of leads.",
+    input_schema: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "apply_engagement_adjustment",
+    description: "Update the live-tunable engagement settings that the automated AI texting (ai-lead-engage) and follow-up cadence actually read at runtime -- no code deploy needed, takes effect on the next message. Only call this after analyze_engagement_performance, and only change what the data actually supports. Joe wants to be able to just say 'look at engagement and adjust' -- apply sensible, data-backed changes directly rather than asking him to approve each one; just always explain what changed and why in your reply.",
+    input_schema: {
+      type: "object",
+      properties: {
+        cadenceMax: { type: "integer", description: "Max follow-up attempts before a lead auto-marks cold. Change conservatively -- e.g. by 1-2, not wild swings." },
+        messagingGuidance: { type: "string", description: "Extra steering text appended to the AI texting system prompt on every conversation, e.g. a specific phrasing or approach that's shown better reply/conversion rates. Replaces whatever guidance is currently set -- if there's existing guidance worth keeping, include it plus your addition, don't just append blindly since you don't know the full current context." },
+        reason: { type: "string", description: "What data supports this change -- cite actual numbers from analyze_engagement_performance. Required." },
+      },
+      required: ["reason"],
     },
   },
 ];
@@ -543,6 +562,52 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
       recipients, count: recipients.length, skippedForOptOut,
       skippedForOptOutMeaning: channel === "both" ? "kept for email, text suppressed only" : "excluded entirely",
     };
+  }
+  if (name === "analyze_engagement_performance") {
+    const { data: config } = await sb.from("engagement_config").select("*").eq("id", "default").single();
+    const { data: leads } = await sb.from("leads")
+      .select("id,name,loan_type,source,assigned_to,stage,status,ai_stage,automation_paused,created_at_ts,first_attempt_at,call_attempts,activity")
+      .limit(500);
+    const rows = leads || [];
+
+    const engaged = rows.filter((l) => l.ai_stage || (Array.isArray(l.call_attempts) && l.call_attempts.length));
+    const converted = rows.filter((l) => ["app_sent", "app_completed", "docs", "processing", "underwriting", "approved", "ctc", "closed", "postclosing"].includes(l.stage as string));
+    const optedOut = rows.filter((l) => (Array.isArray(l.activity) ? l.activity : []).some((a: Record<string, unknown>) => typeof a.text === "string" && a.text.toLowerCase().includes("tcpa opt-out")));
+    const cold = rows.filter((l) => l.status === "cold" || l.status === "lost");
+    const repliedToAiText = rows.filter((l) => l.ai_stage && (Array.isArray(l.activity) ? l.activity : []).some((a: Record<string, unknown>) => typeof a.text === "string" && a.text.startsWith("Received (via Quo)")));
+
+    const byLoanType: Record<string, { total: number; converted: number }> = {};
+    rows.forEach((l) => {
+      const key = (l.loan_type as string) || "unknown";
+      byLoanType[key] = byLoanType[key] || { total: 0, converted: 0 };
+      byLoanType[key].total++;
+      if (converted.includes(l)) byLoanType[key].converted++;
+    });
+
+    const { data: recentCoaching } = await sb.from("coaching_notes").select("source,note,created_at").order("created_at", { ascending: false }).limit(15);
+
+    return {
+      currentConfig: { cadenceMax: config?.cadence_max, messagingGuidance: config?.messaging_guidance || "(none set)" },
+      totalLeads: rows.length,
+      engagedCount: engaged.length,
+      aiTextedCount: rows.filter((l) => l.ai_stage).length,
+      repliedToAiTextCount: repliedToAiText.length,
+      convertedToApplicationOrBeyond: converted.length,
+      wentColdOrLost: cold.length,
+      textOptOuts: optedOut.length,
+      conversionByLoanType: byLoanType,
+      recentCoachingNotes: (recentCoaching || []).map((c) => ({ source: c.source, note: c.note, date: c.created_at })),
+      caveat: "Sample sizes here may be very small if the system is new -- weight recommendations accordingly, and say so plainly rather than overclaiming a pattern.",
+    };
+  }
+  if (name === "apply_engagement_adjustment") {
+    if (!input.reason) return { error: "missing_reason" };
+    const patch: Record<string, unknown> = { last_adjustment_reason: input.reason, last_adjusted_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+    if (input.cadenceMax != null) patch.cadence_max = input.cadenceMax;
+    if (input.messagingGuidance != null) patch.messaging_guidance = input.messagingGuidance;
+    const { error } = await sb.from("engagement_config").update(patch).eq("id", "default");
+    if (error) return { error: error.message };
+    return { ok: true, applied: patch };
   }
   return { error: "unknown_tool" };
 }

@@ -104,6 +104,13 @@ Deno.serve(async (req: Request) => {
     const knownFields = Object.keys(FIELD_MAP).filter((k) => lead[FIELD_MAP[k]] != null && lead[FIELD_MAP[k]] !== "");
     const missingFields = Object.keys(FIELD_MAP).filter((k) => !knownFields.includes(k));
 
+    // Live-tunable guidance -- the AI Assistant's analyze_and_adjust_engagement
+    // tool updates this based on real conversion data, no code deploy needed.
+    const { data: engagementConfig } = await sb.from("engagement_config").select("messaging_guidance").eq("id", "default").single();
+    const messagingGuidance = engagementConfig?.messaging_guidance
+      ? ("Additional guidance learned from real conversion data across all conversations, follow this: " + engagementConfig.messaging_guidance + " ")
+      : "";
+
     const bookingLink = CRM_URL + "?book=" + lead.assigned_to;
     const hasLoanType = !!lead.loan_type;
     const alreadyApplied = !!lead.application_sent_at;
@@ -116,6 +123,7 @@ Deno.serve(async (req: Request) => {
             ? "Their loan type is already known: " + lead.loan_type + ". If they clearly agree to fill out an application (or ask for one), set readyForApplication true in your response and tell them in your reply that you're sending it now."
             : "Their loan type is NOT yet known. Before offering or sending an application, find out what type of financing they need (fix & flip, DSCR/rental, ground-up construction, etc.) -- never set readyForApplication true and never offer to send the application until you know this, since sending the wrong application type would confuse them.")) +
       " Once they seem ready to talk (or if the conversation has gone back and forth a couple times with no clear next step), send them this exact booking link so they can grab a real time slot themselves instead of a vague \"let's hop on a call\": " + bookingLink + " -- don't send it on literally the first message unless they ask to schedule directly. " +
+      messagingGuidance +
       (rateNote ? (rateNote + " ") : "") +
       (awaitingLanguage
         ? "Your last message already asked (in both languages) whether they prefer English or Spanish. Read their latest reply and figure out which they picked -- look for \"spanish\", \"espanol\", \"español\", or a close misspelling/typo of those => Spanish; otherwise assume English. Then write your NEXT message already in that language, moving the conversation forward (e.g. ask about the property or their timeline)."

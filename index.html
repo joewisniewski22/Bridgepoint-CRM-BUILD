@@ -2918,6 +2918,9 @@ function hydrateFromSupabase(){
     if (res.error){ console.error("notification fetch error", res.error); return; }
     if (res.data){ state.notifications = res.data.map(rowToNotif); render(); }
   });
+  sb.from("engagement_config").select("cadence_max").eq("id","default").single().then(function(res){
+    if (res.data && res.data.cadence_max){ CADENCE_MAX = res.data.cadence_max; render(); }
+  });
   sb.from("market_rates").select("*").then(function(res){
     if (res.error){ console.error("market rate fetch error", res.error); return; }
     if (res.data){
