@@ -2515,6 +2515,8 @@ function buildPreApprovalLetter(lead){
   var today = todayISO();
   var expires = addDaysISO(today, 30);
   var lang = lead.preferredLanguage || "en";
+  var isRehabType = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
+  var ltvRatio = (isRehabType && lead.arv && lead.loanAmount) ? (Math.round((lead.loanAmount/lead.arv)*1000)/10) : (isRehabType ? null : lead.ltv);
   var lines = [];
   if (lang === "es"){
     lines.push("BRIDGEPOINT LENDING");
@@ -2532,7 +2534,7 @@ function buildPreApprovalLetter(lead){
     lines.push("Monto del Préstamo: " + fmtUSD(lead.loanAmount));
     lines.push("Tasa Estimada: " + (lead.rate ? fmtPct(lead.rate) : "Por determinar — sujeta a bloqueo de tasa"));
     lines.push("Plazo: " + (lead.termMonths ? (lead.termMonths + " meses") : "Por determinar"));
-    lines.push("Relación Préstamo-Valor: " + (lead.ltv ? (lead.ltv + "%") : "Por determinar"));
+    lines.push((isRehabType ? "Préstamo sobre Valor Después de Reparación: " : "Relación Préstamo-Valor: ") + (ltvRatio ? (ltvRatio + "%") : "Por determinar"));
     lines.push("Propiedad en Cuestión: " + (lead.propertyAddress || "Por determinar"));
     lines.push("Estrategia de Salida: " + (tr(lead.exitStrategy, "es") || "Por determinar"));
     lines.push("");
@@ -2558,7 +2560,7 @@ function buildPreApprovalLetter(lead){
     lines.push("Loan Amount: " + fmtUSD(lead.loanAmount));
     lines.push("Estimated Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
     lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
-    lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
+    lines.push((isRehabType ? "Loan to After-Repair Value: " : "Loan-to-Value: ") + (ltvRatio ? (ltvRatio + "%") : "TBD"));
     lines.push("Subject Property: " + (lead.propertyAddress || "TBD"));
     lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
     lines.push("");
@@ -2586,6 +2588,11 @@ function buildTermSheet(lead){
   var expires = addDaysISO(today, 15);
   var lang = lead.preferredLanguage || "en";
   var isRehabType = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
+  // For rehab/construction loans the meaningful ratio is against the
+  // after-repair value, not raw purchase price -- lead.ltv is computed
+  // against purchase price elsewhere and reads as nonsense here (e.g. a
+  // cheap vacant lot on a Ground Up loan produces LTV well over 100%).
+  var ltvRatio = (isRehabType && lead.arv && lead.loanAmount) ? (Math.round((lead.loanAmount/lead.arv)*1000)/10) : (isRehabType ? null : lead.ltv);
   var commission = (lead.pointsCharged!=null && lead.loanAmount) ? fmtUSD(pointsRevenue(lead)) : (lang==="es" ? "Por determinar" : "TBD");
   var lines = [];
   if (lang === "es"){
@@ -2601,7 +2608,7 @@ function buildTermSheet(lead){
     lines.push("Monto del Préstamo: " + fmtUSD(lead.loanAmount));
     lines.push("Tasa: " + (lead.rate ? fmtPct(lead.rate) : "Por determinar — sujeta a bloqueo de tasa"));
     lines.push("Plazo: " + (lead.termMonths ? (lead.termMonths + " meses") : "Por determinar"));
-    lines.push("Relación Préstamo-Valor: " + (lead.ltv ? (lead.ltv + "%") : "Por determinar"));
+    lines.push((isRehabType ? "Préstamo sobre Valor Después de Reparación: " : "Relación Préstamo-Valor: ") + (ltvRatio ? (ltvRatio + "%") : "Por determinar"));
     lines.push((isRehabType ? "Pago Mensual (solo interés): " : "Pago Mensual (capital e interés): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "Por determinar"));
     lines.push("Originación: " + commission);
     lines.push("Cargo del Prestamista (Suscripción): " + fmtUSD(lenderFeeForLead(lead)));
@@ -2629,7 +2636,7 @@ function buildTermSheet(lead){
     lines.push("Loan Amount: " + fmtUSD(lead.loanAmount));
     lines.push("Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
     lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
-    lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
+    lines.push((isRehabType ? "Loan to After-Repair Value: " : "Loan-to-Value: ") + (ltvRatio ? (ltvRatio + "%") : "TBD"));
     lines.push((isRehabType ? "Monthly Payment (interest only): " : "Monthly Payment (principal & interest): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "TBD"));
     lines.push("Origination: " + commission);
     lines.push("Lender Fee (Underwriting): " + fmtUSD(lenderFeeForLead(lead)));
