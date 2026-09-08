@@ -5578,7 +5578,7 @@ function renderStandalonePricer(){
           PREPAY_TERMS.map(function(t){ return '<option value="' + t.key + '"' + sel("prepayTerm", t.key) + '>' + t.label + '</option>'; }).join("") +
         '</select></div>' +
       '</div>') : ('<div class="form-two">' +
-        '<div class="form-row"><label>Origination Points Charged</label><select class="select" name="points" data-action="standalone-pricer-field">' +
+        '<div class="form-row"><label>Buy-Down Points (to Lender)</label><select class="select" name="points" data-action="standalone-pricer-field">' +
           '<option value="0.00"' + sel("points","0.00") + '>0.00 (default)</option><option value="0.50"' + sel("points","0.50") + '>0.50 — buy down the rate</option><option value="1.00"' + sel("points","1.00") + '>1.00 — buy down the rate further</option>' +
         '</select></div>' +
         '<div class="form-row"><label>Transaction Type</label><select class="select" name="transactionType" data-action="standalone-pricer-field">' +
@@ -6225,7 +6225,7 @@ function renderPricer(lead){
         '</select></div>' +
       '</div>' + propertyTypeSelect)
     : ('<div class="form-two">' +
-        '<div class="form-row"><label>Origination Points Charged</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="points">' +
+        '<div class="form-row"><label>Buy-Down Points (to Lender)</label><select class="select" data-action="pricer-input" data-lead="' + lead.id + '" data-key="points">' +
           '<option value="0.00"' + (inputs.points==="0.00"?" selected":"") + '>0.00 (default)</option>' +
           '<option value="0.50"' + (inputs.points==="0.50"?" selected":"") + '>0.50 — buy down the rate</option>' +
           '<option value="1.00"' + (inputs.points==="1.00"?" selected":"") + '>1.00 — buy down the rate further</option>' +
