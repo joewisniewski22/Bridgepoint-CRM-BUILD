@@ -179,7 +179,7 @@ Deno.serve(async (req: Request) => {
     const row = {
       id, name: fullName, email: email || null, phone: phone || null,
       source: sourceTag, loan_type: loanType, stage: "new", status: "active",
-      assigned_to: assignedTo, created_at: today,
+      assigned_to: assignedTo, created_at: today, created_at_ts: new Date().toISOString(),
       property_address: propertyAddress || null, property_type: propertyType || null,
       purchase_price: purchasePrice, loan_amount: loanAmount,
       credit_score: creditScore, experience_deals: experienceDeals,

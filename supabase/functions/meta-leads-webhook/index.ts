@@ -77,7 +77,7 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const row = {
     id, name: fullName, email: email || null, phone: phone || null,
     source: "Meta Ads", loan_type: null, stage: "new", status: "active",
-    assigned_to: "owner", created_at: today,
+    assigned_to: "owner", created_at: today, created_at_ts: new Date().toISOString(),
     // Enrolls this lead in the same AI conversion-texting automation every
     // other inbound source uses (see index.html's startAiEngagement / the
     // highlevel-leads-webhook) -- routing here still defaults everyone to
