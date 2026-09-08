@@ -1609,7 +1609,11 @@ function stageIndex(key){ return STAGE_MAP[key] ? STAGE_MAP[key].index : -1; }
 function userById(id){ return state.users.filter(function(u){ return u.id===id; })[0] || null; }
 function userName(id){ var u = userById(id); return u ? u.name : "Unassigned"; }
 function loName(id){ return userName(id); }
-function isOwner(){ return ui.viewAs==="owner" || ui.viewAs==="demo"; }
+function isOwner(){
+  if (ui.viewAs==="owner" || ui.viewAs==="demo") return true;
+  var u = userById(ui.viewAs);
+  return !!(u && u.fullAccess);
+}
 function isDemoAccountId(id){ return id==="demo" || id==="demo-processor"; }
 function isDemo(){ return isDemoAccountId(ui.viewAs); }
 function isProcessor(){ var u = userById(ui.viewAs); return !!(u && u.role==="processor"); }
