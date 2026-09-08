@@ -8998,7 +8998,7 @@ function modalCreateLeadFromPricer(){
         '<div class="form-row"><label>Name</label><input class="input" name="name" required></div>' +
         '<div class="form-two">' +
           '<div class="form-row"><label>Email</label><input class="input" type="email" name="email"></div>' +
-          '<div class="form-row"><label>Phone</label><input class="input" name="phone" required><div class="hint">Required — the lead won\'t save without a phone number</div></div>' +
+          '<div class="form-row"><label>Phone</label><input class="input" name="phone"><div class="hint">Required — the lead won\'t save without a phone number</div></div>' +
         '</div>' +
         '<div class="form-two">' +
           '<div class="form-row"><label>Source</label><select class="select" name="source">' + srcOptions + '</select></div>' +
@@ -9062,7 +9062,7 @@ function modalAddLead(){
         '<div class="form-row"><label>Name</label><input class="input" name="name" required></div>' +
         '<div class="form-two">' +
           '<div class="form-row"><label>Email</label><input class="input" type="email" name="email"></div>' +
-          '<div class="form-row"><label>Phone</label><input class="input" name="phone" required><div class="hint">Required — the lead won\'t save without a phone number</div></div>' +
+          '<div class="form-row"><label>Phone</label><input class="input" name="phone"><div class="hint">Required — the lead won\'t save without a phone number</div></div>' +
         '</div>' +
         '<div class="form-two">' +
           '<div class="form-row"><label>Source</label><select class="select" name="source">' + srcOptions + '</select></div>' +
@@ -9553,6 +9553,7 @@ appEl.addEventListener("submit", function(e){
   var type = form.dataset.form;
   var fd = new FormData(form);
   if (type === "add-lead"){
+    if (!fd.get("phone") || !fd.get("phone").trim()){ showToast("Phone number is required — enter one to add this lead"); return; }
     addLead({
       name: fd.get("name"), email: fd.get("email"), phone: fd.get("phone"),
       source: fd.get("source"), loanType: fd.get("loanType"), assignedTo: fd.get("assignedTo"),
@@ -9561,6 +9562,7 @@ appEl.addEventListener("submit", function(e){
       referralPartnerId: fd.get("referralPartnerId") || null
     });
   } else if (type === "create-lead-from-pricer"){
+    if (!fd.get("phone") || !fd.get("phone").trim()){ showToast("Phone number is required — enter one to add this lead"); return; }
     createLeadFromScenario({
       name: fd.get("name"), email: fd.get("email"), phone: fd.get("phone"),
       source: fd.get("source"), assignedTo: fd.get("assignedTo"), propertyAddress: fd.get("propertyAddress")
