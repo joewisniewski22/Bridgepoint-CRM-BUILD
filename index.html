@@ -7569,7 +7569,7 @@ function openChatWith(userId){
   render();
   if (changed) scheduleSync();
 }
-function sendTeamMessage(toUserId, body){
+function sendTeamChatMessage(toUserId, body){
   body = (body||"").trim();
   if (!body || !toUserId) return;
   state.teamMessages = state.teamMessages || [];
@@ -9700,7 +9700,7 @@ appEl.addEventListener("submit", function(e){
     ui.modal = null;
     render();
   } else if (type === "team-chat-send"){
-    sendTeamMessage(form.dataset.to, fd.get("body"));
+    sendTeamChatMessage(form.dataset.to, fd.get("body"));
     form.reset();
   } else if (type === "submit-for-review"){
     submitForReview(form.dataset.lead, fd.get("reviewNote"));
