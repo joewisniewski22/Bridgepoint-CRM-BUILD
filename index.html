@@ -802,7 +802,7 @@ var RTL_BASE_RATES = {
 };
 var RTL_FEE_BY_PROJECT = {
   bridge: 1995, light: 1995, standard: 1995, super: 1995,
-  guc_sfr: 2195, guc_24: 2695
+  guc_sfr: 2195, guc_24: 2695, multifamily_24: 2495
 };
 var RTL_TXN_ADJ = { purchase: 0, ratetermrefi: 0.50, cashout: 1.00 };
 function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
@@ -828,7 +828,7 @@ function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
   }
   var fee = isGuc
     ? (pricingPropertyType(propertyType) === "2-4 Unit" ? RTL_FEE_BY_PROJECT.guc_24 : RTL_FEE_BY_PROJECT.guc_sfr)
-    : RTL_FEE_BY_PROJECT[rehabClass(lead)];
+    : (pricingPropertyType(propertyType) === "2-4 Unit" ? RTL_FEE_BY_PROJECT.multifamily_24 : RTL_FEE_BY_PROJECT[rehabClass(lead)]);
   if (lead.termMonths && lead.termMonths > 12){
     var extraQuarters = Math.ceil((lead.termMonths - 12) / 3);
     notes.push("+" + (extraQuarters * 0.5).toFixed(2) + " pts rate buy down for the extra " + (lead.termMonths-12) + " month(s) beyond the 12-month base term (max 18 months)");
@@ -2572,6 +2572,14 @@ function buildPreApprovalLetter(lead){
   lines = lines.concat(loContactLines(lo, lang));
   return lines.join("\n");
 }
+var PROCESSING_FEE_DEFAULT = 1200;
+function lenderFeeForLead(lead){
+  try {
+    var result = evaluatePricing(lead, {});
+    if (result && !result.ineligible && result.fee != null) return result.fee;
+  } catch(e){}
+  return DSCR_FEE_BY_PROPERTY["SFR"];
+}
 function buildTermSheet(lead){
   var lo = docLoanOfficer(lead);
   var today = todayISO();
@@ -2596,6 +2604,8 @@ function buildTermSheet(lead){
     lines.push("Relación Préstamo-Valor: " + (lead.ltv ? (lead.ltv + "%") : "Por determinar"));
     lines.push((isRehabType ? "Pago Mensual (solo interés): " : "Pago Mensual (capital e interés): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "Por determinar"));
     lines.push("Originación: " + commission);
+    lines.push("Cargo del Prestamista (Suscripción): " + fmtUSD(lenderFeeForLead(lead)));
+    lines.push("Cargo de Procesamiento: " + fmtUSD(PROCESSING_FEE_DEFAULT));
     lines.push("");
     lines.push("PROPIEDAD");
     lines.push("Dirección: " + (lead.propertyAddress || "Por determinar"));
@@ -2622,6 +2632,8 @@ function buildTermSheet(lead){
     lines.push("Loan-to-Value: " + (lead.ltv ? (lead.ltv + "%") : "TBD"));
     lines.push((isRehabType ? "Monthly Payment (interest only): " : "Monthly Payment (principal & interest): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "TBD"));
     lines.push("Origination: " + commission);
+    lines.push("Lender Fee (Underwriting): " + fmtUSD(lenderFeeForLead(lead)));
+    lines.push("Processing Fee: " + fmtUSD(PROCESSING_FEE_DEFAULT));
     lines.push("");
     lines.push("PROPERTY");
     lines.push("Address: " + (lead.propertyAddress || "TBD"));
@@ -5595,6 +5607,7 @@ function buildStandalonePricerOutputHTML(sp){
   var rows = field("Max Loan Amount You Qualify For", fmtUSD(effectiveLoanAmount), true) +
     rateField +
     field("Lender Fee", fmtUSD(result.fee), true) +
+    field("Processing Fee", fmtUSD(PROCESSING_FEE_DEFAULT), true) +
     (isDSCR ? field("Wholesale Price", result.price!=null ? result.price.toFixed(3) : "—", true) : "") +
     (isDSCR ? field("Yield Spread (YSP)", (result.ysp!=null && result.ysp>0) ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : (result.noYspAllowed ? "Not available" : (result.ysp===0 ? "$0 (at par)" : "None (par or better)")), true) : "") +
     (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
@@ -6154,6 +6167,7 @@ function buildPricerOutputHTML(lead, inputs){
     var rows = (maxLoanInfo && !lockedToActualRate ? field("Max Loan Amount You Qualify For", fmtUSD(effectiveLoanAmount), true) : "") +
       rateField +
       field("Lender Fee", fmtUSD(result.fee), true) +
+      field("Processing Fee", fmtUSD(PROCESSING_FEE_DEFAULT), true) +
       (isDSCR ? field("Wholesale Price", result.price!=null ? result.price.toFixed(3) : "—", true) : "") +
       (isDSCR ? field("Yield Spread (YSP)", (result.ysp!=null && result.ysp>0) ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : (result.noYspAllowed ? "Not available" : (result.ysp===0 ? "$0 (at par)" : "None (par or better)")), true) : "") +
       (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
