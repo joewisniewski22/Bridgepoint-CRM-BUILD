@@ -5288,18 +5288,18 @@ function renderShell(){
       '</div>' +
       '<nav class="nav">' +
         navItem("today","☎","Today", callsDue||null) +
-        (!isProcessor() && navVisible("pricer") ? navItem("pricer","🧮","Pricer") : "") +
+        ((isOwner() || !isProcessor()) && navVisible("pricer") ? navItem("pricer","🧮","Pricer") : "") +
         (navVisible("pipeline") ? navItem("pipeline","▤","Pipeline") : "") +
         navItem("leads","☰","Leads & Loans", leads.length) +
         (navVisible("comms") ? navItem("comms","✉","Communications") : "") +
         (navVisible("performance") ? navItem("performance","⚡","Speed & Conversion") : "") +
         (navVisible("retargeting") ? navItem("retargeting","↺","Retargeting", winbackCount||null) : "") +
-        (!isProcessor() && navVisible("referrals") ? navItem("referrals","🤝","Referral Partners") : "") +
-        (!isProcessor() && navVisible("repeat") ? navItem("repeat","👥","Repeat Clients") : "") +
+        ((isOwner() || !isProcessor()) && navVisible("referrals") ? navItem("referrals","🤝","Referral Partners") : "") +
+        ((isOwner() || !isProcessor()) && navVisible("repeat") ? navItem("repeat","👥","Repeat Clients") : "") +
         (navVisible("notifications") ? navItem("notifications","🔔","Notifications", notifCount||null) : "") +
         navItem("teamchat","💬","Team Chat", unreadTeamChatTotal(ui.viewAs)||null) +
         navItem("email","📧","Email") +
-        (!isProcessor() ? navItem("coaching","🎯","Coaching") : "") +
+        (isOwner() || !isProcessor() ? navItem("coaching","🎯","Coaching") : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
         (isOwner() ? navItem("ai-assistant","🤖","AI Assistant") : "") +
