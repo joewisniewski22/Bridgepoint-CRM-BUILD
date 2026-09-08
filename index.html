@@ -3508,7 +3508,7 @@ function reassignLead(leadId, newOwnerId){
   lead.assignedTo = newOwnerId;
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"system", text:"Reassigned from " + oldOwnerName + " to " + userName(newOwnerId), author: currentUser().name });
-  notifyUser(newOwnerId, lead.id, "reassigned", currentUser().name + " assigned " + lead.name + " to you.");
+  notifyUser(newOwnerId, lead.id, "reassigned", currentUser().name + " assigned " + lead.name + " to you.", { dialPhone: lead.phone });
   showToast("Reassigned to " + userName(newOwnerId));
   persist();
 }
@@ -3570,6 +3570,14 @@ function sendBackToLO(leadId, note){
 function crmLeadLink(leadId){
   return CRM_URL + "?lead=" + leadId;
 }
+function quoDialLink(leadPhone, fromNumber){
+  var digits = (leadPhone||"").replace(/\D/g,"");
+  if (!digits) return "";
+  var e164 = digits.length===10 ? ("+1"+digits) : (digits.length===11 ? ("+"+digits) : ("+"+digits));
+  var url = "openphone://dial?number=" + encodeURIComponent(e164) + "&action=call";
+  if (fromNumber) url += "&from=" + encodeURIComponent(fromNumber);
+  return url;
+}
 function notifyLoNewLead(lead){
   // notifyUser()'s own pushStaffAlert already texts the LO for "hot-lead"
   // notifications (with the deep link baked into that text) -- this only
@@ -3618,7 +3626,7 @@ function addLead(data){
     lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
   }
   if (lead.assignedTo && lead.assignedTo !== currentUser().id){
-    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id));
+    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id), { dialPhone: lead.phone });
     notifyLoNewLead(lead);
   }
   startAiEngagement(lead);
@@ -3891,13 +3899,17 @@ function notifyUser(userId, leadId, kind, text, opts){
     id: "N" + Date.now().toString(36) + Math.floor(Math.random()*1000),
     toUserId:userId, leadId:leadId, kind:kind, text:text, date: todayISO(), read:false
   });
-  if (!opts || !opts.skipText) pushStaffAlert(userId, text);
+  if (!opts || !opts.skipText) pushStaffAlert(userId, text, opts && opts.dialPhone);
 }
-function pushStaffAlert(userId, text){
+function pushStaffAlert(userId, text, dialPhone){
   if (!sb) return;
   var u = userById(userId);
   var phone = u && (u.phone || u.quoPhoneNumber);
   if (!phone) return;
+  if (dialPhone){
+    var dialLink = quoDialLink(dialPhone, u.quoPhoneNumber);
+    if (dialLink) text += "\nCall now: " + dialLink;
+  }
   sb.functions.invoke("send-text", { body: { to: phone, text: "Bridgepoint CRM: " + text } }).catch(function(){});
 }
 function submitForReview(leadId, note){
@@ -8932,7 +8944,7 @@ function createLeadFromScenario(data){
     lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
   }
   if (lead.assignedTo && lead.assignedTo !== currentUser().id){
-    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id));
+    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id), { dialPhone: lead.phone });
     notifyLoNewLead(lead);
   }
   startAiEngagement(lead);

@@ -23,6 +23,15 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
+function quoDialLink(leadPhone: string, fromNumber?: string | null): string {
+  const digits = (leadPhone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  const e164 = digits.length === 10 ? ("+1" + digits) : ("+" + digits);
+  let url = "openphone://dial?number=" + encodeURIComponent(e164) + "&action=call";
+  if (fromNumber) url += "&from=" + encodeURIComponent(fromNumber);
+  return url;
+}
+
 function fieldValue(fieldData: Array<{ name: string; values: string[] }>, ...names: string[]): string | null {
   for (const n of names) {
     const f = fieldData.find((x) => x.name.toLowerCase() === n.toLowerCase());
@@ -94,9 +103,10 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   });
   const { data: owner } = await sb.from("users").select("phone,email,quo_phone_number").eq("id", "owner").single();
   if (owner?.phone) {
+    const dialLink = phone ? quoDialLink(phone, owner.quo_phone_number) : "";
     fetch(SUPABASE_URL + "/functions/v1/send-text", {
       method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-      body: JSON.stringify({ to: owner.phone, text: alertText, fromName: "Bridgepoint CRM" }),
+      body: JSON.stringify({ to: owner.phone, text: alertText + (dialLink ? ("\nCall now: " + dialLink) : ""), fromName: "Bridgepoint CRM" }),
     }).catch(() => {});
   }
   if (owner?.email) {

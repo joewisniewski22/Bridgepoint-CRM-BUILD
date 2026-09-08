@@ -24,13 +24,29 @@ function last10(phone: string | null | undefined): string {
   return (phone || "").replace(/\D/g, "").slice(-10);
 }
 
-function extractCallEvent(body: Record<string, unknown>): { callId: string | null; from: string | null; to: string | null } {
+function extractCallEvent(body: Record<string, unknown>): { callId: string | null; from: string | null; to: string | null; direction: string | null; status: string | null; duration: number | null } {
   const data = (body.data as Record<string, unknown>) || body;
   const object = (data.object as Record<string, unknown>) || data;
   const callId = (object.id as string) || (object.callId as string) || (data.callId as string) || null;
   const from = (object.from as string) || (object.participants as string[] | undefined)?.[0] || null;
   const to = (object.to as string) || (Array.isArray(object.to) ? (object.to as string[])[0] : null);
-  return { callId, from: from as string | null, to: to as string | null };
+  const direction = (object.direction as string) || null;
+  const status = (object.status as string) || (object.callStatus as string) || null;
+  const duration = typeof object.duration === "number" ? (object.duration as number) : null;
+  return { callId, from: from as string | null, to: to as string | null, direction, status, duration };
+}
+
+// Payload shape for call.completed isn't fully documented -- infer a
+// CALL_OUTCOMES-compatible outcome ("connected" | "no-answer" |
+// "left-voicemail") defensively from whatever status/duration signal is
+// present, same tune-after-real-events approach as the rest of this call.
+function inferOutcome(status: string | null, duration: number | null): string {
+  const s = (status || "").toLowerCase();
+  if (s.includes("voicemail")) return "left-voicemail";
+  if (s.includes("no-answer") || s.includes("missed") || s.includes("busy") || s.includes("failed")) return "no-answer";
+  if (s.includes("completed") || s.includes("answered")) return "connected";
+  if (duration != null) return duration > 15 ? "connected" : "no-answer";
+  return "connected";
 }
 
 Deno.serve(async (req: Request) => {
@@ -46,7 +62,13 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     console.log("quo-call-webhook: raw payload", JSON.stringify(body));
 
-    const { callId, from, to } = extractCallEvent(body);
+    // Event type field isn't confirmed in Quo's docs either -- try the
+    // common spots. Defaults to treating it as a plain call-completed event
+    // (log the attempt) unless it clearly says recording.completed.
+    const eventType = (body.type as string) || (body.event as string) || ((body.data as Record<string, unknown>)?.type as string) || "";
+    const isRecordingEvent = eventType.includes("recording");
+
+    const { callId, from, to, status, duration } = extractCallEvent(body);
     if (!callId) {
       console.log("quo-call-webhook: no callId found in payload, skipping");
       return new Response(JSON.stringify({ ok: true, note: "no callId in payload" }), { headers: CORS_HEADERS });
@@ -55,7 +77,7 @@ Deno.serve(async (req: Request) => {
     // One of from/to is a staff member's Quo line, the other is the lead's
     // phone -- check both directions against both tables.
     const { data: staffRows } = await sb.from("users").select("id,name,phone,quo_phone_number,role");
-    const { data: leadRows } = await sb.from("leads").select("id,name,phone,assigned_to");
+    const { data: leadRows } = await sb.from("leads").select("id,name,phone,assigned_to,stage,status,ai_stage,automation_paused,call_attempts,activity,first_attempt_at");
 
     const candidates = [from, to].filter(Boolean) as string[];
     let staffId: string | null = null;
@@ -75,9 +97,39 @@ Deno.serve(async (req: Request) => {
       console.log("quo-call-webhook: no matching lead for call", callId, from, to);
       return new Response(JSON.stringify({ ok: true, note: "no matching lead" }), { headers: CORS_HEADERS });
     }
-    if (!staffId) {
-      const lead = (leadRows || []).find((l) => l.id === leadId);
-      staffId = (lead && (lead.assigned_to as string)) || null;
+    const lead = (leadRows || []).find((l) => l.id === leadId)!;
+    if (!staffId) staffId = (lead.assigned_to as string) || null;
+
+    // Log the call itself -- every real call, answered or not, not just
+    // ones that produce a transcript. Dedupe on quoCallId so this stays
+    // idempotent if both call.completed and call.recording.completed fire
+    // for the same call.
+    const existingAttempts = (Array.isArray(lead.call_attempts) ? lead.call_attempts : []) as Array<Record<string, unknown>>;
+    const alreadyLogged = existingAttempts.some((a) => a.quoCallId === callId);
+    if (!alreadyLogged) {
+      const outcome = inferOutcome(status, duration);
+      const outcomeLabel = outcome === "connected" ? "Connected" : outcome === "left-voicemail" ? "Left voicemail" : "No answer";
+      const d = new Date().toISOString().slice(0, 10);
+      const newAttempts = [...existingAttempts, { date: d, outcome, notes: "Logged automatically from Quo", quoCallId: callId }];
+      const activity = (Array.isArray(lead.activity) ? lead.activity : []) as Array<Record<string, unknown>>;
+      activity.push({ date: d, type: "call", text: "Call logged — " + outcomeLabel + " (via Quo)", author: staffId ? ((staffRows || []).find((u) => u.id === staffId)?.name as string) || "System" : "System" });
+      const patch: Record<string, unknown> = {
+        call_attempts: newAttempts, activity, last_contact_at: d,
+        first_attempt_at: lead.first_attempt_at || new Date().toISOString(),
+      };
+      if (outcome === "connected") {
+        if (lead.stage === "new" || lead.stage === "attempting") patch.stage = "qualifying";
+        if (lead.ai_stage && !lead.automation_paused) {
+          patch.automation_paused = true;
+          activity.push({ date: d, type: "system", text: "AI automation paused — you connected with the client directly, follow up per your call", author: "System" });
+        }
+      }
+      await sb.from("leads").update(patch).eq("id", leadId);
+      console.log("quo-call-webhook: logged call attempt", callId, leadId, outcome);
+    }
+
+    if (!isRecordingEvent) {
+      return new Response(JSON.stringify({ ok: true, leadId, staffId, note: "call logged, not a recording event" }), { headers: CORS_HEADERS });
     }
 
     // Give Quo's summary generation a moment if this fires right as the

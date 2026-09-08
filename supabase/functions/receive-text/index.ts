@@ -19,6 +19,15 @@ const CORS_HEADERS = {
   "Content-Type": "application/json",
 };
 
+function quoDialLink(leadPhone: string, fromNumber?: string | null): string {
+  const digits = (leadPhone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  const e164 = digits.length === 10 ? ("+1" + digits) : ("+" + digits);
+  let url = "openphone://dial?number=" + encodeURIComponent(e164) + "&action=call";
+  if (fromNumber) url += "&from=" + encodeURIComponent(fromNumber);
+  return url;
+}
+
 function extractMessage(body: Record<string, unknown>) {
   const data = (body.data as Record<string, unknown>) || {};
   // Newer shape: data.resource.text / data.context.senderIdentifier / recipientIdentifiers
@@ -118,10 +127,19 @@ Deno.serve(async (req: Request) => {
 
         // Always alert the assigned LO for real (text + email), not just the
         // in-app notification above -- a client engaging is time-sensitive.
+        // If they're mid-conversation with the AI (ai_stage set), that's the
+        // hottest possible signal -- a real person actively engaging right
+        // now -- so it gets URGENT framing and a one-tap call link, sent to
+        // their actual personal cell (users.phone), not their Quo line,
+        // since staff don't reliably check Quo itself.
         const { data: lo } = await sb.from("users").select("name,phone,email,quo_phone_number").eq("id", match.assigned_to).single();
         if (lo) {
           const link = CRM_URL + "?lead=" + match.id;
-          const alertText = (match.name as string) + " replied: \"" + msg.text.slice(0, 100) + "\" — " + link;
+          const isHotAiEngagement = !!match.ai_stage;
+          const dialLink = match.phone ? quoDialLink(match.phone as string, lo.quo_phone_number as string | undefined) : "";
+          const alertText = (isHotAiEngagement ? "🚨 URGENT HOT LEAD — " : "") +
+            (match.name as string) + " replied: \"" + msg.text.slice(0, 100) + "\" — " + link +
+            (dialLink ? ("\nCall now: " + dialLink) : "");
           if (lo.phone) {
             fetch(SUPABASE_URL + "/functions/v1/send-text", {
               method: "POST",

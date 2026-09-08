@@ -33,6 +33,15 @@ const CORS_HEADERS = {
   "Content-Type": "application/json",
 };
 
+function quoDialLink(leadPhone: string, fromNumber?: string | null): string {
+  const digits = (leadPhone || "").replace(/\D/g, "");
+  if (!digits) return "";
+  const e164 = digits.length === 10 ? ("+1" + digits) : ("+" + digits);
+  let url = "openphone://dial?number=" + encodeURIComponent(e164) + "&action=call";
+  if (fromNumber) url += "&from=" + encodeURIComponent(fromNumber);
+  return url;
+}
+
 // True alternating 50/50 (not random-averaging-to-50/50) -- Joe was
 // explicit: strict split, starting with him on the very first lead
 // tonight. Looks at who got the last lead THIS WEBHOOK created (matched
@@ -179,9 +188,10 @@ Deno.serve(async (req: Request) => {
     });
     const { data: assignee } = await sb.from("users").select("id,name,email,phone,quo_phone_number,photo_url").eq("id", assignedTo).single();
     if (assignee?.phone) {
+      const dialLink = phone ? quoDialLink(phone, assignee.quo_phone_number) : "";
       fetch(SUPABASE_URL + "/functions/v1/send-text", {
         method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-        body: JSON.stringify({ to: assignee.phone, text: alertText, fromName: "Bridgepoint CRM" }),
+        body: JSON.stringify({ to: assignee.phone, text: alertText + (dialLink ? ("\nCall now: " + dialLink) : ""), fromName: "Bridgepoint CRM" }),
       }).catch(() => {});
     }
     if (assignee?.email) {
