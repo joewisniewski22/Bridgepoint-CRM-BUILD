@@ -1620,12 +1620,13 @@ function canEditApplication(lead){
 }
 function leadById(id){ return state.leads.filter(function(l){ return l.id===id; })[0] || null; }
 function nextLeadId(){
-  var max = 0;
-  state.leads.forEach(function(l){
-    var m = /^L(\d+)$/.exec(l.id);
-    if (m) max = Math.max(max, parseInt(m[1],10));
-  });
-  return "L" + String(max+1).padStart(3,"0");
+  // Was a client-computed sequential L### based on the max id in
+  // state.leads -- but staff RLS now scopes that array to only the leads
+  // each non-owner can see, so a loan officer's "next" number routinely
+  // collided with a real id already used by someone else's lead (invisible
+  // to them), and the insert failed silently. Random suffix -- matching
+  // the id format every lead webhook already uses -- can't collide.
+  return "L" + (crypto.randomUUID ? crypto.randomUUID().slice(0,8).toUpperCase() : (Date.now().toString(36)+Math.random().toString(36).slice(2)).slice(0,8).toUpperCase());
 }
 function loanOfficers(){ return state.users.filter(function(u){ return u.role==="loan_officer" && !isDemoAccountId(u.id); }); }
 function ownerOptions(currentId){
