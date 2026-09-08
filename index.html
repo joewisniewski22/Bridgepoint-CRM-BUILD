@@ -3979,12 +3979,15 @@ function toggleProcessingAction(leadId, kind){
     lead.activity.push({ date:d, type:"notify", text: label + " ordered — notified processing", author: currentUser().name });
     var proc = processingContact(lead);
     if (proc){
-      // Direct, immediate, real text -- not the batched notifyUser() path,
-      // which silently failed to reach Erika in practice (2026-09-08).
+      // Direct, immediate, real text + email -- not the batched notifyUser()
+      // path, which silently failed to reach Erika in practice (2026-09-08).
       if (sb){
         sb.from("notifications").insert({ id:"N"+Date.now().toString(36)+Math.floor(Math.random()*1000), to_user_id:proc.id, lead_id:leadId, kind:kind, text:details, date:d, read:false }).catch(function(){});
         if (proc.phone){
           sb.functions.invoke("send-text", { body:{ leadId:leadId, to:proc.phone, text:"Bridgepoint CRM: "+details, fromName:"Bridgepoint CRM" } }).catch(function(){});
+        }
+        if (proc.email){
+          sb.functions.invoke("send-email", { body:{ leadId:leadId, to:proc.email, subject:label+" needed — "+lead.name, text:details, fromName:"Bridgepoint CRM" } }).catch(function(){});
         }
       }
     }
