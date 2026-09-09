@@ -694,6 +694,24 @@ function tr(text, lang){
 }
 var TP_ROLES = ["Realtor","Title Company","Escrow Officer","Insurance Agent","Attorney","Appraiser"];
 
+// Constructive Capital's RTL Foreign Nationals appendix (Appendix E,
+// 2.1.26) -- these only apply to RTL products (Fix & Flip / Bridge /
+// Ground Up Construction), not DSCR, which is priced off a different
+// rate sheet with no Foreign National provisions of its own.
+var FOREIGN_NATIONAL_DOCS = [
+  "Foreign National Passport",
+  "Foreign National Visa / USCIS Approval",
+  "Foreign National Liquidity Verification",
+  "Registered Agent Confirmation",
+  "Entity Ownership Schedule (Foreign National)"
+];
+function requiredDocsForLead(lead){
+  var list = REQUIRED_DOCS_BY_TYPE[lead.loanType] || [];
+  if (lead.citizenshipStatus === "Foreign National" && RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1){
+    list = list.concat(FOREIGN_NATIONAL_DOCS);
+  }
+  return list;
+}
 var ACH_FORM_DOC_NAME = "ACH / Automatic Payment Authorization Form";
 var RTL_APPLICATION_DOC_NAME = "RTL Application (BPL)";
 var DSCR_APPLICATION_DOC_NAME = "DSCR Application (BPL)";
@@ -806,10 +824,14 @@ var RTL_FEE_BY_PROJECT = {
 };
 var RTL_TXN_ADJ = { purchase: 0, ratetermrefi: 0.50, cashout: 1.00 };
 function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
-  if (lead.citizenshipStatus === "Foreign National" || lead.citizenshipStatus === "ITIN"){
-    return { ineligible:true, reason: (lead.citizenshipStatus) + " pricing isn't modeled on this sheet — needs manual pricing from underwriting." };
+  if (lead.citizenshipStatus === "ITIN"){
+    return { ineligible:true, reason: "ITIN pricing isn't modeled on this sheet — needs manual pricing from underwriting." };
   }
   var tier = experienceTier(lead.experienceDeals);
+  var isFN = lead.citizenshipStatus === "Foreign National";
+  if (isFN && tier === "silver"){
+    return { ineligible:true, reason: "Foreign National borrowers need Gold or Platinum experience (3+ completed RTL/GUC projects) — Silver (0-2) is not eligible per the Foreign Nationals guidelines." };
+  }
   var base = RTL_BASE_RATES[points] && RTL_BASE_RATES[points][tier];
   if (base === undefined || base === null) return { ineligible:true, reason:"No pricing for this experience tier at this origination fee." };
   var rate = base;
@@ -819,6 +841,14 @@ function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
     if (tier === "silver") return { ineligible:true, reason:"Ground Up Construction requires Gold or Platinum experience tier." };
     rate += 0.75;
     notes.push("Ground Up add-on +0.75%");
+  }
+  if (isFN){
+    var fnPct = tier === "platinum" ? 0.20 : 0.25;
+    var fnMin = Math.max(50000, Math.round((lead.loanAmount||0) * fnPct));
+    if (lead.liquidity != null && lead.liquidity < fnMin){
+      return { ineligible:true, reason: "Foreign National liquidity requirement not met — needs " + fmtUSD(fnMin) + " (" + (fnPct*100) + "% of loan amount, $50,000 minimum) seasoned 60+ days in a U.S. bank; has " + fmtUSD(lead.liquidity) + " on file." };
+    }
+    notes.push("Foreign National: priced off the same rate sheet by representative FICO, but requires " + (fnPct*100) + "% of loan amount (" + fmtUSD(fnMin) + " min) in seasoned U.S. bank liquidity, valid passport + US visa or USCIS approval, 2+ bureau FICO with no bankruptcy/foreclosure/short-sale/deed-in-lieu/loan-mod, and confirmation the borrower's country isn't on BPL's ineligible list.");
   }
   var txnKey = transactionType || "purchase";
   var txnAdj = RTL_TXN_ADJ[txnKey] || 0;
@@ -1091,6 +1121,31 @@ function rtlStateLeverageAdj(address){
   if (state === "NY") return { adj:0, state:state, needsManualCheck:true };
   return { adj:0, state:state, needsManualCheck:false };
 }
+// Constructive Capital's RTL Foreign Nationals appendix (Appendix E,
+// 2.1.26). Only the parts we can actually check against data we collect:
+// experience-tier gate (Silver/0-2 is ineligible outright) and the
+// liquidity grid (25% of loan amount for Gold, 20% for Platinum, $50k
+// floor either way). Passport/visa validity, 2+ bureau FICO, derogatory
+// credit history, and the ineligible-countries list aren't fields this
+// CRM collects, so those always come back as a manual-verification flag
+// rather than a pass/fail -- correct behavior, not a gap: it forces the
+// file to underwriting review instead of silently claiming clearance on
+// data we don't actually have.
+function foreignNationalGuidelineChecks(lead, tier){
+  if (lead.citizenshipStatus !== "Foreign National") return [];
+  var out = [];
+  out.push({ label:"Foreign National eligibility", pass: tier !== "silver",
+    detail: tier + " tier — Foreign Nationals need Gold or Platinum (3+ completed RTL/GUC projects); Silver (0-2) is not eligible per the Foreign Nationals guidelines" });
+  if (tier !== "silver"){
+    var fnPct = tier === "platinum" ? 0.20 : 0.25;
+    var fnMin = Math.max(50000, Math.round((lead.loanAmount||0) * fnPct));
+    out.push({ label:"Foreign National liquidity", pass: lead.liquidity!=null && lead.liquidity >= fnMin,
+      detail: (lead.liquidity!=null ? fmtUSD(lead.liquidity) : "not on file") + " — needs " + fmtUSD(fnMin) + " (" + (fnPct*100) + "% of loan amount, $50,000 minimum), seasoned 60+ days in a U.S. bank" });
+  }
+  out.push({ label:"Foreign National documentation", pass:false,
+    detail:"Verify manually: unexpired passport + valid US visa (or USCIS approval letter showing visa class), tri-merge credit with scores from 2+ bureaus and no bankruptcy/foreclosure/short-sale/deed-in-lieu/loan-mod, and confirm country of domicile isn't on BPL's ineligible-countries list" });
+  return out;
+}
 function evaluateGuidelines(lead){
   var checks = [];
   function check(label, pass, detail){ checks.push({ label:label, pass:!!pass, detail:detail }); }
@@ -1187,6 +1242,7 @@ function evaluateGuidelines(lead){
     }
     check("Experience / rehab scope", !!limits,
       (lead.experienceDeals||0) + " deal(s) (" + tierName + ") — " + rClass + " rehab" + (limits ? "" : " isn't eligible at this experience level"));
+    foreignNationalGuidelineChecks(lead, tierName).forEach(function(c){ check(c.label, c.pass, c.detail); });
     if (stateAdj && stateAdj.adj){
       check("State leverage adjustment", true, stateAdj.state + " property — max leverage reduced " + stateAdj.adj + "% per the RTL Matrix's non-cumulative state adjustment table");
     }
@@ -1229,6 +1285,7 @@ function evaluateGuidelines(lead){
     }
     check("Experience", !!guLimits,
       (lead.experienceDeals||0) + " deal(s) (" + guTierName + ") — ground-up isn't eligible under 3 completed deals");
+    foreignNationalGuidelineChecks(lead, guTierName).forEach(function(c){ check(c.label, c.pass, c.detail); });
     if (stateAdj && stateAdj.adj){
       check("State leverage adjustment", true, stateAdj.state + " property — max leverage reduced " + stateAdj.adj + "% per the Ground Up Matrix's non-cumulative state adjustment table");
     }
@@ -4210,7 +4267,7 @@ function requestDoc(leadId, name){
 function applyRequiredDocs(leadId, opts){
   var lead = leadById(leadId);
   if (!lead) return [];
-  var list = REQUIRED_DOCS_BY_TYPE[lead.loanType];
+  var list = requiredDocsForLead(lead);
   if (!list || !list.length) return [];
   lead.documents = lead.documents || [];
   var existing = lead.documents.map(function(d){ return (d.name||"").toLowerCase(); });
@@ -4329,7 +4386,7 @@ function requestAiDocReview(lead, doc){
     path: doc.storagePath, docName: doc.name,
     context: {
       borrowerName: lead.name, loanType: lead.loanType, loanAmount: lead.loanAmount,
-      propertyAddress: lead.propertyAddress, ltv: lead.ltv
+      propertyAddress: lead.propertyAddress, ltv: lead.ltv, citizenshipStatus: lead.citizenshipStatus
     }
   } }).then(function(res){
     if (res.error || !res.data || !res.data.ok) return;
@@ -4724,7 +4781,7 @@ function runAiDocReview(leadId, idx){
   requestAiDocReview(lead, doc);
 }
 function missingRequiredDocs(lead){
-  var list = REQUIRED_DOCS_BY_TYPE[lead.loanType] || [];
+  var list = requiredDocsForLead(lead);
   var byName = {};
   (lead.documents||[]).forEach(function(d){ byName[(d.name||"").toLowerCase()] = d; });
   return list.filter(function(name){
@@ -4754,7 +4811,7 @@ function scanAllDocuments(leadId){
   var calls = docs.map(function(d){
     return sb.functions.invoke("review-document", { body: {
       path: d.storagePath, docName: d.name,
-      context: { borrowerName: lead.name, loanType: lead.loanType, loanAmount: lead.loanAmount, propertyAddress: lead.propertyAddress, ltv: lead.ltv }
+      context: { borrowerName: lead.name, loanType: lead.loanType, loanAmount: lead.loanAmount, propertyAddress: lead.propertyAddress, ltv: lead.ltv, citizenshipStatus: lead.citizenshipStatus }
     } }).then(function(res){
       if (res.error || !res.data || !res.data.ok) return false;
       d.aiReview = { status: res.data.status, note: res.data.note, reviewedAt: todayISO(), dismissed:false };

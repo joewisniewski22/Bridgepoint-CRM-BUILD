@@ -25,6 +25,12 @@ const DOC_GUIDANCE: Record<string, string> = {
   "Entity Docs (Operating Agreement)": "Check the entity name and formation state are clear and an authorized signer is named. Flag if no authorized signer is identifiable.",
   "Appraisal": "Check the appraised value supports the loan amount and LTV given below. Flag if the appraised value looks like it came in below what the loan assumes.",
   "Insurance Binder": "Check the coverage amount and effective dates look sufficient for the loan amount given below. Flag if coverage looks lower than the loan amount or dates don't cover closing.",
+  // Constructive Capital's RTL Foreign Nationals appendix (Appendix E, 2.1.26).
+  "Foreign National Passport": "Check it's a passport (not a national ID or driver's license), the photo page is legible, and the expiration date is clearly in the future (not expired). Flag if expired, illegible, or if the document is not actually a passport.",
+  "Foreign National Visa / USCIS Approval": "This should be an I-797 Notice of Action, a visa stamp/page in the passport, or a USCIS approval letter showing a valid, unexpired visa classification. Flag if expired, illegible, or if no visa class is identifiable on the document.",
+  "Foreign National Liquidity Verification": "Check this shows funds on deposit at a U.S. (FDIC-insured) banking institution, seasoned at least 60 days -- statement dates should span 2+ months. Flag if the institution isn't clearly U.S.-based, if seasoning can't be confirmed from the dates shown, or if the balance looks inconsistent across statements.",
+  "Registered Agent Confirmation": "Check it names a registered agent (a company, attorney, or individual) for the borrowing entity in the state(s) where it's qualified to do business. Flag if no registered agent is named or the entity/state isn't identifiable.",
+  "Entity Ownership Schedule (Foreign National)": "Check the ownership schedule accounts for every owner/guarantor and their percentage. Flag if more than 2 Foreign Nationals are guarantors or hold 20%+ ownership, if any owner is itself an entity (not a natural person), or if ownership percentages don't add up to 100%.",
 };
 const DEFAULT_GUIDANCE = "Check the document looks complete, legible, and consistent with the loan details given below. Flag any illegible sections, missing pages, or obvious inconsistencies.";
 
@@ -78,8 +84,12 @@ Deno.serve(async (req: Request) => {
     }
 
     const guidance = DOC_GUIDANCE[docName] || DEFAULT_GUIDANCE;
+    const isForeignNational = context.citizenshipStatus === "Foreign National";
+    const fnNote = isForeignNational
+      ? "\n\nFOREIGN NATIONAL FILE: this borrower/guarantor is a Foreign National (not a US citizen, permanent resident, or authorized to work in the US). Per BPL's Foreign Nationals guidelines: on a Government-Issued Photo ID, a foreign passport is acceptable and expected -- do not flag it as wrong just for not being a US-issued ID. On bank statements, funds must be at a U.S. (FDIC-insured) institution seasoned 60+ days -- flag if the institution or seasoning can't be confirmed. On entity/ownership documents, flag if more than 2 Foreign Nationals appear as guarantors or 20%+ owners, or if any owner is itself an entity rather than a natural person."
+      : "";
     const promptText = "You are reviewing a loan document for a hard-money/DSCR real estate lender.\n\n" +
-      "IMPORTANT CONTEXT: this lender only makes business-purpose loans to investment entities on non-owner-occupied property -- the borrower/guarantor never lives at the subject property. Their government ID, EIN letter, entity documents, and bank statements will almost always show a personal or business mailing address that's completely different from the property address below. That is normal and expected for every single file -- NEVER flag an address on the borrower's ID, entity docs, or EIN letter as inconsistent just because it doesn't match the property address. Only flag address-related issues within a document type where that document's own guidance below explicitly calls for an address check (e.g. a purchase contract's address should match the property).\n\n" +
+      "IMPORTANT CONTEXT: this lender only makes business-purpose loans to investment entities on non-owner-occupied property -- the borrower/guarantor never lives at the subject property. Their government ID, EIN letter, entity documents, and bank statements will almost always show a personal or business mailing address that's completely different from the property address below. That is normal and expected for every single file -- NEVER flag an address on the borrower's ID, entity docs, or EIN letter as inconsistent just because it doesn't match the property address. Only flag address-related issues within a document type where that document's own guidance below explicitly calls for an address check (e.g. a purchase contract's address should match the property)." + fnNote + "\n\n" +
       "Document type: " + docName + "\n" +
       "What to check: " + guidance + "\n\n" +
       "Loan file details:\n" +
