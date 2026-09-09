@@ -746,6 +746,10 @@ function requiredDocsForLead(lead){
   }
   return list;
 }
+// ACH form is deliberately NOT in the general document checklist below --
+// it's collected as its own e-signed step inside the application itself
+// (see applyAchAndRtlAppPatch / uploadGeneratedPdfDocument), so asking for
+// it again through the generic upload checklist just duplicated the ask.
 var ACH_FORM_DOC_NAME = "ACH / Automatic Payment Authorization Form";
 var RTL_APPLICATION_DOC_NAME = "RTL Application (BPL)";
 var DSCR_APPLICATION_DOC_NAME = "DSCR Application (BPL)";
@@ -755,8 +759,7 @@ var UNIVERSAL_DOCS = [
   "Entity Formation Docs & Operating Agreement (if closing in an entity)",
   "EIN Letter (if closing in an entity)",
   "Credit Authorization Form",
-  "Voided Check / Wire Instructions",
-  ACH_FORM_DOC_NAME
+  "Voided Check / Wire Instructions"
 ];
 var REQUIRED_DOCS_BY_TYPE = {
   "DSCR": UNIVERSAL_DOCS.concat([
@@ -2780,7 +2783,7 @@ function leadToRow(l){
     loan_type: l.loanType, stage: l.stage, status: l.status, assigned_to: l.assignedTo, created_at: l.createdAt,
     entity_type: l.entityType, credit_score: l.creditScore, experience_deals: l.experienceDeals, liquidity: l.liquidity,
     property_address: l.propertyAddress, property_type: l.propertyType,
-    purchase_price: l.purchasePrice, current_value: l.currentValue || null, current_loan_balance: l.currentLoanBalance || null, arv: l.arv, rehab_budget: l.rehabBudget, rent_estimate: l.rentEstimate,
+    purchase_price: l.purchasePrice, current_value: (l.currentValue!=null ? l.currentValue : null), current_loan_balance: (l.currentLoanBalance!=null ? l.currentLoanBalance : null), arv: l.arv, rehab_budget: l.rehabBudget, rent_estimate: l.rentEstimate,
     loan_amount: l.loanAmount, ltv: l.ltv, rate: l.rate, term_months: l.termMonths,
     exit_strategy: l.exitStrategy, close_date: l.closeDate, next_follow_up: l.nextFollowUp, next_follow_up_note: l.nextFollowUpNote,
     points_charged: l.pointsCharged, created_at_ts: l.createdAtTs, first_attempt_at: l.firstAttemptAt,
@@ -2818,7 +2821,7 @@ function rowToLead(r){
     loanType: r.loan_type, stage: r.stage, status: r.status, assignedTo: r.assigned_to, createdAt: r.created_at,
     entityType: r.entity_type, creditScore: r.credit_score, experienceDeals: r.experience_deals, liquidity: r.liquidity,
     propertyAddress: r.property_address, propertyType: r.property_type,
-    purchasePrice: r.purchase_price, currentValue: r.current_value || null, currentLoanBalance: r.current_loan_balance || null, arv: r.arv, rehabBudget: r.rehab_budget, rentEstimate: r.rent_estimate,
+    purchasePrice: r.purchase_price, currentValue: (r.current_value!=null ? r.current_value : null), currentLoanBalance: (r.current_loan_balance!=null ? r.current_loan_balance : null), arv: r.arv, rehabBudget: r.rehab_budget, rentEstimate: r.rent_estimate,
     loanAmount: r.loan_amount, ltv: r.ltv, rate: r.rate, termMonths: r.term_months,
     exitStrategy: r.exit_strategy, closeDate: r.close_date, nextFollowUp: r.next_follow_up, nextFollowUpNote: r.next_follow_up_note,
     pointsCharged: r.points_charged, createdAtTs: r.created_at_ts, firstAttemptAt: r.first_attempt_at,
@@ -3682,6 +3685,27 @@ function reassignLead(leadId, newOwnerId){
   persist();
 }
 
+// Joe's real feedback (2026-09-09): LOs need to change a file's loan type
+// often -- a lead comes in guessed/imported as one product and turns out
+// to be another once they actually talk to the client. Non-destructive on
+// purpose: doesn't touch any figures already entered, just re-tags the
+// file and tops up the document checklist for the new type (existing
+// checklist items from the old type are left alone, not removed).
+function setLoanType(leadId, newType){
+  var lead = leadById(leadId);
+  if (!lead || !newType || newType === lead.loanType) return;
+  var oldType = lead.loanType;
+  lead.loanType = newType;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text:"Loan type changed from " + oldType + " to " + newType, author: currentUser().name });
+  var addedDocs = applyRequiredDocs(leadId, { silent:true }) || [];
+  if (addedDocs.length){
+    lead.activity.push({ date: todayISO(), type:"document", text:"Added " + addedDocs.length + " checklist item(s) for " + newType, author:"System" });
+  }
+  showToast("Loan type changed to " + newType);
+  persist();
+}
+
 function toggleOnHold(leadId, note){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -4366,6 +4390,13 @@ function requestDoc(leadId, name){
   showToast("Requested " + name + " — borrower notified by email & text");
   persist();
 }
+// Only loads the checklist for STAFF to see what's needed -- status
+// "suggested", never "requested" -- so nothing shows in the borrower
+// portal or gets emailed/texted to them until a staff member actually
+// clicks Request (requestChecklistDoc) or Request All
+// (requestAllSuggestedDocs) on an item. Joe's real complaint (2026-09-09):
+// this used to auto-request (and auto-notify the borrower about) every
+// required document the moment the Documents tab was opened.
 function applyRequiredDocs(leadId, opts){
   var lead = leadById(leadId);
   if (!lead) return [];
@@ -4376,19 +4407,50 @@ function applyRequiredDocs(leadId, opts){
   var added = [];
   list.forEach(function(name){
     if (existing.indexOf(name.toLowerCase()) === -1){
-      lead.documents.push({ name:name, status:"requested", requestedAt: todayISO() });
+      lead.documents.push({ name:name, status:"suggested" });
       added.push(name);
     }
   });
   if (opts && opts.silent) return added;
-  if (!added.length){ showToast("All required documents already requested"); return added; }
+  if (!added.length){ showToast("Checklist already up to date"); return added; }
   lead.activity = lead.activity || [];
   var d = todayISO();
-  lead.activity.push({ date:d, type:"document", text:"Requested required document checklist (" + added.length + " item(s)) for " + lead.loanType, author: currentUser().name });
-  lead.activity.push({ date:d, type:"notify", text:"Emailed and texted " + lead.name + " the full document checklist — now showing in their borrower portal.", author:"System" });
-  showToast("Requested " + added.length + " required document(s)");
+  lead.activity.push({ date:d, type:"document", text:"Loaded required document checklist (" + added.length + " item(s)) for " + lead.loanType + " -- not yet requested from the borrower", author: currentUser().name });
+  showToast("Added " + added.length + " item(s) to the checklist — click Request to ask the borrower");
   persist();
   return added;
+}
+function requestChecklistDoc(leadId, idx){
+  var lead = leadById(leadId);
+  if (!lead || !lead.documents[idx]) return;
+  var doc = lead.documents[idx];
+  if (doc.status !== "suggested") return;
+  doc.status = "requested"; doc.requestedAt = todayISO();
+  lead.activity = lead.activity || [];
+  var d = todayISO();
+  lead.activity.push({ date:d, type:"document", text:"Requested document: " + doc.name, author: currentUser().name });
+  lead.activity.push({ date:d, type:"notify", text:"Emailed and texted " + lead.name + " about the document request — now showing in their borrower portal.", author:"System" });
+  showToast("Requested " + doc.name + " — borrower notified by email & text");
+  persist();
+}
+function requestAllSuggestedDocs(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var docs = lead.documents || [];
+  var d = todayISO();
+  var names = [];
+  docs.forEach(function(doc){
+    if (doc.status === "suggested"){
+      doc.status = "requested"; doc.requestedAt = d;
+      names.push(doc.name);
+    }
+  });
+  if (!names.length){ showToast("Nothing left to request"); return; }
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"document", text:"Requested " + names.length + " document(s): " + names.join(", "), author: currentUser().name });
+  lead.activity.push({ date:d, type:"notify", text:"Emailed and texted " + lead.name + " the document checklist — now showing in their borrower portal.", author:"System" });
+  showToast("Requested " + names.length + " document(s) — borrower notified by email & text");
+  persist();
 }
 function viewLeadDocument(leadId, idx){
   var lead = leadById(leadId);
@@ -5290,7 +5352,7 @@ function buildBorrowerPortalHTML(lead, opts){
       '</div>';
   }
 
-  var visibleDocs = (lead.documents||[]).map(function(d,i){ return {d:d, i:i}; }).filter(function(x){ return !x.d.staffOnly && x.d.status!=="waived"; });
+  var visibleDocs = (lead.documents||[]).map(function(d,i){ return {d:d, i:i}; }).filter(function(x){ return !x.d.staffOnly && x.d.status!=="waived" && x.d.status!=="suggested"; });
   var docs = visibleDocs.map(function(x){
     var d = x.d, i = x.i;
     var received = d.status==="received";
@@ -6100,6 +6162,30 @@ function field(label, value, mono){
   return '<div class="field"><label>' + label + '</label><div class="val' + (mono?" mono":"") + '">' + value + '</div></div>';
 }
 
+// Erika's + Fiore's real feedback (2026-09-09): where a loan is being
+// placed was too easy to miss -- buried in a small rail block, and only
+// shown at all once a guideline check had been run. This is now big,
+// bold, and right at the top of Overview for anyone who can see placement
+// (owner, Fiore, Erika) -- always defaults to In-House (Constructive
+// Capital) unless an outside lender is actually set, never a "needs
+// review" middle state.
+function renderLoanPlacementBanner(lead){
+  if (!canViewOutsideLender()) return "";
+  var current = lead.outsideLender || "";
+  var displayValue = current || "In-House (Constructive Capital)";
+  var isInHouse = !current;
+  var editor = canManageOutsideLender()
+    ? ('<select class="select" data-action="set-outside-lender" data-lead="' + lead.id + '" style="font-weight:700;margin-top:8px;max-width:320px">' +
+        '<option value="">In-House (Constructive Capital)</option>' +
+        OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (current===l?" selected":"") + '>' + l + '</option>'; }).join("") +
+      '</select>')
+    : '<div class="footnote" style="padding-top:4px">Only Joe and Fiore can change this.</div>';
+  return '<div class="panel panel-pad" style="margin-bottom:16px;border:2px solid ' + (isInHouse ? 'var(--brand)' : 'var(--c-rust)') + '">' +
+    '<div class="hint" style="margin-bottom:2px">📍 LOAN PLACEMENT</div>' +
+    '<div style="font-size:1.4rem;font-weight:800;line-height:1.2">' + esc(displayValue) + '</div>' +
+    editor +
+  '</div>';
+}
 function renderTabOverview(lead){
   var fu = '<div class="field-grid" style="margin-top:16px">' +
     '<div class="field" style="grid-column:1/-1"><label>Next follow-up</label>' +
@@ -6120,7 +6206,7 @@ function renderTabOverview(lead){
     ? ('<div style="margin-bottom:14px"><button class="btn btn-sm" type="button" data-action="view-term-sheet" data-lead="' + lead.id + '">📄 View Term Sheet</button></div>')
     : "";
 
-  return viewTermSheetBtn + '<div class="field-grid">' +
+  return renderLoanPlacementBanner(lead) + viewTermSheetBtn + '<div class="field-grid">' +
     field("Borrower", esc(lead.name)) +
     field("Entity Type", esc(lead.entityType||"—")) +
     field("Email", '<a href="mailto:' + esc(lead.email) + '">' + esc(lead.email) + '</a>') +
@@ -6221,19 +6307,17 @@ function setOutsideLender(leadId, lender){
 }
 function renderOutsideLenderBox(lead, guidelineStatus){
   var current = lead.outsideLender || "";
-  // No outside lender chosen doesn't mean "unknown" -- if guidelines
-  // passed, this loan is just going through our own in-house pipeline
-  // (Constructive Capital) and always was; only actually undecided if
-  // guidelines needed review and nobody's picked an outside lender yet.
-  var inHouseDefault = guidelineStatus === "pass";
-  var displayValue = lead.outsideLender || (inHouseDefault ? "In-House (Constructive Capital)" : "Not yet placed — needs review");
+  // Joe's explicit rule (2026-09-09): default to Constructive Capital
+  // (in-house) unless an outside lender is actually set -- no "needs
+  // review, undecided" middle state to keep guessing about.
+  var displayValue = lead.outsideLender || "In-House (Constructive Capital)";
   if (!canManageOutsideLender()){
     return '<div class="panel panel-pad" style="margin-top:10px">' +
       '<div class="rail-title" style="margin-bottom:4px">Where This Is Being Placed</div>' +
       '<div>' + esc(displayValue) + '</div>' +
     '</div>';
   }
-  var options = '<option value="">— ' + (inHouseDefault ? "In-House (Constructive Capital)" : "Not yet placed") + ' —</option>' +
+  var options = '<option value="">— In-House (Constructive Capital) —</option>' +
     OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (current===l?" selected":"") + '>' + l + '</option>'; }).join("");
   return '<div class="panel panel-pad" style="margin-top:10px">' +
     '<div class="rail-title" style="margin-bottom:4px">Where This Is Being Placed</div>' +
@@ -6283,17 +6367,23 @@ function setPropertyAddress(leadId, address){
   showToast("Address updated");
   persist();
 }
+function renderLoanTypeEditor(lead){
+  if (isProcessor()) return "";
+  var options = LOAN_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.loanType===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  return '<div class="form-row" style="max-width:320px;margin-bottom:14px"><label>Loan Type</label>' +
+    '<select class="select" data-action="set-loan-type" data-lead="' + lead.id + '">' + options + '</select></div>';
+}
 function renderTabScenario(lead){
   var ruralBanner = lead.ruralStatus === "rural"
     ? '<div class="hint" style="color:var(--c-rust);margin-bottom:12px">⚠️ This property appears to be in a rural area (checked ' + fmtDate(lead.ruralCheckedAt) + ') — confirm eligibility and any overlay pricing with underwriting before quoting.</div>'
     : "";
-  return ruralBanner + renderPropertyAddressEditor(lead) + '<div class="field-grid">' +
+  return ruralBanner + renderLoanTypeEditor(lead) + renderPropertyAddressEditor(lead) + '<div class="field-grid">' +
     field("Property Type", esc(lead.propertyType||"—")) +
     (lead.loanType === "Portfolio/Blanket" ? field("Number of Properties", lead.propertyCount||"—", true) : "") +
     field("Citizenship Status", esc(lead.citizenshipStatus||"—")) +
     field("Purchase Price", fmtUSD(lead.purchasePrice), true) +
-    (lead.currentValue ? field("Current Value", fmtUSD(lead.currentValue), true) : "") +
-    (lead.currentLoanBalance ? field("Current Loan Balance", fmtUSD(lead.currentLoanBalance), true) : "") +
+    (lead.currentValue != null ? field("Current Value", fmtUSD(lead.currentValue), true) : "") +
+    (lead.currentLoanBalance != null ? field("Current Loan Balance", fmtUSD(lead.currentLoanBalance), true) : "") +
     field("After-Repair Value (ARV)", fmtUSD(lead.arv), true) +
     field("Rehab / Construction Budget", fmtUSD(lead.rehabBudget), true) +
     field("Monthly Rent Estimate", fmtUSD(lead.rentEstimate), true) +
@@ -6625,9 +6715,18 @@ function renderTabDocuments(lead){
     '</div>';
   }
 
+  var suggestedCount = docs.filter(function(d){ return d.status==="suggested"; }).length;
+  var requestAllBar = suggestedCount ? (
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">' +
+      '<button class="btn btn-sm btn-primary" type="button" data-action="request-all-suggested-docs" data-lead="' + lead.id + '">Request All ' + suggestedCount + ' Remaining</button>' +
+      '<span class="hint">On the checklist for this loan type but not yet asked for — nothing below is shown to the borrower until you click Request.</span>' +
+    '</div>'
+  ) : "";
+
   var rows = docs.map(function(d,i){
     var statusBadge = d.status==="received" ? '<span class="badge badge-forest">Received</span>'
       : d.status==="waived" ? '<span class="badge badge-slate">N/A</span>'
+      : d.status==="suggested" ? '<span class="badge badge-slate">Not Yet Requested</span>'
       : '<span class="badge badge-slate">Requested</span>';
     var staffOnlyBadge = d.staffOnly ? '<span class="badge badge-slate" title="Never shown to the borrower">Staff Only</span>' : "";
     var aiBadge = "", aiNote = "";
@@ -6637,13 +6736,16 @@ function renderTabDocuments(lead){
         : '<span class="badge badge-rust">AI: Flagged</span>';
       aiNote = '<div class="cell-sub" style="margin-top:4px;max-width:360px">' + esc(d.aiReview.note) + '</div>';
     }
-    var viewBtn = "", uploadBtn = "", markBtn = "", deleteBtn = "", naBtn = "", undoNaBtn = "";
+    var viewBtn = "", uploadBtn = "", markBtn = "", deleteBtn = "", naBtn = "", undoNaBtn = "", requestBtn = "";
     if (d.status==="received"){
       if (d.storagePath) viewBtn = '<button class="btn btn-sm" data-action="view-lead-document" data-lead="' + lead.id + '" data-idx="' + i + '">View File</button>';
       if (canManage) deleteBtn = '<button class="btn btn-sm btn-ghost" style="color:var(--c-rust)" data-action="delete-document" data-lead="' + lead.id + '" data-idx="' + i + '">Delete</button>';
     } else if (d.status==="waived"){
       undoNaBtn = '<button class="btn btn-sm btn-ghost" data-action="undo-doc-na" data-lead="' + lead.id + '" data-idx="' + i + '">Undo</button>';
     } else {
+      if (d.status==="suggested"){
+        requestBtn = '<button class="btn btn-sm btn-primary" data-action="request-checklist-doc" data-lead="' + lead.id + '" data-idx="' + i + '" title="Emails and texts the borrower — nothing is sent until you click this">Request</button>';
+      }
       uploadBtn = '<label class="btn btn-sm btn-primary" style="cursor:pointer">Upload<input type="file" style="display:none" data-action="upload-doc-staff" data-lead="' + lead.id + '" data-idx="' + i + '"></label>';
       markBtn = '<button class="btn btn-sm btn-ghost" data-action="mark-doc-received" data-lead="' + lead.id + '" data-idx="' + i + '">Mark Received (no file)</button>';
       naBtn = '<button class="btn btn-sm btn-ghost" data-action="mark-doc-na" data-lead="' + lead.id + '" data-idx="' + i + '" title="Doesn\'t apply to this deal — stops it counting as missing, without asking the borrower for something they can\'t provide">Mark N/A</button>';
@@ -6651,10 +6753,11 @@ function renderTabDocuments(lead){
     return '<div class="doc-row" style="align-items:flex-start"><div><div>' + esc(d.name) + '</div>' +
       '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):""))
         : d.status==="waived" ? ("Marked N/A " + fmtDate(d.waivedAt) + " by " + esc(d.waivedBy||""))
+        : d.status==="suggested" ? "Not yet requested — the borrower can't see this until you click Request. Upload/Mark Received directly if you already have it."
         : "A client may have emailed this directly — upload it here if so.") + '</div>' +
       aiNote +
       '</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + viewBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + viewBtn + requestBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
   }).join("");
   var uwRows = (lead.uwConditions||[]).map(function(c){
     var statusBadge = c.status==="received" ? '<span class="badge badge-forest">Response Received</span>' : '<span class="badge badge-slate">Open</span>';
@@ -6678,7 +6781,7 @@ function renderTabDocuments(lead){
         '<button class="btn btn-sm btn-primary" type="submit" style="margin-top:8px">Send Condition</button>' +
       '</form>'
     ) : '');
-  return scanBar + issuesPanel + (rows || '<div class="empty">No documents requested yet.</div>') +
+  return scanBar + issuesPanel + requestAllBar + (rows || '<div class="empty">No documents on the checklist yet.</div>') +
     '<form data-form="request-doc" data-lead="' + lead.id + '" style="display:flex;gap:8px;margin-top:14px">' +
       '<input class="input" name="name" placeholder="Document name (e.g. Bank Statements)" style="flex:1">' +
       '<button class="btn btn-sm" type="submit">Request Document</button>' +
@@ -6728,9 +6831,11 @@ function renderConversationThread(lead){
 
 function renderTabThirdParties(lead){
   var rows = (lead.thirdParties||[]).map(function(tp, i){
+    var phoneLine = tp.phone ? ('<div><a href="tel:' + esc((tp.phone||"").replace(/[^0-9+]/g,"")) + '">' + esc(tp.phone) + '</a></div>') : '';
+    var emailLine = tp.email ? ('<div><a href="mailto:' + esc(tp.email) + '">' + esc(tp.email) + '</a></div>') : '';
     return '<div class="tp-row"><div class="r">' + esc(tp.role) + '</div>' +
       '<div style="display:flex;justify-content:space-between;align-items:center">' +
-        '<div><b>' + esc(tp.name) + '</b><div class="cell-sub">' + esc(tp.phone||"") + (tp.email?(" · " + esc(tp.email)):"") + '</div></div>' +
+        '<div><b>' + esc(tp.name) + '</b><div class="cell-sub">' + (phoneLine + emailLine || "—") + '</div></div>' +
         '<label style="display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--text-muted)"><input type="checkbox" data-action="toggle-notify" data-lead="' + lead.id + '" data-idx="' + i + '"' + (tp.notify?" checked":"") + '> Notify on stage change</label>' +
       '</div></div>';
   }).join("");
@@ -6800,10 +6905,10 @@ function renderRail(lead){
       '<div class="rail-title">Loan Placement</div>' +
       (canManageOutsideLender() ? (
         '<select class="select" style="width:100%" data-action="set-outside-lender" data-lead="' + lead.id + '">' +
-          '<option value="">— ' + (lead.guidelineCheck && lead.guidelineCheck.status==="pass" ? "In-House (Constructive Capital)" : "Not yet placed") + ' —</option>' +
+          '<option value="">— In-House (Constructive Capital) —</option>' +
           OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (lead.outsideLender===l?" selected":"") + '>' + l + '</option>'; }).join("") +
         '</select>'
-      ) : ('<div>' + esc(lead.outsideLender || (lead.guidelineCheck && lead.guidelineCheck.status==="pass" ? "In-House (Constructive Capital)" : "Not yet placed")) + '</div>')) +
+      ) : ('<div>' + esc(lead.outsideLender || "In-House (Constructive Capital)") + '</div>')) +
     '</div>') : '') +
     (isProcessor() ? '' : renderCoachingTip(lead.id)) +
     '<div class="rail-block">' +
@@ -9546,6 +9651,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "mark-doc-na"){ markDocNA(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "undo-doc-na"){ undoDocNA(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "request-checklist-doc"){ requestChecklistDoc(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "request-all-suggested-docs"){ requestAllSuggestedDocs(t.dataset.lead); }
   else if (action === "delete-document"){ deleteDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-uw-condition-file"){ viewUnderwritingConditionFile(t.dataset.lead, t.dataset.condid, t.dataset.borrower==="1"); }
@@ -9723,6 +9830,8 @@ appEl.addEventListener("change", function(e){
     reassignLead(t.dataset.lead, t.value);
   } else if (action === "reassign-processor"){
     reassignProcessor(t.dataset.lead, t.value);
+  } else if (action === "set-loan-type"){
+    setLoanType(t.dataset.lead, t.value);
   } else if (action === "set-outside-lender"){
     setOutsideLender(t.dataset.lead, t.value);
   } else if (action === "set-comm-language"){
