@@ -4954,6 +4954,18 @@ function renderPublicShowcase(){
   return '<div class="showcase-page">' + head + '<div class="showcase-wrap">' + content + '</div></div>';
 }
 function render(){
+  // Google Places Autocomplete appends its suggestion dropdown
+  // (.pac-container) directly to <body>, as a sibling of #app -- not
+  // inside the address input it's attached to. Every render() here
+  // replaces #app's innerHTML wholesale, which destroys the old input
+  // but leaves that dropdown orphaned in the DOM if it happened to be
+  // open at that moment (e.g. a background poll/re-render firing while
+  // someone's mid-typing an address). Nothing ever tells an orphaned one
+  // to hide, so it just sits there, boosted to z-index 9999 to clear
+  // modals, looking like a stuck leftover address suggestion from
+  // wherever it last was. Safe to always remove -- Google recreates it
+  // on demand the next time a bound input is focused/typed into.
+  document.querySelectorAll(".pac-container").forEach(function(el){ el.remove(); });
   var app = document.getElementById("app");
   if (ui.publicShowcase){
     app.innerHTML = renderPublicShowcase();
