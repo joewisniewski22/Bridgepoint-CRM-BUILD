@@ -2796,6 +2796,7 @@ function leadToRow(l){
     last_contact_at: l.lastContactAt,
     monthly_taxes: l.monthlyTaxes, monthly_insurance: l.monthlyInsurance, monthly_hoa: l.monthlyHoa,
     guideline_check: l.guidelineCheck || null, scope_of_work: l.scopeOfWork || null, application_token: l.applicationToken || null,
+    previous_lead_id: l.previousLeadId || null, next_lead_id: l.nextLeadId || null,
     property_count: l.propertyCount || null, birthday: l.birthday || null,
     title_requested_at: l.titleRequestedAt || null, insurance_requested_at: l.insuranceRequestedAt || null,
     entity_legal_name: l.entityLegalName || null,
@@ -2834,6 +2835,7 @@ function rowToLead(r){
     lastContactAt: r.last_contact_at,
     monthlyTaxes: r.monthly_taxes, monthlyInsurance: r.monthly_insurance, monthlyHoa: r.monthly_hoa,
     guidelineCheck: r.guideline_check || null, scopeOfWork: r.scope_of_work || null, applicationToken: r.application_token || null,
+    previousLeadId: r.previous_lead_id || null, nextLeadId: r.next_lead_id || null,
     propertyCount: r.property_count || null, birthday: r.birthday || null,
     titleRequestedAt: r.title_requested_at || null, insuranceRequestedAt: r.insurance_requested_at || null,
     entityLegalName: r.entity_legal_name || null,
@@ -3703,6 +3705,51 @@ function setLoanType(leadId, newType){
     lead.activity.push({ date: todayISO(), type:"document", text:"Added " + addedDocs.length + " checklist item(s) for " + newType, author:"System" });
   }
   showToast("Loan type changed to " + newType);
+  persist();
+}
+
+// Joe's real example (2026-09-09): a client does an RTL loan with us, then
+// comes back to refinance that same property with us -- that's a genuinely
+// NEW loan file (its own stage/documents/activity), not a continuation of
+// the old one, but re-typing all their contact/guarantor/entity info from
+// scratch is pure friction. Carries over what's almost always still true
+// (contact info, guarantor/entity, citizenship, property address/type,
+// third parties) and resets everything deal-specific (amounts, rate,
+// documents, activity) so the new file starts clean. The two files link
+// via previousLeadId/nextLeadId; computeRepeatClients() already groups them
+// together automatically since it matches on phone/email, not by this link.
+function startNewLoanForClient(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (!window.confirm('Start a new loan file for ' + lead.name + '? Carries over contact, guarantor/entity, and property info; loan amount, rate, documents, and activity all start fresh.')) return;
+  var id = nextLeadId();
+  var d = todayISO();
+  var newLead = {
+    id:id, name:lead.name, email:lead.email||null, phone:lead.phone, source:"Repeat Client",
+    loanType: lead.loanType, stage:"new", status:"active", assignedTo:lead.assignedTo,
+    createdAt:d, createdAtTs:nowTs(), firstAttemptAt:null,
+    entityType:lead.entityType||"LLC", entityLegalName:lead.entityLegalName||null,
+    guarantorFirstName:lead.guarantorFirstName||null, guarantorLastName:lead.guarantorLastName||null,
+    guarantorPhone:lead.guarantorPhone||null, guarantorEmail:lead.guarantorEmail||null,
+    guarantorOwnershipPct:lead.guarantorOwnershipPct||null, birthday:lead.birthday||null,
+    citizenshipStatus:lead.citizenshipStatus||null, countryOfDomicile:lead.countryOfDomicile||null,
+    creditScore:lead.creditScore||null, experienceDeals:lead.experienceDeals||null, liquidity:lead.liquidity||null,
+    propertyAddress:lead.propertyAddress||"", propertyType:lead.propertyType||null,
+    purchasePrice:null, currentValue:null, currentLoanBalance:null, arv:null, rehabBudget:null, rentEstimate:null,
+    monthlyTaxes:null, monthlyInsurance:null, monthlyHoa:null,
+    loanAmount:null, ltv:null, rate:null, termMonths:null, pointsCharged:null, transactionType:null, prepayTerm:null,
+    exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null,
+    callAttempts:[], documents:[], thirdParties:(lead.thirdParties||[]).map(function(tp){ return Object.assign({}, tp); }),
+    applicationToken: randomToken(), previousLeadId: lead.id,
+    activity:[{ date:d, type:"note", text:"New loan file started for a repeat client -- linked to previous file " + lead.id + " (" + (lead.loanType||"loan") + ", " + stageLabel(lead.stage) + ")", author: currentUser().name }]
+  };
+  state.leads.unshift(newLead);
+  lead.nextLeadId = id;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"note", text:"Started a new loan file (" + id + ") for this client's next deal", author: currentUser().name });
+  applyRequiredDocs(id, { silent:true });
+  showToast("New loan file " + id + " created for " + lead.name);
+  ui.view = "detail"; ui.selectedLeadId = id; ui.activeTab = "scenario";
   persist();
 }
 
@@ -6166,10 +6213,20 @@ function renderLeadDetail(){
   var main = '<div class="panel">' + tabs + '<div class="panel-pad">' + tabContent + '</div></div>';
   var rail = renderRail(lead);
 
-  var actions = '<button class="btn btn-ghost" data-action="nav" data-view="leads">← Back</button>';
+  var actions = renderLoanPlacementHeaderTag(lead) + '<button class="btn btn-ghost" data-action="nav" data-view="leads">← Back</button>';
 
   return topbar(esc(lead.name), esc(lead.loanType) + " · " + esc(lead.propertyAddress||""), actions) +
-    '<div class="content"><div class="detail-grid">' + main + rail + '</div></div>';
+    '<div class="content">' + renderDuplicateFileBanner(lead) + '<div class="detail-grid">' + main + rail + '</div></div>';
+}
+// Joe's explicit ask (2026-09-09): he, Fiore, and Erika need loan
+// placement visible in big blue letters right in the header, on every
+// tab, not just buried on Overview -- so this sits in the topbar actions
+// slot (top-right, next to "Back") alongside the Overview banner, not
+// instead of it.
+function renderLoanPlacementHeaderTag(lead){
+  if (!canViewOutsideLender()) return "";
+  var displayValue = lead.outsideLender || "In-House (Constructive Capital)";
+  return '<div style="font-size:1.1rem;font-weight:800;color:var(--brand);margin-right:14px;white-space:nowrap">📍 ' + esc(displayValue) + '</div>';
 }
 
 function field(label, value, mono){
@@ -6896,6 +6953,7 @@ function renderRail(lead){
       '<button class="btn btn-sm' + (lead.automationPaused ? " btn-primary" : "") + '" style="width:100%;margin-top:6px" data-action="toggle-automation-paused" data-lead="' + lead.id + '" title="Stops AI-driven texts/emails/campaigns to this client only — never affects internal AI scanning (document review, guideline checks, etc.)">' +
         (lead.automationPaused ? "▶ Resume Automation" : "🚫 Stop Automation") +
       '</button>' +
+      (isProcessor() ? '' : ('<button class="btn btn-sm btn-ghost" style="width:100%;margin-top:6px" data-action="start-new-loan" data-lead="' + lead.id + '" title="For a client starting a new deal with us -- e.g. refinancing a property they got an RTL loan on with us. Opens a new file with their contact/guarantor/entity info carried over.">🔁 Start New Loan for This Client</button>')) +
     '</div>' +
     '<div class="rail-block">' +
       '<div class="rail-title">Lead Owner</div>' +
@@ -7567,6 +7625,136 @@ function renderPublicBooking(){
   );
 }
 
+// Duplicate-FILE detection (2026-09-09, Joe's real ask): distinct from
+// repeat clients (borrowerGroupKey above, matched by phone/email -- the
+// SAME person legitimately getting a second loan over time, expected and
+// fine). A duplicate is the SAME deal accidentally entered twice -- flagged
+// only on name + property address + loan type all matching, since those
+// three together are very unlikely to coincide for two truly different
+// deals. Alerted to the assigned LO, Erika, and the owner so they can
+// verify which file has the right info, merge it in, and delete the extra.
+function normalizeForDupMatch(s){ return (s||"").toLowerCase().replace(/[^a-z0-9]/g,""); }
+function findDuplicateLeads(lead){
+  if (!lead) return [];
+  var nameKey = normalizeForDupMatch(lead.name);
+  var addrKey = normalizeForDupMatch(lead.propertyAddress);
+  if (!nameKey || !addrKey) return [];
+  return state.leads.filter(function(other){
+    return other.id !== lead.id &&
+      normalizeForDupMatch(other.name) === nameKey &&
+      normalizeForDupMatch(other.propertyAddress) === addrKey &&
+      (other.loanType||"") === (lead.loanType||"");
+  });
+}
+function canSeeDuplicateAlert(lead){
+  return isOwner() || currentUser().id === lead.assignedTo || ui.viewAs === "proc-erika";
+}
+function renderDuplicateFileBanner(lead){
+  if (!canSeeDuplicateAlert(lead)) return "";
+  var dups = findDuplicateLeads(lead);
+  if (!dups.length) return "";
+  var items = dups.map(function(d){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px">' +
+      '<div>' + esc(d.id) + ' — created ' + fmtDate(d.createdAt) + ' · ' + esc(stageLabel(d.stage)) + ' · ' + esc(userName(d.assignedTo)) + '</div>' +
+      '<button class="btn btn-sm btn-primary" type="button" data-action="open-modal" data-modal="mergeDuplicate" data-lead="' + lead.id + '" data-dup="' + d.id + '">Review &amp; Merge</button>' +
+    '</div>';
+  }).join("");
+  return '<div class="panel panel-pad" style="border:2px solid var(--c-rust)">' +
+    '<div style="font-weight:800;color:var(--c-rust)">⚠️ Possible Duplicate File' + (dups.length>1?'s':'') + '</div>' +
+    '<div class="footnote" style="padding-top:2px">Same name, property address, and loan type as ' + (dups.length>1?"these other files":"this other file") + ' — if it\'s genuinely the same deal entered twice, verify which one has the right info, merge it in, then delete the extra.</div>' +
+    items +
+  '</div>';
+}
+// Fills gaps only (never overwrites a value the primary already has),
+// combines activity/documents/thirdParties -- deliberately conservative
+// so a merge can't silently destroy real data.
+function mergeLeadsAction(primaryId, dupId){
+  var primary = leadById(primaryId), dup = leadById(dupId);
+  if (!primary || !dup) return;
+  var scalarKeys = ["email","phone","source","entityType","creditScore","experienceDeals","liquidity",
+    "propertyType","purchasePrice","currentValue","currentLoanBalance","arv","rehabBudget","rentEstimate",
+    "monthlyTaxes","monthlyInsurance","monthlyHoa","loanAmount","ltv","rate","termMonths","pointsCharged",
+    "exitStrategy","closeDate","transactionType","prepayTerm","citizenshipStatus","countryOfDomicile",
+    "guarantorFirstName","guarantorLastName","guarantorPhone","guarantorEmail","entityLegalName",
+    "guarantorOwnershipPct","birthday"];
+  var filled = [];
+  scalarKeys.forEach(function(k){
+    if ((primary[k]===null||primary[k]===undefined||primary[k]==="") && dup[k]!==null && dup[k]!==undefined && dup[k]!==""){
+      primary[k] = dup[k];
+      filled.push(k);
+    }
+  });
+  var existingDocNames = (primary.documents||[]).map(function(d){ return (d.name||"").toLowerCase(); });
+  (dup.documents||[]).forEach(function(d){
+    if (existingDocNames.indexOf((d.name||"").toLowerCase()) === -1) (primary.documents = primary.documents||[]).push(d);
+  });
+  var existingTpKey = (primary.thirdParties||[]).map(function(tp){ return (tp.role||"")+"|"+(tp.name||""); });
+  (dup.thirdParties||[]).forEach(function(tp){
+    if (existingTpKey.indexOf((tp.role||"")+"|"+(tp.name||"")) === -1) (primary.thirdParties = primary.thirdParties||[]).push(tp);
+  });
+  primary.activity = (primary.activity||[]).concat(dup.activity||[]).sort(function(a,b){ return (a.date||"").localeCompare(b.date||""); });
+  primary.activity.push({
+    date: todayISO(), type:"system",
+    text: "Merged in " + dup.id + " (" + dup.name + ") as a duplicate file" + (filled.length ? (" — filled: " + filled.join(", ")) : " — no gaps to fill") + ". " + (dup.activity||[]).length + " activity entries and " + (dup.documents||[]).length + " document(s) combined in.",
+    author: currentUser().name
+  });
+  showToast("Merged " + dup.id + " into " + primary.id);
+  ui.modal = null;
+  persist();
+  if (window.confirm('Merge done. Delete the duplicate file ' + dup.id + ' (' + dup.name + ') now? This cannot be undone.')){
+    deleteDuplicateLead(dup.id, primary.id);
+  }
+}
+// Narrower than the owner-only deleteLead() -- usable by the assigned LO
+// and Erika too, but ONLY re-confirmed as a genuine duplicate of the
+// primary file right before deleting, so this can't be repurposed into a
+// general delete-anything button.
+function deleteDuplicateLead(dupId, primaryId){
+  var dup = leadById(dupId), primary = leadById(primaryId);
+  if (!dup || !primary || !sb) return;
+  if (!canSeeDuplicateAlert(primary)) return;
+  var stillMatches = findDuplicateLeads(primary).some(function(d){ return d.id === dupId; });
+  if (!stillMatches){ showToast("Doesn't look like a duplicate anymore — not deleted"); return; }
+  sb.from("leads").delete().eq("id", dupId).then(function(res){
+    if (res.error){ showToast("Couldn't delete — try again"); return; }
+    state.leads = state.leads.filter(function(l){ return l.id !== dupId; });
+    showToast(dup.name + "'s duplicate file (" + dupId + ") deleted");
+    render();
+  });
+}
+function modalMergeDuplicate(leadId, dupId){
+  var lead = leadById(leadId), dup = leadById(dupId);
+  if (!lead || !dup) return "";
+  var fieldsToShow = [
+    ["Name","name"], ["Property Address","propertyAddress"], ["Loan Type","loanType"], ["Phone","phone"], ["Email","email"],
+    ["Stage","stage"], ["Assigned To","assignedTo"], ["Loan Amount","loanAmount"], ["Created","createdAt"]
+  ];
+  var fmt = function(l, key){
+    if (key === "stage") return stageLabel(l.stage);
+    if (key === "assignedTo") return userName(l.assignedTo);
+    if (key === "loanAmount") return fmtUSD(l.loanAmount);
+    if (key === "createdAt") return fmtDate(l.createdAt);
+    return esc(l[key] || "—");
+  };
+  var rows = fieldsToShow.map(function(f){
+    var a = fmt(lead, f[1]), b = fmt(dup, f[1]);
+    var diff = a !== b;
+    return '<tr' + (diff ? ' style="background:var(--c-rust-bg)"' : '') + '><td><b>' + f[0] + '</b></td><td>' + a + '</td><td>' + b + '</td></tr>';
+  }).join("");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1" style="max-width:640px">' +
+      '<div class="modal-head"><h3>Review Possible Duplicate</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding-bottom:10px">Highlighted rows differ between the two files. Pick which one is correct/more complete — that one becomes the primary file. Anything the primary is missing gets filled in from the other (activity and documents from both are always combined in); nothing that\'s already filled gets overwritten.</div>' +
+        '<div class="table-wrap"><table><thead><tr><th></th><th>' + esc(lead.id) + ' (this file)</th><th>' + esc(dup.id) + '</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '</div>' +
+      '<div class="modal-foot" style="flex-wrap:wrap">' +
+        '<button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button>' +
+        '<button class="btn btn-primary" type="button" data-action="merge-duplicate" data-lead="' + dup.id + '" data-dup="' + lead.id + '">Keep ' + esc(dup.id) + ' as Primary</button>' +
+        '<button class="btn btn-primary" type="button" data-action="merge-duplicate" data-lead="' + lead.id + '" data-dup="' + dup.id + '">Keep ' + esc(lead.id) + ' as Primary</button>' +
+      '</div>' +
+    '</div></div>';
+}
 function borrowerGroupKey(l){
   var phoneDigits = (l.phone||"").replace(/\D/g,"").slice(-10);
   if (phoneDigits.length === 10) return "p:" + phoneDigits;
@@ -8250,6 +8438,7 @@ function renderModal(){
   if (ui.modal.type === "importLeads") return modalImportLeads();
   if (ui.modal.type === "logCall") return modalLogCall(ui.modal.leadId);
   if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
+  if (ui.modal.type === "mergeDuplicate") return modalMergeDuplicate(ui.modal.leadId, ui.modal.dupId);
   if (ui.modal.type === "sendApplication") return modalSendApplication(ui.modal.leadId);
   if (ui.modal.type === "takeApplication") return modalTakeApplication(ui.modal.leadId);
   if (ui.modal.type === "viewApplication") return modalViewApplication(ui.modal.leadId);
@@ -9638,7 +9827,7 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "open-modal"){
     if (t.dataset.modal === "composeEmail" && prefersOutlook()){ openMailto("", "", ""); return; }
-    ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null }; ui.teamMemberError = null; if (t.dataset.modal === "importLeads") ui.importState = null; render();
+    ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null, dupId:t.dataset.dup||null }; ui.teamMemberError = null; if (t.dataset.modal === "importLeads") ui.importState = null; render();
   }
   else if (action === "close-modal"){ ui.modal = null; ui.importState = null; render(); }
   else if (action === "import-back"){ ui.importState = null; render(); }
@@ -9668,6 +9857,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "undo-doc-na"){ undoDocNA(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "request-checklist-doc"){ requestChecklistDoc(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "request-all-suggested-docs"){ requestAllSuggestedDocs(t.dataset.lead); }
+  else if (action === "start-new-loan"){ startNewLoanForClient(t.dataset.lead); }
+  else if (action === "merge-duplicate"){ mergeLeadsAction(t.dataset.lead, t.dataset.dup); }
   else if (action === "delete-document"){ deleteDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-uw-condition-file"){ viewUnderwritingConditionFile(t.dataset.lead, t.dataset.condid, t.dataset.borrower==="1"); }
