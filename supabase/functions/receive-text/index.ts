@@ -28,6 +28,27 @@ function quoDialLink(leadPhone: string, fromNumber?: string | null): string {
   return url;
 }
 
+// Translates an inbound client message to English when the lead has a
+// non-English communication language set (see index.html's Client
+// Language select + setCommLanguage). Falls back to the original text on
+// any failure -- a missed translation should never lose or block a real
+// inbound message.
+async function maybeTranslateToEnglish(text: string, preferredLanguage: string | null | undefined): Promise<{ text: string; wasTranslated: boolean; original: string }> {
+  if (!preferredLanguage || preferredLanguage === "en") return { text, wasTranslated: false, original: text };
+  try {
+    const res = await fetch(SUPABASE_URL + "/functions/v1/translate-message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+      body: JSON.stringify({ text, targetLanguage: "English" }),
+    });
+    const data = await res.json();
+    if (res.ok && data && data.ok && data.translated) {
+      return { text: data.translated as string, wasTranslated: true, original: text };
+    }
+  } catch (_e) { /* fall through to original below */ }
+  return { text, wasTranslated: false, original: text };
+}
+
 function extractMessage(body: Record<string, unknown>) {
   const data = (body.data as Record<string, unknown>) || {};
   // Newer shape: data.resource.text / data.context.senderIdentifier / recipientIdentifiers
@@ -98,18 +119,19 @@ Deno.serve(async (req: Request) => {
       return phones.some((p) => p.replace(/\D/g, "").slice(-10) === senderDigits.slice(-10));
     });
 
-    const { data: leads } = await sb.from("leads").select("id, phone, name, activity, assigned_to, automation_paused, ai_stage");
+    const { data: leads } = await sb.from("leads").select("id, phone, name, activity, assigned_to, automation_paused, ai_stage, preferred_language");
     const match = staffMatch ? undefined : (leads || []).find((l: Record<string, unknown>) => {
       const phone = (l.phone as string) || "";
       return phone.replace(/\D/g, "").slice(-10) === senderDigits.slice(-10);
     });
 
     if (match) {
+      const { text: textForLog, wasTranslated } = await maybeTranslateToEnglish(msg.text, match.preferred_language as string | undefined);
       const activity = (match.activity as unknown[]) || [];
       activity.push({
         date: new Date().toISOString().slice(0, 10),
         type: "text",
-        text: "Received (via Quo): " + msg.text,
+        text: "Received (via Quo): " + textForLog + (wasTranslated ? (' [original: "' + msg.text + '"]') : ""),
         author: (match.name as string) || "Borrower",
       });
       await sb.from("leads").update({ activity }).eq("id", match.id as string);
@@ -120,7 +142,7 @@ Deno.serve(async (req: Request) => {
           to_user_id: match.assigned_to,
           lead_id: match.id,
           kind: "text",
-          text: (match.name as string) + " replied: " + msg.text.slice(0, 80),
+          text: (match.name as string) + " replied: " + textForLog.slice(0, 80),
           date: new Date().toISOString().slice(0, 10),
           read: false,
         });
@@ -138,7 +160,7 @@ Deno.serve(async (req: Request) => {
           const isHotAiEngagement = !!match.ai_stage;
           const dialLink = match.phone ? quoDialLink(match.phone as string, lo.quo_phone_number as string | undefined) : "";
           const alertText = (isHotAiEngagement ? "🚨 URGENT HOT LEAD — " : "") +
-            (match.name as string) + " replied: \"" + msg.text.slice(0, 100) + "\" — " + link +
+            (match.name as string) + " replied: \"" + textForLog.slice(0, 100) + "\" — " + link +
             (dialLink ? ("\nCall now: " + dialLink) : "");
           if (lo.phone) {
             fetch(SUPABASE_URL + "/functions/v1/send-text", {

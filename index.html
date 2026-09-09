@@ -493,6 +493,25 @@ function pricingPropertyType(pt){
 }
 var EXIT_STRATEGIES = ["Sell","Refinance to DSCR","Hold/Rent","1031 Exchange"];
 var CITIZENSHIP_STATUSES = ["US Citizen","Permanent Resident","Foreign National","ITIN"];
+// Client's communication language, set per lead in the rail. Drives live
+// translation of ad-hoc texts (see translate-message + send-text/receive-text)
+// -- separate from lead.preferredLanguage's older en/es-only role of picking
+// which pre-built bilingual template (application, portal, documents) to use.
+// Both read the SAME lead.preferredLanguage field on purpose: selecting
+// Spanish here still gets the bilingual templates too, exactly like the old
+// toggle did, while every other language on this list only affects live
+// text translation (no bilingual templates exist for them).
+var COMM_LANGUAGES = [
+  { code:"en", name:"English" }, { code:"es", name:"Spanish" }, { code:"pt", name:"Portuguese" },
+  { code:"fr", name:"French" }, { code:"ht", name:"Haitian Creole" }, { code:"zh", name:"Mandarin Chinese" },
+  { code:"vi", name:"Vietnamese" }, { code:"ru", name:"Russian" }, { code:"ar", name:"Arabic" },
+  { code:"ko", name:"Korean" }, { code:"tl", name:"Tagalog" }, { code:"pl", name:"Polish" },
+  { code:"de", name:"German" }, { code:"it", name:"Italian" }, { code:"hi", name:"Hindi" }
+];
+function commLanguageName(code){
+  var l = COMM_LANGUAGES.filter(function(x){ return x.code === (code||"en"); })[0];
+  return l ? l.name : "English";
+}
 // Constructive Capital's RTL Foreign Nationals appendix (2.1.26), "Ineligible
 // Countries List" -- not exhaustive per the source doc itself ("include but
 // not limited to"), a real match here is a hard stop, not a maybe.
@@ -3335,30 +3354,49 @@ function sendTextViaQuo(leadId, message){
   if (!message || !message.trim()){ showToast("Write a message first"); return; }
   if (!sb){ showToast("Text service unavailable"); return; }
   var lo = currentUser();
-  sb.functions.invoke("send-text", {
-    body: { leadId: lead.id, to: lead.phone, text: message, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
-  }).then(function(res){
-    if (res.error || !res.data || !res.data.ok){
+  var targetLang = lead.preferredLanguage || "en";
+  var doSend = function(textToSend, wasTranslated){
+    sb.functions.invoke("send-text", {
+      body: { leadId: lead.id, to: lead.phone, text: textToSend, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
+    }).then(function(res){
+      if (res.error || !res.data || !res.data.ok){
+        showToast("Couldn't send the text — try again, or use Copy Message");
+        return;
+      }
+      var d = todayISO();
+      if (!lead.firstAttemptAt) lead.firstAttemptAt = nowTs();
+      lead.callAttempts = lead.callAttempts || [];
+      lead.callAttempts.push({ date:d, outcome:"texted", notes:message });
+      lead.activity = lead.activity || [];
+      lead.activity.push({
+        date:d, type:"text",
+        text: "Texted (via Quo): " + textToSend + (wasTranslated ? (' [you wrote in English: "' + message + '"]') : ""),
+        author: lo.name
+      });
+      lead.lastContactAt = d;
+      if (lead.status === "cold" || lead.status === "lost"){
+        lead.status = "active";
+        lead.stage = "qualifying";
+        lead.activity.push({ date:d, type:"system", text:"Reactivated via win-back outreach", author: lo.name });
+      }
+      ui.modal = null;
+      showToast(wasTranslated ? ("Translated to " + commLanguageName(targetLang) + " and sent to " + lead.name) : ("Text sent to " + lead.name));
+      persist();
+    }).catch(function(){
       showToast("Couldn't send the text — try again, or use Copy Message");
-      return;
-    }
-    var d = todayISO();
-    if (!lead.firstAttemptAt) lead.firstAttemptAt = nowTs();
-    lead.callAttempts = lead.callAttempts || [];
-    lead.callAttempts.push({ date:d, outcome:"texted", notes:message });
-    lead.activity = lead.activity || [];
-    lead.activity.push({ date:d, type:"text", text:"Texted (via Quo): " + message, author: lo.name });
-    lead.lastContactAt = d;
-    if (lead.status === "cold" || lead.status === "lost"){
-      lead.status = "active";
-      lead.stage = "qualifying";
-      lead.activity.push({ date:d, type:"system", text:"Reactivated via win-back outreach", author: lo.name });
-    }
-    ui.modal = null;
-    showToast("Text sent to " + lead.name);
-    persist();
+    });
+  };
+  if (targetLang === "en"){
+    doSend(message, false);
+    return;
+  }
+  sb.functions.invoke("translate-message", { body: { text: message, targetLanguage: commLanguageName(targetLang) } }).then(function(tres){
+    var translated = (tres && tres.data && tres.data.ok && tres.data.translated) ? tres.data.translated : null;
+    if (!translated){ showToast("Translation failed — sending in English instead"); doSend(message, false); return; }
+    doSend(translated, true);
   }).catch(function(){
-    showToast("Couldn't send the text — try again, or use Copy Message");
+    showToast("Translation failed — sending in English instead");
+    doSend(message, false);
   });
 }
 function sendApplicationAction(leadId, channel){
@@ -3999,13 +4037,21 @@ function setPricingInputs(leadId, fd){
   showToast("Pricing inputs saved");
   persist();
 }
-function toggleLanguage(leadId){
+function setCommLanguage(leadId, code){
   var lead = leadById(leadId);
-  if (!lead) return;
-  lead.preferredLanguage = lead.preferredLanguage === "es" ? "en" : "es";
+  if (!lead || !code) return;
+  var prior = lead.preferredLanguage || "en";
+  if (code === prior) return;
+  lead.preferredLanguage = code;
   lead.activity = lead.activity || [];
-  lead.activity.push({ date: todayISO(), type:"system", text: lead.preferredLanguage === "es" ? "Marked as Spanish speaking — application, portal, and documents will go out in Spanish" : "Switched back to English", author: currentUser().name });
-  showToast(lead.preferredLanguage === "es" ? "Client-facing content now in Spanish" : "Client-facing content now in English");
+  lead.activity.push({
+    date: todayISO(), type:"system",
+    text: code === "en"
+      ? "Switched client language back to English"
+      : "Set client language to " + commLanguageName(code) + " — texts you send are now translated into " + commLanguageName(code) + ", and their replies are translated to English for you" + (code === "es" ? " (application, portal, and documents also go out in Spanish)" : ""),
+    author: currentUser().name
+  });
+  showToast(code === "en" ? "Client language set to English" : "Texts will now be translated to/from " + commLanguageName(code));
   persist();
 }
 
@@ -6720,9 +6766,10 @@ function renderRail(lead){
       '<div class="rail-title">Borrower</div>' +
       '<div class="rail-name">' + esc(lead.name) + '</div>' +
       '<div class="stage-line">' + badgeForStage(lead) + (lead.onHold ? ' <span class="badge badge-rust">⏸ On Hold</span>' : '') + (lead.automationPaused ? ' <span class="badge badge-rust">🚫 Automation Stopped</span>' : '') + '</div>' +
-      '<button class="btn btn-sm' + (lead.preferredLanguage==="es" ? " btn-primary" : "") + '" style="width:100%;margin-top:8px" data-action="toggle-language" data-lead="' + lead.id + '" title="' + (lead.preferredLanguage==="es" ? "Spanish — click to switch back to English" : "English — click to switch to Spanish") + '">' +
-        (lead.preferredLanguage==="es" ? "🇪🇸" : "🇺🇸") + ' Spanish Speaking' +
-      '</button>' +
+      '<label class="hint" style="display:block;margin-top:10px">Client Language</label>' +
+      '<select class="select" style="width:100%" data-action="set-comm-language" data-lead="' + lead.id + '" title="Texts you send are translated into this language; their replies are translated to English for you.">' +
+        COMM_LANGUAGES.map(function(l){ return '<option value="' + l.code + '"' + ((lead.preferredLanguage||"en")===l.code ? " selected" : "") + '>' + l.name + '</option>'; }).join("") +
+      '</select>' +
       '<button class="btn btn-sm' + (lead.automationPaused ? " btn-primary" : "") + '" style="width:100%;margin-top:6px" data-action="toggle-automation-paused" data-lead="' + lead.id + '" title="Stops AI-driven texts/emails/campaigns to this client only — never affects internal AI scanning (document review, guideline checks, etc.)">' +
         (lead.automationPaused ? "▶ Resume Automation" : "🚫 Stop Automation") +
       '</button>' +
@@ -9507,7 +9554,6 @@ appEl.addEventListener("click", function(e){
   else if (action === "dismiss-ai-flag"){ dismissAiFlag(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
   else if (action === "toggle-processing"){ toggleProcessingAction(t.dataset.lead, t.dataset.kind); }
   else if (action === "confirm-processing"){ confirmProcessingAction(t.dataset.lead, t.dataset.kind); }
-  else if (action === "toggle-language"){ toggleLanguage(t.dataset.lead); }
   else if (action === "request-third-party-doc"){ requestThirdPartyDoc(t.dataset.lead, t.dataset.role); }
   else if (action === "send-text-quo"){
     var textBox = document.getElementById("text-message-box");
@@ -9676,6 +9722,8 @@ appEl.addEventListener("change", function(e){
     reassignProcessor(t.dataset.lead, t.value);
   } else if (action === "set-outside-lender"){
     setOutsideLender(t.dataset.lead, t.value);
+  } else if (action === "set-comm-language"){
+    setCommLanguage(t.dataset.lead, t.value);
   } else if (action === "toggle-notify"){
     toggleNotify(t.dataset.lead, parseInt(t.dataset.idx,10));
   } else if (action === "portal-select"){
