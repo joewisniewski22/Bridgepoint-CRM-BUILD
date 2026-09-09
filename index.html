@@ -5471,7 +5471,7 @@ function renderShell(){
         (isOwner() || !isProcessor() ? navItem("coaching","🎯","Coaching") : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
-        (isOwner() ? navItem("ai-assistant","🤖","AI Assistant") : "") +
+        navItem("ai-assistant","🤖","AI Assistant") +
         (navVisible("portal") ? navItem("portal","⌂","Borrower Portal Preview") : "") +
       '</nav>' +
       '<div class="sidebar-foot">' +
@@ -7541,14 +7541,20 @@ function processOutsideTermSheet(leadId, file, notes){
 }
 function renderAiAssistant(){
   var log = ui.aiChatLog;
+  var examplePrompt = isOwner()
+    ? 'Ask me to look up closed deals, draft and publish a recent-closing or story post to bplending.com, or paste/attach a term sheet to create a loan file.<br>e.g. "post the Munoz deal as a recent closing" · "create a loan file from this term sheet, assign to Fanis" · "send the term sheet to Jose Munoz"'
+    : 'Ask me to look up or update one of your own loan files, add a note, send a document, or paste/attach a term sheet to create a new one assigned to you.<br>e.g. "create a loan file from this term sheet" · "what\'s the status on Jose Munoz" · "send the term sheet to Jose Munoz" — marketing and team-wide tools are owner-only.';
   var bubbles = (log===undefined)
     ? '<div class="empty">Loading…</div>'
     : (log.length===0
-      ? '<div class="empty">Ask me to look up closed deals, draft and publish a recent-closing or story post to bplending.com, or paste/attach a term sheet to create a loan file.<br>e.g. "post the Munoz deal as a recent closing" · "create a loan file from this term sheet, assign to Fanis" · "send the term sheet to Jose Munoz"</div>'
+      ? '<div class="empty">' + examplePrompt + '</div>'
       : log.map(function(m){
           return '<div class="ai-msg ai-msg-' + m.role + '"><div class="ai-msg-role">' + (m.role==="user" ? esc(currentUser().name) : "AI Assistant") + '</div><div class="ai-msg-body">' + esc(m.content) + '</div></div>';
         }).join(""));
-  return topbar("AI Assistant", "Owner-only. Marketing content to bplending.com, creating loan files from term sheets, and sending documents — ad spend and other integrations get added here once they're connected.", "") +
+  var subtitle = isOwner()
+    ? "Marketing content to bplending.com, creating loan files from term sheets, and sending documents — ad spend and other integrations get added here once they're connected."
+    : "Manage your own loan files by chatting — create/update files, look one up, add a note, or send a document. Marketing and team-wide actions are owner-only.";
+  return topbar("AI Assistant", subtitle, "") +
     '<div class="content">' +
       '<div class="panel panel-pad" style="max-width:760px">' +
         '<div class="ai-chat-log" id="ai-chat-log">' + bubbles + '</div>' +

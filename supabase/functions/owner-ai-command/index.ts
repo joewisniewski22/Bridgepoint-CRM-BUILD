@@ -1,7 +1,11 @@
-// Owner-only AI command box. Joe types a plain-English request in his
-// portal; Claude decides which of a small, fixed set of real backend tools
-// to call (look up closed deals, draft/publish marketing content to the
-// CRM's own public showcase page) and reports back what it actually did.
+// AI command box, available to every staff member. Joe types a
+// plain-English request in his portal; Claude decides which of a small,
+// fixed set of real backend tools to call (look up closed deals, draft/
+// publish marketing content to the CRM's own public showcase page, manage
+// loan files) and reports back what it actually did. Owner-only tools
+// (marketing/public site, team-wide broadcasts, engagement/growth/pricing
+// levers) and non-owner scoping to the caller's own leads are enforced
+// server-side -- see OWNER_ONLY_TOOLS and resolveCaller() below.
 // CRM-native by design -- this whole CRM build is meant to eventually
 // replace GoHighLevel (which currently runs bplending.com), not deepen
 // the dependency on it. Deliberately narrow tool surface -- no arbitrary
@@ -13,7 +17,25 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const MODEL = "claude-sonnet-5";
+
+// Real per-caller authorization. Everyone gets the assistant now (Joe:
+// "the only restriction they should have is system wide changes ... they
+// should all be able to give it commands to update files etc") -- so a
+// non-owner caller may use lead-scoped tools ONLY against leads assigned
+// to them, and may never touch the owner-only tools below (marketing to
+// the public site, team-wide broadcasts, and business-wide engagement/
+// growth/pricing levers that affect every LO at once). Caller identity is
+// resolved server-side from the real Supabase Auth JWT on the request --
+// see resolveCaller() -- never trusted from a client-supplied field.
+type Caller = { id: string; name: string; role: string; isOwner: boolean };
+const OWNER_ONLY_TOOLS = new Set([
+  "list_closed_deals", "list_content_drafts", "create_content", "publish_content",
+  "email_team", "text_team",
+  "analyze_engagement_performance", "apply_engagement_adjustment",
+  "analyze_growth_progress", "update_growth_goal", "analyze_pricing_competitiveness",
+]);
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -30,10 +52,14 @@ const OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN"];
 const CITIZENSHIP_STATUSES = ["US Citizen", "Permanent Resident", "Foreign National", "ITIN"];
 const PREPAY_TERMS = ["5yr", "3yr", "2yr", "1yr", "none"];
 
-async function buildSystemPrompt(): Promise<string> {
+async function buildSystemPrompt(caller: Caller): Promise<string> {
   const { data: staff } = await sb.from("users").select("id,name,role").order("name");
   const roster = (staff || []).map((u) => u.id + " = " + u.name + " (" + u.role + ")").join("; ");
-  return "You are Joe's AI operations assistant for Bridgepoint Lending, embedded in his CRM (owner-only -- you're never shown to loan officers or borrowers). " +
+  const callerLine = caller.isOwner
+    ? "You are talking to " + caller.name + " (owner), who has full access to every tool below.\n\n"
+    : "You are talking to " + caller.name + " (" + caller.role + ", id " + caller.id + "), NOT the owner. " +
+      "They can manage their own loan files (create/update/search/view leads assigned to them, add notes, reassign leads currently assigned to them, send documents, run a retargeting campaign against their own leads) but CANNOT do anything company-wide: no marketing content to the public site, no team-wide email/text broadcasts, and no engagement/growth/pricing-strategy tools -- those are owner-only, no matter how they phrase the request. If they ask for one of those, tell them plainly it's owner-only rather than attempting it. Every lead-scoped tool call you make is re-checked server-side against leads actually assigned to them, so never try to act on someone else's lead on their behalf -- tell them to ask the owner or that LO instead.\n\n";
+  return callerLine + "You are Joe's AI operations assistant for Bridgepoint Lending, embedded in his CRM. " +
     "This CRM is meant to eventually replace GoHighLevel entirely (which currently runs bplending.com) -- content you publish lives on the CRM's public page, not GoHighLevel. " +
     "You do NOT yet have access to ad platforms (Meta/Facebook), payments, or pricing changes -- if asked for something outside your current tools, say clearly that it isn't wired up yet rather than pretending to do it. " +
     "\n\nStaff roster (use these exact ids for assignedTo, never guess an id): " + roster +
@@ -316,7 +342,10 @@ function fmtUSD(n: number | null): string | null {
   return "$" + Math.round(n).toLocaleString("en-US");
 }
 
-async function runTool(name: string, input: Record<string, unknown>): Promise<unknown> {
+async function runTool(name: string, input: Record<string, unknown>, caller: Caller): Promise<unknown> {
+  if (OWNER_ONLY_TOOLS.has(name) && !caller.isOwner) {
+    return { error: "not_authorized", detail: "This is an owner-only action -- only Joe can do this." };
+  }
   if (name === "list_closed_deals") {
     const limit = Math.min((input.limit as number) || 5, 20);
     const { data, error } = await sb.from("leads").select("id,name,loan_type,loan_amount,property_address,exit_strategy,close_date")
@@ -355,8 +384,12 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
   }
   if (name === "create_loan_file") {
     if (!LOAN_TYPES.includes(input.loanType as string)) return { error: "invalid_loan_type", validValues: LOAN_TYPES };
-    if (input.assignedTo) {
-      const { data: staffCheck } = await sb.from("users").select("id").eq("id", input.assignedTo).single();
+    if (!caller.isOwner && input.assignedTo && input.assignedTo !== caller.id) {
+      return { error: "not_authorized", detail: "You can only create loan files assigned to yourself." };
+    }
+    const assignedTo = caller.isOwner ? (input.assignedTo as string | undefined) : caller.id;
+    if (assignedTo) {
+      const { data: staffCheck } = await sb.from("users").select("id").eq("id", assignedTo).single();
       if (!staffCheck) return { error: "invalid_assignedTo", detail: "No staff member with that id" };
     }
     const id = "L" + Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -364,7 +397,7 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     const row: Record<string, unknown> = {
       id, name: input.name, email: input.email || null, phone: input.phone || null,
       source: input.source || "Referral", loan_type: input.loanType, stage: "new", status: "active",
-      assigned_to: input.assignedTo || null, created_at: today,
+      assigned_to: assignedTo || null, created_at: today,
       entity_type: "LLC", credit_score: input.creditScore || null,
       property_address: input.propertyAddress || null, property_type: input.propertyType || null,
       purchase_price: input.purchasePrice || null, loan_amount: input.loanAmount || null,
@@ -377,8 +410,8 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     const { error } = await sb.from("leads").insert(row);
     if (error) return { error: error.message };
     const link = "https://bridgepoint-crm-build.vercel.app/?lead=" + id;
-    if (input.notifyAssignee !== false && input.assignedTo) {
-      const { data: assignee } = await sb.from("users").select("email,phone,name,quo_phone_number").eq("id", input.assignedTo).single();
+    if (input.notifyAssignee !== false && assignedTo) {
+      const { data: assignee } = await sb.from("users").select("email,phone,name,quo_phone_number").eq("id", assignedTo).single();
       if (assignee?.email) {
         fetch(SUPABASE_URL + "/functions/v1/send-email", {
           method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
@@ -399,6 +432,9 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     if (!leadId) return { error: "missing_leadId" };
     const { data: existing, error: fetchErr } = await sb.from("leads").select("*").eq("id", leadId).single();
     if (fetchErr || !existing) return { error: "lead_not_found" };
+    if (!caller.isOwner && existing.assigned_to !== caller.id) {
+      return { error: "not_authorized", detail: "That loan file isn't assigned to you." };
+    }
 
     const fieldMap: Record<string, string> = {
       propertyAddress: "property_address", propertyType: "property_type", transactionType: "transaction_type",
@@ -468,23 +504,30 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
   if (name === "search_leads") {
     const query = ((input.query as string) || "").trim();
     if (!query) return { error: "missing_query" };
-    const { data, error } = await sb.from("leads")
+    let q = sb.from("leads")
       .select("id,name,phone,email,loan_type,stage,assigned_to")
-      .or(`name.ilike.%${query}%,phone.ilike.%${query}%,email.ilike.%${query}%`)
-      .limit(10);
+      .or(`name.ilike.%${query}%,phone.ilike.%${query}%,email.ilike.%${query}%`);
+    if (!caller.isOwner) q = q.eq("assigned_to", caller.id);
+    const { data, error } = await q.limit(10);
     if (error) return { error: error.message };
     return { matches: data || [] };
   }
   if (name === "get_lead_details") {
     const { data, error } = await sb.from("leads").select("*").eq("id", input.leadId as string).single();
     if (error || !data) return { error: "lead_not_found" };
+    if (!caller.isOwner && data.assigned_to !== caller.id) {
+      return { error: "not_authorized", detail: "That loan file isn't assigned to you." };
+    }
     return { lead: data };
   }
   if (name === "reassign_lead") {
     const { data: staffCheck } = await sb.from("users").select("id,name").eq("id", input.assignedTo as string).single();
     if (!staffCheck) return { error: "invalid_assignedTo" };
-    const { data: existing } = await sb.from("leads").select("id,name,activity").eq("id", input.leadId as string).single();
+    const { data: existing } = await sb.from("leads").select("id,name,activity,assigned_to").eq("id", input.leadId as string).single();
     if (!existing) return { error: "lead_not_found" };
+    if (!caller.isOwner && existing.assigned_to !== caller.id) {
+      return { error: "not_authorized", detail: "That loan file isn't assigned to you." };
+    }
     const today = new Date().toISOString().slice(0, 10);
     const activity = Array.isArray(existing.activity) ? existing.activity as unknown[] : [];
     activity.push({ date: today, type: "system", text: "Reassigned to " + staffCheck.name + " by AI Assistant", author: "AI Assistant" });
@@ -493,8 +536,11 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     return { ok: true, leadId: input.leadId, assignedTo: staffCheck.name };
   }
   if (name === "add_lead_note") {
-    const { data: existing } = await sb.from("leads").select("id,activity").eq("id", input.leadId as string).single();
+    const { data: existing } = await sb.from("leads").select("id,activity,assigned_to").eq("id", input.leadId as string).single();
     if (!existing) return { error: "lead_not_found" };
+    if (!caller.isOwner && existing.assigned_to !== caller.id) {
+      return { error: "not_authorized", detail: "That loan file isn't assigned to you." };
+    }
     const today = new Date().toISOString().slice(0, 10);
     const activity = Array.isArray(existing.activity) ? existing.activity as unknown[] : [];
     activity.push({ date: today, type: "note", text: input.note as string, author: "AI Assistant" });
@@ -524,8 +570,11 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     };
   }
   if (name === "send_document") {
-    const { data: lead } = await sb.from("leads").select("id").eq("id", input.leadId).single();
+    const { data: lead } = await sb.from("leads").select("id,assigned_to").eq("id", input.leadId).single();
     if (!lead) return { error: "lead_not_found" };
+    if (!caller.isOwner && lead.assigned_to !== caller.id) {
+      return { error: "not_authorized", detail: "That loan file isn't assigned to you." };
+    }
     if (input.kind !== "preapproval" && input.kind !== "termSheet") return { error: "invalid_kind" };
     // Actual bilingual send happens client-side (reuses the CRM's tested
     // send pipeline) -- this just validates and signals the frontend to do it.
@@ -534,8 +583,21 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
   if (name === "start_retargeting_campaign") {
     const channel = input.channel as string;
     if (!["email", "text", "both"].includes(channel)) return { error: "invalid_channel" };
-    const assignedTo = input.assignedTo as string | undefined;
-    const leadIds = input.leadIds as string[] | undefined;
+    let assignedTo = input.assignedTo as string | undefined;
+    let leadIds = input.leadIds as string[] | undefined;
+    if (!caller.isOwner) {
+      if (assignedTo && assignedTo !== caller.id) {
+        return { error: "not_authorized", detail: "You can only run a campaign against your own leads." };
+      }
+      if (leadIds && leadIds.length) {
+        const { data: ownedCheck } = await sb.from("leads").select("id,assigned_to").in("id", leadIds);
+        const notOwned = (ownedCheck || []).filter((l) => l.assigned_to !== caller.id);
+        if (notOwned.length) return { error: "not_authorized", detail: "Some of those loan files aren't assigned to you." };
+      } else {
+        assignedTo = caller.id;
+        leadIds = undefined;
+      }
+    }
     if (!assignedTo && (!leadIds || !leadIds.length)) return { error: "missing_target", detail: "Provide assignedTo or leadIds" };
 
     let q = sb.from("leads").select("id,name,email,phone,loan_type,assigned_to,activity").eq("status", "active");
@@ -646,7 +708,8 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
     let query = sb.from("leads")
       .select("id,name,assigned_to,stage,status,loan_amount,points_charged,created_at_ts,created_at,first_attempt_at,activity")
       .limit(1000);
-    if (input.assignedTo) query = query.eq("assigned_to", input.assignedTo as string);
+    if (!caller.isOwner) query = query.eq("assigned_to", caller.id);
+    else if (input.assignedTo) query = query.eq("assigned_to", input.assignedTo as string);
     const { data: leads } = await query;
     const rows = leads || [];
 
@@ -815,6 +878,29 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
   return { error: "unknown_tool" };
 }
 
+// Resolves who is REALLY calling, from the real Supabase Auth JWT the
+// frontend's own sb client attaches to every functions.invoke() once a
+// staff member has logged in via staff-login -- never from the
+// client-supplied body.userId, which is only a convenience label anyone
+// could set to anything. Demo accounts have no auth_id by design (see
+// staff-login) and carry no real JWT, so they're let through as owner --
+// same as the rest of the app's isOwner(), and harmless since demo has no
+// real leads/data. Anyone else with no resolvable JWT is refused outright.
+async function resolveCaller(req: Request, bodyUserId: string | undefined): Promise<Caller | null> {
+  if (bodyUserId === "demo" || bodyUserId === "demo-processor") {
+    return { id: bodyUserId, name: "Demo", role: "owner", isOwner: true };
+  }
+  const authHeader = req.headers.get("Authorization") || "";
+  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (!token || token === ANON_KEY) return null;
+  const sbAsCaller = createClient(SUPABASE_URL, ANON_KEY);
+  const { data: authData, error: authErr } = await sbAsCaller.auth.getUser(token);
+  if (authErr || !authData?.user) return null;
+  const { data: userRow, error: userErr } = await sb.from("users").select("id,name,role,full_access").eq("auth_id", authData.user.id).single();
+  if (userErr || !userRow) return null;
+  return { id: userRow.id, name: userRow.name, role: userRow.role, isOwner: userRow.role === "owner" || userRow.full_access === true };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") {
@@ -824,13 +910,18 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json();
     const message: string = body.message;
-    const userId: string = body.userId || "owner";
     // Optional term sheet attachment (PDF or image), base64-encoded.
     const attachmentBase64: string | null = body.attachmentBase64 || null;
     const attachmentMediaType: string | null = body.attachmentMediaType || null;
     if (!message && !attachmentBase64) {
       return new Response(JSON.stringify({ error: "missing_message" }), { status: 400, headers: CORS_HEADERS });
     }
+
+    const caller = await resolveCaller(req, body.userId);
+    if (!caller) {
+      return new Response(JSON.stringify({ error: "unauthenticated", detail: "Please log in again." }), { status: 401, headers: CORS_HEADERS });
+    }
+    const userId = caller.id;
 
     const { data: history } = await sb.from("ai_chat_messages").select("role,content").eq("user_id", userId)
       .order("created_at", { ascending: false }).limit(20);
@@ -845,7 +936,7 @@ Deno.serve(async (req: Request) => {
 
     const messages: Array<Record<string, unknown>> = [...priorMessages, { role: "user", content: userContent }];
     const actionsTaken: Array<Record<string, unknown>> = [];
-    const systemPrompt = await buildSystemPrompt();
+    const systemPrompt = await buildSystemPrompt(caller);
 
     let finalText = "";
     for (let iter = 0; iter < 6; iter++) {
@@ -874,7 +965,7 @@ Deno.serve(async (req: Request) => {
       messages.push({ role: "assistant", content });
       const toolResults = [];
       for (const tu of toolUses) {
-        const result = await runTool(tu.name, tu.input || {});
+        const result = await runTool(tu.name, tu.input || {}, caller);
         actionsTaken.push({ tool: tu.name, input: tu.input, result });
         toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result) });
       }
