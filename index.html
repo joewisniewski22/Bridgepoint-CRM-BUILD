@@ -906,8 +906,22 @@ function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
   return { rate: Math.round(rate*100)/100, points: Number(points), fee: fee, tier: tier, notes: notes };
 }
 
-var DSCR_BASE_PAR_RATE = 6.000;
-var DSCR_MIN_NOTE_RATE = 6.250;
+var DSCR_BASE_PAR_RATE = 6.125;
+var DSCR_MIN_NOTE_RATE = 6.375;
+// C3 Surge sheet (eff. 9/9/2026), "Expanded" program -- flat +0.375% for
+// the subject property's state. Confirmed against the live pricing engine
+// spreadsheet (V3 C3 Constructive Capital Pricing Engine.xlsx, Adjustments
+// tab), not in the PDF matrix. "Standard" program has its own separate,
+// much smaller state list -- not modeled since Standard's own par
+// rates/ARM pricing look stale (no live spread, N/A ARM rates) and Joe's
+// production pricing has only ever run off Expanded.
+var DSCR_GEO_ADJ_STATES = ["AL","GA","KS","ME","MO","MS","NE","SD","WI","WY"];
+var DSCR_GEO_ADJ = 0.375;
+// Per the DSCR Rental Matrix (7.1.26), "Ineligible States: ND, SD, NV" --
+// a hard stop, not a pricing adjustment (SD also happens to be on the
+// geography-adjustment list above, but that's moot since it's ineligible
+// outright).
+var DSCR_INELIGIBLE_STATES = ["ND","NV","SD"];
 var DSCR_LTV_BANDS = [55, 60, 65, 70, 75, 80];
 function dscrLtvCol(ltv){
   for (var i=0;i<DSCR_LTV_BANDS.length;i++){ if (ltv <= DSCR_LTV_BANDS[i]) return i; }
@@ -959,23 +973,24 @@ var DSCR_FEE_BY_PROPERTY = {
   "Multifamily 5+": 3995
 };
 var DSCR_BASE_RATE_PRICE = [
-  {rate:7.125, price:102.125},{rate:7.000, price:102.000},{rate:6.875, price:101.875},
-  {rate:6.750, price:101.750},{rate:6.625, price:101.500},{rate:6.500, price:101.250},
-  {rate:6.375, price:101.000},{rate:6.250, price:100.750},{rate:6.125, price:100.375},
-  {rate:6.000, price:100.000}
+  {rate:7.250, price:102.125},{rate:7.125, price:102.000},{rate:7.000, price:101.875},
+  {rate:6.875, price:101.750},{rate:6.750, price:101.500},{rate:6.625, price:101.250},
+  {rate:6.500, price:101.000},{rate:6.375, price:100.750},{rate:6.250, price:100.375},
+  {rate:6.125, price:100.000}
 ];
 // The rate/price grid (DSCR_BASE_RATE_PRICE) is a buy-up curve measured from
-// PAR, not a table of absolute rates -- "par" is DSCR_BASE_PAR_RATE (6.000%)
+// PAR, not a table of absolute rates -- "par" is DSCR_BASE_PAR_RATE (6.125%)
 // PLUS this specific borrower's own risk-based adjustments (FICO/LTV/DSCR
-// band/property/transaction/loan amount/prepay), so two borrowers with
-// different risk profiles have different par rates. Quoting AT a borrower's
-// own par rate always prices at 100.000 (zero YSP) by definition; only
-// choosing a HIGHER rate than that borrower's par earns YSP, looked up by
-// how far above par the chosen rate is (delta), reusing this same table's
-// shape since it already spans par (6.000, delta 0) through the max buy-up
-// (7.125, delta 1.125) in 0.125% steps. Per the C3 Surge sheet (eff.
-// 8/6/2026), a hard floor of DSCR_MIN_NOTE_RATE (6.250%) still applies below
-// this curve's own par for exceptionally strong borrowers.
+// band/property/transaction/loan amount/prepay/geography), so two borrowers
+// with different risk profiles have different par rates. Quoting AT a
+// borrower's own par rate always prices at 100.000 (zero YSP) by
+// definition; only choosing a HIGHER rate than that borrower's par earns
+// YSP, looked up by how far above par the chosen rate is (delta), reusing
+// this same table's shape since it already spans par (6.125, delta 0)
+// through the max buy-up (7.250, delta 1.125) in 0.125% steps. Per the C3
+// Surge sheet (eff. 9/9/2026), a hard floor of DSCR_MIN_NOTE_RATE (6.375%)
+// still applies below this curve's own par for exceptionally strong
+// borrowers.
 function dscrPriceForDelta(deltaFromPar){
   if (deltaFromPar < -0.0001) return null;
   var tableRate = Math.round((DSCR_BASE_PAR_RATE + deltaFromPar) * 1000) / 1000;
@@ -992,6 +1007,10 @@ function dscrValueBasis(lead, inputs){
 function dscrParRate(lead, inputs){
   var valueBasis = dscrValueBasis(lead, inputs);
   if (!lead.creditScore || !lead.loanAmount || !valueBasis) return null;
+  var propState = stateFromAddress(lead.propertyAddress);
+  if (propState && DSCR_INELIGIBLE_STATES.indexOf(propState) !== -1){
+    return { ineligible:true, reason: propState + " is on this program's ineligible-states list (ND, NV, SD) — not eligible for DSCR on this sheet." };
+  }
   var propertyType = pricingPropertyType((inputs && inputs.propertyType) || lead.propertyType);
   var ltv = lead.loanAmount / valueBasis * 100;
   var col = dscrLtvCol(ltv);
@@ -1033,6 +1052,11 @@ function dscrParRate(lead, inputs){
 
   var amtBand = DSCR_LOAN_AMT_ADJ.filter(function(b){ return lead.loanAmount >= b.min && lead.loanAmount <= b.max; })[0];
   if (amtBand) rate += amtBand.adj;
+
+  if (propState && DSCR_GEO_ADJ_STATES.indexOf(propState) !== -1){
+    rate += DSCR_GEO_ADJ;
+    notes.push(propState + " state pricing add-on: +" + DSCR_GEO_ADJ.toFixed(3) + "%");
+  }
 
   var prepayKey = (inputs && inputs.prepayTerm) || "5yr";
   rate += DSCR_PREPAY_ADJ[prepayKey][col];
