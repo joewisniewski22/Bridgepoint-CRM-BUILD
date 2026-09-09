@@ -5141,7 +5141,17 @@ function buildBorrowerPortalHTML(lead, opts){
     stepper +
     (opts.justSubmitted ? ('<div class="hint" style="color:var(--c-forest);margin:6px 0 0">' + L("Thanks — we've got your application! Here's where things stand.") + '</div>') : '');
 
-  var isInProcessing = stageIndex(lead.stage) >= stageIndex("processing");
+  // Real bug (Fiore's client, 2026-09-09): hasCompletedIntake only ever
+  // becomes true via the formal application flow (borrower's own online
+  // submission, or "Take Application by Phone"). A file that's been
+  // manually moved along -- an LO collecting details conversationally
+  // and advancing the stage themselves, never running either formal
+  // flow -- left the borrower stuck on the full "let's get started"
+  // intake form with no upload option in sight, even once the file had
+  // already reached Docs Collection and staff were actively requesting
+  // documents. isInProcessing only covered "processing" stage onward,
+  // missing that entire gap.
+  var isInProcessing = stageIndex(lead.stage) >= stageIndex("docs");
 
   if (!hasCompletedIntake && !isInProcessing){
     return header +
@@ -6739,6 +6749,13 @@ function renderRail(lead){
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<a class="btn btn-sm" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — " + lead.loanType) + '&body=' + encodeURIComponent(defaultOutreachMessage(lead)) + '" data-action="log-email" data-lead="' + lead.id + '">Email</a>' +
         '<button class="btn btn-sm" data-action="send-scheduling-link" data-lead="' + lead.id + '" title="Sends your personal booking link by email and text so they can grab a time with you directly">📅 Schedule Appointment</button>' +
+        // Always visible, regardless of stage or role -- separate from
+        // "Take Application by Phone" below, which is the edit action and
+        // stays gated. Joe's ask (2026-09-09): everyone with access to a
+        // file needs a clear way to just SEE the application, since the
+        // edit action disappears entirely for processors and for the LO
+        // once the file's past a stage they can still edit.
+        '<button class="btn btn-sm" data-action="open-modal" data-modal="viewApplication" data-lead="' + lead.id + '">View Application</button>' +
         (isProcessor() ? '' :
           (canEditApplication(lead) ? (
             '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
@@ -8045,6 +8062,7 @@ function renderModal(){
   if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
   if (ui.modal.type === "sendApplication") return modalSendApplication(ui.modal.leadId);
   if (ui.modal.type === "takeApplication") return modalTakeApplication(ui.modal.leadId);
+  if (ui.modal.type === "viewApplication") return modalViewApplication(ui.modal.leadId);
   if (ui.modal.type === "changePin") return modalChangePin();
   if (ui.modal.type === "editSignature") return modalEditSignature();
   if (ui.modal.type === "addTeamMember") return modalAddTeamMember();
@@ -9123,6 +9141,26 @@ function modalTakeApplication(leadId){
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save Application</button></div>' +
       '</form>' +
+    '</div></div>';
+}
+// Read-only view of the same fields -- so anyone with access to the file
+// (a processor, or the LO once the file's moved past a stage where they
+// can still edit it) has a clear way to just SEE what was submitted,
+// without needing edit rights or reopening the phone-intake flow. A
+// <fieldset disabled> around the exact same field-building function
+// disables every nested input for free, no separate read-only rendering
+// to keep in sync.
+function modalViewApplication(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return "";
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1" style="max-width:600px">' +
+      '<div class="modal-head"><h3>Application — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0">View only — everything below is what\'s currently on file.</div>' +
+        '<fieldset disabled style="border:0;padding:0;margin:0">' + buildApplicationFieldsHTML(lead) + '</fieldset>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Close</button></div>' +
     '</div></div>';
 }
 function modalScopeOfWork(leadId){
