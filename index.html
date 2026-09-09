@@ -6721,6 +6721,16 @@ function renderRail(lead){
         '</select>'
       ) : ('<div>' + esc(lead.assignedProcessor ? userName(lead.assignedProcessor) : "Not yet assigned") + '</div>')) +
     '</div>') : '') +
+    (canViewOutsideLender() ? (
+    '<div class="rail-block">' +
+      '<div class="rail-title">Loan Placement</div>' +
+      (canManageOutsideLender() ? (
+        '<select class="select" style="width:100%" data-action="set-outside-lender" data-lead="' + lead.id + '">' +
+          '<option value="">— ' + (lead.guidelineCheck && lead.guidelineCheck.status==="pass" ? "In-House (Constructive Capital)" : "Not yet placed") + ' —</option>' +
+          OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (lead.outsideLender===l?" selected":"") + '>' + l + '</option>'; }).join("") +
+        '</select>'
+      ) : ('<div>' + esc(lead.outsideLender || (lead.guidelineCheck && lead.guidelineCheck.status==="pass" ? "In-House (Constructive Capital)" : "Not yet placed")) + '</div>')) +
+    '</div>') : '') +
     (isProcessor() ? '' : renderCoachingTip(lead.id)) +
     '<div class="rail-block">' +
       '<div class="rail-title">Contact</div>' +
