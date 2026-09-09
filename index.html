@@ -493,6 +493,21 @@ function pricingPropertyType(pt){
 }
 var EXIT_STRATEGIES = ["Sell","Refinance to DSCR","Hold/Rent","1031 Exchange"];
 var CITIZENSHIP_STATUSES = ["US Citizen","Permanent Resident","Foreign National","ITIN"];
+// Constructive Capital's RTL Foreign Nationals appendix (2.1.26), "Ineligible
+// Countries List" -- not exhaustive per the source doc itself ("include but
+// not limited to"), a real match here is a hard stop, not a maybe.
+var INELIGIBLE_COUNTRIES = [
+  "Afghanistan","Balkans","Belarus","Bosnia-Herzegovina","Burma","Myanmar","Burundi",
+  "Central African Republic","Crimea","Cuba","Democratic Republic of the Congo","DRC",
+  "Egypt","Eritrea","Haiti","Iran","Iraq","Lebanon","Liberia","Libya","Nicaragua",
+  "North Korea","Russia","Saudi Arabia","Somalia","South Sudan","Sudan","Syria",
+  "Turkey","Ukraine","United Arab Emirates","UAE","Vanuatu","Venezuela","Yemen","Zimbabwe"
+];
+function isIneligibleCountry(country){
+  if (!country) return false;
+  var c = country.trim().toLowerCase();
+  return INELIGIBLE_COUNTRIES.some(function(n){ return n.toLowerCase() === c; });
+}
 var TRANSACTION_TYPES = [
   { key:"purchase", label:"Purchase" },
   { key:"ratetermrefi", label:"Rate/Term Refinance" },
@@ -829,6 +844,9 @@ function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
   }
   var tier = experienceTier(lead.experienceDeals);
   var isFN = lead.citizenshipStatus === "Foreign National";
+  if (isFN && lead.countryOfDomicile && isIneligibleCountry(lead.countryOfDomicile)){
+    return { ineligible:true, reason: lead.countryOfDomicile + " is on BPL's ineligible-countries list — this borrower cannot be a guarantor on this loan, period. Find out if they can bring in a partner/co-guarantor who qualifies independently (different citizenship or a country not on the list) — the ineligible person can't be added as a guarantor even alongside someone who does qualify." };
+  }
   if (isFN && tier === "silver"){
     return { ineligible:true, reason: "Foreign National borrowers need Gold or Platinum experience (3+ completed RTL/GUC projects) — Silver (0-2) is not eligible per the Foreign Nationals guidelines." };
   }
@@ -1134,6 +1152,11 @@ function rtlStateLeverageAdj(address){
 function foreignNationalGuidelineChecks(lead, tier){
   if (lead.citizenshipStatus !== "Foreign National") return [];
   var out = [];
+  if (lead.countryOfDomicile && isIneligibleCountry(lead.countryOfDomicile)){
+    out.push({ label:"Foreign National country eligibility", pass:false,
+      detail: lead.countryOfDomicile + " is on BPL's ineligible-countries list — this borrower cannot be a guarantor on this loan, period, regardless of experience or liquidity. They can still get the deal done if they bring in a partner/co-guarantor who meets eligibility on their own (different citizenship or a country not on the list) — that person would need to qualify independently." });
+    return out;
+  }
   out.push({ label:"Foreign National eligibility", pass: tier !== "silver",
     detail: tier + " tier — Foreign Nationals need Gold or Platinum (3+ completed RTL/GUC projects); Silver (0-2) is not eligible per the Foreign Nationals guidelines" });
   if (tier !== "silver"){
@@ -1142,8 +1165,10 @@ function foreignNationalGuidelineChecks(lead, tier){
     out.push({ label:"Foreign National liquidity", pass: lead.liquidity!=null && lead.liquidity >= fnMin,
       detail: (lead.liquidity!=null ? fmtUSD(lead.liquidity) : "not on file") + " — needs " + fmtUSD(fnMin) + " (" + (fnPct*100) + "% of loan amount, $50,000 minimum), seasoned 60+ days in a U.S. bank" });
   }
+  out.push({ label:"Foreign National country of domicile", pass: !!lead.countryOfDomicile,
+    detail: lead.countryOfDomicile ? (lead.countryOfDomicile + " — not on the ineligible-countries list") : "Not on file yet — ask the borrower their country of citizenship/domicile before proceeding, BPL maintains an ineligible-countries list this must be checked against" });
   out.push({ label:"Foreign National documentation", pass:false,
-    detail:"Verify manually: unexpired passport + valid US visa (or USCIS approval letter showing visa class), tri-merge credit with scores from 2+ bureaus and no bankruptcy/foreclosure/short-sale/deed-in-lieu/loan-mod, and confirm country of domicile isn't on BPL's ineligible-countries list" });
+    detail:"Verify manually: unexpired passport + valid US visa (or USCIS approval letter showing visa class), and tri-merge credit with scores from 2+ bureaus and no bankruptcy/foreclosure/short-sale/deed-in-lieu/loan-mod" });
   return out;
 }
 function evaluateGuidelines(lead){
@@ -2755,7 +2780,7 @@ function leadToRow(l){
     guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null,
     guarantor_ownership_pct: l.guarantorOwnershipPct || null, track_record: l.trackRecord || [],
     preferred_language: l.preferredLanguage || "en",
-    citizenship_status: l.citizenshipStatus || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
+    citizenship_status: l.citizenshipStatus || null, country_of_domicile: l.countryOfDomicile || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
@@ -2793,7 +2818,7 @@ function rowToLead(r){
     guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null,
     guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [],
     preferredLanguage: r.preferred_language || "en",
-    citizenshipStatus: r.citizenship_status || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
+    citizenshipStatus: r.citizenship_status || null, countryOfDomicile: r.country_of_domicile || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
@@ -3920,7 +3945,7 @@ function setLoanDetails(leadId, loanAmount, rate, termMonths){
   showToast("Loan details updated");
   persist();
 }
-var PRICING_INPUT_KEYS = ["creditScore","purchasePrice","currentValue","rentEstimate","experienceDeals","rehabBudget","arv","propertyCount","citizenshipStatus"];
+var PRICING_INPUT_KEYS = ["creditScore","purchasePrice","currentValue","rentEstimate","experienceDeals","rehabBudget","arv","propertyCount","citizenshipStatus","countryOfDomicile"];
 var RTL_AUTO_LOAN_TYPES = ["Fix & Flip","Bridge","Ground Up Construction"];
 function setPricingInputs(leadId, fd){
   var lead = leadById(leadId);
@@ -3928,7 +3953,7 @@ function setPricingInputs(leadId, fd){
   var numOrNull = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
   PRICING_INPUT_KEYS.forEach(function(k){
     if (!fd.has(k)) return;
-    lead[k] = (k === "citizenshipStatus") ? (fd.get(k) || null) : numOrNull(k);
+    lead[k] = (k === "citizenshipStatus" || k === "countryOfDomicile") ? (fd.get(k) || null) : numOrNull(k);
   });
   // RTL loan amount is driven by the guideline max, not typed in separately --
   // recompute it every time the underlying deal numbers (purchase price,
@@ -5638,6 +5663,7 @@ function renderStandalonePricer(){
     (isRTL ? ('<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" data-action="standalone-pricer-field" value="' + v(sp.arv) + '"></div>') : '') +
     (isPortfolio ? ('<div class="form-row"><label>Number of Properties</label><input class="input" type="number" min="1" name="propertyCount" data-action="standalone-pricer-field" value="' + v(sp.propertyCount) + '"></div>') : '') +
     '<div class="form-row"><label>Citizenship Status</label><select class="select" name="citizenshipStatus" data-action="standalone-pricer-field">' + citizenshipOptions + '</select></div>' +
+    (sp.citizenshipStatus === "Foreign National" ? ('<div class="form-row"><label>Country of Citizenship</label><input class="input" name="countryOfDomicile" data-action="standalone-pricer-field" value="' + esc(sp.countryOfDomicile||"") + '" placeholder="e.g. Mexico"></div>') : '') +
     (isDSCR ? ('<div class="form-two">' +
         '<div class="form-row"><label>Transaction Type</label><select class="select" name="transactionType" data-action="standalone-pricer-field">' +
           TRANSACTION_TYPES.map(function(t){ return '<option value="' + t.key + '"' + sel("transactionType", t.key) + '>' + t.label + '</option>'; }).join("") +
@@ -6193,6 +6219,7 @@ function renderPricingInputsEditor(lead){
       (isRTL ? ('<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>') : '') +
       (isPortfolio ? ('<div class="form-row"><label>Number of Properties</label><input class="input" type="number" min="1" name="propertyCount" value="' + v(lead.propertyCount) + '"></div>') : '') +
       '<div class="form-row"><label>Citizenship Status</label><select class="select" name="citizenshipStatus">' + citizenshipOptions + '</select></div>' +
+      '<div class="form-row"><label>Country of Citizenship <span class="hint">(if Foreign National)</span></label><input class="input" name="countryOfDomicile" value="' + esc(lead.countryOfDomicile||"") + '" placeholder="e.g. Mexico"></div>' +
       '<div class="form-row"><button class="btn btn-sm btn-primary" type="submit">Save Pricing Inputs</button></div>' +
     '</form>';
 }
@@ -8271,6 +8298,7 @@ function buildApplicationFieldsHTML(lead, lang){
       '</select></div>' +
       '<div class="form-row"><label>' + L("Investing Experience (deals completed)") + '</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '" data-action="update-track-record-count" data-lang="' + lang + '"></div>' +
     '</div>' +
+    '<div class="form-row"><label>' + L("Country of Citizenship") + ' <span class="hint">(' + L("if Foreign National") + ')</span></label><input class="input" name="countryOfDomicile" value="' + esc(lead.countryOfDomicile||"") + '" placeholder="' + L("e.g. Mexico") + '"></div>' +
     '<div class="form-row"><label>' + L("Liquidity / Reserves") + '</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
     '<div class="form-row"><label>' + L("Property Address") + '</label>' +
       '<input class="input" name="propertyAddress" value="' + esc(lead.propertyAddress||"") + '" list="address-suggest-' + lead.id + '" autocomplete="off" data-action="address-lookup" data-lead="' + lead.id + '">' +
@@ -9665,6 +9693,7 @@ appEl.addEventListener("submit", function(e){
       guarantorOwnershipPct: numOrNull("guarantorOwnershipPct"),
       entityLegalName: fd.get("entityLegalName"),
       citizenshipStatus: fd.get("citizenshipStatus"),
+      countryOfDomicile: fd.get("countryOfDomicile"),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
@@ -9711,6 +9740,7 @@ appEl.addEventListener("submit", function(e){
       guarantorOwnershipPct: numOrNullPub("guarantorOwnershipPct"),
       entityLegalName: fd.get("entityLegalName"),
       citizenshipStatus: fd.get("citizenshipStatus"),
+      countryOfDomicile: fd.get("countryOfDomicile"),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
