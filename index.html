@@ -3906,6 +3906,28 @@ function setBirthday(leadId, birthday){
   showToast("Birthday saved");
   persist();
 }
+// Not gated to owner/LO/processor -- anyone who can see the lead (LO or
+// the processor who picked it up in Processing) can fix a small gap here
+// directly, without reopening the full application or sending the file
+// back to the LO for something minor. Only touches fields explicitly in
+// this form; blank inputs clear rather than overwrite with nothing
+// meaningful.
+function quickEditGuarantor(leadId, fd){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  lead.guarantorFirstName = fd.get("guarantorFirstName") || null;
+  lead.guarantorLastName = fd.get("guarantorLastName") || null;
+  lead.birthday = fd.get("birthday") || null;
+  lead.guarantorPhone = fd.get("guarantorPhone") || null;
+  lead.guarantorEmail = fd.get("guarantorEmail") || null;
+  lead.entityLegalName = fd.get("entityLegalName") || null;
+  var ownPct = fd.get("guarantorOwnershipPct");
+  lead.guarantorOwnershipPct = (ownPct===null||ownPct==="") ? null : Number(ownPct);
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"note", text: "Guarantor/entity info updated by " + currentUser().name, author: currentUser().name });
+  showToast("Saved");
+  persist();
+}
 function setRuralStatus(leadId, isRural){
   var newStatus = isRural ? "rural" : "urban";
   if (leadId === "standalone"){
@@ -4339,6 +4361,33 @@ function markDocReceived(leadId, idx){
   doc.status = "received"; doc.receivedAt = todayISO();
   lead.activity = lead.activity || [];
   lead.activity.push({ date:todayISO(), type:"document", text:"Received document: " + doc.name, author: currentUser().name });
+  persist();
+}
+// Erika's real feedback (2026-09-09): several required docs are only
+// conditionally needed ("if applicable" -- HOA package, flood insurance,
+// etc.), but there was no way to say "doesn't apply here" -- they just
+// sat as permanently missing, showing as outstanding to whoever's
+// reviewing the file and getting re-requested from a borrower who
+// genuinely can't provide them. Marking N/A satisfies missingRequiredDocs
+// the same way "received" does, but stays clearly labeled and reversible.
+function markDocNA(leadId, idx){
+  var lead = leadById(leadId);
+  if (!lead || !lead.documents[idx]) return;
+  var doc = lead.documents[idx];
+  doc.status = "waived"; doc.waivedAt = todayISO(); doc.waivedBy = currentUser().name;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:todayISO(), type:"document", text: doc.name + " marked N/A by " + currentUser().name, author: currentUser().name });
+  showToast("Marked N/A");
+  persist();
+}
+function undoDocNA(leadId, idx){
+  var lead = leadById(leadId);
+  if (!lead || !lead.documents[idx]) return;
+  var doc = lead.documents[idx];
+  doc.status = "requested"; doc.waivedAt = null; doc.waivedBy = null;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:todayISO(), type:"document", text: doc.name + " — N/A undone, back to requested by " + currentUser().name, author: currentUser().name });
+  showToast("Back to requested");
   persist();
 }
 function uploadLeadDocument(leadId, idx, file, actorLabel){
@@ -4811,7 +4860,7 @@ function missingRequiredDocs(lead){
   (lead.documents||[]).forEach(function(d){ byName[(d.name||"").toLowerCase()] = d; });
   return list.filter(function(name){
     var d = byName[name.toLowerCase()];
-    return !d || d.status !== "received";
+    return !d || (d.status !== "received" && d.status !== "waived");
   });
 }
 function docIssuesExplanation(lead){
@@ -5175,7 +5224,7 @@ function buildBorrowerPortalHTML(lead, opts){
       '</div>';
   }
 
-  var visibleDocs = (lead.documents||[]).map(function(d,i){ return {d:d, i:i}; }).filter(function(x){ return !x.d.staffOnly; });
+  var visibleDocs = (lead.documents||[]).map(function(d,i){ return {d:d, i:i}; }).filter(function(x){ return !x.d.staffOnly && x.d.status!=="waived"; });
   var docs = visibleDocs.map(function(x){
     var d = x.d, i = x.i;
     var received = d.status==="received";
@@ -6014,15 +6063,18 @@ function renderTabOverview(lead){
     field("Liquidity / Reserves", fmtUSD(lead.liquidity), true) +
     field("Created", fmtDate(lead.createdAt)) +
   '</div>' +
-  '<div class="section-head" style="margin-top:20px"><h2>Guarantor & Entity</h2></div>' +
-  '<div class="field-grid">' +
-    field("Guarantor Name", esc([lead.guarantorFirstName, lead.guarantorMiddleName, lead.guarantorLastName].filter(Boolean).join(" ") || lead.name || "—")) +
-    field("Guarantor DOB", fmtDate(lead.birthday)) +
-    field("Guarantor Phone", esc(lead.guarantorPhone||lead.phone||"—")) +
-    field("Guarantor Email", esc(lead.guarantorEmail||lead.email||"—")) +
-    field("Entity Legal Name", esc(lead.entityLegalName||"—")) +
-    field("Guarantor Ownership %", lead.guarantorOwnershipPct!=null ? (lead.guarantorOwnershipPct + "%") : "—", true) +
-  '</div>' + fu;
+  '<div class="section-head" style="margin-top:20px"><h2>Guarantor & Entity</h2>' +
+    '<span class="hint">Quick-fix a gap here — this doesn\'t re-send the application, it just corrects the file</span></div>' +
+  '<form data-form="quick-edit-guarantor" data-lead="' + lead.id + '" class="field-grid">' +
+    '<div class="field"><label>Guarantor First Name</label><input class="input" name="guarantorFirstName" value="' + esc(lead.guarantorFirstName||"") + '"></div>' +
+    '<div class="field"><label>Guarantor Last Name</label><input class="input" name="guarantorLastName" value="' + esc(lead.guarantorLastName||"") + '"></div>' +
+    '<div class="field"><label>Guarantor DOB</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
+    '<div class="field"><label>Guarantor Phone</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||"") + '" placeholder="' + esc(lead.phone||"") + '"></div>' +
+    '<div class="field"><label>Guarantor Email</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||"") + '" placeholder="' + esc(lead.email||"") + '"></div>' +
+    '<div class="field"><label>Entity Legal Name</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
+    '<div class="field"><label>Guarantor Ownership %</label><input class="input" type="number" min="0" max="100" name="guarantorOwnershipPct" value="' + (lead.guarantorOwnershipPct!=null?lead.guarantorOwnershipPct:"") + '"></div>' +
+    '<div class="field" style="align-self:end"><button class="btn btn-sm btn-primary" type="submit">Save</button></div>' +
+  '</form>' + fu;
 }
 
 function renderGuidelineCheck(lead){
@@ -6047,7 +6099,14 @@ function renderGuidelineCheck(lead){
     ? ('<div style="margin-top:10px"><button class="btn btn-sm" type="button" data-action="ai-explain-guideline" data-lead="' + lead.id + '">✨ Explain to LO</button>' +
        '<div id="guideline-explain-box" class="footnote" style="padding-top:8px;white-space:pre-wrap"></div></div>')
     : '';
-  var outsideLenderSection = (gc.status === "review" && canViewOutsideLender()) ? renderOutsideLenderBox(lead) : '';
+  // Erika's real feedback (2026-09-09): a passing in-house file showed
+  // NO placement info anywhere -- this box only rendered when the
+  // guideline check needed manual outside placement, so a normal
+  // in-house-eligible loan gave her nothing to look at even though she
+  // still needs to know it's Constructive Capital (not RCN/Kiavi/etc.)
+  // to fill out the right third-party portals. Now always shown for
+  // anyone who can view it, regardless of pass/fail.
+  var outsideLenderSection = canViewOutsideLender() ? renderOutsideLenderBox(lead, gc.status) : '';
   var rcnFitSection = gc.status === "review" ? renderOutsideLenderFitBox(lead) : '';
   return header +
     '<div style="margin-bottom:10px">' + badge + ' <span class="hint">as of ' + fmtDate(gc.evaluatedAt) + '</span></div>' +
@@ -6091,18 +6150,24 @@ function setOutsideLender(leadId, lender){
   showToast(lender ? ("Routed to " + lender) : "Set back to in-house / needs manual placement");
   persist();
 }
-function renderOutsideLenderBox(lead){
+function renderOutsideLenderBox(lead, guidelineStatus){
   var current = lead.outsideLender || "";
+  // No outside lender chosen doesn't mean "unknown" -- if guidelines
+  // passed, this loan is just going through our own in-house pipeline
+  // (Constructive Capital) and always was; only actually undecided if
+  // guidelines needed review and nobody's picked an outside lender yet.
+  var inHouseDefault = guidelineStatus === "pass";
+  var displayValue = lead.outsideLender || (inHouseDefault ? "In-House (Constructive Capital)" : "Not yet placed — needs review");
   if (!canManageOutsideLender()){
     return '<div class="panel panel-pad" style="margin-top:10px">' +
-      '<div class="rail-title" style="margin-bottom:4px">Outside Lender</div>' +
-      '<div>' + esc(lead.outsideLender || "Not yet placed") + '</div>' +
+      '<div class="rail-title" style="margin-bottom:4px">Where This Is Being Placed</div>' +
+      '<div>' + esc(displayValue) + '</div>' +
     '</div>';
   }
-  var options = '<option value="">— Not yet placed —</option>' +
+  var options = '<option value="">— ' + (inHouseDefault ? "In-House (Constructive Capital)" : "Not yet placed") + ' —</option>' +
     OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (current===l?" selected":"") + '>' + l + '</option>'; }).join("");
   return '<div class="panel panel-pad" style="margin-top:10px">' +
-    '<div class="rail-title" style="margin-bottom:4px">Outside Lender</div>' +
+    '<div class="rail-title" style="margin-bottom:4px">Where This Is Being Placed</div>' +
     '<div class="footnote" style="padding-bottom:6px">Only you, Fiore, and Erika can see this. Every other LO just sees "Needs Review."</div>' +
     '<select class="select" data-action="set-outside-lender" data-lead="' + lead.id + '">' + options + '</select>' +
   '</div>';
@@ -6490,7 +6555,9 @@ function renderTabDocuments(lead){
   }
 
   var rows = docs.map(function(d,i){
-    var statusBadge = d.status==="received" ? '<span class="badge badge-forest">Received</span>' : '<span class="badge badge-slate">Requested</span>';
+    var statusBadge = d.status==="received" ? '<span class="badge badge-forest">Received</span>'
+      : d.status==="waived" ? '<span class="badge badge-slate">N/A</span>'
+      : '<span class="badge badge-slate">Requested</span>';
     var staffOnlyBadge = d.staffOnly ? '<span class="badge badge-slate" title="Never shown to the borrower">Staff Only</span>' : "";
     var aiBadge = "", aiNote = "";
     if (canAiReview && d.aiReview){
@@ -6499,19 +6566,24 @@ function renderTabDocuments(lead){
         : '<span class="badge badge-rust">AI: Flagged</span>';
       aiNote = '<div class="cell-sub" style="margin-top:4px;max-width:360px">' + esc(d.aiReview.note) + '</div>';
     }
-    var viewBtn = "", uploadBtn = "", markBtn = "", deleteBtn = "";
+    var viewBtn = "", uploadBtn = "", markBtn = "", deleteBtn = "", naBtn = "", undoNaBtn = "";
     if (d.status==="received"){
       if (d.storagePath) viewBtn = '<button class="btn btn-sm" data-action="view-lead-document" data-lead="' + lead.id + '" data-idx="' + i + '">View File</button>';
       if (canManage) deleteBtn = '<button class="btn btn-sm btn-ghost" style="color:var(--c-rust)" data-action="delete-document" data-lead="' + lead.id + '" data-idx="' + i + '">Delete</button>';
+    } else if (d.status==="waived"){
+      undoNaBtn = '<button class="btn btn-sm btn-ghost" data-action="undo-doc-na" data-lead="' + lead.id + '" data-idx="' + i + '">Undo</button>';
     } else {
       uploadBtn = '<label class="btn btn-sm btn-primary" style="cursor:pointer">Upload<input type="file" style="display:none" data-action="upload-doc-staff" data-lead="' + lead.id + '" data-idx="' + i + '"></label>';
       markBtn = '<button class="btn btn-sm btn-ghost" data-action="mark-doc-received" data-lead="' + lead.id + '" data-idx="' + i + '">Mark Received (no file)</button>';
+      naBtn = '<button class="btn btn-sm btn-ghost" data-action="mark-doc-na" data-lead="' + lead.id + '" data-idx="' + i + '" title="Doesn\'t apply to this deal — stops it counting as missing, without asking the borrower for something they can\'t provide">Mark N/A</button>';
     }
     return '<div class="doc-row" style="align-items:flex-start"><div><div>' + esc(d.name) + '</div>' +
-      '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):"")) : "A client may have emailed this directly — upload it here if so.") + '</div>' +
+      '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):""))
+        : d.status==="waived" ? ("Marked N/A " + fmtDate(d.waivedAt) + " by " + esc(d.waivedBy||""))
+        : "A client may have emailed this directly — upload it here if so.") + '</div>' +
       aiNote +
       '</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + viewBtn + uploadBtn + markBtn + deleteBtn + '</div></div>';
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + viewBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
   }).join("");
   var uwRows = (lead.uwConditions||[]).map(function(c){
     var statusBadge = c.status==="received" ? '<span class="badge badge-forest">Response Received</span>' : '<span class="badge badge-slate">Open</span>';
@@ -9354,6 +9426,8 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "toggle-automation-paused"){ toggleAutomationPaused(t.dataset.lead); }
   else if (action === "mark-doc-received"){ markDocReceived(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "mark-doc-na"){ markDocNA(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "undo-doc-na"){ undoDocNA(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "delete-document"){ deleteDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-uw-condition-file"){ viewUnderwritingConditionFile(t.dataset.lead, t.dataset.condid, t.dataset.borrower==="1"); }
@@ -9832,6 +9906,8 @@ appEl.addEventListener("submit", function(e){
     setFollowUp(form.dataset.lead, fd.get("date"), fd.get("note"));
   } else if (type === "birthday"){
     setBirthday(form.dataset.lead, fd.get("birthday"));
+  } else if (type === "quick-edit-guarantor"){
+    quickEditGuarantor(form.dataset.lead, fd);
   } else if (type === "loan-details"){
     var ldLoanAmount = fd.get("loanAmount") ? Number(fd.get("loanAmount")) : null;
     var ldRate = fd.get("rate") ? Number(fd.get("rate")) : null;

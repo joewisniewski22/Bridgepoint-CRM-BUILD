@@ -125,12 +125,19 @@ Deno.serve(async (req: Request) => {
     const assignedTo = await pickCIOwnerOrFiore();
 
     // --- Structured field extraction (stable names first, then keyword fallback) ---
+    // "Stable names" now includes PrivateLenders.com's actual snake_case
+    // custom-field IDs (per their API Field Mapping doc, 2026-09-09) --
+    // the keyword fallback below only catches space-separated phrasing
+    // ("credit score"), which never matches their machine field names
+    // ("credit_score"), so without these explicit entries this webhook
+    // would silently capture name/email/phone from them and drop every
+    // deal detail (loan amount, credit score, experience, etc.).
     const propertyAddress = firstOf(body, "Property Address") || findByKeyword(body, ["property address"]);
-    const propertyType = firstOf(body, "Property Type") || findByKeyword(body, ["property type"]);
+    const propertyType = firstOf(body, "Property Type", "type_of_deal") || findByKeyword(body, ["property type"]);
     const purchasePrice = toNumber(firstOf(body, "Purchase Price / Est. Value") || findByKeyword(body, ["purchase price", "estimated value", "est. value"]));
-    let loanAmount = toNumber(firstOf(body, "Requested Loan Amount", "Requested Amount") || findByKeyword(body, ["loan amount", "amount needed", "amount requested"]));
-    let creditScore = toNumber(firstOf(body, "Estimated FICO Score", "Credit Score") || findByKeyword(body, ["credit score", "fico"]));
-    let experienceDeals: number | null = toNumber(firstOf(body, "Experience") || findByKeyword(body, ["experience", "deals completed", "properties flipped"]));
+    let loanAmount = toNumber(firstOf(body, "Requested Loan Amount", "Requested Amount", "requested_amount") || findByKeyword(body, ["loan amount", "amount needed", "amount requested"]));
+    let creditScore = toNumber(firstOf(body, "Estimated FICO Score", "Credit Score", "credit_score") || findByKeyword(body, ["credit score", "fico"]));
+    let experienceDeals: number | null = toNumber(firstOf(body, "Experience", "deals_done") || findByKeyword(body, ["experience", "deals completed", "properties flipped"]));
     if (loanAmount == null) loanAmount = rangeMidpoint(findByKeyword(body, ["loan amount", "amount needed"]));
     if (creditScore == null) creditScore = rangeMidpoint(findByKeyword(body, ["credit score", "fico"]));
     if (experienceDeals != null && /primero|first|none|0/i.test(String(experienceDeals))) experienceDeals = 0;
@@ -143,12 +150,16 @@ Deno.serve(async (req: Request) => {
 
     // Qualifying answers with no dedicated CRM column -- one readable note.
     const qualifyingNotes: string[] = [];
-    const holdingPeriod = firstOf(body, "Holding Period") || findByKeyword(body, ["holding period"]);
+    const holdingPeriod = firstOf(body, "Holding Period", "holding_period") || findByKeyword(body, ["holding period"]);
     if (holdingPeriod) qualifyingNotes.push("Holding period: " + holdingPeriod);
-    const buyVsRefi = firstOf(body, "Buy VS Refi") || findByKeyword(body, ["buy vs refi", "purchase or refinance"]);
+    const buyVsRefi = firstOf(body, "Buy VS Refi", "buy_vs_refi") || findByKeyword(body, ["buy vs refi", "purchase or refinance"]);
     if (buyVsRefi) qualifyingNotes.push("Buy vs. Refi: " + buyVsRefi);
-    const additionalDetails = firstOf(body, "Additional Project Details") || findByKeyword(body, ["additional details", "project details", "message", "comments"]);
+    const additionalDetails = firstOf(body, "Additional Project Details", "special_and_terms") || findByKeyword(body, ["additional details", "project details", "message", "comments"]);
     if (additionalDetails) qualifyingNotes.push("Additional details: " + additionalDetails);
+    const referralSource = firstOf(body, "referral_source");
+    if (referralSource) qualifyingNotes.push("Referral source: " + referralSource);
+    const externalLeadId = firstOf(body, "lead_id");
+    if (externalLeadId) qualifyingNotes.push("PrivateLenders lead ID: " + externalLeadId);
 
     const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
     const today = new Date().toISOString().slice(0, 10);
