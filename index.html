@@ -2189,11 +2189,17 @@ function computeQueue(userId){
     var rk = RATE_KEY_BY_LOAN_TYPE[lead.loanType];
     if (rk && state.marketRates[rk]){
       var r = state.marketRates[rk];
-      if (r.current < r.previous && (lead.status==="active" || lead.status==="closed")){
+      // Only a real opportunity if THIS lead's own locked-in rate is
+      // actually above where the market sits now -- matching on loan type
+      // alone (the old condition) fired for every active/closed lead of
+      // that type forever, regardless of what they were quoted, with no
+      // way to clear it once surfaced. 0.125 buffer avoids noise from a
+      // trivial/rounding-level gap that isn't worth a call.
+      if (r.current < r.previous && lead.rate != null && lead.rate >= r.current + 0.125 && (lead.status==="active" || lead.status==="closed")){
         items.push({
           type:"rate-drop", leadId:lead.id, priority:3,
           label: lead.loanType + " rates dropped to " + fmtPct(r.current) + " — call to discuss",
-          reason: "Was " + fmtPct(r.previous) + ", now " + fmtPct(r.current) + " as of " + fmtDate(r.updatedAt)
+          reason: "They're locked at " + fmtPct(lead.rate) + ", now " + fmtPct(r.current) + " as of " + fmtDate(r.updatedAt)
         });
       }
     }
