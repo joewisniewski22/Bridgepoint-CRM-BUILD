@@ -2871,7 +2871,7 @@ function submitPublicApplication(leadId, patch){
     notifyUser(lead.assignedTo, lead.id, "application", lead.name + " completed their application online — open & dial: " + appLink);
     var appLo = userById(lead.assignedTo);
     if (appLo && appLo.email && sb){
-      sb.functions.invoke("send-email", { body: { leadId: lead.id, to: appLo.email, subject: lead.name + " completed their application", text: lead.name + " just completed their loan application online. Open the file here: " + appLink, fromName: "Bridgepoint CRM" } }).catch(function(){});
+      sb.functions.invoke("send-email", { body: { leadId: lead.id, to: appLo.email, subject: lead.name + " completed their application", text: lead.name + " just completed their loan application online. Open the file here: " + appLink, fromName: "Bridgepoint CRM", initiatedBy: "ai" } }).catch(function(){});
     }
   }
   ui.publicApply.status = "submitted";
@@ -3621,7 +3621,7 @@ function notifyLoNewLead(lead){
   if (!lo || !lo.email) return;
   var link = crmLeadLink(lead.id);
   var text = "New lead: " + lead.name + " (" + lead.loanType + ", " + lead.source + ") — open & dial: " + link;
-  sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lo.email, subject: "New lead: " + lead.name, text: text, fromName: "Bridgepoint CRM" } }).catch(function(){});
+  sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lo.email, subject: "New lead: " + lead.name, text: text, fromName: "Bridgepoint CRM", initiatedBy: "ai" } }).catch(function(){});
 }
 var BILINGUAL_LOS = ["lo-fanis","lo-david"];
 function startAiEngagement(lead){
@@ -3634,7 +3634,7 @@ function startAiEngagement(lead){
   var text = isBilingual
     ? ("Hi " + firstName + "! It's " + loName + " with Bridgepoint Lending, following up on your " + (lead.loanType||"loan") + " inquiry. Would you prefer English or Spanish? (Reply STOP to opt out)\n\n¡Hola " + firstName + "! Soy " + loName + " de Bridgepoint Lending, dándole seguimiento a su consulta de préstamo. ¿Prefiere inglés o español? (Responda STOP para cancelar)")
     : ("Hi " + firstName + "! It's " + loName + " with Bridgepoint Lending, following up on your " + (lead.loanType||"loan") + " inquiry. What property are you looking to finance? (Reply STOP to opt out)");
-  sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: loName, fromNumber: lo.quoPhoneNumber||null } }).then(function(res){
+  sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: loName, fromNumber: lo.quoPhoneNumber||null, initiatedBy: "ai" } }).then(function(res){
     if (res.error || !res.data || !res.data.ok) return;
     lead.aiStage = isBilingual ? "awaiting_language" : "engaging";
     persist();
@@ -4008,10 +4008,10 @@ function toggleProcessingAction(leadId, kind){
       if (sb){
         sb.from("notifications").insert({ id:"N"+Date.now().toString(36)+Math.floor(Math.random()*1000), to_user_id:proc.id, lead_id:leadId, kind:kind, text:details, date:d, read:false }).catch(function(){});
         if (proc.phone){
-          sb.functions.invoke("send-text", { body:{ leadId:leadId, to:proc.phone, text:"Bridgepoint CRM: "+details, fromName:"Bridgepoint CRM" } }).catch(function(){});
+          sb.functions.invoke("send-text", { body:{ leadId:leadId, to:proc.phone, text:"Bridgepoint CRM: "+details, fromName:"Bridgepoint CRM", initiatedBy:"ai" } }).catch(function(){});
         }
         if (proc.email){
-          sb.functions.invoke("send-email", { body:{ leadId:leadId, to:proc.email, subject:label+" needed — "+lead.name, text:details, fromName:"Bridgepoint CRM" } }).catch(function(){});
+          sb.functions.invoke("send-email", { body:{ leadId:leadId, to:proc.email, subject:label+" needed — "+lead.name, text:details, fromName:"Bridgepoint CRM", initiatedBy:"ai" } }).catch(function(){});
         }
       }
     }

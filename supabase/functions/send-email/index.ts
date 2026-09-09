@@ -73,6 +73,9 @@ Deno.serve(async (req: Request) => {
     // token in `text` (instead of a raw URL), the HTML version renders it
     // as a real "HERE" hyperlink; the plain-text fallback just gets the URL.
     const ctaUrl: string | null = body.ctaUrl || null;
+    // See send-text's initiatedBy for why this exists -- lets speed-to-lead
+    // reporting count only genuine LO actions, not AI/automated ones.
+    const initiatedBy: string = body.initiatedBy === "ai" ? "ai" : "staff";
 
     if (!to || !subject || !text) {
       return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400, headers: CORS_HEADERS });
@@ -129,6 +132,7 @@ Deno.serve(async (req: Request) => {
         type: "email",
         text: "Emailed " + to + ": " + subject,
         author: fromName || "System",
+        initiatedBy,
       });
       await sb.from("leads").update({ activity: activity }).eq("id", leadId);
     }

@@ -215,13 +215,13 @@ Deno.serve(async (req: Request) => {
       if (lead.phone) {
         await fetch(SUPABASE_URL + "/functions/v1/send-text", {
           method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-          body: JSON.stringify({ leadId, to: lead.phone, text: appMsg, fromName: loName, fromNumber: (lo && lo.quo_phone_number) || null }),
+          body: JSON.stringify({ leadId, to: lead.phone, text: appMsg, fromName: loName, fromNumber: (lo && lo.quo_phone_number) || null, initiatedBy: "ai" }),
         }).catch(() => {});
       }
       if (lead.email) {
         await fetch(SUPABASE_URL + "/functions/v1/send-email", {
           method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-          body: JSON.stringify({ leadId, to: lead.email, subject: "Bridgepoint Lending — Your Application", text: appMsg, fromName: loName, fromAddress: (lo && lo.email) || null }),
+          body: JSON.stringify({ leadId, to: lead.email, subject: "Bridgepoint Lending — Your Application", text: appMsg, fromName: loName, fromAddress: (lo && lo.email) || null, initiatedBy: "ai" }),
         }).catch(() => {});
       }
     }
@@ -231,7 +231,7 @@ Deno.serve(async (req: Request) => {
       const sendRes = await fetch(SUPABASE_URL + "/functions/v1/send-text", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-        body: JSON.stringify({ leadId, to: lead.phone, text: replyText, fromName: loName, fromNumber: (lo && lo.quo_phone_number) || null }),
+        body: JSON.stringify({ leadId, to: lead.phone, text: replyText, fromName: loName, fromNumber: (lo && lo.quo_phone_number) || null, initiatedBy: "ai" }),
       });
       sendResult = await sendRes.json();
     }

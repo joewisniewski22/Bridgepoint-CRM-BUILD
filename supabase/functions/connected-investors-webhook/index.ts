@@ -240,14 +240,14 @@ Deno.serve(async (req: Request) => {
               method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
               body: JSON.stringify({
                 leadId: id, to: email, subject: "Bridgepoint Lending — Your Loan Inquiry",
-                text: message, fromName: assignee.name, fromAddress: assignee.email, fromUserId: assignee.id, fromPhotoUrl: assignee.photo_url || null,
+                text: message, fromName: assignee.name, fromAddress: assignee.email, fromUserId: assignee.id, fromPhotoUrl: assignee.photo_url || null, initiatedBy: "ai",
               }),
             }).catch(() => {}));
           }
           if (phone) {
             sendCalls.push(fetch(SUPABASE_URL + "/functions/v1/send-text", {
               method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-              body: JSON.stringify({ leadId: id, to: phone, text: message, fromName: assignee.name, fromNumber: assignee.quo_phone_number || null }),
+              body: JSON.stringify({ leadId: id, to: phone, text: message, fromName: assignee.name, fromNumber: assignee.quo_phone_number || null, initiatedBy: "ai" }),
             }).catch(() => {}));
           }
           await Promise.all(sendCalls);

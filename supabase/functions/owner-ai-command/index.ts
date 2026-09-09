@@ -257,6 +257,18 @@ const TOOLS = [
     input_schema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "analyze_lo_speed_to_lead",
+    description: "Per-loan-officer report on REAL HUMAN speed-to-lead and missed leads -- excludes anything the AI did automatically, since the AI can text/email instantly and that's not a measure of the LO's own behavior. Calls are always human (the AI never dials), and are timed precisely from lead creation to first call. Texts/emails only count if explicitly staff-initiated (not the AI texting/emailing under the LO's name) and are only date-precise, not time-of-day -- and that distinction only exists for messages sent after this tool was built, so older texts/emails can't be retroactively classified and are excluded from the text/email side of the report (calls are unaffected by this, they were always trackable). Use this for 'who's missing leads' / 'how fast is X calling' / 'income left on the table' questions -- don't estimate this by eyeballing lead files.",
+    input_schema: {
+      type: "object",
+      properties: {
+        assignedTo: { type: "string", description: "Staff id to report on just one LO. Omit for every LO." },
+        missedThresholdHours: { type: "integer", description: "Hours since lead creation with zero human contact before it counts as 'missed' / fell through the cracks. Default 48." },
+      },
+      required: [],
+    },
+  },
+  {
     name: "apply_engagement_adjustment",
     description: "Update the live-tunable engagement settings that the automated AI texting (ai-lead-engage) and follow-up cadence actually read at runtime -- no code deploy needed, takes effect on the next message. Only call this after analyze_engagement_performance, and only change what the data actually supports. Joe wants to be able to just say 'look at engagement and adjust' -- apply sensible, data-backed changes directly rather than asking him to approve each one; just always explain what changed and why in your reply.",
     input_schema: {
@@ -627,6 +639,90 @@ async function runTool(name: string, input: Record<string, unknown>): Promise<un
       conversionByLoanType: byLoanType,
       recentCoachingNotes: (recentCoaching || []).map((c) => ({ source: c.source, note: c.note, date: c.created_at })),
       caveat: "Sample sizes here may be very small if the system is new -- weight recommendations accordingly, and say so plainly rather than overclaiming a pattern.",
+    };
+  }
+  if (name === "analyze_lo_speed_to_lead") {
+    const missedThresholdHours = typeof input.missedThresholdHours === "number" ? input.missedThresholdHours : 48;
+    let query = sb.from("leads")
+      .select("id,name,assigned_to,stage,status,loan_amount,points_charged,created_at_ts,created_at,first_attempt_at,activity")
+      .limit(1000);
+    if (input.assignedTo) query = query.eq("assigned_to", input.assignedTo as string);
+    const { data: leads } = await query;
+    const rows = leads || [];
+
+    const { data: staff } = await sb.from("users").select("id,name,role").eq("role", "loan_officer");
+    const nameById: Record<string, string> = {};
+    (staff || []).forEach((u) => { nameById[u.id as string] = u.name as string; });
+
+    const CONVERTED_STAGES = ["app_sent", "app_completed", "docs", "processing", "underwriting", "approved", "ctc", "closed", "postclosing"];
+    const now = Date.now();
+
+    // Real deal economics from whatever's actually on file, used only to
+    // turn "N missed leads" into a rough dollar estimate -- never a made-up
+    // constant. Origination revenue only (points x loan amount), not lender
+    // or processing fees, so this is a floor, not a full P&L number.
+    const withEconomics = rows.filter((l) => l.loan_amount && l.points_charged);
+    const avgLoanAmount = withEconomics.length ? withEconomics.reduce((s, l) => s + (l.loan_amount as number), 0) / withEconomics.length : null;
+    const avgPointsPct = withEconomics.length ? withEconomics.reduce((s, l) => s + (l.points_charged as number), 0) / withEconomics.length : null;
+    const revenuePerFundedDeal = avgLoanAmount && avgPointsPct ? avgLoanAmount * (avgPointsPct / 100) : null;
+    const outcomeKnown = rows.filter((l) => CONVERTED_STAGES.includes(l.stage as string) || l.status === "cold" || l.status === "lost");
+    const converted = rows.filter((l) => CONVERTED_STAGES.includes(l.stage as string));
+    const observedConversionRate = outcomeKnown.length ? converted.length / outcomeKnown.length : null;
+
+    type PerLead = { id: string; name: string; hoursToFirstCall: number | null; hadAnyHumanContact: boolean; missed: boolean; ageHours: number };
+    const byLo: Record<string, { name: string; leads: PerLead[] }> = {};
+
+    rows.forEach((l) => {
+      const assignedTo = (l.assigned_to as string) || "unassigned";
+      const createdAtMs = l.created_at_ts ? new Date(l.created_at_ts as string).getTime() : (l.created_at ? new Date(l.created_at as string + "T12:00:00Z").getTime() : null);
+      if (!createdAtMs) return; // can't measure speed without a creation time
+      const ageHours = (now - createdAtMs) / 3600000;
+
+      let hoursToFirstCall: number | null = null;
+      if (l.first_attempt_at) {
+        const h = (new Date(l.first_attempt_at as string).getTime() - createdAtMs) / 3600000;
+        if (h >= 0) hoursToFirstCall = Math.round(h * 10) / 10;
+      }
+      const activity = Array.isArray(l.activity) ? (l.activity as Array<Record<string, unknown>>) : [];
+      const hadHumanTextOrEmail = activity.some((a) => (a.type === "text" || a.type === "email") && a.initiatedBy === "staff");
+      const hadAnyHumanContact = hoursToFirstCall !== null || hadHumanTextOrEmail;
+      const missed = !hadAnyHumanContact && ageHours >= missedThresholdHours;
+
+      byLo[assignedTo] = byLo[assignedTo] || { name: nameById[assignedTo] || assignedTo, leads: [] };
+      byLo[assignedTo].leads.push({ id: l.id as string, name: l.name as string, hoursToFirstCall, hadAnyHumanContact, missed, ageHours: Math.round(ageHours) });
+    });
+
+    const report = Object.entries(byLo).map(([id, v]) => {
+      const withCallTiming = v.leads.filter((l) => l.hoursToFirstCall !== null);
+      const sorted = withCallTiming.map((l) => l.hoursToFirstCall as number).sort((a, b) => a - b);
+      const avgHoursToFirstCall = sorted.length ? Math.round((sorted.reduce((s, h) => s + h, 0) / sorted.length) * 10) / 10 : null;
+      const medianHoursToFirstCall = sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
+      const missedLeads = v.leads.filter((l) => l.missed);
+      return {
+        loId: id,
+        loName: v.name,
+        totalLeads: v.leads.length,
+        neverHumanContacted: v.leads.filter((l) => !l.hadAnyHumanContact).length,
+        missedLeadsCount: missedLeads.length,
+        missedLeads: missedLeads.map((l) => ({ id: l.id, name: l.name, hoursSinceCreated: Math.round(l.ageHours) })),
+        avgHoursToFirstCall,
+        medianHoursToFirstCall,
+        estimatedIncomeLeftOnTable: revenuePerFundedDeal && observedConversionRate
+          ? Math.round(missedLeads.length * observedConversionRate * revenuePerFundedDeal)
+          : null,
+      };
+    }).sort((a, b) => b.missedLeadsCount - a.missedLeadsCount);
+
+    return {
+      missedThresholdHours,
+      perLoanOfficer: report,
+      economicsUsedForEstimate: revenuePerFundedDeal ? {
+        avgLoanAmount: Math.round(avgLoanAmount as number),
+        avgPointsPct: Math.round((avgPointsPct as number) * 100) / 100,
+        revenuePerFundedDeal: Math.round(revenuePerFundedDeal),
+        observedConversionRate: observedConversionRate ? Math.round(observedConversionRate * 1000) / 10 + "%" : null,
+      } : null,
+      caveat: "Call timing (hoursToFirstCall) is precise and fully reliable -- the AI never dials, so every call attempt is a real human action. Text/email speed is NOT included as a timing metric (activity is only date-precise, not time-of-day) -- it only feeds hadAnyHumanContact/missed as a yes/no signal, and only for messages sent after this tracking was added, so leads worked entirely before then may show as falsely missed if contacted only by text/email. Income-left-on-table is a rough floor estimate from average points revenue on file times the observed conversion rate -- not lender/processing fees, and unreliable with a small sample.",
     };
   }
   if (name === "apply_engagement_adjustment") {

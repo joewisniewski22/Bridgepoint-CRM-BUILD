@@ -172,7 +172,7 @@ Deno.serve(async (req: Request) => {
           fetch(SUPABASE_URL + "/functions/v1/send-text", {
             method: "POST",
             headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-            body: JSON.stringify({ leadId: match.id, to: match.phone, text: "You've been unsubscribed from automated texts from Bridgepoint Lending. Reply if you'd like to speak with your loan officer directly." }),
+            body: JSON.stringify({ leadId: match.id, to: match.phone, text: "You've been unsubscribed from automated texts from Bridgepoint Lending. Reply if you'd like to speak with your loan officer directly.", initiatedBy: "ai" }),
           }).catch(() => {});
         }
       } else if (match.ai_stage && !match.automation_paused) {

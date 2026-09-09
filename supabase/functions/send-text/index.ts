@@ -36,6 +36,14 @@ Deno.serve(async (req: Request) => {
     const to: string = body.to;
     const text: string = body.text;
     const fromName: string | null = body.fromName || null;
+    // Who actually caused this send -- "staff" (default) for every real
+    // button-click in the CRM, "ai" only when the AI engagement/campaign
+    // functions pass it explicitly. AI-sent texts still go out under the
+    // LO's own name (fromName) so they read naturally to the borrower,
+    // which means that field alone can't tell a real human contact
+    // attempt apart from an automated one -- this can. Lets speed-to-lead
+    // reporting count only genuine LO actions, not AI activity.
+    const initiatedBy: string = body.initiatedBy === "ai" ? "ai" : "staff";
     // Each team member's own Quo line, passed from the CRM (their Team
     // record) -- falls back to the shared office line when not set.
     const fromNumber = toE164(body.fromNumber || QUO_FROM_NUMBER);
@@ -75,6 +83,7 @@ Deno.serve(async (req: Request) => {
         type: "text",
         text: "Texted (via Quo): " + text,
         author: fromName || "System",
+        initiatedBy,
       });
       await sb.from("leads").update({ activity: activity }).eq("id", leadId);
     }
