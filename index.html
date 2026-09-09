@@ -4094,7 +4094,7 @@ function toggleProcessingAction(leadId, kind){
       // Direct, immediate, real text + email -- not the batched notifyUser()
       // path, which silently failed to reach Erika in practice (2026-09-08).
       if (sb){
-        sb.from("notifications").insert({ id:"N"+Date.now().toString(36)+Math.floor(Math.random()*1000), to_user_id:proc.id, lead_id:leadId, kind:kind, text:details, date:d, read:false }).catch(function(){});
+        sb.from("notifications").insert({ id:"N"+Date.now().toString(36)+Math.floor(Math.random()*1000), to_user_id:proc.id, lead_id:leadId, kind:kind, text:details, date:d, read:false }).then(function(nres){ if (nres && nres.error) console.error("notification insert error", nres.error); });
         if (proc.phone){
           sb.functions.invoke("send-text", { body:{ leadId:leadId, to:proc.phone, text:"Bridgepoint CRM: "+details, fromName:"Bridgepoint CRM", initiatedBy:"ai" } }).catch(function(){});
         }
@@ -5355,7 +5355,7 @@ function requestPortalCustomization(prompt){
 function resetPortalCustomization(){
   var u = currentUser();
   u.portalPrefs = {};
-  if (sb) sb.rpc("set_portal_prefs", { p_user_id: u.id, p_prefs: {} }).catch(function(){});
+  if (sb) sb.rpc("set_portal_prefs", { p_user_id: u.id, p_prefs: {} }).then(function(rres){ if (rres && rres.error) console.error("portal prefs reset error", rres.error); });
   showToast("Portal reset to default");
   render();
 }
@@ -9292,6 +9292,7 @@ appEl.addEventListener("drop", function(e){
 });
 
 appEl.addEventListener("click", function(e){
+  try {
   var backdrop = e.target.closest && e.target.closest("[data-action='backdrop']");
   if (backdrop && e.target === backdrop){ ui.modal = null; ui.dialer = null; render(); return; }
 
@@ -9499,6 +9500,10 @@ appEl.addEventListener("click", function(e){
       if (draftBox) draftBox.value = suggestion || defaultOutreachMessage(draftLead);
     });
   }
+  } catch(clickErr){
+    console.error("click handler error", clickErr);
+    showToast("Something went wrong — try again");
+  }
 });
 
 appEl.addEventListener("change", function(e){
@@ -9648,6 +9653,7 @@ appEl.addEventListener("submit", function(e){
   e.preventDefault();
   var type = form.dataset.form;
   var fd = new FormData(form);
+  try {
   if (type === "add-lead"){
     if (!fd.get("phone") || !fd.get("phone").trim()){ showToast("Phone number is required — enter one to add this lead"); return; }
     addLead({
@@ -9886,6 +9892,10 @@ appEl.addEventListener("submit", function(e){
     });
     saveScopeOfWork(form.dataset.lead, items, fd.get("notes"));
     render();
+  }
+  } catch(submitErr){
+    console.error("submit handler error", submitErr);
+    showToast("Something went wrong — try again");
   }
 });
 
