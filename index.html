@@ -2598,7 +2598,7 @@ function loContactLines(lo, lang){
   lines.push(lo.name || (isEs ? "Oficial de Préstamos" : "Loan Officer"));
   lines.push(lo.title || (isEs ? "Oficial de Préstamos" : "Loan Officer"));
   lines.push("Bridgepoint Lending — " + (isEs ? "Soluciones de Financiamiento Inmobiliario" : "Real Estate Financing Solutions"));
-  var contact = [lo.phone, lo.email].filter(Boolean).join("  ·  ");
+  var contact = [lo.quoPhoneNumber, lo.email].filter(Boolean).join("  ·  ");
   if (contact) lines.push(contact);
   lines.push((isEs ? "Oficina: " : "Office: ") + OFFICE_PHONE);
   return lines;
@@ -5192,7 +5192,7 @@ function buildBorrowerPortalHTML(lead, opts){
       '<div>' +
         '<div style="font-weight:700">' + esc(lo.name||"—") + '</div>' +
         '<div class="portal-lo-actions">' +
-          (lo.phone ? ('<a href="tel:' + esc(lo.phone) + '">📞 ' + esc(lo.phone) + '</a>') : '') +
+          (lo.quoPhoneNumber ? ('<a href="tel:' + esc(lo.quoPhoneNumber) + '">📞 ' + esc(lo.quoPhoneNumber) + '</a>') : '') +
           (lo.email ? ('<a href="mailto:' + esc(lo.email) + '">✉️ ' + L("Email") + '</a>') : '') +
         '</div>' +
       '</div>' +
@@ -6735,7 +6735,7 @@ function renderRail(lead){
     '<div class="rail-block">' +
       '<div class="rail-title">Contact</div>' +
       '<div class="contact-row">' +
-        '<a class="btn btn-sm" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Call</a>' +
+        '<a class="btn btn-sm" href="' + esc(quoDialLink(lead.phone, currentUser().quoPhoneNumber) || ("tel:" + (lead.phone||"").replace(/[^0-9+]/g,""))) + '">Call</a>' +
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<a class="btn btn-sm" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — " + lead.loanType) + '&body=' + encodeURIComponent(defaultOutreachMessage(lead)) + '" data-action="log-email" data-lead="' + lead.id + '">Email</a>' +
         '<button class="btn btn-sm" data-action="send-scheduling-link" data-lead="' + lead.id + '" title="Sends your personal booking link by email and text so they can grab a time with you directly">📅 Schedule Appointment</button>' +
@@ -7685,7 +7685,7 @@ function renderRetargeting(){
         '<textarea class="textarea" readonly style="margin-top:8px;font-size:.78rem" rows="2">' + esc(msg) + '</textarea>' +
       '</div>' +
       '<div class="queue-actions">' +
-        '<a class="btn btn-sm" href="tel:' + esc((l.phone||"").replace(/[^0-9+]/g,"")) + '">Call</a>' +
+        '<a class="btn btn-sm" href="' + esc(quoDialLink(l.phone, currentUser().quoPhoneNumber) || ("tel:" + (l.phone||"").replace(/[^0-9+]/g,""))) + '">Call</a>' +
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + l.id + '">Text</button>' +
         '<button class="btn btn-sm btn-primary" data-action="open-modal" data-modal="logCall" data-lead="' + l.id + '">Log Outreach</button>' +
         '<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + l.id + '">View</button>' +
@@ -8275,7 +8275,7 @@ function modalDialer(){
         '<div class="rail-name" style="font-size:1.15rem">' + esc(lead.name) + '</div>' +
         '<div class="footnote" style="padding:0">' + esc(lead.loanType) + ' · ' + fmtUSD(lead.loanAmount) + '</div>' +
         renderCoachingTip(lead.id) +
-        '<a class="btn btn-primary" style="width:100%;justify-content:center;font-size:1.05rem;padding:13px" href="tel:' + esc(digits) + '">📞 Call ' + esc(lead.phone||"") + '</a>' +
+        '<a class="btn btn-primary" style="width:100%;justify-content:center;font-size:1.05rem;padding:13px" href="' + esc(quoDialLink(lead.phone, currentUser().quoPhoneNumber) || ("tel:" + digits)) + '">📞 Call ' + esc(lead.phone||"") + '</a>' +
         '<div class="form-row"><label>Outcome</label><select class="select" name="outcome">' + outOptions + '</select></div>' +
         '<div class="form-row"><label>Notes</label><textarea class="textarea" name="notes" rows="2" placeholder="What did you discuss?"></textarea></div>' +
       '</div>' +
