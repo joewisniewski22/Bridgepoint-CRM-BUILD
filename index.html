@@ -5151,9 +5151,10 @@ function buildBorrowerPortalHTML(lead, opts){
   // already reached Docs Collection and staff were actively requesting
   // documents. isInProcessing only covered "processing" stage onward,
   // missing that entire gap.
-  var isInProcessing = stageIndex(lead.stage) >= stageIndex("docs");
+  var isInProcessing = stageIndex(lead.stage) >= stageIndex("processing");
+  var skipIntakeForm = isInProcessing || stageIndex(lead.stage) >= stageIndex("docs");
 
-  if (!hasCompletedIntake && !isInProcessing){
+  if (!hasCompletedIntake && !skipIntakeForm){
     return header +
       '<div class="portal-cta">' +
         '<b>' + L("Let's get your application started") + '</b>' +
