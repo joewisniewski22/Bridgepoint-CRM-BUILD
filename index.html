@@ -1685,6 +1685,7 @@ function daysDiff(a,b){ return Math.round((b.getTime()-a.getTime())/86400000); }
 function stageLabel(key){
   if (key==="cold") return "Cold";
   if (key==="lost") return "Lost / Dead";
+  if (key==="spam") return "Spam";
   return (STAGE_MAP[key] && STAGE_MAP[key].label) || key;
 }
 function stageIndex(key){ return STAGE_MAP[key] ? STAGE_MAP[key].index : -1; }
@@ -3591,6 +3592,14 @@ function moveStage(leadId, target){
   } else if (target === "reactivate"){
     lead.status = "active";
     lead.activity.push({ date:d, type:"system", text:"Reactivated", author: currentUser().name });
+  } else if (target === "spam"){
+    // Distinct from cold/lost -- a real scam/robot lead should never
+    // resurface in win-back queues or auto-reactivate just because a
+    // call happened to connect (logCall's cold/lost reactivation
+    // deliberately excludes spam), and shouldn't be treated as a
+    // legitimate deal that fell through.
+    lead.status = "spam"; lead.stage = "spam";
+    lead.activity.push({ date:d, type:"system", text:"Marked spam", author: currentUser().name });
   } else {
     var oldLabel = stageLabel(lead.stage);
     lead.stage = target;
@@ -5514,6 +5523,7 @@ function topbar(title, sub, actionsHTML){
 function badgeForStage(lead){
   if (lead.status==="cold") return '<span class="badge badge-rust">Cold</span>';
   if (lead.status==="lost") return '<span class="badge badge-neutral">Lost</span>';
+  if (lead.status==="spam") return '<span class="badge badge-neutral">🚫 Spam</span>';
   if (lead.status==="closed") return '<span class="badge badge-forest">' + esc(stageLabel(lead.stage)) + '</span>';
   return '<span class="badge badge-slate">' + esc(stageLabel(lead.stage)) + '</span>';
 }
@@ -5977,6 +5987,7 @@ function renderLeadsTable(){
       '<option value="closed"' + (f.status==="closed"?" selected":"") + '>Closed</option>' +
       '<option value="cold"' + (f.status==="cold"?" selected":"") + '>Cold</option>' +
       '<option value="lost"' + (f.status==="lost"?" selected":"") + '>Lost</option>' +
+      '<option value="spam"' + (f.status==="spam"?" selected":"") + '>Spam</option>' +
       '<option value=""' + (f.status===""?" selected":"") + '>All</option>' +
     '</select>' +
     '<select class="select" data-action="filter" data-key="stage"><option value="">Any stage</option>' + stageOptions + '</select>' +
@@ -6693,8 +6704,10 @@ function renderRail(lead){
   var statusRow = "";
   if (lead.status === "cold") statusRow = '<button class="btn btn-sm" data-action="move-stage" data-lead="' + lead.id + '" data-target="reactivate">Reactivate</button>';
   else if (lead.status === "lost") statusRow = '<span class="badge badge-neutral">Lost / Dead</span>';
+  else if (lead.status === "spam") statusRow = '<span class="badge badge-neutral">🚫 Spam</span>';
   else if (!isProcessor()) statusRow = '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="cold">Mark Cold</button>' +
-      '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="lost">Mark Lost</button>';
+      '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="lost">Mark Lost</button>' +
+      '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="spam" title="Clearly a scam or robot — different from Cold/Lost, this never resurfaces in win-back and never auto-reactivates from a connected call">🚫 Mark Spam</button>';
   if (isProcessor() || isOwner()){
     statusRow += '<button class="btn btn-sm' + (lead.onHold ? ' btn-primary' : '') + '" data-action="toggle-on-hold" data-lead="' + lead.id + '">' + (lead.onHold ? "Remove Hold" : "⏸ Put On Hold") + '</button>';
   }
