@@ -44,19 +44,19 @@ function quoDialLink(leadPhone: string, fromNumber?: string | null): string {
 
 // True alternating 50/50 (not random-averaging-to-50/50) -- Joe was
 // explicit: strict split, starting with him on the very first lead
-// tonight. Looks at who got the last lead THIS WEBHOOK created (matched
-// by its own activity-note marker, not just source="Connected Investors"
-// -- a manually-added lead can carry that same source string without
-// being part of this automated rotation) and flips from there.
+// tonight. Used to infer "who's next" by querying the most recent lead
+// this webhook created and flipping from there -- broke under a real,
+// confirmed race: HighLevel fires this webhook twice in quick succession
+// for the same contact sometimes (a workflow re-trigger quirk), and both
+// requests could read the same "last" lead before either insert
+// committed, landing both on the same assignee instead of alternating.
+// A single-row atomic UPDATE...RETURNING (ci_routing_state /
+// next_ci_assignee(), 063_ci_routing_atomic.sql) is serialized by
+// Postgres's own row lock, so concurrent requests can't race anymore.
 async function pickCIOwnerOrFiore(): Promise<string> {
-  const { data: recent } = await sb.from("leads").select("assigned_to,activity")
-    .eq("source", "Connected Investors").order("created_at", { ascending: false }).limit(10);
-  const last = (recent || []).find((l) => {
-    const activity = (l.activity as Array<Record<string, unknown>>) || [];
-    return activity.some((a) => typeof a.text === "string" && a.text.indexOf("via webhook (Connected Investors)") !== -1);
-  });
-  if (!last || last.assigned_to !== "owner") return "owner";
-  return "lo-fiore";
+  const { data, error } = await sb.rpc("next_ci_assignee");
+  if (error || !data) return "owner";
+  return data as string;
 }
 
 function firstOf(obj: Record<string, unknown>, ...keys: string[]): string | null {
