@@ -3983,9 +3983,15 @@ function setBirthday(leadId, birthday){
 // back to the LO for something minor. Only touches fields explicitly in
 // this form; blank inputs clear rather than overwrite with nothing
 // meaningful.
+// Joe's rule (2026-09-09): a file should be changeable/correctable by
+// name at any time, but should always end up named after the guarantor
+// once one's on file -- so the direct "File / Borrower Name" field above
+// is really just for files with no guarantor yet (or entity-only files);
+// a guarantor first + last name, once both are set, always wins.
 function quickEditGuarantor(leadId, fd){
   var lead = leadById(leadId);
   if (!lead) return;
+  var directName = (fd.get("name") || "").trim();
   lead.guarantorFirstName = fd.get("guarantorFirstName") || null;
   lead.guarantorLastName = fd.get("guarantorLastName") || null;
   lead.birthday = fd.get("birthday") || null;
@@ -3995,6 +4001,14 @@ function quickEditGuarantor(leadId, fd){
   var ownPct = fd.get("guarantorOwnershipPct");
   lead.guarantorOwnershipPct = (ownPct===null||ownPct==="") ? null : Number(ownPct);
   lead.activity = lead.activity || [];
+  var oldName = lead.name;
+  var newName = (lead.guarantorFirstName && lead.guarantorLastName)
+    ? (lead.guarantorFirstName + " " + lead.guarantorLastName)
+    : (directName || lead.name);
+  if (newName && newName !== oldName){
+    lead.name = newName;
+    lead.activity.push({ date: todayISO(), type:"system", text: 'File renamed from "' + oldName + '" to "' + newName + '"', author: currentUser().name });
+  }
   lead.activity.push({ date: todayISO(), type:"note", text: "Guarantor/entity info updated by " + currentUser().name, author: currentUser().name });
   showToast("Saved");
   persist();
@@ -6179,7 +6193,7 @@ function renderLoanPlacementBanner(lead){
         '<option value="">In-House (Constructive Capital)</option>' +
         OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (current===l?" selected":"") + '>' + l + '</option>'; }).join("") +
       '</select>')
-    : '<div class="footnote" style="padding-top:4px">Only Joe and Fiore can change this.</div>';
+    : '<div class="footnote" style="padding-top:4px">Only Joe, Fiore, and Erika can change this.</div>';
   return '<div class="panel panel-pad" style="margin-bottom:16px;border:2px solid ' + (isInHouse ? 'var(--brand)' : 'var(--c-rust)') + '">' +
     '<div class="hint" style="margin-bottom:2px">📍 LOAN PLACEMENT</div>' +
     '<div style="font-size:1.4rem;font-weight:800;line-height:1.2">' + esc(displayValue) + '</div>' +
@@ -6221,6 +6235,7 @@ function renderTabOverview(lead){
   '<div class="section-head" style="margin-top:20px"><h2>Guarantor & Entity</h2>' +
     '<span class="hint">Quick-fix a gap here — this doesn\'t re-send the application, it just corrects the file</span></div>' +
   '<form data-form="quick-edit-guarantor" data-lead="' + lead.id + '" class="field-grid">' +
+    '<div class="field"><label>File / Borrower Name</label><input class="input" name="name" value="' + esc(lead.name||"") + '"><div class="hint">If a guarantor first + last name is set below, that always wins as the file name.</div></div>' +
     '<div class="field"><label>Guarantor First Name</label><input class="input" name="guarantorFirstName" value="' + esc(lead.guarantorFirstName||"") + '"></div>' +
     '<div class="field"><label>Guarantor Last Name</label><input class="input" name="guarantorLastName" value="' + esc(lead.guarantorLastName||"") + '"></div>' +
     '<div class="field"><label>Guarantor DOB</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
@@ -6296,8 +6311,8 @@ function renderOutsideLenderFitBox(lead){
   '</div>';
 }
 var OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN"];
-function canManageOutsideLender(){ return ui.viewAs==="owner" || ui.viewAs==="lo-fiore"; }
-function canViewOutsideLender(){ return canManageOutsideLender() || ui.viewAs==="proc-erika"; }
+function canManageOutsideLender(){ return ui.viewAs==="owner" || ui.viewAs==="lo-fiore" || ui.viewAs==="proc-erika"; }
+function canViewOutsideLender(){ return canManageOutsideLender(); }
 function setOutsideLender(leadId, lender){
   var lead = leadById(leadId);
   if (!lead || !canManageOutsideLender()) return;
@@ -6321,7 +6336,7 @@ function renderOutsideLenderBox(lead, guidelineStatus){
     OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (current===l?" selected":"") + '>' + l + '</option>'; }).join("");
   return '<div class="panel panel-pad" style="margin-top:10px">' +
     '<div class="rail-title" style="margin-bottom:4px">Where This Is Being Placed</div>' +
-    '<div class="footnote" style="padding-bottom:6px">Only you, Fiore, and Erika can see this. Every other LO just sees "Needs Review."</div>' +
+    '<div class="footnote" style="padding-bottom:6px">Only you, Fiore, and Erika can set this. Every other LO just sees the current placement, read-only.</div>' +
     '<select class="select" data-action="set-outside-lender" data-lead="' + lead.id + '">' + options + '</select>' +
   '</div>';
 }
