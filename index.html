@@ -2780,7 +2780,7 @@ function leadToRow(l){
     loan_type: l.loanType, stage: l.stage, status: l.status, assigned_to: l.assignedTo, created_at: l.createdAt,
     entity_type: l.entityType, credit_score: l.creditScore, experience_deals: l.experienceDeals, liquidity: l.liquidity,
     property_address: l.propertyAddress, property_type: l.propertyType,
-    purchase_price: l.purchasePrice, current_value: l.currentValue || null, arv: l.arv, rehab_budget: l.rehabBudget, rent_estimate: l.rentEstimate,
+    purchase_price: l.purchasePrice, current_value: l.currentValue || null, current_loan_balance: l.currentLoanBalance || null, arv: l.arv, rehab_budget: l.rehabBudget, rent_estimate: l.rentEstimate,
     loan_amount: l.loanAmount, ltv: l.ltv, rate: l.rate, term_months: l.termMonths,
     exit_strategy: l.exitStrategy, close_date: l.closeDate, next_follow_up: l.nextFollowUp, next_follow_up_note: l.nextFollowUpNote,
     points_charged: l.pointsCharged, created_at_ts: l.createdAtTs, first_attempt_at: l.firstAttemptAt,
@@ -2818,7 +2818,7 @@ function rowToLead(r){
     loanType: r.loan_type, stage: r.stage, status: r.status, assignedTo: r.assigned_to, createdAt: r.created_at,
     entityType: r.entity_type, creditScore: r.credit_score, experienceDeals: r.experience_deals, liquidity: r.liquidity,
     propertyAddress: r.property_address, propertyType: r.property_type,
-    purchasePrice: r.purchase_price, currentValue: r.current_value || null, arv: r.arv, rehabBudget: r.rehab_budget, rentEstimate: r.rent_estimate,
+    purchasePrice: r.purchase_price, currentValue: r.current_value || null, currentLoanBalance: r.current_loan_balance || null, arv: r.arv, rehabBudget: r.rehab_budget, rentEstimate: r.rent_estimate,
     loanAmount: r.loan_amount, ltv: r.ltv, rate: r.rate, termMonths: r.term_months,
     exitStrategy: r.exit_strategy, closeDate: r.close_date, nextFollowUp: r.next_follow_up, nextFollowUpNote: r.next_follow_up_note,
     pointsCharged: r.points_charged, createdAtTs: r.created_at_ts, firstAttemptAt: r.first_attempt_at,
@@ -4014,7 +4014,7 @@ function setLoanDetails(leadId, loanAmount, rate, termMonths){
   showToast("Loan details updated");
   persist();
 }
-var PRICING_INPUT_KEYS = ["creditScore","purchasePrice","currentValue","rentEstimate","experienceDeals","rehabBudget","arv","propertyCount","citizenshipStatus","countryOfDomicile"];
+var PRICING_INPUT_KEYS = ["creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","experienceDeals","rehabBudget","arv","propertyCount","citizenshipStatus","countryOfDomicile"];
 var RTL_AUTO_LOAN_TYPES = ["Fix & Flip","Bridge","Ground Up Construction"];
 function setPricingInputs(leadId, fd){
   var lead = leadById(leadId);
@@ -5687,10 +5687,10 @@ function renderTeamSnapshot(){
 }
 
 var STANDALONE_PRICER_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction","Portfolio/Blanket"];
-var STANDALONE_PRICER_NUMERIC_KEYS = ["creditScore","purchasePrice","currentValue","rentEstimate","experienceDeals","rehabBudget","propertyCount","termMonths","arv"];
+var STANDALONE_PRICER_NUMERIC_KEYS = ["creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","experienceDeals","rehabBudget","propertyCount","termMonths","arv"];
 function defaultStandalonePricer(){
   return {
-    loanType:"DSCR", propertyType:"SFR", creditScore:null, purchasePrice:null, currentValue:null,
+    loanType:"DSCR", propertyType:"SFR", creditScore:null, purchasePrice:null, currentValue:null, currentLoanBalance:null,
     propertyAddress:null, ruralStatus:null, arv:null,
     rentEstimate:null, experienceDeals:null, rehabBudget:null, propertyCount:null,
     citizenshipStatus:null, transactionType:"purchase", prepayTerm:"5yr", points:"0.00", termMonths:360,
@@ -5782,6 +5782,7 @@ function renderStandalonePricer(){
       '<div class="form-row"><label>' + (isPortfolio?"Total ":"") + 'Purchase Price</label><input class="input" type="number" name="purchasePrice" data-action="standalone-pricer-field" value="' + v(sp.purchasePrice) + '"></div>' +
     '</div>' +
     (isDSCR ? ('<div class="form-row"><label>Current Value <span class="hint">(refi LTV basis)</span></label><input class="input" type="number" name="currentValue" data-action="standalone-pricer-field" value="' + v(sp.currentValue) + '"></div>') : '') +
+    ((isDSCR || isRTL) ? ('<div class="form-row"><label>Current Loan Balance <span class="hint">(if refinancing — existing lender payoff)</span></label><input class="input" type="number" name="currentLoanBalance" data-action="standalone-pricer-field" value="' + v(sp.currentLoanBalance) + '"></div>') : '') +
     '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" data-action="standalone-pricer-field" value="' + v(sp.termMonths) + '"></div>' +
     (isDSCR ? ('<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" data-action="standalone-pricer-field" value="' + v(sp.rentEstimate) + '"></div>') : '') +
     (isRTL ? ('<div class="form-two">' +
@@ -6292,6 +6293,7 @@ function renderTabScenario(lead){
     field("Citizenship Status", esc(lead.citizenshipStatus||"—")) +
     field("Purchase Price", fmtUSD(lead.purchasePrice), true) +
     (lead.currentValue ? field("Current Value", fmtUSD(lead.currentValue), true) : "") +
+    (lead.currentLoanBalance ? field("Current Loan Balance", fmtUSD(lead.currentLoanBalance), true) : "") +
     field("After-Repair Value (ARV)", fmtUSD(lead.arv), true) +
     field("Rehab / Construction Budget", fmtUSD(lead.rehabBudget), true) +
     field("Monthly Rent Estimate", fmtUSD(lead.rentEstimate), true) +
@@ -6358,6 +6360,7 @@ function renderPricingInputsEditor(lead){
       '<div class="form-row"><label>Credit Score</label><input class="input" type="number" min="300" max="850" name="creditScore" value="' + v(lead.creditScore) + '"></div>' +
       '<div class="form-row"><label>' + (isPortfolio?"Total ":"") + 'Purchase Price</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
       (isDSCR ? ('<div class="form-row"><label>Current Value <span class="hint">(refi LTV basis)</span></label><input class="input" type="number" name="currentValue" value="' + v(lead.currentValue) + '"></div>') : '') +
+      ((isDSCR || isRTL) ? ('<div class="form-row"><label>Current Loan Balance <span class="hint">(if refinancing — existing lender payoff)</span></label><input class="input" type="number" name="currentLoanBalance" value="' + v(lead.currentLoanBalance) + '"></div>') : '') +
       (isDSCR ? ('<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>') : '') +
       (isRTL ? ('<div class="form-row"><label>Investing Experience (deals)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '"></div>') : '') +
       (isRTL ? ('<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>') : '') +
