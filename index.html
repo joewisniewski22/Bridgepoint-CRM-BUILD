@@ -7952,7 +7952,11 @@ function renderAiAssistant(){
 var COMM_TYPES = ["call","text","email","notify"];
 var COMM_LABEL = { call:"Call", text:"Text", email:"Email", notify:"Notification" };
 function renderCommunications(){
-  var leads = scopedLeads();
+  // Same real ask as myEmails() above -- owner's Communications tab (calls/
+  // texts/emails) is scoped to their own assigned clients now, not the
+  // whole team's. LOs and processors already saw an appropriately scoped
+  // view via scopedLeads(); only owner's "see everything" default changes.
+  var leads = isOwner() ? state.leads.filter(function(l){ return l.assignedTo === currentUser().id; }) : scopedLeads();
   var items = [];
   leads.forEach(function(l){
     (l.activity||[]).forEach(function(a){
@@ -7980,7 +7984,7 @@ function renderCommunications(){
     '</div>';
   }).join("");
 
-  return topbar("Communications", "Every call, text, and email logged across " + (isOwner() ? "the team" : "your leads") + ", newest first.", "") +
+  return topbar("Communications", "Every call, text, and email logged across your own leads, newest first.", "") +
     '<div class="content">' + filters + (rows || '<div class="empty">No communications logged yet.</div>') + '</div>';
 }
 
@@ -8245,9 +8249,13 @@ function ensureEmailPolling(){
     refreshEmails();
   }, 15000);
 }
+// Joe's real ask (2026-09-09): "I only need to see communications ... from
+// my clients -- right now I see them all." Owner used to see every email
+// in the system here; now scoped the same way every other role already
+// is (sent by them, on a lead assigned to them, or addressed directly to
+// their own address) -- being owner no longer bypasses that.
 function myEmails(){
   var all = state.emails || [];
-  if (isOwner()) return all;
   var myAddr = (currentUser().email||"").toLowerCase();
   return all.filter(function(e){
     if (e.sentBy === ui.viewAs) return true;
