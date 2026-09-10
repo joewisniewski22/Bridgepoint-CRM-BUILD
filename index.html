@@ -4577,7 +4577,21 @@ function requestThirdPartyDoc(leadId, role){
     ];
     if (lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket"){
       bodyLines.push("", "Coverage requirements: full replacement cost, coverage equal to the lesser of 100% of insurable value or unpaid principal balance, plus 6 months of rent-loss coverage. Condos require HO6 coverage.");
-      bodyLines.push("", "Mortgagee Clause:", "BPL Mortgage, LLC ISAOA / ATIMA", "c/o Fay Servicing, LLC", "P.O. Box 7047", "Troy, MI 48007-7047");
+      // Constructive closes loans under "BPL Mortgage, LLC" in 45 states, but
+      // is required to close under "Fay Servicing, LLC" directly (as the
+      // named mortgagee, not just the mail handler) in 4 states -- confirmed
+      // against the REFERENCE tab of the live pricing engine spreadsheet
+      // (V3.1, 9/10/26). Both versions route to the same P.O. Box; only the
+      // named entity on the ISAOA/ATIMA line changes.
+      var mortgageeState = stateFromAddress(lead.propertyAddress);
+      var isFayNamedState = mortgageeState && ["CA","NV","UT","VA"].indexOf(mortgageeState) !== -1;
+      bodyLines.push("", "Mortgagee Clause:");
+      if (isFayNamedState){
+        bodyLines.push("Fay Servicing, LLC ISAOA / ATIMA");
+      } else {
+        bodyLines.push("BPL Mortgage, LLC ISAOA / ATIMA", "c/o Fay Servicing, LLC");
+      }
+      bodyLines.push("P.O. Box 7047", "Troy, MI 48007-7047");
     }
   }
   bodyLines.push("", "");
