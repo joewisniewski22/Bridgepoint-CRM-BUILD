@@ -286,6 +286,7 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .pcard.dragging{opacity:.4}
 .col.drag-over{border-color:var(--brand);background:var(--surface)}
 [data-dropzone].drag-over{outline:2px dashed var(--brand);outline-offset:-2px;background:var(--surface)}
+.link-btn{background:none;border:none;padding:0;margin:0;font:inherit;color:var(--brand);text-decoration:underline;cursor:pointer}
 .pcard .nm{font-weight:600;font-size:13px}
 .pcard .ty{font-size:12px;color:var(--ink-muted);margin-top:2px}
 .pcard .amt{font-family:var(--font-mono);font-size:12.5px;margin-top:5px}
@@ -6501,7 +6502,7 @@ function renderTabOverview(lead){
   return renderLoanPlacementBanner(lead) + viewTermSheetBtn + '<div class="field-grid">' +
     field("Borrower", esc(lead.name)) +
     field("Entity Type", esc(lead.entityType||"—")) +
-    field("Email", '<a href="mailto:' + esc(lead.email) + '">' + esc(lead.email) + '</a>') +
+    field("Email", lead.email ? ('<button type="button" class="link-btn" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline, as this file\'s loan officer">' + esc(lead.email) + '</button>') : "—") +
     field("Phone", '<a href="tel:' + esc(lead.phone) + '">' + esc(lead.phone) + '</a>') +
     field("Guarantor Address", esc(lead.guarantorAddress || (lead.rtlApp && lead.rtlApp.homeAddress) || (lead.dscrApp && lead.dscrApp.homeAddress) || "—")) +
     field("Source", esc(lead.source)) +
