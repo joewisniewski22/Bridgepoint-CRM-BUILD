@@ -285,6 +285,7 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .pcard:hover{border-color:var(--ink-faint)}
 .pcard.dragging{opacity:.4}
 .col.drag-over{border-color:var(--brand);background:var(--surface)}
+[data-dropzone].drag-over{outline:2px dashed var(--brand);outline-offset:-2px;background:var(--surface)}
 .pcard .nm{font-weight:600;font-size:13px}
 .pcard .ty{font-size:12px;color:var(--ink-muted);margin-top:2px}
 .pcard .amt{font-family:var(--font-mono);font-size:12.5px;margin-top:5px}
@@ -8075,13 +8076,14 @@ function renderAiAssistant(){
     : "Manage your own loan files by chatting — create/update files, look one up, add a note, or send a document. Marketing and team-wide actions are owner-only.";
   return topbar("AI Assistant", subtitle, "") +
     '<div class="content">' +
-      '<div class="panel panel-pad" style="max-width:760px">' +
+      '<div class="panel panel-pad" data-dropzone="ai-assistant" style="max-width:760px">' +
         '<div class="ai-chat-log" id="ai-chat-log">' + bubbles + '</div>' +
         '<form data-form="ai-command" style="display:flex;gap:8px;margin-top:12px;align-items:center">' +
           '<label class="btn btn-ghost btn-sm" style="cursor:pointer" title="Attach a term sheet (PDF or image)">📎<input type="file" name="attachment" accept="application/pdf,image/*" style="display:none"></label>' +
           '<input class="input" type="text" name="message" placeholder="e.g. create a loan file from this term sheet, assign to Fanis" style="flex:1" autocomplete="off"' + (ui.aiCommandBusy ? ' disabled' : '') + '>' +
           '<button class="btn btn-primary" type="submit"' + (ui.aiCommandBusy ? ' disabled' : '') + '>' + (ui.aiCommandBusy ? '…' : 'Send') + '</button>' +
         '</form>' +
+        '<div class="hint" style="padding-top:6px">Or just drag a file (term sheet, doc) in from your desktop and drop it anywhere in this box.</div>' +
       '</div>' +
     '</div>';
 }
@@ -9980,26 +9982,53 @@ appEl.addEventListener("dragend", function(e){
 });
 appEl.addEventListener("dragover", function(e){
   var col = e.target.closest && e.target.closest(".col[data-stage]");
-  if (!col) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = "move";
-  col.classList.add("drag-over");
+  if (col){
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    col.classList.add("drag-over");
+    return;
+  }
+  // File drag-and-drop onto a marked zone (e.g. the AI Assistant) --
+  // separate from the pipeline's lead-card dragging above, only reacts
+  // when actual OS files are being dragged (not a lead card).
+  var zone = e.target.closest && e.target.closest("[data-dropzone]");
+  if (zone && e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") !== -1){
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    zone.classList.add("drag-over");
+  }
 });
 appEl.addEventListener("dragleave", function(e){
   var col = e.target.closest && e.target.closest(".col[data-stage]");
   if (col && !col.contains(e.relatedTarget)) col.classList.remove("drag-over");
+  var zone = e.target.closest && e.target.closest("[data-dropzone]");
+  if (zone && !zone.contains(e.relatedTarget)) zone.classList.remove("drag-over");
 });
 appEl.addEventListener("drop", function(e){
   var col = e.target.closest && e.target.closest(".col[data-stage]");
-  if (!col) return;
-  e.preventDefault();
-  col.classList.remove("drag-over");
-  var leadId = e.dataTransfer.getData("text/plain");
-  var targetStage = col.dataset.stage;
-  if (!leadId || !targetStage) return;
-  var lead = leadById(leadId);
-  if (!lead || lead.stage === targetStage) return;
-  moveStage(leadId, targetStage);
+  if (col){
+    e.preventDefault();
+    col.classList.remove("drag-over");
+    var leadId = e.dataTransfer.getData("text/plain");
+    var targetStage = col.dataset.stage;
+    if (!leadId || !targetStage) return;
+    var lead = leadById(leadId);
+    if (!lead || lead.stage === targetStage) return;
+    moveStage(leadId, targetStage);
+    return;
+  }
+  var zone = e.target.closest && e.target.closest("[data-dropzone]");
+  if (zone && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length){
+    e.preventDefault();
+    zone.classList.remove("drag-over");
+    var droppedFile = e.dataTransfer.files[0];
+    if (zone.dataset.dropzone === "ai-assistant"){
+      var msgInput = zone.querySelector('input[name="message"]');
+      var msgText = (msgInput && msgInput.value) || "";
+      sendAiCommand(msgText, droppedFile);
+      if (msgInput) msgInput.value = "";
+    }
+  }
 });
 
 appEl.addEventListener("click", function(e){
