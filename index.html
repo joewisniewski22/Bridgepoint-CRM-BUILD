@@ -762,6 +762,7 @@ var UNIVERSAL_DOCS = [
   "2 Months Bank Statements",
   "Entity Formation Docs & Operating Agreement (if closing in an entity)",
   "EIN Letter (if closing in an entity)",
+  "Certificate of Good Standing (if closing in an entity)",
   "Credit Authorization Form",
   "Voided Check / Wire Instructions"
 ];
@@ -2882,10 +2883,11 @@ function leadToRow(l){
     title_requested_at: l.titleRequestedAt || null, insurance_requested_at: l.insuranceRequestedAt || null,
     entity_legal_name: l.entityLegalName || null,
     guarantor_first_name: l.guarantorFirstName || null, guarantor_middle_name: l.guarantorMiddleName || null, guarantor_last_name: l.guarantorLastName || null,
-    guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null,
+    guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null, guarantor_address: l.guarantorAddress || null,
     guarantor_ownership_pct: l.guarantorOwnershipPct || null, track_record: l.trackRecord || [],
     preferred_language: l.preferredLanguage || "en",
     citizenship_status: l.citizenshipStatus || null, country_of_domicile: l.countryOfDomicile || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
+    marital_status: l.maritalStatus || null,
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
@@ -2921,10 +2923,11 @@ function rowToLead(r){
     titleRequestedAt: r.title_requested_at || null, insuranceRequestedAt: r.insurance_requested_at || null,
     entityLegalName: r.entity_legal_name || null,
     guarantorFirstName: r.guarantor_first_name || null, guarantorMiddleName: r.guarantor_middle_name || null, guarantorLastName: r.guarantor_last_name || null,
-    guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null, guarantorSsnLast4: r.guarantor_ssn_last4 || null,
+    guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null, guarantorAddress: r.guarantor_address || null, guarantorSsnLast4: r.guarantor_ssn_last4 || null,
     guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [],
     preferredLanguage: r.preferred_language || "en",
     citizenshipStatus: r.citizenship_status || null, countryOfDomicile: r.country_of_domicile || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
+    maritalStatus: r.marital_status || null,
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
@@ -3655,7 +3658,12 @@ function previewDocumentPdf(leadId, kind){
 function exportAllDocuments(leadId){
   var lead = leadById(leadId);
   if (!lead || !sb) return;
-  var docs = (lead.documents||[]).filter(function(d){ return d.status==="received" && d.storagePath; });
+  var docs = [];
+  (lead.documents||[]).forEach(function(d){
+    if (d.status!=="received") return;
+    if (d.storagePath) docs.push({ fileName:d.fileName, storagePath:d.storagePath, name:d.name });
+    (d.files||[]).forEach(function(f){ docs.push({ fileName:f.fileName, storagePath:f.storagePath, name:d.name }); });
+  });
   if (!docs.length){ showToast("No uploaded documents to export yet"); return; }
   if (typeof JSZip === "undefined"){ showToast("Export tool didn't load — try refreshing the page"); return; }
   showToast("Zipping " + docs.length + " document(s)…");
@@ -4183,6 +4191,7 @@ function quickEditGuarantor(leadId, fd){
   if (newSsn) saveGuarantorSsn(leadId, newSsn); // never in the bulk sync -- encrypted server-side, see saveGuarantorSsn
   lead.guarantorPhone = fd.get("guarantorPhone") || null;
   lead.guarantorEmail = fd.get("guarantorEmail") || null;
+  lead.guarantorAddress = fd.get("guarantorAddress") || null;
   lead.entityLegalName = fd.get("entityLegalName") || null;
   var ownPct = fd.get("guarantorOwnershipPct");
   lead.guarantorOwnershipPct = (ownPct===null||ownPct==="") ? null : Number(ownPct);
@@ -4578,17 +4587,46 @@ function requestThirdPartyDoc(leadId, role){
     showToast("Couldn't send the request — try again");
   });
 }
-function requestDoc(leadId, name){
+function requestDoc(leadId, name, file){
   var lead = leadById(leadId);
   if (!lead || !name) return;
   lead.documents = lead.documents || [];
-  lead.documents.push({ name:name, status:"requested", requestedAt: todayISO() });
+  lead.documents.push({ name:name, status:"requested", requestedAt: todayISO(), referenceFileUrl:null, referenceFileName:null });
+  var docIdx = lead.documents.length - 1;
   lead.activity = lead.activity || [];
   var d = todayISO();
   lead.activity.push({ date:d, type:"document", text:"Requested document: " + name, author: currentUser().name });
   lead.activity.push({ date:d, type:"notify", text:"Emailed and texted " + lead.name + " about the new document request — now showing in their borrower portal.", author:"System" });
   showToast("Requested " + name + " — borrower notified by email & text");
   persist();
+  if (file) uploadDocRequestReferenceFile(leadId, docIdx, file, currentUser().name);
+}
+// Lets staff attach an example/blank form (e.g. a blank ACH form, a sample
+// lease) to a document request, so the borrower knows exactly what to send
+// back instead of guessing from the name alone.
+function uploadDocRequestReferenceFile(leadId, idx, file, actorLabel){
+  var lead = leadById(leadId);
+  if (!lead || !lead.documents[idx] || !file || !sb) return;
+  var doc = lead.documents[idx];
+  var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  var path = leadId + "/docreq-" + Date.now() + "-" + safeName;
+  sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+    if (res.error){ showToast("Reference file upload failed — try again"); return; }
+    doc.referenceFileUrl = path;
+    doc.referenceFileName = file.name;
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"document", text: actorLabel + " attached a reference file to the request for " + doc.name + ": " + file.name, author: actorLabel });
+    persist();
+  });
+}
+function viewDocRequestReferenceFile(leadId, idx){
+  var lead = leadById(leadId);
+  var doc = lead && lead.documents[idx];
+  if (!doc || !doc.referenceFileUrl || !sb) return;
+  sb.storage.from("lead-documents").createSignedUrl(doc.referenceFileUrl, 3600).then(function(res){
+    if (res.error || !res.data){ showToast("Couldn't open the file — try again"); return; }
+    window.open(res.data.signedUrl, "_blank");
+  });
 }
 // Only loads the checklist for STAFF to see what's needed -- status
 // "suggested", never "requested" -- so nothing shows in the borrower
@@ -4707,6 +4745,13 @@ function undoDocNA(leadId, idx){
   showToast("Back to requested");
   persist();
 }
+// A single checklist item (e.g. "Signed Lease Agreement" or "Entity
+// Formation Docs") often needs more than one file -- multiple leases,
+// multiple entity documents, etc. The first upload becomes the primary
+// file (doc.storagePath/fileName, unchanged -- everything else that reads
+// a document, like AI review, MISMO export, and the ZIP export, keeps
+// working off that). Every upload after that appends to doc.files instead
+// of overwriting it, so nothing already on file is ever lost.
 function uploadLeadDocument(leadId, idx, file, actorLabel){
   var lead = leadById(leadId);
   if (!lead || !lead.documents[idx] || !file || !sb) return;
@@ -4718,14 +4763,39 @@ function uploadLeadDocument(leadId, idx, file, actorLabel){
     if (res.error){ showToast("Upload failed — try again"); return; }
     doc.status = "received";
     doc.receivedAt = todayISO();
-    doc.fileName = file.name;
-    doc.storagePath = path;
     lead.activity = lead.activity || [];
+    if (!doc.storagePath){
+      doc.fileName = file.name;
+      doc.storagePath = path;
+    } else {
+      doc.files = doc.files || [];
+      doc.files.push({ fileName: file.name, storagePath: path, uploadedAt: todayISO(), uploadedBy: actorLabel });
+    }
     lead.activity.push({ date:todayISO(), type:"document", text: actorLabel + " uploaded: " + doc.name + " (" + file.name + ")", author: actorLabel });
     showToast("Uploaded " + doc.name);
     persist();
     requestAiDocReview(lead, doc);
   });
+}
+function viewExtraDocumentFile(leadId, idx, fileIdx){
+  var lead = leadById(leadId);
+  var doc = lead && lead.documents[idx];
+  var f = doc && doc.files && doc.files[fileIdx];
+  if (!f || !sb) return;
+  sb.storage.from("lead-documents").createSignedUrl(f.storagePath, 3600).then(function(res){
+    if (res.error || !res.data){ showToast("Couldn't open the file — try again"); return; }
+    window.open(res.data.signedUrl, "_blank");
+  });
+}
+function deleteExtraDocumentFile(leadId, idx, fileIdx){
+  var lead = leadById(leadId);
+  var doc = lead && lead.documents[idx];
+  if (!doc || !doc.files || !doc.files[fileIdx]) return;
+  var removed = doc.files.splice(fileIdx, 1)[0];
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:todayISO(), type:"document", text: currentUser().name + " removed a file from " + doc.name + ": " + removed.fileName, author: currentUser().name });
+  showToast("Removed " + removed.fileName);
+  persist();
 }
 function addUnderwritingCondition(leadId, description, file){
   var lead = leadById(leadId);
@@ -5558,9 +5628,12 @@ function buildBorrowerPortalHTML(lead, opts){
   var docs = visibleDocs.map(function(x){
     var d = x.d, i = x.i;
     var received = d.status==="received";
-    return '<div class="doc-row"><div><div>' + L(d.name) + '</div><div class="cell-sub">' + (received ? (L("Received") + " " + fmtDate(d.receivedAt)) : L("Needed to move forward")) + '</div></div>' +
-      (received ? '<span class="badge badge-forest">' + L("Received") + '</span>' :
-        '<label class="btn btn-sm btn-primary" style="cursor:pointer">' + L("Upload") + '<input type="file" style="display:none" data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label>') +
+    var extraCount = (d.files||[]).length;
+    var refLink = d.referenceFileUrl ? ('<div style="margin-top:4px"><button class="btn btn-sm btn-ghost" type="button" data-action="view-doc-request-reference" data-lead="' + lead.id + '" data-idx="' + i + '">📎 ' + L("Download example / form") + '</button></div>') : "";
+    return '<div class="doc-row"><div><div>' + L(d.name) + '</div><div class="cell-sub">' + (received ? (L("Received") + " " + fmtDate(d.receivedAt) + (extraCount ? (" · " + (extraCount+1) + " " + L("files")) : "")) : L("Needed to move forward")) + '</div>' + refLink + '</div>' +
+      (received
+        ? ('<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span class="badge badge-forest">' + L("Received") + '</span><label class="btn btn-sm btn-ghost" style="cursor:pointer">' + L("+ Add Another File") + '<input type="file" style="display:none" data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label></div>')
+        : '<label class="btn btn-sm btn-primary" style="cursor:pointer">' + L("Upload") + '<input type="file" style="display:none" data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label>') +
       '</div>';
   }).join("");
   var docsCard = '<div class="portal-section">' +
@@ -6430,6 +6503,7 @@ function renderTabOverview(lead){
     field("Entity Type", esc(lead.entityType||"—")) +
     field("Email", '<a href="mailto:' + esc(lead.email) + '">' + esc(lead.email) + '</a>') +
     field("Phone", '<a href="tel:' + esc(lead.phone) + '">' + esc(lead.phone) + '</a>') +
+    field("Guarantor Address", esc(lead.guarantorAddress || (lead.rtlApp && lead.rtlApp.homeAddress) || (lead.dscrApp && lead.dscrApp.homeAddress) || "—")) +
     field("Source", esc(lead.source)) +
     field("Loan Officer", esc(userName(lead.assignedTo))) +
     field("Credit Score", lead.creditScore ? lead.creditScore : "—", true) +
@@ -6447,6 +6521,7 @@ function renderTabOverview(lead){
     '<div class="field"><label>Guarantor SSN</label><input class="input" type="password" autocomplete="off" name="guarantorSsn" value="" placeholder="' + (lead.guarantorSsnLast4 ? ("On file, ending " + lead.guarantorSsnLast4 + " — leave blank to keep") : "XXX-XX-XXXX") + '"></div>' +
     '<div class="field"><label>Guarantor Phone</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||"") + '" placeholder="' + esc(lead.phone||"") + '"></div>' +
     '<div class="field"><label>Guarantor Email</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||"") + '" placeholder="' + esc(lead.email||"") + '"></div>' +
+    '<div class="field" style="grid-column:1/-1"><label>Guarantor Physical / Mailing Address</label><input class="input" name="guarantorAddress" value="' + esc(lead.guarantorAddress || (lead.rtlApp && lead.rtlApp.homeAddress) || (lead.dscrApp && lead.dscrApp.homeAddress) || "") + '" placeholder="Street Address, City, State, ZIP"></div>' +
     '<div class="field"><label>Entity Legal Name</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
     '<div class="field"><label>Guarantor Ownership %</label><input class="input" type="number" min="0" max="100" name="guarantorOwnershipPct" value="' + (lead.guarantorOwnershipPct!=null?lead.guarantorOwnershipPct:"") + '"></div>' +
     '<div class="field" style="align-self:end"><button class="btn btn-sm btn-primary" type="submit">Save</button></div>' +
@@ -6905,7 +6980,7 @@ function deleteDocument(leadId, idx){
   var name = doc.name;
   if (!window.confirm('Delete "' + name + '"? It will need to be re-uploaded — the current file and its AI review will be cleared.')) return;
   doc.status = "requested";
-  doc.storagePath = null; doc.fileName = null; doc.receivedAt = null; doc.aiReview = null; doc.staffOnly = false;
+  doc.storagePath = null; doc.fileName = null; doc.receivedAt = null; doc.aiReview = null; doc.staffOnly = false; doc.files = [];
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"system", text: name + " deleted — needs to be re-uploaded", author: currentUser().name });
   showToast(name + " deleted");
@@ -6971,9 +7046,14 @@ function renderTabDocuments(lead){
       aiNote = '<div class="cell-sub" style="margin-top:4px;max-width:360px">' + esc(d.aiReview.note) + '</div>';
     }
     var viewBtn = "", uploadBtn = "", markBtn = "", deleteBtn = "", naBtn = "", undoNaBtn = "", requestBtn = "";
+    var refBtn = d.referenceFileUrl ? ('<button class="btn btn-sm btn-ghost" data-action="view-doc-request-reference" data-lead="' + lead.id + '" data-idx="' + i + '" title="The example/blank form attached when this was requested">📎 ' + esc(d.referenceFileName||"Reference File") + '</button>') : "";
+    // Once a doc is received, a second file input stays available (relabeled)
+    // so a checklist item that needs several files -- e.g. multiple lease
+    // agreements, or a full set of entity docs -- can keep collecting them.
     if (d.status==="received"){
       if (d.storagePath) viewBtn = '<button class="btn btn-sm" data-action="view-lead-document" data-lead="' + lead.id + '" data-idx="' + i + '">View File</button>';
       if (canManage) deleteBtn = '<button class="btn btn-sm btn-ghost" style="color:var(--c-rust)" data-action="delete-document" data-lead="' + lead.id + '" data-idx="' + i + '">Delete</button>';
+      uploadBtn = '<label class="btn btn-sm btn-ghost" style="cursor:pointer">+ Add Another File<input type="file" style="display:none" data-action="upload-doc-staff" data-lead="' + lead.id + '" data-idx="' + i + '"></label>';
     } else if (d.status==="waived"){
       undoNaBtn = '<button class="btn btn-sm btn-ghost" data-action="undo-doc-na" data-lead="' + lead.id + '" data-idx="' + i + '">Undo</button>';
     } else {
@@ -6984,14 +7064,22 @@ function renderTabDocuments(lead){
       markBtn = '<button class="btn btn-sm btn-ghost" data-action="mark-doc-received" data-lead="' + lead.id + '" data-idx="' + i + '">Mark Received (no file)</button>';
       naBtn = '<button class="btn btn-sm btn-ghost" data-action="mark-doc-na" data-lead="' + lead.id + '" data-idx="' + i + '" title="Doesn\'t apply to this deal — stops it counting as missing, without asking the borrower for something they can\'t provide">Mark N/A</button>';
     }
+    var extraFiles = (d.files||[]).map(function(f, fi){
+      return '<div class="cell-sub" style="margin-top:4px;display:flex;gap:8px;align-items:center">' +
+        '<span>· ' + esc(f.fileName) + '</span>' +
+        '<button class="btn btn-sm btn-ghost" type="button" data-action="view-extra-document-file" data-lead="' + lead.id + '" data-idx="' + i + '" data-fileidx="' + fi + '">View</button>' +
+        (canManage ? ('<button class="btn btn-sm btn-ghost" type="button" style="color:var(--c-rust)" data-action="delete-extra-document-file" data-lead="' + lead.id + '" data-idx="' + i + '" data-fileidx="' + fi + '">Remove</button>') : "") +
+      '</div>';
+    }).join("");
     return '<div class="doc-row" style="align-items:flex-start"><div><div>' + esc(d.name) + '</div>' +
       '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):""))
         : d.status==="waived" ? ("Marked N/A " + fmtDate(d.waivedAt) + " by " + esc(d.waivedBy||""))
         : d.status==="suggested" ? "Not yet requested — the borrower can't see this until you click Request. Upload/Mark Received directly if you already have it."
         : "A client may have emailed this directly — upload it here if so.") + '</div>' +
+      extraFiles +
       aiNote +
       '</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + viewBtn + requestBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + refBtn + viewBtn + requestBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
   }).join("");
   var uwRows = (lead.uwConditions||[]).map(function(c){
     var statusBadge = c.status==="received" ? '<span class="badge badge-forest">Response Received</span>' : '<span class="badge badge-slate">Open</span>';
@@ -7016,9 +7104,16 @@ function renderTabDocuments(lead){
       '</form>'
     ) : '');
   return exportBar + scanBar + issuesPanel + requestAllBar + (rows || '<div class="empty">No documents on the checklist yet.</div>') +
-    '<form data-form="request-doc" data-lead="' + lead.id + '" style="display:flex;gap:8px;margin-top:14px">' +
-      '<input class="input" name="name" placeholder="Document name (e.g. Bank Statements)" style="flex:1">' +
-      '<button class="btn btn-sm" type="submit">Request Document</button>' +
+    '<form data-form="request-doc" data-lead="' + lead.id + '" style="margin-top:14px">' +
+      '<div style="display:flex;gap:8px">' +
+        '<input class="input" name="name" placeholder="Document name (e.g. Bank Statements)" style="flex:1">' +
+        '<button class="btn btn-sm" type="submit">Request Document</button>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">' +
+        '<label class="btn btn-sm btn-ghost" style="cursor:pointer">Attach a file (optional)<input type="file" name="file" style="display:none" data-action="request-doc-file-select"></label>' +
+        '<span class="hint" id="request-doc-filename-' + lead.id + '"></span>' +
+      '</div>' +
+      '<div class="hint" style="padding-top:2px">e.g. a blank form to fill out and return, or an example of what you need.</div>' +
     '</form>' +
     uwSection;
 }
@@ -8979,6 +9074,9 @@ function buildApplicationFieldsHTML(lead, lang){
       '</select></div>' +
       '<div class="form-row"><label>' + L("Investing Experience (deals completed)") + '</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '" data-action="update-track-record-count" data-lang="' + lang + '"></div>' +
     '</div>' +
+    (lead.loanType === "Mixed-Use" ? ('<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="maritalStatus">' +
+      ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (lead.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
+    '</select></div>') : "") +
     '<div class="form-row"><label>' + L("Country of Citizenship") + ' <span class="hint">(' + L("if Foreign National") + ')</span></label><input class="input" name="countryOfDomicile" value="' + esc(lead.countryOfDomicile||"") + '" placeholder="' + L("e.g. Mexico") + '"></div>' +
     '<div class="form-row"><label>' + L("Liquidity / Reserves") + '</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
     '<div class="form-row"><label>' + L("Property Address") + '</label>' +
@@ -9297,7 +9395,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
     '</div>' +
     '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="rtlHomeAddress" value="' + esc(r.homeAddress||"") + '"></div>' +
     '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="rtlMaritalStatus">' +
-      ["Single","Married","Separated"].map(function(o){ return '<option value="' + o + '"' + (r.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
+      ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (r.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>' +
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Co-Applicant (leave blank if none)") + '</b></div>' +
@@ -9541,7 +9639,7 @@ function buildDscrApplicationFieldsHTML(lead, lang){
     '</div>' +
     '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="dscrHomeAddress" value="' + esc(d.homeAddress||"") + '"></div>' +
     '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="dscrMaritalStatus">' +
-      ["Single","Married","Separated"].map(function(o){ return '<option value="' + o + '"' + (d.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
+      ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (d.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>' +
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Co-Applicant (leave blank if none)") + '</b></div>' +
@@ -10104,6 +10202,9 @@ appEl.addEventListener("click", function(e){
   else if (action === "merge-duplicate"){ mergeLeadsAction(t.dataset.lead, t.dataset.dup); }
   else if (action === "delete-document"){ deleteDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "view-extra-document-file"){ viewExtraDocumentFile(t.dataset.lead, parseInt(t.dataset.idx,10), parseInt(t.dataset.fileidx,10)); }
+  else if (action === "delete-extra-document-file"){ deleteExtraDocumentFile(t.dataset.lead, parseInt(t.dataset.idx,10), parseInt(t.dataset.fileidx,10)); }
+  else if (action === "view-doc-request-reference"){ viewDocRequestReferenceFile(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-uw-condition-file"){ viewUnderwritingConditionFile(t.dataset.lead, t.dataset.condid, t.dataset.borrower==="1"); }
   else if (action === "ai-review-doc"){ runAiDocReview(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
   else if (action === "scan-all-documents"){ scanAllDocuments(t.dataset.lead); render(); }
@@ -10304,6 +10405,11 @@ appEl.addEventListener("change", function(e){
     var uwForm = t.closest("form");
     var uwSpan = uwForm && document.getElementById("uw-condition-filename-" + uwForm.dataset.lead);
     if (uwSpan) uwSpan.textContent = uwFile ? uwFile.name : "";
+  } else if (action === "request-doc-file-select"){
+    var reqDocFile = t.files && t.files[0];
+    var reqDocForm = t.closest("form");
+    var reqDocSpan = reqDocForm && document.getElementById("request-doc-filename-" + reqDocForm.dataset.lead);
+    if (reqDocSpan) reqDocSpan.textContent = reqDocFile ? reqDocFile.name : "";
   } else if (action === "upload-doc-staff"){
     var staffFile = t.files && t.files[0];
     if (staffFile) uploadLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10), staffFile, currentUser().name);
@@ -10467,6 +10573,7 @@ appEl.addEventListener("submit", function(e){
       entityLegalName: fd.get("entityLegalName"),
       citizenshipStatus: fd.get("citizenshipStatus"),
       countryOfDomicile: fd.get("countryOfDomicile"),
+      maritalStatus: fd.get("maritalStatus"),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
@@ -10516,6 +10623,7 @@ appEl.addEventListener("submit", function(e){
       entityLegalName: fd.get("entityLegalName"),
       citizenshipStatus: fd.get("citizenshipStatus"),
       countryOfDomicile: fd.get("countryOfDomicile"),
+      maritalStatus: fd.get("maritalStatus"),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
@@ -10559,8 +10667,12 @@ appEl.addEventListener("submit", function(e){
     addNote(form.dataset.lead, fd.get("note"));
     form.reset();
   } else if (type === "request-doc"){
-    requestDoc(form.dataset.lead, fd.get("name"));
+    var reqDocFileInput = form.querySelector('[name="file"]');
+    var reqDocFile = reqDocFileInput && reqDocFileInput.files && reqDocFileInput.files[0];
+    requestDoc(form.dataset.lead, fd.get("name"), reqDocFile || null);
     form.reset();
+    var reqDocSpanReset = document.getElementById("request-doc-filename-" + form.dataset.lead);
+    if (reqDocSpanReset) reqDocSpanReset.textContent = "";
   } else if (type === "property-address"){
     setPropertyAddress(form.dataset.lead, fd.get("propertyAddress"));
   } else if (type === "compose-email"){
