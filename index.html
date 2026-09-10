@@ -1143,7 +1143,19 @@ function evaluatePricing(lead, inputs){
 function syncPricerRateToLead(leadId){
   var lead = leadById(leadId);
   if (!lead || !canEditApplication(lead)) return null;
-  var inputs = (ui.pricerInputs && ui.pricerInputs[leadId]) || {};
+  // Real bug found 2026-09-10: this runs on first opening the Loan
+  // Scenario tab, BEFORE renderPricer() has ever lazily initialized
+  // ui.pricerInputs[leadId] -- falling back to {} here meant
+  // evaluatePricing() silently defaulted to Purchase/5yr-Prepay
+  // regardless of the lead's actual saved transaction type/prepay term,
+  // computed a wrong par rate, and wrote it to lead.rate permanently
+  // (never recalculated again, since a non-null rate is never clobbered).
+  // Must fall back to the LEAD's own saved values, same as renderPricer()
+  // does when it initializes this same object.
+  var inputs = (ui.pricerInputs && ui.pricerInputs[leadId]) || {
+    points:"0.00", transactionType: lead.transactionType||"purchase",
+    prepayTerm: lead.prepayTerm||"5yr", propertyType: lead.propertyType||"SFR"
+  };
   var result = evaluatePricing(lead, inputs);
   if (!result || result.ineligible) return null;
   if (lead.rate != null) { render(); return result; } // never clobber a rate someone already locked in via Loan Details
