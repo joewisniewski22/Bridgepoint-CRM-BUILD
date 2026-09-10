@@ -419,9 +419,17 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
    Toast
 --------------------------------------------------------------------- */
 .toast{
-  position:fixed;bottom:20px;right:20px;background:var(--ink);color:var(--bg);padding:10px 16px;
-  border-radius:8px;font-size:13px;box-shadow:var(--shadow-modal);z-index:80;
+  position:fixed;top:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:14px 22px;
+  border-radius:10px;font-size:15px;font-weight:600;box-shadow:var(--shadow-modal);z-index:200;
+  border-left:5px solid var(--c-forest);display:flex;align-items:center;gap:10px;
+  animation:toast-in .25s ease-out, toast-out .3s ease-in 2.9s forwards;
+  max-width:min(520px,90vw);
 }
+.toast::before{content:"✓";display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--c-forest);color:var(--bg);font-size:13px;font-weight:800;flex:0 0 auto}
+.toast-error{border-left-color:var(--c-rust)}
+.toast-error::before{content:"✕";background:var(--c-rust)}
+@keyframes toast-in{from{opacity:0;transform:translate(-50%,-12px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes toast-out{from{opacity:1}to{opacity:0}}
 
 @media (max-width:860px){
   .sidebar{position:static;height:auto;width:100%;flex:0 0 auto}
@@ -3374,11 +3382,16 @@ function buildFullDocument(st){
     "</body>\n</html>";
 }
 var toastTimer = null;
-function showToast(msg){
+// Joe's rule (2026-09-10): every click needs an unmistakable on-screen
+// confirmation, not a small toast easy to miss off in a corner. This is
+// the one shared confirmation surface for the whole app (buttons, forms,
+// uploads, requests, etc.) -- see the .toast/.toast-error CSS.
+function showToast(msg, isError){
   ui.toast = msg;
+  ui.toastType = isError || /couldn.?t|can.?t\b|failed|error/i.test(msg) ? "error" : "success";
   render();
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(function(){ ui.toast = null; render(); }, 2600);
+  toastTimer = setTimeout(function(){ ui.toast = null; render(); }, 3200);
 }
 
 function logCall(leadId, outcome, notes){
@@ -4617,6 +4630,7 @@ function uploadDocRequestReferenceFile(leadId, idx, file, actorLabel){
     doc.referenceFileName = file.name;
     lead.activity = lead.activity || [];
     lead.activity.push({ date: todayISO(), type:"document", text: actorLabel + " attached a reference file to the request for " + doc.name + ": " + file.name, author: actorLabel });
+    showToast("Attached " + file.name + " to " + doc.name);
     persist();
   });
 }
@@ -5412,21 +5426,21 @@ function render(){
   }
   if (ui.publicApply){
     app.innerHTML = renderPublicApply();
-    var toastHostPA = ui.toast ? ('<div class="toast" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+    var toastHostPA = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
     app.insertAdjacentHTML("beforeend", toastHostPA);
     initSignaturePads();
     return;
   }
   if (ui.publicBooking){
     app.innerHTML = renderPublicBooking();
-    var toastHostPB = ui.toast ? ('<div class="toast" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+    var toastHostPB = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
     app.insertAdjacentHTML("beforeend", toastHostPB);
     return;
   }
   if (!ui.loggedIn){
     app.innerHTML = renderLogin();
     var toastHost0 = document.getElementById("toast-host");
-    var toastHTML0 = ui.toast ? ('<div class="toast" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+    var toastHTML0 = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
     app.insertAdjacentHTML("beforeend", toastHTML0);
     return;
   }
@@ -5446,7 +5460,7 @@ function render(){
     if (mm) app.insertAdjacentHTML("beforeend", mm);
   }
   var toastHost = document.getElementById("toast-host");
-  var toastHTML = ui.toast ? ('<div class="toast" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+  var toastHTML = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
   app.insertAdjacentHTML("beforeend", toastHTML);
   initSignaturePads();
   initPlacesAutocomplete();
@@ -7072,11 +7086,12 @@ function renderTabDocuments(lead){
         (canManage ? ('<button class="btn btn-sm btn-ghost" type="button" style="color:var(--c-rust)" data-action="delete-extra-document-file" data-lead="' + lead.id + '" data-idx="' + i + '" data-fileidx="' + fi + '">Remove</button>') : "") +
       '</div>';
     }).join("");
-    return '<div class="doc-row" style="align-items:flex-start"><div><div>' + esc(d.name) + '</div>' +
+    var rowIsDropzone = d.status==="suggested" || d.status==="requested";
+    return '<div class="doc-row"' + (rowIsDropzone ? (' data-dropzone="checklist-doc-file" data-lead="' + lead.id + '" data-idx="' + i + '"') : '') + ' style="align-items:flex-start"><div><div>' + esc(d.name) + '</div>' +
       '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):""))
         : d.status==="waived" ? ("Marked N/A " + fmtDate(d.waivedAt) + " by " + esc(d.waivedBy||""))
-        : d.status==="suggested" ? "Not yet requested — the borrower can't see this until you click Request. Upload/Mark Received directly if you already have it."
-        : "A client may have emailed this directly — upload it here if so.") + '</div>' +
+        : d.status==="suggested" ? "Not yet requested — the borrower can't see this until you click Request. Upload/Mark Received directly if you already have it, or drag a blank form in to attach it as an example."
+        : "A client may have emailed this directly — upload it here if so. Drag a file in to attach it as a reference/example for the borrower.") + '</div>' +
       extraFiles +
       aiNote +
       '</div>' +
@@ -7105,7 +7120,7 @@ function renderTabDocuments(lead){
       '</form>'
     ) : '');
   return exportBar + scanBar + issuesPanel + requestAllBar + (rows || '<div class="empty">No documents on the checklist yet.</div>') +
-    '<form data-form="request-doc" data-lead="' + lead.id + '" style="margin-top:14px">' +
+    '<form data-form="request-doc" data-lead="' + lead.id + '" data-dropzone="request-doc-file" style="margin-top:14px;padding:10px;border:1px dashed var(--border);border-radius:8px">' +
       '<div style="display:flex;gap:8px">' +
         '<input class="input" name="name" placeholder="Document name (e.g. Bank Statements)" style="flex:1">' +
         '<button class="btn btn-sm" type="submit">Request Document</button>' +
@@ -7114,7 +7129,7 @@ function renderTabDocuments(lead){
         '<label class="btn btn-sm btn-ghost" style="cursor:pointer">Attach a file (optional)<input type="file" name="file" style="display:none" data-action="request-doc-file-select"></label>' +
         '<span class="hint" id="request-doc-filename-' + lead.id + '"></span>' +
       '</div>' +
-      '<div class="hint" style="padding-top:2px">e.g. a blank form to fill out and return, or an example of what you need.</div>' +
+      '<div class="hint" style="padding-top:2px">e.g. a blank form to fill out and return, or an example of what you need — click Attach, or just drag a file in anywhere on this box.</div>' +
     '</form>' +
     uwSection;
 }
@@ -10126,6 +10141,18 @@ appEl.addEventListener("drop", function(e){
       var msgText = (msgInput && msgInput.value) || "";
       sendAiCommand(msgText, droppedFile);
       if (msgInput) msgInput.value = "";
+    } else if (zone.dataset.dropzone === "request-doc-file"){
+      var reqFileInput = zone.querySelector('input[name="file"]');
+      if (reqFileInput){
+        var reqDt = new DataTransfer();
+        reqDt.items.add(droppedFile);
+        reqFileInput.files = reqDt.files;
+        var reqSpan = document.getElementById("request-doc-filename-" + zone.dataset.lead);
+        if (reqSpan) reqSpan.textContent = droppedFile.name;
+        showToast("Attached " + droppedFile.name);
+      }
+    } else if (zone.dataset.dropzone === "checklist-doc-file"){
+      uploadDocRequestReferenceFile(zone.dataset.lead, parseInt(zone.dataset.idx,10), droppedFile, currentUser().name);
     }
   }
 });
