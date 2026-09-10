@@ -8565,6 +8565,13 @@ function sendCampaign(){
 }
 function modalComposeEmail(prefill){
   prefill = prefill || {};
+  // Matches sendComposedEmail()'s own logic exactly -- a lead attached
+  // means it sends as that lead's assigned LO, not whoever's composing.
+  var ceLead = prefill.leadId ? leadById(prefill.leadId) : null;
+  var ceFrom = ceLead ? docLoanOfficer(ceLead) : currentUser();
+  var ceFromNote = (ceLead && ceFrom.id !== currentUser().id)
+    ? ("Sends for real as " + esc(ceFrom.name) + " (" + esc(ceFrom.email||"") + ") — this file's loan officer, not your own address.")
+    : ("Sends for real from your own address (" + esc(currentUser().email||"") + ").");
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
     '<div class="modal" data-stop="1">' +
       '<div class="modal-head"><h3>Compose Email</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
@@ -8573,7 +8580,7 @@ function modalComposeEmail(prefill){
         '<div class="form-row"><label>To</label><input class="input" type="email" name="to" value="' + esc(prefill.to||"") + '" required></div>' +
         '<div class="form-row"><label>Subject</label><input class="input" name="subject" value="' + esc(prefill.subject||"") + '" required></div>' +
         '<div class="form-row"><label>Message</label><textarea class="textarea" name="body" rows="8" required>' + esc(prefill.body||"") + '</textarea></div>' +
-        '<div class="footnote" style="padding:0">Sends for real from your own address (' + esc(currentUser().email||"") + ').</div>' +
+        '<div class="footnote" style="padding:0">' + ceFromNote + '</div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Send</button></div>' +
       '</form>' +
