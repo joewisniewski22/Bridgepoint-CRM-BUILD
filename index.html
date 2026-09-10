@@ -6920,9 +6920,11 @@ function renderTabDocuments(lead){
   var missing = missingRequiredDocs(lead);
   var hasIssues = flaggedCount > 0 || missing.length > 0;
 
-  var exportBar = receivedCount ? (
-    '<div style="margin-bottom:10px"><button class="btn btn-sm btn-ghost" type="button" data-action="export-all-documents" data-lead="' + lead.id + '" title="Downloads every uploaded document on this file as one ZIP, to save internally">⬇ Export All Documents (ZIP)</button></div>'
-  ) : "";
+  // Always visible (not just when receivedCount > 0) so it's discoverable
+  // regardless of a file's document state -- Joe couldn't find it when it
+  // was conditionally hidden. Clicking with nothing uploaded yet still
+  // works, just shows a plain "nothing to export yet" toast.
+  var exportBar = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-ghost" type="button" data-action="export-all-documents" data-lead="' + lead.id + '" title="Downloads every uploaded document on this file as one ZIP, to save internally">⬇ Export All Documents (ZIP)' + (receivedCount ? (' — ' + receivedCount) : '') + '</button></div>';
 
   var scanBar = "";
   if (canAiReview){
