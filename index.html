@@ -2598,7 +2598,10 @@ function reallySendSchedulingLink(leadId){
   if (!lead) return;
   if (!sb){ showToast("Send service unavailable"); return; }
   if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
-  var me = currentUser();
+  // Joe's rule (2026-09-10): always the assigned LO's identity -- and
+  // their real booking calendar, not whoever happened to click send --
+  // so a client always books time with their actual loan officer.
+  var me = docLoanOfficer(lead);
   var link = bookingLinkFor(me.id);
   var isEs = (lead.preferredLanguage||"en") === "es";
   var firstName = (lead.name||"").split(" ")[0];
@@ -3734,16 +3737,6 @@ function logCreditOrder(leadId){
   lead.activity.push({ date:d, type:"credit", text:"Opened Xactus to order credit for " + lead.name, author: currentUser().name });
   persist();
 }
-function logEmailSent(leadId){
-  var lead = leadById(leadId);
-  if (!lead) return;
-  var d = todayISO();
-  lead.activity = lead.activity || [];
-  lead.activity.push({ date:d, type:"email", text:"Emailed " + lead.name, author: currentUser().name });
-  lead.lastContactAt = d;
-  persist();
-}
-
 function moveStage(leadId, target){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -7150,7 +7143,7 @@ function renderRail(lead){
       '<div class="contact-row">' +
         '<a class="btn btn-sm" href="' + esc(quoDialLink(lead.phone, currentUser().quoPhoneNumber) || ("tel:" + (lead.phone||"").replace(/[^0-9+]/g,""))) + '">Call</a>' +
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
-        '<a class="btn btn-sm" href="mailto:' + esc(lead.email||"") + '?subject=' + encodeURIComponent("Bridgepoint Lending — " + lead.loanType) + '&body=' + encodeURIComponent(defaultOutreachMessage(lead)) + '" data-action="log-email" data-lead="' + lead.id + '">Email</a>' +
+        '<button class="btn btn-sm" type="button" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline">Email</button>' +
         '<button class="btn btn-sm" data-action="send-scheduling-link" data-lead="' + lead.id + '" title="Sends your personal booking link by email and text so they can grab a time with you directly">📅 Schedule Appointment</button>' +
         // Always visible, regardless of stage or role -- separate from
         // "Take Application by Phone" below, which is the edit action and
@@ -8416,7 +8409,13 @@ function openMailto(to, subject, body){
 }
 function sendComposedEmail(leadId, to, subject, body){
   if (!sb || !to || !subject || !body) return;
-  var me = currentUser();
+  // Joe's rule (2026-09-10): an email sent from someone else's file needs
+  // to appear as if it came from THAT loan officer, not whoever's actually
+  // clicking send -- matches how reallySendDocumentBoth already works.
+  // Only falls back to the actual sender for a general compose with no
+  // lead attached (nobody else's identity to borrow).
+  var lead = leadId ? leadById(leadId) : null;
+  var me = lead ? docLoanOfficer(lead) : currentUser();
   showToast("Sending…");
   sb.functions.invoke("send-email", { body: {
     leadId: leadId || null, to: to, subject: subject, text: body,
@@ -10028,6 +10027,20 @@ appEl.addEventListener("click", function(e){
   else if (action === "confirm-team-message"){ sendTeamMessage(); }
   else if (action === "confirm-campaign"){ sendCampaign(); }
   else if (action === "request-coaching-tip"){ requestCoachingTip(t.dataset.lead); }
+  // Joe's rule (2026-09-10): "Email" on a lead should use the CRM's own
+  // internal send pipeline, not pop open whoever's personal mail client
+  // (Outlook, for most of us) -- same escape hatch Erika already has for
+  // every other compose entry point, since she genuinely prefers Outlook.
+  else if (action === "compose-lead-email"){
+    var ceLead = leadById(t.dataset.lead);
+    if (ceLead){
+      var ceSubject = "Bridgepoint Lending — " + ceLead.loanType;
+      var ceBody = defaultOutreachMessage(ceLead);
+      if (prefersOutlook()){ openMailto(ceLead.email||"", ceSubject, ceBody); return; }
+      ui.modal = { type:"composeEmail", to: ceLead.email||"", subject: ceSubject, body: ceBody, leadId: ceLead.id };
+      render();
+    }
+  }
   else if (action === "reply-email"){
     var replySrc = (state.emails||[]).find(function(x){ return x.id===t.dataset.id; });
     if (replySrc){
@@ -10063,7 +10076,6 @@ appEl.addEventListener("click", function(e){
     sendTextViaQuo(t.dataset.lead, textBox ? textBox.value : "");
   }
   else if (action === "mark-notif-read"){ markNotificationRead(t.dataset.id); }
-  else if (action === "log-email"){ logEmailSent(t.dataset.lead); }
   else if (action === "send-application"){
     sendApplicationAction(t.dataset.lead, t.dataset.channel);
     if (t.dataset.channel === "manually"){ ui.modal = null; render(); }
