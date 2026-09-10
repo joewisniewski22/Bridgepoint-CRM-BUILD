@@ -548,6 +548,7 @@ var ES_DICT = {
   "Guarantor First Name":"Nombre del Garante", "Middle Name":"Segundo Nombre", "Last Name":"Apellido",
   "Guarantor Date of Birth":"Fecha de Nacimiento del Garante", "Guarantor Ownership %":"% de Propiedad del Garante",
   "Guarantor Social Security Number":"Número de Seguro Social del Garante",
+  "On file, ending":"Ya registrado, terminando en",
   "Guarantor Phone":"Teléfono del Garante", "Guarantor Email":"Correo Electrónico del Garante",
   "Entity Legal Name (if closing in an entity)":"Nombre Legal de la Entidad (si cierra a nombre de una entidad)",
   "Entity Type":"Tipo de Entidad", "Credit Score":"Puntaje de Crédito",
@@ -1753,16 +1754,6 @@ function fmtUSD(n){
   if (n===null || n===undefined || isNaN(n)) return "—";
   return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(n);
 }
-// Masks everything but the last 4 digits -- used wherever a guarantor's
-// SSN gets printed onto a document (never shown in full on paper/PDF that
-// could be forwarded or printed, even though the underwriting file needs
-// the real digits on record).
-function fmtSsnMasked(ssn){
-  if (!ssn) return "—";
-  var digits = String(ssn).replace(/\D/g,"");
-  if (digits.length < 4) return "•••-••-••••";
-  return "•••-••-" + digits.slice(-4);
-}
 function fmtPct(n){
   if (n===null || n===undefined) return "—";
   var s = Number(n).toFixed(3);
@@ -2887,7 +2878,7 @@ function leadToRow(l){
     title_requested_at: l.titleRequestedAt || null, insurance_requested_at: l.insuranceRequestedAt || null,
     entity_legal_name: l.entityLegalName || null,
     guarantor_first_name: l.guarantorFirstName || null, guarantor_middle_name: l.guarantorMiddleName || null, guarantor_last_name: l.guarantorLastName || null,
-    guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null, guarantor_ssn: l.guarantorSsn || null,
+    guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null,
     guarantor_ownership_pct: l.guarantorOwnershipPct || null, track_record: l.trackRecord || [],
     preferred_language: l.preferredLanguage || "en",
     citizenship_status: l.citizenshipStatus || null, country_of_domicile: l.countryOfDomicile || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
@@ -2926,7 +2917,7 @@ function rowToLead(r){
     titleRequestedAt: r.title_requested_at || null, insuranceRequestedAt: r.insurance_requested_at || null,
     entityLegalName: r.entity_legal_name || null,
     guarantorFirstName: r.guarantor_first_name || null, guarantorMiddleName: r.guarantor_middle_name || null, guarantorLastName: r.guarantor_last_name || null,
-    guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null, guarantorSsn: r.guarantor_ssn || null,
+    guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null, guarantorSsnLast4: r.guarantor_ssn_last4 || null,
     guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [],
     preferredLanguage: r.preferred_language || "en",
     citizenshipStatus: r.citizenship_status || null, countryOfDomicile: r.country_of_domicile || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
@@ -4170,6 +4161,23 @@ function setBirthday(leadId, birthday){
 // once one's on file -- so the direct "File / Borrower Name" field above
 // is really just for files with no guarantor yet (or entity-only files);
 // a guarantor first + last name, once both are set, always wins.
+// SSN is encrypted server-side (pgcrypto + Vault, see migration 067) and
+// deliberately kept OUT of the normal optimistic-local-state + bulk-sync
+// flow every other field uses (persist() / syncToSupabase) -- it's never
+// held in plaintext client-side longer than this one call, and never
+// ships to the browser at all on a normal lead read (only the last-4 does).
+function saveGuarantorSsn(leadId, ssn){
+  if (!sb) return;
+  sb.rpc("set_guarantor_ssn", { p_lead_id: leadId, p_ssn: ssn }).then(function(res){
+    if (res.error){ showToast("Couldn't save SSN — try again"); return; }
+    var lead = leadById(leadId);
+    if (lead){
+      var digits = ssn.replace(/\D/g,"");
+      lead.guarantorSsnLast4 = digits.slice(-4) || null;
+      render();
+    }
+  }).catch(function(){ showToast("Couldn't save SSN — try again"); });
+}
 function quickEditGuarantor(leadId, fd){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -4177,7 +4185,8 @@ function quickEditGuarantor(leadId, fd){
   lead.guarantorFirstName = fd.get("guarantorFirstName") || null;
   lead.guarantorLastName = fd.get("guarantorLastName") || null;
   lead.birthday = fd.get("birthday") || null;
-  lead.guarantorSsn = fd.get("guarantorSsn") || null;
+  var newSsn = (fd.get("guarantorSsn") || "").trim();
+  if (newSsn) saveGuarantorSsn(leadId, newSsn); // never in the bulk sync -- encrypted server-side, see saveGuarantorSsn
   lead.guarantorPhone = fd.get("guarantorPhone") || null;
   lead.guarantorEmail = fd.get("guarantorEmail") || null;
   lead.entityLegalName = fd.get("entityLegalName") || null;
@@ -4973,7 +4982,7 @@ function buildRtlApplicationPdfBlob(lead){
   w.twoCol("Own/Rent", r.ownRent, "Years/Mo at Address", r.yearsAtAddress);
   w.row("Current Address", r.homeAddress);
   w.twoCol("Phone", lead.phone, "Email", lead.email);
-  w.twoCol("Date of Birth", lead.birthday, "SSN", fmtSsnMasked(lead.guarantorSsn));
+  w.twoCol("Date of Birth", lead.birthday, "SSN", lead.guarantorSsnLast4 ? ("•••-••-" + lead.guarantorSsnLast4) : "—");
 
   if (r.coFirstName || r.coLastName){
     w.heading("2) Co-Applicant");
@@ -5044,7 +5053,7 @@ function buildDscrApplicationPdfBlob(lead){
   w.twoCol("Own/Rent", d.ownRent, "Years/Mo at Address", d.yearsAtAddress);
   w.row("Current Address", d.homeAddress);
   w.twoCol("Phone", lead.phone, "Email", lead.email);
-  w.twoCol("Date of Birth", lead.birthday, "SSN", fmtSsnMasked(lead.guarantorSsn));
+  w.twoCol("Date of Birth", lead.birthday, "SSN", lead.guarantorSsnLast4 ? ("•••-••-" + lead.guarantorSsnLast4) : "—");
 
   if (d.coFirstName || d.coLastName){
     w.heading("2) Co-Applicant");
@@ -6434,7 +6443,7 @@ function renderTabOverview(lead){
     '<div class="field"><label>Guarantor First Name</label><input class="input" name="guarantorFirstName" value="' + esc(lead.guarantorFirstName||"") + '"></div>' +
     '<div class="field"><label>Guarantor Last Name</label><input class="input" name="guarantorLastName" value="' + esc(lead.guarantorLastName||"") + '"></div>' +
     '<div class="field"><label>Guarantor DOB</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
-    '<div class="field"><label>Guarantor SSN</label><input class="input" type="password" autocomplete="off" name="guarantorSsn" value="' + esc(lead.guarantorSsn||"") + '" placeholder="XXX-XX-XXXX"></div>' +
+    '<div class="field"><label>Guarantor SSN</label><input class="input" type="password" autocomplete="off" name="guarantorSsn" value="" placeholder="' + (lead.guarantorSsnLast4 ? ("On file, ending " + lead.guarantorSsnLast4 + " — leave blank to keep") : "XXX-XX-XXXX") + '"></div>' +
     '<div class="field"><label>Guarantor Phone</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||"") + '" placeholder="' + esc(lead.phone||"") + '"></div>' +
     '<div class="field"><label>Guarantor Email</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||"") + '" placeholder="' + esc(lead.email||"") + '"></div>' +
     '<div class="field"><label>Entity Legal Name</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
@@ -8933,7 +8942,7 @@ function buildApplicationFieldsHTML(lead, lang){
     '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Guarantor Date of Birth") + '</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
-      '<div class="form-row"><label>' + L("Guarantor Social Security Number") + '</label><input class="input" type="password" autocomplete="off" name="guarantorSsn" value="' + esc(lead.guarantorSsn||"") + '" placeholder="XXX-XX-XXXX"></div>' +
+      '<div class="form-row"><label>' + L("Guarantor Social Security Number") + '</label><input class="input" type="password" autocomplete="off" name="guarantorSsn" value="" placeholder="' + (lead.guarantorSsnLast4 ? (L("On file, ending") + " " + lead.guarantorSsnLast4) : "XXX-XX-XXXX") + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Guarantor Ownership %") + '</label><input class="input" type="number" min="0" max="100" name="guarantorOwnershipPct" value="' + v(lead.guarantorOwnershipPct) + '"></div>' +
@@ -10370,6 +10379,8 @@ appEl.addEventListener("submit", function(e){
     });
   } else if (type === "take-application"){
     var numOrNull = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
+    var takeAppSsn = (fd.get("guarantorSsn") || "").trim();
+    if (takeAppSsn) saveGuarantorSsn(form.dataset.lead, takeAppSsn);
     submitPhoneApplication(form.dataset.lead, {
       entityType: fd.get("entityType"),
       creditScore: numOrNull("creditScore"),
@@ -10394,7 +10405,6 @@ appEl.addEventListener("submit", function(e){
       guarantorLastName: fd.get("guarantorLastName"),
       guarantorPhone: fd.get("guarantorPhone"),
       guarantorEmail: fd.get("guarantorEmail"),
-      guarantorSsn: fd.get("guarantorSsn"),
       birthday: fd.get("birthday"),
       guarantorOwnershipPct: numOrNull("guarantorOwnershipPct"),
       entityLegalName: fd.get("entityLegalName"),
@@ -10414,6 +10424,8 @@ appEl.addEventListener("submit", function(e){
     render();
   } else if (type === "public-application"){
     var numOrNullPub = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
+    var pubSsn = (fd.get("guarantorSsn") || "").trim();
+    if (pubSsn) saveGuarantorSsn(form.dataset.lead, pubSsn);
     var pubLead = leadById(form.dataset.lead);
     var pubAchData = extractAchFromForm(fd, signaturePadDataUrl("sig-ach-" + form.dataset.lead), pubLead && pubLead.achForm);
     var pubRtlData = extractRtlApplicationFromForm(fd, signaturePadDataUrl("sig-rtlapp-" + form.dataset.lead), pubLead && pubLead.rtlApp);
@@ -10442,7 +10454,6 @@ appEl.addEventListener("submit", function(e){
       guarantorLastName: fd.get("guarantorLastName"),
       guarantorPhone: fd.get("guarantorPhone"),
       guarantorEmail: fd.get("guarantorEmail"),
-      guarantorSsn: fd.get("guarantorSsn"),
       birthday: fd.get("birthday"),
       guarantorOwnershipPct: numOrNullPub("guarantorOwnershipPct"),
       entityLegalName: fd.get("entityLegalName"),
