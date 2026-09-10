@@ -546,6 +546,7 @@ var PREPAY_TERMS = [
 var ES_DICT = {
   "Guarantor First Name":"Nombre del Garante", "Middle Name":"Segundo Nombre", "Last Name":"Apellido",
   "Guarantor Date of Birth":"Fecha de Nacimiento del Garante", "Guarantor Ownership %":"% de Propiedad del Garante",
+  "Guarantor Social Security Number":"Número de Seguro Social del Garante",
   "Guarantor Phone":"Teléfono del Garante", "Guarantor Email":"Correo Electrónico del Garante",
   "Entity Legal Name (if closing in an entity)":"Nombre Legal de la Entidad (si cierra a nombre de una entidad)",
   "Entity Type":"Tipo de Entidad", "Credit Score":"Puntaje de Crédito",
@@ -1751,6 +1752,16 @@ function fmtUSD(n){
   if (n===null || n===undefined || isNaN(n)) return "—";
   return new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(n);
 }
+// Masks everything but the last 4 digits -- used wherever a guarantor's
+// SSN gets printed onto a document (never shown in full on paper/PDF that
+// could be forwarded or printed, even though the underwriting file needs
+// the real digits on record).
+function fmtSsnMasked(ssn){
+  if (!ssn) return "—";
+  var digits = String(ssn).replace(/\D/g,"");
+  if (digits.length < 4) return "•••-••-••••";
+  return "•••-••-" + digits.slice(-4);
+}
 function fmtPct(n){
   if (n===null || n===undefined) return "—";
   var s = Number(n).toFixed(3);
@@ -2700,11 +2711,11 @@ function loContactLines(lo, lang){
   lines.push((isEs ? "Oficina: " : "Office: ") + OFFICE_PHONE);
   return lines;
 }
-function buildPreApprovalLetter(lead){
+function buildPreApprovalLetter(lead, langOverride){
   var lo = docLoanOfficer(lead);
   var today = todayISO();
   var expires = addDaysISO(today, 30);
-  var lang = lead.preferredLanguage || "en";
+  var lang = langOverride || lead.preferredLanguage || "en";
   var isRehabType = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
   var ltvRatio = (isRehabType && lead.arv && lead.loanAmount) ? (Math.round((lead.loanAmount/lead.arv)*1000)/10) : (isRehabType ? null : lead.ltv);
   var lines = [];
@@ -2772,11 +2783,11 @@ function lenderFeeForLead(lead){
   } catch(e){}
   return DSCR_FEE_BY_PROPERTY["SFR"];
 }
-function buildTermSheet(lead){
+function buildTermSheet(lead, langOverride){
   var lo = docLoanOfficer(lead);
   var today = todayISO();
   var expires = addDaysISO(today, 15);
-  var lang = lead.preferredLanguage || "en";
+  var lang = langOverride || lead.preferredLanguage || "en";
   var isRehabType = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
   // For rehab/construction loans the meaningful ratio is against the
   // after-repair value, not raw purchase price -- lead.ltv is computed
@@ -2875,7 +2886,7 @@ function leadToRow(l){
     title_requested_at: l.titleRequestedAt || null, insurance_requested_at: l.insuranceRequestedAt || null,
     entity_legal_name: l.entityLegalName || null,
     guarantor_first_name: l.guarantorFirstName || null, guarantor_middle_name: l.guarantorMiddleName || null, guarantor_last_name: l.guarantorLastName || null,
-    guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null,
+    guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null, guarantor_ssn: l.guarantorSsn || null,
     guarantor_ownership_pct: l.guarantorOwnershipPct || null, track_record: l.trackRecord || [],
     preferred_language: l.preferredLanguage || "en",
     citizenship_status: l.citizenshipStatus || null, country_of_domicile: l.countryOfDomicile || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
@@ -2914,7 +2925,7 @@ function rowToLead(r){
     titleRequestedAt: r.title_requested_at || null, insuranceRequestedAt: r.insurance_requested_at || null,
     entityLegalName: r.entity_legal_name || null,
     guarantorFirstName: r.guarantor_first_name || null, guarantorMiddleName: r.guarantor_middle_name || null, guarantorLastName: r.guarantor_last_name || null,
-    guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null,
+    guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null, guarantorSsn: r.guarantor_ssn || null,
     guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [],
     preferredLanguage: r.preferred_language || "en",
     citizenshipStatus: r.citizenship_status || null, countryOfDomicile: r.country_of_domicile || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
@@ -3601,14 +3612,19 @@ function reallySendDocumentBoth(leadId, kind){
     showToast("Couldn't send " + label + " — try again");
   });
 }
+// Staff-facing view -- always English regardless of the client's
+// preferredLanguage (Joe's rule, 2026-09-10: only the client sees their
+// own language; staff always see English, including term sheets). The
+// actual document SENT to the client (reallySendDocumentBoth) still
+// correctly uses the client's language -- this only affects what staff
+// see when they click to view/download it themselves.
 function viewTermSheet(leadId){
   var lead = leadById(leadId);
   if (!lead || !sb) return;
-  var body = buildTermSheet(lead);
-  var isEs = (lead.preferredLanguage||"en") === "es";
-  showToast(isEs ? "Preparando hoja de términos…" : "Preparing term sheet…");
+  var body = buildTermSheet(lead, "en");
+  showToast("Preparing term sheet…");
   sb.functions.invoke("generate-doc-pdf", { body: { text: body, label: "Term Sheet" } }).then(function(res){
-    if (res.error || !res.data || !res.data.ok){ showToast(isEs ? "No se pudo generar" : "Couldn't generate term sheet"); return; }
+    if (res.error || !res.data || !res.data.ok){ showToast("Couldn't generate term sheet"); return; }
     var bytes = atob(res.data.pdfBase64);
     var arr = new Uint8Array(bytes.length);
     for (var i=0;i<bytes.length;i++) arr[i] = bytes.charCodeAt(i);
@@ -3616,7 +3632,7 @@ function viewTermSheet(leadId){
     var url = URL.createObjectURL(blob);
     window.open(url, "_blank");
     setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
-  }).catch(function(){ showToast(isEs ? "No se pudo generar" : "Couldn't generate term sheet"); });
+  }).catch(function(){ showToast("Couldn't generate term sheet"); });
 }
 function previewDocumentPdf(leadId, kind){
   var lead = leadById(leadId);
@@ -4116,6 +4132,7 @@ function quickEditGuarantor(leadId, fd){
   lead.guarantorFirstName = fd.get("guarantorFirstName") || null;
   lead.guarantorLastName = fd.get("guarantorLastName") || null;
   lead.birthday = fd.get("birthday") || null;
+  lead.guarantorSsn = fd.get("guarantorSsn") || null;
   lead.guarantorPhone = fd.get("guarantorPhone") || null;
   lead.guarantorEmail = fd.get("guarantorEmail") || null;
   lead.entityLegalName = fd.get("entityLegalName") || null;
@@ -4911,7 +4928,7 @@ function buildRtlApplicationPdfBlob(lead){
   w.twoCol("Own/Rent", r.ownRent, "Years/Mo at Address", r.yearsAtAddress);
   w.row("Current Address", r.homeAddress);
   w.twoCol("Phone", lead.phone, "Email", lead.email);
-  w.twoCol("Date of Birth", lead.birthday, "SSN", "On file — see Government ID");
+  w.twoCol("Date of Birth", lead.birthday, "SSN", fmtSsnMasked(lead.guarantorSsn));
 
   if (r.coFirstName || r.coLastName){
     w.heading("2) Co-Applicant");
@@ -4982,7 +4999,7 @@ function buildDscrApplicationPdfBlob(lead){
   w.twoCol("Own/Rent", d.ownRent, "Years/Mo at Address", d.yearsAtAddress);
   w.row("Current Address", d.homeAddress);
   w.twoCol("Phone", lead.phone, "Email", lead.email);
-  w.twoCol("Date of Birth", lead.birthday, "SSN", "On file — see Government ID");
+  w.twoCol("Date of Birth", lead.birthday, "SSN", fmtSsnMasked(lead.guarantorSsn));
 
   if (d.coFirstName || d.coLastName){
     w.heading("2) Co-Applicant");
@@ -6372,6 +6389,7 @@ function renderTabOverview(lead){
     '<div class="field"><label>Guarantor First Name</label><input class="input" name="guarantorFirstName" value="' + esc(lead.guarantorFirstName||"") + '"></div>' +
     '<div class="field"><label>Guarantor Last Name</label><input class="input" name="guarantorLastName" value="' + esc(lead.guarantorLastName||"") + '"></div>' +
     '<div class="field"><label>Guarantor DOB</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
+    '<div class="field"><label>Guarantor SSN</label><input class="input" type="password" autocomplete="off" name="guarantorSsn" value="' + esc(lead.guarantorSsn||"") + '" placeholder="XXX-XX-XXXX"></div>' +
     '<div class="field"><label>Guarantor Phone</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||"") + '" placeholder="' + esc(lead.phone||"") + '"></div>' +
     '<div class="field"><label>Guarantor Email</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||"") + '" placeholder="' + esc(lead.email||"") + '"></div>' +
     '<div class="field"><label>Entity Legal Name</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
@@ -6538,7 +6556,8 @@ function renderTabScenario(lead){
     field("Monthly Property Tax", fmtUSD(lead.monthlyTaxes), true) +
     field("Monthly Insurance", fmtUSD(lead.monthlyInsurance), true) +
     field("Monthly HOA / Dues", lead.monthlyHoa ? fmtUSD(lead.monthlyHoa) : "—", true) +
-    field("Loan Amount Requested", fmtUSD(lead.loanAmount), true) +
+    (computeMaxLoanAmount(lead) ? field("Max Loan Amount You Qualify For", fmtUSD(Math.floor(computeMaxLoanAmount(lead).amount)), true) : "") +
+    field("Day One Loan Amount", fmtUSD(lead.loanAmount), true) +
     field("LTV / LTC", lead.ltv ? lead.ltv + "%" : "—", true) +
     field("Rate", fmtPct(lead.rate), true) +
     field("Term", lead.termMonths ? (lead.termMonths + " months") : "—", true) +
@@ -6652,7 +6671,13 @@ function buildPricerOutputHTML(lead, inputs){
     var rateField = (isDSCR && !lockedToActualRate && parRateForDisplay!=null)
       ? dscrRateAdjustField(lead, result.rate, parRateForDisplay)
       : field("Rate" + (lockedToActualRate ? " (locked on this loan)" : ""), fmtPct(result.rate), true);
-    var rows = (maxLoanInfo && !lockedToActualRate ? field("Max Loan Amount You Qualify For", fmtUSD(effectiveLoanAmount), true) : "") +
+    // Joe's real ask (2026-09-10): Max Loan Amount and Day One Loan
+    // Amount need to be visible together on every loan scenario, always --
+    // this used to hide "Max Loan Amount You Qualify For" entirely once a
+    // rate got locked in (very common on DSCR/in-house files), leaving no
+    // way to see the ceiling vs. what's actually being funded.
+    var rows = (maxLoanInfo ? field("Max Loan Amount You Qualify For", fmtUSD(Math.floor(maxLoanInfo.amount)), true) : "") +
+      field("Day One Loan Amount", fmtUSD(lead.loanAmount), true) +
       rateField +
       field("Lender Fee", fmtUSD(result.fee), true) +
       field("Processing Fee", fmtUSD(PROCESSING_FEE_DEFAULT), true) +
@@ -8540,20 +8565,25 @@ function renderModal(){
   if (ui.modal.type === "campaignPreview") return modalCampaignPreview(ui.modal);
   return "";
 }
+// Staff-facing preview, shown before a real send -- always English
+// regardless of the client's preferredLanguage (Joe's rule, 2026-09-10).
+// The actual send (reallySendDocumentBoth / reallySendBorrowerPortalInvite
+// / reallySendSchedulingLink, triggered on confirm) independently computes
+// its own language from lead.preferredLanguage as before, so a Spanish
+// client still gets Spanish for real -- this only changes what staff see
+// while reviewing it first.
 function modalSendPreview(leadId, kind){
   var lead = leadById(leadId);
   if (!lead) return "";
-  var isEs = (lead.preferredLanguage||"en") === "es";
+  var willSendEs = (lead.preferredLanguage||"en") === "es";
   var firstName = (lead.name||"").split(" ")[0];
   var lo = docLoanOfficer(lead);
   var title, subject, emailBody, smsMsg, showPdfBtn;
   if (kind === "portal"){
     var link = applicationLink(lead);
     title = "Preview — Send Borrower Portal";
-    subject = isEs ? "Bridgepoint Lending — Su Portal de Cliente" : "Bridgepoint Lending — Your Borrower Portal";
-    emailBody = isEs
-      ? ("Hola " + firstName + ", puede revisar el estado de su préstamo, subir documentos y enviar mensajes a " + (lo.name||"su oficial de préstamos") + " en cualquier momento aquí: " + link)
-      : ("Hi " + firstName + ", you can check your loan status, upload documents, and message " + (lo.name||"your loan officer") + " anytime here: " + link);
+    subject = "Bridgepoint Lending — Your Borrower Portal";
+    emailBody = "Hi " + firstName + ", you can check your loan status, upload documents, and message " + (lo.name||"your loan officer") + " anytime here: " + link;
     smsMsg = emailBody;
     showPdfBtn = false;
   } else if (kind === "scheduling"){
@@ -8561,10 +8591,8 @@ function modalSendPreview(leadId, kind){
     var schedLink = bookingLinkFor(me.id);
     var firstNameSched = (lead.name||"").split(" ")[0];
     title = "Preview — Send Scheduling Link";
-    subject = isEs ? "Bridgepoint Lending — Agende una Llamada" : "Bridgepoint Lending — Schedule a Call";
-    emailBody = isEs
-      ? ("Hola " + firstNameSched + ", puede reservar una hora conmigo directamente aquí, cuando le convenga: " + schedLink)
-      : ("Hi " + firstNameSched + ", you can grab a time on my calendar directly here, whatever works best for you: " + schedLink);
+    subject = "Bridgepoint Lending — Schedule a Call";
+    emailBody = "Hi " + firstNameSched + ", you can grab a time on my calendar directly here, whatever works best for you: " + schedLink;
     smsMsg = emailBody;
     showPdfBtn = false;
   } else {
@@ -8572,10 +8600,8 @@ function modalSendPreview(leadId, kind){
     var label = isTerm ? "Term Sheet" : "Pre-Approval Letter";
     title = "Preview — Send " + (isTerm ? "Term Sheet" : "Pre-Approval");
     subject = "Bridgepoint Lending — Your " + label;
-    emailBody = isTerm ? buildTermSheet(lead) : buildPreApprovalLetter(lead);
-    smsMsg = isEs
-      ? ("Hola " + firstName + ", es " + (lo.name||"") + " de Bridgepoint Lending — le acabo de enviar por correo electrónico su " + (isTerm ? "hoja de términos" : "carta de preaprobación") + " con todos los detalles. Revise su bandeja de entrada (" + (lead.email||"su correo") + ") y avíseme si tiene preguntas.")
-      : ("Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your " + label.toLowerCase() + " with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!");
+    emailBody = isTerm ? buildTermSheet(lead, "en") : buildPreApprovalLetter(lead, "en");
+    smsMsg = "Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your " + label.toLowerCase() + " with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!";
     showPdfBtn = true;
   }
   var channels = [];
@@ -8585,7 +8611,9 @@ function modalSendPreview(leadId, kind){
     '<div class="modal" data-stop="1">' +
       '<div class="modal-head"><h3>' + title + ' — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
       '<div class="modal-body">' +
-        '<div class="footnote" style="padding:0 0 8px">Going out via ' + (channels.length ? channels.join(" and ") : "no channel — add an email or phone first") + '. Review below before it sends for real.</div>' +
+        '<div class="footnote" style="padding:0 0 8px">Going out via ' + (channels.length ? channels.join(" and ") : "no channel — add an email or phone first") + '. Review below before it sends for real.' +
+          (willSendEs ? ' Shown in English for you — this client is tagged Spanish, so what actually sends will be in Spanish.' : '') +
+        '</div>' +
         '<div class="form-row"><label>Email subject</label><div class="val">' + esc(subject) + '</div></div>' +
         '<div class="form-row"><label>Email body' + (showPdfBtn ? " (also attached as a PDF)" : "") + '</label><textarea class="textarea" rows="10" readonly>' + esc(emailBody) + '</textarea></div>' +
         (showPdfBtn ? '<div class="form-row"><label>Text heads-up</label><textarea class="textarea" rows="3" readonly>' + esc(smsMsg) + '</textarea></div>' : '') +
@@ -8856,6 +8884,9 @@ function buildApplicationFieldsHTML(lead, lang){
     '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Guarantor Date of Birth") + '</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Guarantor Social Security Number") + '</label><input class="input" type="password" autocomplete="off" name="guarantorSsn" value="' + esc(lead.guarantorSsn||"") + '" placeholder="XXX-XX-XXXX"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Guarantor Ownership %") + '</label><input class="input" type="number" min="0" max="100" name="guarantorOwnershipPct" value="' + v(lead.guarantorOwnershipPct) + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
@@ -10311,6 +10342,7 @@ appEl.addEventListener("submit", function(e){
       guarantorLastName: fd.get("guarantorLastName"),
       guarantorPhone: fd.get("guarantorPhone"),
       guarantorEmail: fd.get("guarantorEmail"),
+      guarantorSsn: fd.get("guarantorSsn"),
       birthday: fd.get("birthday"),
       guarantorOwnershipPct: numOrNull("guarantorOwnershipPct"),
       entityLegalName: fd.get("entityLegalName"),
@@ -10358,6 +10390,7 @@ appEl.addEventListener("submit", function(e){
       guarantorLastName: fd.get("guarantorLastName"),
       guarantorPhone: fd.get("guarantorPhone"),
       guarantorEmail: fd.get("guarantorEmail"),
+      guarantorSsn: fd.get("guarantorSsn"),
       birthday: fd.get("birthday"),
       guarantorOwnershipPct: numOrNullPub("guarantorOwnershipPct"),
       entityLegalName: fd.get("entityLegalName"),
