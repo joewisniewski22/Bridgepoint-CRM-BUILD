@@ -6353,7 +6353,14 @@ function renderLeadDetail(){
   var main = '<div class="panel">' + tabs + '<div class="panel-pad">' + tabContent + '</div></div>';
   var rail = renderRail(lead);
 
-  var actions = renderLoanPlacementHeaderTag(lead) + '<button class="btn btn-ghost" data-action="nav" data-view="leads">← Back</button>';
+  // Joe's real ask (2026-09-10): wanted Export All Documents up in the
+  // header itself, not buried in the Documents tab -- visible from any
+  // tab, matching where the Loan Placement tag already sits. The button
+  // in the Documents tab body stays too; this is just a second, more
+  // conspicuous entry point to the same exportAllDocuments() action.
+  var actions = renderLoanPlacementHeaderTag(lead) +
+    '<button class="btn btn-ghost btn-sm" type="button" data-action="export-all-documents" data-lead="' + lead.id + '" title="Downloads every uploaded document on this file as one ZIP, to save internally">⬇ Export All Docs</button>' +
+    '<button class="btn btn-ghost" data-action="nav" data-view="leads">← Back</button>';
 
   return topbar(esc(lead.name), esc(lead.loanType) + " · " + esc(lead.propertyAddress||""), actions) +
     '<div class="content">' + renderDuplicateFileBanner(lead) + '<div class="detail-grid">' + main + rail + '</div></div>';
