@@ -773,7 +773,11 @@ var UNIVERSAL_DOCS = [
   "EIN Letter (if closing in an entity)",
   "Certificate of Good Standing (if closing in an entity)",
   "Credit Authorization Form",
-  "Voided Check / Wire Instructions"
+  "Voided Check / Wire Instructions",
+  "Title Commitment",
+  "Closing Protection Letter (CPL)",
+  "Letter of Explanation for Recent Credit Inquiries (if applicable — any pull in the last 120 days)",
+  "Letter of Explanation for Cash-Out Proceeds (if applicable)"
 ];
 var REQUIRED_DOCS_BY_TYPE = {
   "DSCR": UNIVERSAL_DOCS.concat([
@@ -783,7 +787,13 @@ var REQUIRED_DOCS_BY_TYPE = {
     "Proof of Landlord / Hazard Insurance",
     "HOA / COA / PUD Questionnaire & Package (if applicable)",
     "Paid Appraisal Invoice",
+    "Appraisal Report",
     "Flood Insurance (if applicable)",
+    "Payoff Statement (refinance only)",
+    "Subject Property Acquisition HUD-1 (if borrower owned under 12 months)",
+    "Fully Executed Assignment of Contract (if applicable)",
+    "Detailed Rent Roll (5-20 unit properties only)",
+    "Commercial General Liability Insurance $1MM+ (5-20 unit properties only)",
     DSCR_APPLICATION_DOC_NAME
   ]),
   "Portfolio/Blanket": UNIVERSAL_DOCS.concat([
@@ -793,7 +803,13 @@ var REQUIRED_DOCS_BY_TYPE = {
     "Proof of Landlord / Hazard Insurance",
     "HOA / COA / PUD Questionnaire & Package (if applicable)",
     "Paid Appraisal Invoice",
+    "Appraisal Report",
     "Flood Insurance (if applicable)",
+    "Payoff Statement (refinance only)",
+    "Subject Property Acquisition HUD-1 (if borrower owned under 12 months)",
+    "Fully Executed Assignment of Contract (if applicable)",
+    "Detailed Rent Roll (5-20 unit properties only)",
+    "Commercial General Liability Insurance $1MM+ (5-20 unit properties only)",
     "Schedule of Properties (addresses for every property in the portfolio)",
     DSCR_APPLICATION_DOC_NAME
   ]),
@@ -2911,6 +2927,8 @@ function leadToRow(l){
     marital_status: l.maritalStatus || null,
     built_year: l.builtYear || null, current_lender_name: l.currentLenderName || null,
     units_ready_for_rent: l.unitsReadyForRent || null, property_occupied: l.propertyOccupied || null, taxes_current: l.taxesCurrent || null,
+    property_lease_status: l.propertyLeaseStatus || null, delayed_purchase: l.delayedPurchase || null,
+    ny_cema_loan: l.nyCemaLoan || null, ny_closing_attorney: l.nyClosingAttorney || null,
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
@@ -2953,6 +2971,8 @@ function rowToLead(r){
     maritalStatus: r.marital_status || null,
     builtYear: r.built_year || null, currentLenderName: r.current_lender_name || null,
     unitsReadyForRent: r.units_ready_for_rent || null, propertyOccupied: r.property_occupied || null, taxesCurrent: r.taxes_current || null,
+    propertyLeaseStatus: r.property_lease_status || null, delayedPurchase: r.delayed_purchase || null,
+    nyCemaLoan: r.ny_cema_loan || null, nyClosingAttorney: r.ny_closing_attorney || null,
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
@@ -5169,7 +5189,9 @@ function buildRtlApplicationPdfBlob(lead){
   w.twoCol("Loan Term (months)", lead.termMonths, "Total Loan Amount Requested", lead.loanAmount ? fmtUSD(lead.loanAmount) : null);
   w.twoCol("Financing for Budget", lead.rehabBudget ? fmtUSD(lead.rehabBudget) : null, "Year Built", lead.builtYear);
   w.twoCol("Are all units ready for rent?", lead.unitsReadyForRent, "Is the property currently occupied?", lead.propertyOccupied);
-  w.row("Are taxes paid current?", lead.taxesCurrent);
+  w.twoCol("Are taxes paid current?", lead.taxesCurrent, "Property Currently Leased", lead.propertyLeaseStatus);
+  w.twoCol("Delayed Purchase?", lead.delayedPurchase, "New York CEMA Loan?", lead.nyCemaLoan);
+  if (lead.nyClosingAttorney) w.row("NY Closing Attorney", lead.nyClosingAttorney);
   w.row("Interior Access Contact", (r.accessName||"—") + " (" + (r.accessRelationship||"") + ") — " + (r.accessPhone||"") + " — " + (r.accessEmail||""));
 
   w.heading("7) Current Debt on Property (Refinance Only)");
@@ -5249,6 +5271,8 @@ function buildDscrApplicationPdfBlob(lead){
   w.twoCol("Loan Term (months)", lead.termMonths, "Loan Product Needed", d.loanProduct);
   w.twoCol("Year Built", lead.builtYear, "Are all units ready for rent?", lead.unitsReadyForRent);
   w.twoCol("Is the property currently occupied?", lead.propertyOccupied, "Are taxes paid current?", lead.taxesCurrent);
+  w.twoCol("Property Currently Leased", lead.propertyLeaseStatus, "Delayed Purchase?", lead.delayedPurchase);
+  w.twoCol("New York CEMA Loan?", lead.nyCemaLoan, "NY Closing Attorney", lead.nyClosingAttorney);
   w.row("Interior Access Contact", (d.accessName||"—") + " (" + (d.accessRelationship||"") + ") — " + (d.accessPhone||"") + " — " + (d.accessEmail||""));
 
   if (isPortfolio && (d.multiPack||[]).length){
@@ -9205,6 +9229,16 @@ function buildApplicationFieldsHTML(lead, lang){
       '<div class="form-row"><label>' + L("Is the property currently occupied?") + '</label>' + appYn("propertyOccupied", lead.propertyOccupied) + '</div>' +
     '</div>' +
     '<div class="form-row"><label>' + L("Are taxes paid current?") + '</label>' + appYn("taxesCurrent", lead.taxesCurrent) + '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Property Currently Leased") + '</label><select class="select" name="propertyLeaseStatus">' +
+        ["","Fully Leased","Partially Leased","Vacant"].map(function(o){ return '<option value="' + o + '"' + (lead.propertyLeaseStatus===o?" selected":"") + '>' + (o?L(o):L("— Select —")) + '</option>'; }).join("") +
+      '</select></div>' +
+      '<div class="form-row"><label>' + L("Delayed Purchase?") + '</label>' + appYn("delayedPurchase", lead.delayedPurchase) + '</div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("New York CEMA Loan?") + ' <span class="hint">(' + L("NY properties only") + ')</span></label>' + appYn("nyCemaLoan", lead.nyCemaLoan) + '</div>' +
+      '<div class="form-row"><label>' + L("NY Closing Attorney") + ' <span class="hint">(' + L("NY loans only") + ')</span></label><input class="input" name="nyClosingAttorney" value="' + esc(lead.nyClosingAttorney||"") + '"></div>' +
+    '</div>' +
     buildScenarioFieldsHTML(lead, lang) +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Loan Amount Requested") + '</label><input class="input" type="number" name="loanAmount" value="' + v(lead.loanAmount) + '"></div>' +
@@ -10742,6 +10776,10 @@ appEl.addEventListener("submit", function(e){
       unitsReadyForRent: fd.get("unitsReadyForRent"),
       propertyOccupied: fd.get("propertyOccupied"),
       taxesCurrent: fd.get("taxesCurrent"),
+      propertyLeaseStatus: fd.get("propertyLeaseStatus"),
+      delayedPurchase: fd.get("delayedPurchase"),
+      nyCemaLoan: fd.get("nyCemaLoan"),
+      nyClosingAttorney: fd.get("nyClosingAttorney"),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
@@ -10798,6 +10836,10 @@ appEl.addEventListener("submit", function(e){
       unitsReadyForRent: fd.get("unitsReadyForRent"),
       propertyOccupied: fd.get("propertyOccupied"),
       taxesCurrent: fd.get("taxesCurrent"),
+      propertyLeaseStatus: fd.get("propertyLeaseStatus"),
+      delayedPurchase: fd.get("delayedPurchase"),
+      nyCemaLoan: fd.get("nyCemaLoan"),
+      nyClosingAttorney: fd.get("nyClosingAttorney"),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
