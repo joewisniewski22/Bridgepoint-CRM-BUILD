@@ -2897,6 +2897,8 @@ function leadToRow(l){
     preferred_language: l.preferredLanguage || "en",
     citizenship_status: l.citizenshipStatus || null, country_of_domicile: l.countryOfDomicile || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
     marital_status: l.maritalStatus || null,
+    built_year: l.builtYear || null, current_lender_name: l.currentLenderName || null,
+    units_ready_for_rent: l.unitsReadyForRent || null, property_occupied: l.propertyOccupied || null, taxes_current: l.taxesCurrent || null,
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
@@ -2937,6 +2939,8 @@ function rowToLead(r){
     preferredLanguage: r.preferred_language || "en",
     citizenshipStatus: r.citizenship_status || null, countryOfDomicile: r.country_of_domicile || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
     maritalStatus: r.marital_status || null,
+    builtYear: r.built_year || null, currentLenderName: r.current_lender_name || null,
+    unitsReadyForRent: r.units_ready_for_rent || null, propertyOccupied: r.property_occupied || null, taxesCurrent: r.taxes_current || null,
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
@@ -4657,6 +4661,51 @@ function viewDocRequestReferenceFile(leadId, idx){
     window.open(res.data.signedUrl, "_blank");
   });
 }
+// Uploads a declaration's supporting file (lawsuit explanation, felony
+// explanation, environmental report) after the application form itself has
+// already been saved -- appKey is "rtlApp" or "dscrApp" depending on which
+// application section the declaration lives in.
+function uploadDeclarationFile(leadId, appKey, declKey, file){
+  var lead = leadById(leadId);
+  if (!lead || !file || !sb) return;
+  var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  var path = leadId + "/decl-" + declKey + "-" + Date.now() + "-" + safeName;
+  sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+    if (res.error){ showToast("Attachment upload failed — try again"); return; }
+    lead[appKey] = lead[appKey] || {};
+    lead[appKey].declarations = lead[appKey].declarations || {};
+    lead[appKey].declarations[declKey] = lead[appKey].declarations[declKey] || {};
+    lead[appKey].declarations[declKey].fileUrl = path;
+    lead[appKey].declarations[declKey].fileName = file.name;
+    persist();
+  });
+}
+function viewDeclarationFile(leadId, appKey, declKey){
+  var lead = leadById(leadId);
+  var decl = lead && lead[appKey] && lead[appKey].declarations && lead[appKey].declarations[declKey];
+  if (!decl || !decl.fileUrl || !sb) return;
+  sb.storage.from("lead-documents").createSignedUrl(decl.fileUrl, 3600).then(function(res){
+    if (res.error || !res.data){ showToast("Couldn't open the file — try again"); return; }
+    window.open(res.data.signedUrl, "_blank");
+  });
+}
+// Only one of rtlApp/dscrApp's declarations block is ever actually rendered
+// for a given loan type, so there's only ever one live set of decl_*_file
+// inputs in the DOM to check -- called after the main application patch on
+// both the phone-intake and public-application submit paths.
+function uploadAnyDeclarationFiles(form, leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var appKey = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1 ? "rtlApp"
+    : (lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket") ? "dscrApp" : null;
+  if (!appKey) return;
+  LOAN_APP_DECLARATIONS.forEach(function(d){
+    if (!d.needsAttach) return;
+    var input = form.querySelector('[name="decl_' + d.key + '_file"]');
+    var file = input && input.files && input.files[0];
+    if (file) uploadDeclarationFile(leadId, appKey, d.key, file);
+  });
+}
 // Only loads the checklist for STAFF to see what's needed -- status
 // "suggested", never "requested" -- so nothing shows in the borrower
 // portal or gets emailed/texted to them until a staff member actually
@@ -5106,11 +5155,13 @@ function buildRtlApplicationPdfBlob(lead){
   w.twoCol("Property Type", lead.propertyType, "Purchase Price", lead.purchasePrice ? fmtUSD(lead.purchasePrice) : null);
   w.twoCol("After-Repair Value", lead.arv ? fmtUSD(lead.arv) : null, "Exit Strategy", lead.exitStrategy);
   w.twoCol("Loan Term (months)", lead.termMonths, "Total Loan Amount Requested", lead.loanAmount ? fmtUSD(lead.loanAmount) : null);
-  w.twoCol("Financing for Budget", lead.rehabBudget ? fmtUSD(lead.rehabBudget) : null, "", "");
+  w.twoCol("Financing for Budget", lead.rehabBudget ? fmtUSD(lead.rehabBudget) : null, "Year Built", lead.builtYear);
+  w.twoCol("Are all units ready for rent?", lead.unitsReadyForRent, "Is the property currently occupied?", lead.propertyOccupied);
+  w.row("Are taxes paid current?", lead.taxesCurrent);
   w.row("Interior Access Contact", (r.accessName||"—") + " (" + (r.accessRelationship||"") + ") — " + (r.accessPhone||"") + " — " + (r.accessEmail||""));
 
   w.heading("7) Current Debt on Property (Refinance Only)");
-  w.twoCol("Balance Owed", r.balanceOwed ? fmtUSD(r.balanceOwed) : null, "Current Lender", r.currentLender);
+  w.twoCol("Balance Owed", r.balanceOwed ? fmtUSD(r.balanceOwed) : null, "Current Lender / Mortgage Company", lead.currentLenderName || r.currentLender);
   w.twoCol("Original Cost", r.originalCost ? fmtUSD(r.originalCost) : null, "Year Acquired", r.yearAcquired);
   w.twoCol("Purchase Date", r.purchaseDate ? fmtDate(r.purchaseDate) : null, "Cost of Improvements Since Purchase", r.improvementsCost ? fmtUSD(r.improvementsCost) : null);
 
@@ -5124,7 +5175,10 @@ function buildRtlApplicationPdfBlob(lead){
     var existing = (r.declarations||{})[d.key] || {};
     w.paragraph(d.text);
     w.twoCol("You", existing.guarantor||"No", "Co-Applicant", existing.coGuarantor||"No");
+    if (existing.list) w.row(d.listLabel || "List", existing.list);
     if (existing.explain) w.row("Explanation", existing.explain);
+    if (existing.date) w.row(d.dateLabel || "Date", fmtDate(existing.date));
+    if (existing.fileName) w.row("Attachment on file", existing.fileName);
   });
 
   w.heading("Borrower's Certification & Authorization");
@@ -5169,7 +5223,10 @@ function buildDscrApplicationPdfBlob(lead){
     var existing = (d.declarations||{})[decl.key] || {};
     w.paragraph(decl.text);
     w.twoCol("You", existing.guarantor||"No", "Co-Applicant", existing.coGuarantor||"No");
+    if (existing.list) w.row(decl.listLabel || "List", existing.list);
     if (existing.explain) w.row("Explanation", existing.explain);
+    if (existing.date) w.row(decl.dateLabel || "Date", fmtDate(existing.date));
+    if (existing.fileName) w.row("Attachment on file", existing.fileName);
   });
 
   w.heading("5) Subject Property & Loan Terms" + (isPortfolio ? " — Property #1" : ""));
@@ -5178,6 +5235,8 @@ function buildDscrApplicationPdfBlob(lead){
   w.twoCol("As-Is Value", lead.arv ? fmtUSD(lead.arv) : null, "Loan Amount Requested", lead.loanAmount ? fmtUSD(lead.loanAmount) : null);
   w.twoCol("Transaction Purpose", lead.transactionType, "Cash Out Purpose", d.cashOutPurpose);
   w.twoCol("Loan Term (months)", lead.termMonths, "Loan Product Needed", d.loanProduct);
+  w.twoCol("Year Built", lead.builtYear, "Are all units ready for rent?", lead.unitsReadyForRent);
+  w.twoCol("Is the property currently occupied?", lead.propertyOccupied, "Are taxes paid current?", lead.taxesCurrent);
   w.row("Interior Access Contact", (d.accessName||"—") + " (" + (d.accessRelationship||"") + ") — " + (d.accessPhone||"") + " — " + (d.accessEmail||""));
 
   if (isPortfolio && (d.multiPack||[]).length){
@@ -5193,7 +5252,7 @@ function buildDscrApplicationPdfBlob(lead){
   }
 
   w.heading("6) Current Debt on Property (Refinance Only)");
-  w.twoCol("Balance Owed", d.balanceOwed ? fmtUSD(d.balanceOwed) : null, "Current Lender", d.currentLender);
+  w.twoCol("Balance Owed", d.balanceOwed ? fmtUSD(d.balanceOwed) : null, "Current Lender / Mortgage Company", lead.currentLenderName || d.currentLender);
   w.twoCol("Original Cost", d.originalCost ? fmtUSD(d.originalCost) : null, "Year Acquired", d.yearAcquired);
   w.twoCol("Purchase Date", d.purchaseDate ? fmtDate(d.purchaseDate) : null, "Cost of Improvements Since Purchase", d.improvementsCost ? fmtUSD(d.improvementsCost) : null);
 
@@ -9071,6 +9130,12 @@ function buildApplicationFieldsHTML(lead, lang){
   lang = lang || "en";
   var L = function(s){ return esc(tr(s, lang)); };
   var v = function(x){ return x===null||x===undefined ? "" : x; };
+  var appYn = function(name, val){
+    return '<select class="select" name="' + name + '">' +
+      '<option value="No"' + (val!=="Yes"?" selected":"") + '>' + L("No") + '</option>' +
+      '<option value="Yes"' + (val==="Yes"?" selected":"") + '>' + L("Yes") + '</option>' +
+    '</select>';
+  };
   var entityOptions = ENTITY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.entityType===t?" selected":"") + '>' + L(t) + '</option>'; }).join("");
   var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (lead.propertyType===t?" selected":"") + '>' + L(t) + '</option>'; }).join("");
   var exitOptions = EXIT_STRATEGIES.map(function(t){ return '<option value="' + t + '"' + (lead.exitStrategy===t?" selected":"") + '>' + L(t) + '</option>'; }).join("");
@@ -9118,6 +9183,15 @@ function buildApplicationFieldsHTML(lead, lang){
       '<div class="form-row"><label>' + L("Property Type") + '</label><select class="select" name="propertyType">' + propTypeOptions + '</select></div>' +
       '<div class="form-row"><label>' + L("Exit Strategy") + '</label><select class="select" name="exitStrategy">' + exitOptions + '</select></div>' +
     '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Year Built") + '</label><input class="input" type="number" name="builtYear" value="' + v(lead.builtYear) + '"></div>' +
+      '<div class="form-row"><label>' + L("Current Lender / Mortgage Company") + ' <span class="hint">(' + L("if refinance") + ')</span></label><input class="input" name="currentLenderName" value="' + esc(lead.currentLenderName||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Are all units ready for rent?") + '</label>' + appYn("unitsReadyForRent", lead.unitsReadyForRent) + '</div>' +
+      '<div class="form-row"><label>' + L("Is the property currently occupied?") + '</label>' + appYn("propertyOccupied", lead.propertyOccupied) + '</div>' +
+    '</div>' +
+    '<div class="form-row"><label>' + L("Are taxes paid current?") + '</label>' + appYn("taxesCurrent", lead.taxesCurrent) + '</div>' +
     buildScenarioFieldsHTML(lead, lang) +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Loan Amount Requested") + '</label><input class="input" type="number" name="loanAmount" value="' + v(lead.loanAmount) + '"></div>' +
@@ -9385,11 +9459,19 @@ function extractScheduleAFromForm(fd){
   }
   return rows;
 }
+// Matches Constructive Capital's own submission form declarations exactly
+// (wording and order), per Joe 2026-09-11 -- these go out to the lender
+// as-is, so the questions themselves aren't ours to paraphrase.
 var LOAN_APP_DECLARATIONS = [
-  { key:"lawsuit", text:"Currently or previously involved in any pending lawsuits (foreclosure, collection, or suits by lenders/creditors/subcontractors)?" },
-  { key:"bankruptcy", text:"Involved in bankruptcy or insolvency proceedings in the last 3 years?" },
-  { key:"felony", text:"Charged or convicted of a felony?" },
-  { key:"licensed", text:"Licensed General Contractor, Real Estate Broker/Salesperson, Lender, Appraiser, or involved in other real estate activities?" }
+  { key:"lawsuit", text:"Is any borrower, guarantor, or key principal currently involved, or previously been involved in, any pending lawsuits, including foreclosure, collection or suits by past or current lenders, creditors, or subcontractors/suppliers?",
+    needsList:true, listLabel:"If yes, list the lenders, creditors, or subcontractors/suppliers involved in the action", needsExplain:true, needsAttach:true, attachLabel:"If yes, attach explanation" },
+  { key:"bankruptcy", text:"Have any borrowers, guarantors, or key principals filed for bankruptcy or been involved in foreclosure proceedings in the last 2-4 years?",
+    needsDate:true, dateLabel:"If yes, Bankruptcy Discharge or Foreclosure Settlement Date" },
+  { key:"felony", text:"Has any borrower, guarantor, or key principal been charged or convicted of a felony?",
+    needsExplain:true, needsAttach:true, attachLabel:"If yes, attach explanation" },
+  { key:"licensed", text:"Is any borrower, guarantor, or key principal a licensed General Contractor, Real Estate Broker/Sales Person, Lender, Appraiser or involved in any other real estate related activities?" },
+  { key:"environmental", text:"Has the property been inspected or tested for environmental hazards (lead-based paint, asbestos, underground storage tanks, etc.)?",
+    needsAttach:true, attachLabel:"If yes, please attach report" }
 ];
 function buildRtlApplicationFieldsHTML(lead, lang){
   if (["Fix & Flip","Bridge","Ground Up Construction"].indexOf(lead.loanType) === -1) return "";
@@ -9406,13 +9488,18 @@ function buildRtlApplicationFieldsHTML(lead, lang){
   };
   var declRows = LOAN_APP_DECLARATIONS.map(function(d){
     var existing = (r.declarations || {})[d.key] || {};
+    var extra = "";
+    if (d.needsList) extra += '<div class="form-row"><label>' + L(d.listLabel) + '</label><input class="input" name="decl_' + d.key + '_list" value="' + esc(existing.list||"") + '"></div>';
+    if (d.needsExplain) extra += '<div class="form-row"><label>' + L("If yes, explain") + '</label><input class="input" name="decl_' + d.key + '_explain" value="' + esc(existing.explain||"") + '"></div>';
+    if (d.needsDate) extra += '<div class="form-row"><label>' + L(d.dateLabel) + '</label><input class="input" type="date" name="decl_' + d.key + '_date" value="' + esc(existing.date||"") + '"></div>';
+    if (d.needsAttach) extra += '<div class="form-row"><label>' + L(d.attachLabel) + '</label><input class="input" type="file" name="decl_' + d.key + '_file">' + (existing.fileName ? ('<div class="hint"><button type="button" class="link-btn" data-action="view-declaration-file" data-lead="' + lead.id + '" data-appkey="rtlApp" data-declkey="' + d.key + '">' + L("On file") + ': ' + esc(existing.fileName) + '</button></div>') : '') + '</div>';
     return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">' +
       '<div style="margin-bottom:6px">' + L(d.text) + '</div>' +
       '<div class="form-two">' +
         '<div class="form-row"><label>' + L("You") + '</label>' + yn("decl_" + d.key, existing.guarantor) + '</div>' +
         '<div class="form-row"><label>' + L("Co-Applicant (if any)") + '</label>' + yn("decl_" + d.key + "_co", existing.coGuarantor) + '</div>' +
       '</div>' +
-      '<div class="form-row"><label>' + L("If yes, explain") + '</label><input class="input" name="decl_' + d.key + '_explain" value="' + esc(existing.explain||"") + '"></div>' +
+      extra +
     '</div>';
   }).join("");
   return '<div class="section-head" style="margin-top:24px"><h2>' + L("RTL Business Purpose Loan Application") + '</h2></div>' +
@@ -9514,10 +9601,18 @@ function extractRtlApplicationFromForm(fd, signatureDataUrl, existing){
   var num = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
   var declarations = {};
   LOAN_APP_DECLARATIONS.forEach(function(d){
+    // File itself is uploaded separately (see uploadDeclarationFile) --
+    // preserve whatever's already on file since this form has no file input
+    // value to read back.
+    var existingDecl = (existing && existing.declarations && existing.declarations[d.key]) || {};
     declarations[d.key] = {
       guarantor: fd.get("decl_" + d.key) || "No",
       coGuarantor: fd.get("decl_" + d.key + "_co") || "No",
-      explain: fd.get("decl_" + d.key + "_explain") || ""
+      explain: fd.get("decl_" + d.key + "_explain") || "",
+      list: fd.get("decl_" + d.key + "_list") || "",
+      date: fd.get("decl_" + d.key + "_date") || "",
+      fileUrl: existingDecl.fileUrl || null,
+      fileName: existingDecl.fileName || null
     };
   });
   return {
@@ -9650,13 +9745,18 @@ function buildDscrApplicationFieldsHTML(lead, lang){
   };
   var declRows = LOAN_APP_DECLARATIONS.map(function(decl){
     var existing = (d.declarations || {})[decl.key] || {};
+    var extra = "";
+    if (decl.needsList) extra += '<div class="form-row"><label>' + L(decl.listLabel) + '</label><input class="input" name="decl_' + decl.key + '_list" value="' + esc(existing.list||"") + '"></div>';
+    if (decl.needsExplain) extra += '<div class="form-row"><label>' + L("If yes, explain") + '</label><input class="input" name="decl_' + decl.key + '_explain" value="' + esc(existing.explain||"") + '"></div>';
+    if (decl.needsDate) extra += '<div class="form-row"><label>' + L(decl.dateLabel) + '</label><input class="input" type="date" name="decl_' + decl.key + '_date" value="' + esc(existing.date||"") + '"></div>';
+    if (decl.needsAttach) extra += '<div class="form-row"><label>' + L(decl.attachLabel) + '</label><input class="input" type="file" name="decl_' + decl.key + '_file">' + (existing.fileName ? ('<div class="hint"><button type="button" class="link-btn" data-action="view-declaration-file" data-lead="' + lead.id + '" data-appkey="dscrApp" data-declkey="' + decl.key + '">' + L("On file") + ': ' + esc(existing.fileName) + '</button></div>') : '') + '</div>';
     return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">' +
       '<div style="margin-bottom:6px">' + L(decl.text) + '</div>' +
       '<div class="form-two">' +
         '<div class="form-row"><label>' + L("You") + '</label>' + yn("decl_" + decl.key, existing.guarantor) + '</div>' +
         '<div class="form-row"><label>' + L("Co-Applicant (if any)") + '</label>' + yn("decl_" + decl.key + "_co", existing.coGuarantor) + '</div>' +
       '</div>' +
-      '<div class="form-row"><label>' + L("If yes, explain") + '</label><input class="input" name="decl_' + decl.key + '_explain" value="' + esc(existing.explain||"") + '"></div>' +
+      extra +
     '</div>';
   }).join("");
   return '<div class="section-head" style="margin-top:24px"><h2>' + L("DSCR Business Purpose Loan Application") + '</h2></div>' +
@@ -9765,10 +9865,15 @@ function extractDscrApplicationFromForm(fd, signatureDataUrl, existing){
   var num = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
   var declarations = {};
   LOAN_APP_DECLARATIONS.forEach(function(decl){
+    var existingDecl = (existing && existing.declarations && existing.declarations[decl.key]) || {};
     declarations[decl.key] = {
       guarantor: fd.get("decl_" + decl.key) || "No",
       coGuarantor: fd.get("decl_" + decl.key + "_co") || "No",
-      explain: fd.get("decl_" + decl.key + "_explain") || ""
+      explain: fd.get("decl_" + decl.key + "_explain") || "",
+      list: fd.get("decl_" + decl.key + "_list") || "",
+      date: fd.get("decl_" + decl.key + "_date") || "",
+      fileUrl: existingDecl.fileUrl || null,
+      fileName: existingDecl.fileName || null
     };
   });
   return {
@@ -10247,6 +10352,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "view-extra-document-file"){ viewExtraDocumentFile(t.dataset.lead, parseInt(t.dataset.idx,10), parseInt(t.dataset.fileidx,10)); }
   else if (action === "delete-extra-document-file"){ deleteExtraDocumentFile(t.dataset.lead, parseInt(t.dataset.idx,10), parseInt(t.dataset.fileidx,10)); }
   else if (action === "view-doc-request-reference"){ viewDocRequestReferenceFile(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "view-declaration-file"){ viewDeclarationFile(t.dataset.lead, t.dataset.appkey, t.dataset.declkey); }
   else if (action === "view-uw-condition-file"){ viewUnderwritingConditionFile(t.dataset.lead, t.dataset.condid, t.dataset.borrower==="1"); }
   else if (action === "ai-review-doc"){ runAiDocReview(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
   else if (action === "scan-all-documents"){ scanAllDocuments(t.dataset.lead); render(); }
@@ -10616,6 +10722,11 @@ appEl.addEventListener("submit", function(e){
       citizenshipStatus: fd.get("citizenshipStatus"),
       countryOfDomicile: fd.get("countryOfDomicile"),
       maritalStatus: fd.get("maritalStatus"),
+      builtYear: fd.get("builtYear") ? Number(fd.get("builtYear")) : null,
+      currentLenderName: fd.get("currentLenderName"),
+      unitsReadyForRent: fd.get("unitsReadyForRent"),
+      propertyOccupied: fd.get("propertyOccupied"),
+      taxesCurrent: fd.get("taxesCurrent"),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
@@ -10625,6 +10736,7 @@ appEl.addEventListener("submit", function(e){
     var taRtlData = extractRtlApplicationFromForm(fd, signaturePadDataUrl("sig-rtlapp-" + form.dataset.lead), taLead && taLead.rtlApp);
     var taDscrData = extractDscrApplicationFromForm(fd, signaturePadDataUrl("sig-dscrapp-" + form.dataset.lead), taLead && taLead.dscrApp);
     applyAchAndRtlAppPatch(form.dataset.lead, taAchData, taRtlData, taDscrData);
+    uploadAnyDeclarationFiles(form, form.dataset.lead);
     var sowPatch = extractScopeOfWorkFromForm(fd);
     if (sowPatch) saveScopeOfWork(form.dataset.lead, sowPatch.items, sowPatch.notes);
     render();
@@ -10666,11 +10778,17 @@ appEl.addEventListener("submit", function(e){
       citizenshipStatus: fd.get("citizenshipStatus"),
       countryOfDomicile: fd.get("countryOfDomicile"),
       maritalStatus: fd.get("maritalStatus"),
+      builtYear: fd.get("builtYear") ? Number(fd.get("builtYear")) : null,
+      currentLenderName: fd.get("currentLenderName"),
+      unitsReadyForRent: fd.get("unitsReadyForRent"),
+      propertyOccupied: fd.get("propertyOccupied"),
+      taxesCurrent: fd.get("taxesCurrent"),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
     });
     applyAchAndRtlAppPatch(form.dataset.lead, pubAchData, pubRtlData, pubDscrData);
+    uploadAnyDeclarationFiles(form, form.dataset.lead);
     var sowPatchPub = extractScopeOfWorkFromForm(fd);
     if (sowPatchPub) saveScopeOfWork(form.dataset.lead, sowPatchPub.items, sowPatchPub.notes);
     render();
