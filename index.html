@@ -9170,6 +9170,7 @@ function buildApplicationFieldsHTML(lead, lang){
       '<div class="form-row"><label>' + L("Investing Experience (deals completed)") + '</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '" data-action="update-track-record-count" data-lang="' + lang + '"></div>' +
     '</div>' +
     (lead.loanType === "Mixed-Use" ? ('<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="maritalStatus">' +
+      '<option value=""' + (lead.maritalStatus!=="Married" && lead.maritalStatus!=="Unmarried" ? " selected" : "") + '>' + L("— Select —") + '</option>' +
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (lead.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>') : "") +
     '<div class="form-row"><label>' + L("Country of Citizenship") + ' <span class="hint">(' + L("if Foreign National") + ')</span></label><input class="input" name="countryOfDomicile" value="' + esc(lead.countryOfDomicile||"") + '" placeholder="' + L("e.g. Mexico") + '"></div>' +
@@ -9512,6 +9513,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
     '</div>' +
     '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="rtlHomeAddress" value="' + esc(r.homeAddress||"") + '"></div>' +
     '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="rtlMaritalStatus">' +
+      '<option value=""' + (r.maritalStatus!=="Married" && r.maritalStatus!=="Unmarried" ? " selected" : "") + '>' + L("— Select —") + '</option>' +
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (r.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>' +
 
@@ -9769,6 +9771,7 @@ function buildDscrApplicationFieldsHTML(lead, lang){
     '</div>' +
     '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="dscrHomeAddress" value="' + esc(d.homeAddress||"") + '"></div>' +
     '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="dscrMaritalStatus">' +
+      '<option value=""' + (d.maritalStatus!=="Married" && d.maritalStatus!=="Unmarried" ? " selected" : "") + '>' + L("— Select —") + '</option>' +
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (d.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>' +
 
