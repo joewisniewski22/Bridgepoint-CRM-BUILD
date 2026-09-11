@@ -2929,6 +2929,7 @@ function leadToRow(l){
     units_ready_for_rent: l.unitsReadyForRent || null, property_occupied: l.propertyOccupied || null, taxes_current: l.taxesCurrent || null,
     property_lease_status: l.propertyLeaseStatus || null, delayed_purchase: l.delayedPurchase || null,
     ny_cema_loan: l.nyCemaLoan || null, ny_closing_attorney: l.nyClosingAttorney || null,
+    num_units: l.numUnits || null, lease_detail: l.leaseDetail || [],
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
@@ -2973,6 +2974,7 @@ function rowToLead(r){
     unitsReadyForRent: r.units_ready_for_rent || null, propertyOccupied: r.property_occupied || null, taxesCurrent: r.taxes_current || null,
     propertyLeaseStatus: r.property_lease_status || null, delayedPurchase: r.delayed_purchase || null,
     nyCemaLoan: r.ny_cema_loan || null, nyClosingAttorney: r.ny_closing_attorney || null,
+    numUnits: r.num_units || null, leaseDetail: r.lease_detail || [],
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
@@ -5193,6 +5195,13 @@ function buildRtlApplicationPdfBlob(lead){
   w.twoCol("Delayed Purchase?", lead.delayedPurchase, "New York CEMA Loan?", lead.nyCemaLoan);
   if (lead.nyClosingAttorney) w.row("NY Closing Attorney", lead.nyClosingAttorney);
   w.row("Interior Access Contact", (r.accessName||"—") + " (" + (r.accessRelationship||"") + ") — " + (r.accessPhone||"") + " — " + (r.accessEmail||""));
+  if (lead.numUnits) w.row("Number of Units", lead.numUnits);
+  if ((lead.leaseDetail||[]).length){
+    w.heading("Lease Detail — All Units");
+    lead.leaseDetail.forEach(function(u, i){
+      w.row("Unit #" + (i+1), "Lease " + (u.leaseAmount?fmtUSD(u.leaseAmount):"—") + " (" + (u.leaseStart||"—") + " to " + (u.leaseEnd||"—") + ") — Market Rent " + (u.marketRent?fmtUSD(u.marketRent):"—") + " — Qualifying Rent " + (u.qualifyingRent?fmtUSD(u.qualifyingRent):"—"));
+    });
+  }
 
   w.heading("7) Current Debt on Property (Refinance Only)");
   w.twoCol("Balance Owed", r.balanceOwed ? fmtUSD(r.balanceOwed) : null, "Current Lender / Mortgage Company", lead.currentLenderName || r.currentLender);
@@ -5274,6 +5283,13 @@ function buildDscrApplicationPdfBlob(lead){
   w.twoCol("Property Currently Leased", lead.propertyLeaseStatus, "Delayed Purchase?", lead.delayedPurchase);
   w.twoCol("New York CEMA Loan?", lead.nyCemaLoan, "NY Closing Attorney", lead.nyClosingAttorney);
   w.row("Interior Access Contact", (d.accessName||"—") + " (" + (d.accessRelationship||"") + ") — " + (d.accessPhone||"") + " — " + (d.accessEmail||""));
+  if (lead.numUnits) w.row("Number of Units", lead.numUnits);
+  if ((lead.leaseDetail||[]).length){
+    w.heading("Lease Detail — All Units");
+    lead.leaseDetail.forEach(function(u, i){
+      w.row("Unit #" + (i+1), "Lease " + (u.leaseAmount?fmtUSD(u.leaseAmount):"—") + " (" + (u.leaseStart||"—") + " to " + (u.leaseEnd||"—") + ") — Market Rent " + (u.marketRent?fmtUSD(u.marketRent):"—") + " — Qualifying Rent " + (u.qualifyingRent?fmtUSD(u.qualifyingRent):"—"));
+    });
+  }
 
   if (isPortfolio && (d.multiPack||[]).length){
     w.heading("Multi-Pack Addendum");
@@ -9224,6 +9240,7 @@ function buildApplicationFieldsHTML(lead, lang){
       '<div class="form-row"><label>' + L("Year Built") + '</label><input class="input" type="number" name="builtYear" value="' + v(lead.builtYear) + '"></div>' +
       '<div class="form-row"><label>' + L("Current Lender / Mortgage Company") + ' <span class="hint">(' + L("if refinance") + ')</span></label><input class="input" name="currentLenderName" value="' + esc(lead.currentLenderName||"") + '"></div>' +
     '</div>' +
+    (LEASE_DETAIL_PROPERTY_TYPES.indexOf(lead.propertyType) !== -1 ? ('<div class="form-row"><label>' + L("Number of Units") + '</label><input class="input" type="number" min="0" max="20" name="numUnits" value="' + v(lead.numUnits) + '" data-action="update-lease-detail-count" data-lang="' + lang + '" data-lead="' + lead.id + '"></div>') : "") +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Are all units ready for rent?") + '</label>' + appYn("unitsReadyForRent", lead.unitsReadyForRent) + '</div>' +
       '<div class="form-row"><label>' + L("Is the property currently occupied?") + '</label>' + appYn("propertyOccupied", lead.propertyOccupied) + '</div>' +
@@ -9245,6 +9262,7 @@ function buildApplicationFieldsHTML(lead, lang){
       '<div class="form-row"><label>' + L("Term (months)") + '</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
     '</div>' +
     buildTrackRecordSectionHTML(lead, lang) +
+    buildLeaseDetailSectionHTML(lead, lang) +
     buildScopeOfWorkFieldsHTML(lead, lang) +
     buildRtlApplicationFieldsHTML(lead, lang) +
     buildDscrApplicationFieldsHTML(lead, lang) +
@@ -9319,6 +9337,76 @@ function extractTrackRecordFromForm(fd){
       exitType: fd.get("trackExitType_" + i) || "",
       exitDate: fd.get("trackExitDate_" + i) || null,
       exitValue: fd.get("trackExitValue_" + i) ? Number(fd.get("trackExitValue_" + i)) : null
+    });
+    i++;
+  }
+  return rows;
+}
+// Constructive's DSCR Loan Submission Sheet requires this exact per-unit
+// breakdown ("Lease Detail for all 2-20 Unit Properties") for any Duplex,
+// 2-4 Unit, or Multifamily 5+ subject property -- a single blended rent
+// estimate isn't enough for those. Row count is driven by Number of Units,
+// same live-rebuild pattern as Track Record/Schedule A above.
+var LEASE_DETAIL_PROPERTY_TYPES = ["Duplex","2-4 Unit","Multifamily 5+"];
+function buildLeaseDetailRowHTML(i, row, lang){
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
+  row = row || {};
+  var v2 = function(x){ return x===null||x===undefined ? "" : x; };
+  return '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">' +
+    '<div class="hint" style="margin-bottom:6px">' + L("Unit #") + (i+1) + '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Actual Lease Amount") + '</label><input class="input" type="number" name="leaseAmount_' + i + '" value="' + v2(row.leaseAmount) + '"></div>' +
+      '<div class="form-row"><label>' + L("Market Rent (from 1007)") + '</label><input class="input" type="number" name="leaseMarketRent_' + i + '" value="' + v2(row.marketRent) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Lease Start Date") + '</label><input class="input" type="date" name="leaseStart_' + i + '" value="' + (row.leaseStart||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Lease End Date") + '</label><input class="input" type="date" name="leaseEnd_' + i + '" value="' + (row.leaseEnd||"") + '"></div>' +
+    '</div>' +
+    '<div class="form-row"><label>' + L("Qualifying Rent") + '</label><input class="input" type="number" name="leaseQualifyingRent_' + i + '" value="' + v2(row.qualifyingRent) + '"></div>' +
+  '</div>';
+}
+function buildLeaseDetailRowsHTML(count, existingRows, lang){
+  var rows = [];
+  for (var i=0;i<count;i++){ rows.push(buildLeaseDetailRowHTML(i, (existingRows||[])[i], lang)); }
+  return rows.join("");
+}
+function buildLeaseDetailSectionHTML(lead, lang){
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
+  if (LEASE_DETAIL_PROPERTY_TYPES.indexOf(lead.propertyType) === -1) return "";
+  var count = Math.min(lead.numUnits||0, 20);
+  return '<div class="section-head" style="margin-top:20px"><h2>' + L("Lease Detail — All Units") + '</h2></div>' +
+    '<div class="footnote" style="padding:0 0 10px">' + L("Required for Duplex, 2-4 Unit, and Multifamily 5+ properties — one row per unit, driven by Number of Units above.") + '</div>' +
+    '<div id="lease-detail-rows-' + lead.id + '" data-lang="' + lang + '">' + (count ? buildLeaseDetailRowsHTML(count, lead.leaseDetail, lang) : '<div class="empty">' + L("Enter Number of Units above to add per-unit lease rows.") + '</div>') + '</div>';
+}
+function collectLeaseDetailRowsFromDOM(container){
+  var rows = [];
+  var i = 0;
+  var el;
+  while ((el = container.querySelector('[name="leaseAmount_' + i + '"]'))){
+    var get = function(name){ var f = container.querySelector('[name="' + name + '"]'); return f ? f.value : ""; };
+    rows.push({
+      leaseAmount: get("leaseAmount_" + i),
+      marketRent: get("leaseMarketRent_" + i),
+      leaseStart: get("leaseStart_" + i),
+      leaseEnd: get("leaseEnd_" + i),
+      qualifyingRent: get("leaseQualifyingRent_" + i)
+    });
+    i++;
+  }
+  return rows;
+}
+function extractLeaseDetailFromForm(fd){
+  var rows = [];
+  var i = 0;
+  while (fd.has("leaseAmount_" + i)){
+    rows.push({
+      leaseAmount: fd.get("leaseAmount_" + i) ? Number(fd.get("leaseAmount_" + i)) : null,
+      marketRent: fd.get("leaseMarketRent_" + i) ? Number(fd.get("leaseMarketRent_" + i)) : null,
+      leaseStart: fd.get("leaseStart_" + i) || null,
+      leaseEnd: fd.get("leaseEnd_" + i) || null,
+      qualifyingRent: fd.get("leaseQualifyingRent_" + i) ? Number(fd.get("leaseQualifyingRent_" + i)) : null
     });
     i++;
   }
@@ -10618,6 +10706,14 @@ appEl.addEventListener("change", function(e){
       var trCount = Math.max(0, Math.min(parseInt(t.value,10)||0, 20));
       trContainer.innerHTML = trCount ? buildTrackRecordRowsHTML(trCount, trExisting, trLang) : '<div class="empty">' + esc(tr("Enter a number above for Investing Experience to add project rows.", trLang)) + '</div>';
     }
+  } else if (action === "update-lease-detail-count"){
+    var ldContainer = document.getElementById("lease-detail-rows-" + t.dataset.lead);
+    if (ldContainer){
+      var ldLang = t.dataset.lang || "en";
+      var ldExisting = collectLeaseDetailRowsFromDOM(ldContainer);
+      var ldCount = Math.max(0, Math.min(parseInt(t.value,10)||0, 20));
+      ldContainer.innerHTML = ldCount ? buildLeaseDetailRowsHTML(ldCount, ldExisting, ldLang) : '<div class="empty">' + esc(tr("Enter Number of Units above to add per-unit lease rows.", ldLang)) + '</div>';
+    }
   } else if (action === "update-schedule-a-count"){
     var saContainer = document.getElementById("schedule-a-rows-" + t.dataset.lead);
     if (saContainer){
@@ -10780,6 +10876,8 @@ appEl.addEventListener("submit", function(e){
       delayedPurchase: fd.get("delayedPurchase"),
       nyCemaLoan: fd.get("nyCemaLoan"),
       nyClosingAttorney: fd.get("nyClosingAttorney"),
+      numUnits: fd.get("numUnits") ? Number(fd.get("numUnits")) : null,
+      leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
@@ -10840,6 +10938,8 @@ appEl.addEventListener("submit", function(e){
       delayedPurchase: fd.get("delayedPurchase"),
       nyCemaLoan: fd.get("nyCemaLoan"),
       nyClosingAttorney: fd.get("nyClosingAttorney"),
+      numUnits: fd.get("numUnits") ? Number(fd.get("numUnits")) : null,
+      leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
       trackRecord: extractTrackRecordFromForm(fd)
