@@ -5644,6 +5644,12 @@ function render(){
   initSignaturePads();
   initPlacesAutocomplete();
   syncHistory();
+  // Every render() replaces #app's innerHTML wholesale (see note above),
+  // which resets any scrollable container's scrollTop to 0 -- including
+  // the AI chat log, so each new reply visibly yanked the view back up to
+  // the oldest message instead of staying on the newest one.
+  var chatLog = document.getElementById("ai-chat-log");
+  if (chatLog) chatLog.scrollTop = chatLog.scrollHeight;
 }
 var lastHistoryKey = null;
 function syncHistory(){
