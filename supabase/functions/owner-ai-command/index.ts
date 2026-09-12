@@ -35,6 +35,7 @@ const OWNER_ONLY_TOOLS = new Set([
   "email_team", "text_team",
   "analyze_engagement_performance", "apply_engagement_adjustment",
   "analyze_growth_progress", "update_growth_goal", "analyze_pricing_competitiveness",
+  "analyze_lost_deals",
 ]);
 
 const CORS_HEADERS = {
@@ -73,7 +74,7 @@ async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string
     "7. reassign_lead to change who a loan file is assigned to. add_lead_note to log a note on a loan file's activity history.\n" +
     "8. Retargeting campaigns: start_retargeting_campaign drafts a personalized email/text batch send to a group of existing leads. Target them by assignedTo (e.g. 'all of Taeya's leads'), specific leadIds, or noContactDays (e.g. 'anyone with no contact in 30 days' -> noContactDays: 30, computed from real call attempts and logged call/text/email activity, never guessed) -- these can combine, e.g. assignedTo + noContactDays for 'Taeya's leads that have gone quiet for 30 days'. Write genuinely good, specific copy yourself -- introduce the LO by name as the borrower's real point of contact, reference their loan interest when known (via {{loanTypeLine}}), and drive toward booking a call ({{bookingLink}}) or calling/texting the LO directly ({{loPhone}}). Keep texts SMS-short. This never sends anything itself -- it resolves the real recipient list and returns a preview for Joe to review and confirm in the CRM.\n" +
     "9. Learning from real performance: when Joe asks you to 'look at engagement' or 'look and adjust' (he does not want to track this himself), this is ALWAYS a two-tool-call task, never one. Step 1: call analyze_engagement_performance. Step 2, in that same turn after seeing the results: you must do exactly one of (a) call apply_engagement_adjustment for real, or (b) write your reply stating plainly that nothing in the data supports a change. There is no third option -- never write a reply that describes, summarizes, or claims a specific adjustment (a guidance change, a cadence change) as something you did unless that exact apply_engagement_adjustment tool call is present in this turn's actions. If you're weighing whether to make a change, resolve that by calling the tool or by concluding no -- never resolve it by narrating an intention. Weight changes to how thin the data is, and say so plainly rather than overclaiming a pattern from a handful of leads. Always cite the actual numbers.\n" +
-    "10. Growth advising: Joe wants ongoing, business-manager-style guidance toward a real funded-volume goal (call analyze_growth_progress for the current target/deadline/pace, real pipeline/lead/revenue numbers, AND its perLoanOfficer breakdown -- never assume the goal, always look it up fresh). For a capacity-planning question like 'how do I get to 30 loans this month with the employees I have', combine analyze_growth_progress's perLoanOfficer pace (closed + active pipeline per LO) with analyze_lo_speed_to_lead's missed-leads report (real slack capacity being left on the table per LO) -- reason concretely from both: whether the shortfall is a lead-volume problem, a per-LO conversion/speed problem, or genuinely needs another hire, citing the actual numbers rather than a generic pep talk. Ground spend/channel recommendations in real revenue (points-based revenue on the active pipeline and any closed volume -- or the REAL-TIME REVENUE SNAPSHOT for YSP-inclusive totals) so a recommendation like 'increase Facebook spend' is actually affordable, not just a lead-volume guess -- his own words: 'you'll know my budget because you should see earnings based on what we already built.' If he tells you a goal, deadline, or baseline changed (ad spend, CIX volume, a month hit the target), call update_growth_goal for real, same discipline as tool 9 -- narrating it isn't enough. For pricing/rate competitiveness questions, call analyze_pricing_competitiveness -- there is no external competitor-rate feed, so frame guidance around Bridgepoint's own margin over its real wholesale par rate, and say explicitly that you don't have live competitor pricing if asked to compare against a specific competitor.\n\n" +
+    "10. Growth advising: Joe wants ongoing, business-manager-style guidance toward a real funded-volume goal (call analyze_growth_progress for the current target/deadline/pace, real pipeline/lead/revenue numbers, AND its perLoanOfficer breakdown -- never assume the goal, always look it up fresh). For a capacity-planning question like 'how do I get to 30 loans this month with the employees I have', combine analyze_growth_progress's perLoanOfficer pace (closed + active pipeline per LO) with analyze_lo_speed_to_lead's missed-leads report (real slack capacity being left on the table per LO) -- reason concretely from both: whether the shortfall is a lead-volume problem, a per-LO conversion/speed problem, or genuinely needs another hire, citing the actual numbers rather than a generic pep talk. Ground spend/channel recommendations in real revenue (points-based revenue on the active pipeline and any closed volume -- or the REAL-TIME REVENUE SNAPSHOT for YSP-inclusive totals) so a recommendation like 'increase Facebook spend' is actually affordable, not just a lead-volume guess -- his own words: 'you'll know my budget because you should see earnings based on what we already built.' If he tells you a goal, deadline, or baseline changed (ad spend, CIX volume, a month hit the target), call update_growth_goal for real, same discipline as tool 9 -- narrating it isn't enough. For pricing/rate competitiveness questions, call analyze_pricing_competitiveness -- there is no external competitor-rate feed, so frame guidance around Bridgepoint's own margin over its real wholesale par rate, and say explicitly that you don't have live competitor pricing if asked to compare against a specific competitor. For 'why are we losing deals' / win-loss questions, call analyze_lost_deals -- it's real structured data (staff pick a reason when marking a deal lost), not a guess, but say plainly if the categorized sample is thin.\n\n" +
     "You still do NOT have: ad platform access, payments/spend, or any destructive/irreversible action (no deleting files, no changing pricing/guidelines). If asked for one of those, say plainly it isn't wired up rather than pretending.\n\n" +
     "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success. " +
     "CRITICAL: never describe an action (sent, triggered, created, updated, published) as done unless you actually called that exact tool THIS turn and its result confirmed success -- don't narrate an effect from context, from what Joe asked for, or from a tool you called for a different purpose. If you only updated a file and didn't call send_document, do not say anything was sent or triggered -- say what you'd need to do that as a separate, explicit step instead.\n\n" +
@@ -336,6 +337,11 @@ const TOOLS = [
       },
       required: [],
     },
+  },
+  {
+    name: "analyze_lost_deals",
+    description: "Real win-loss breakdown from structured lost-reason data (captured when staff mark a deal lost in the CRM, not guessed) -- counts by reason, loan type, and loan officer, plus recent examples. Use this for 'why are we losing deals' / 'what's our biggest leak' questions. If most leads are still active/uncategorized, say the sample is thin rather than overclaiming a pattern.",
+    input_schema: { type: "object", properties: {}, required: [] },
   },
   {
     name: "analyze_pricing_competitiveness",
@@ -917,6 +923,39 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     const { error } = await sb.from("growth_goals").update(patch).eq("id", "default");
     if (error) return { error: error.message };
     return { ok: true, applied: patch };
+  }
+  if (name === "analyze_lost_deals") {
+    const { data: leads } = await sb.from("leads")
+      .select("id,name,loan_type,assigned_to,loan_amount,lost_reason,lost_reason_note,created_at")
+      .eq("status", "lost");
+    const rows = leads || [];
+    const categorized = rows.filter((l) => l.lost_reason);
+    const { data: staff } = await sb.from("users").select("id,name");
+    const nameById: Record<string, string> = {};
+    (staff || []).forEach((u) => { nameById[u.id as string] = u.name as string; });
+
+    const byReason: Record<string, number> = {};
+    const byLoanType: Record<string, number> = {};
+    const byLo: Record<string, number> = {};
+    categorized.forEach((l) => {
+      const reason = l.lost_reason as string;
+      byReason[reason] = (byReason[reason] || 0) + 1;
+      const lt = (l.loan_type as string) || "unknown";
+      byLoanType[lt] = (byLoanType[lt] || 0) + 1;
+      const lo = nameById[l.assigned_to as string] || (l.assigned_to as string) || "unassigned";
+      byLo[lo] = (byLo[lo] || 0) + 1;
+    });
+
+    return {
+      totalLostDeals: rows.length,
+      categorizedCount: categorized.length,
+      uncategorizedCount: rows.length - categorized.length,
+      byReason, byLoanType, byLoanOfficer: byLo,
+      recentExamples: categorized.slice(-10).reverse().map((l) => ({
+        name: l.name, loanType: l.loan_type, reason: l.lost_reason, note: l.lost_reason_note, loanAmount: fmtUSD(l.loan_amount as number),
+      })),
+      caveat: "uncategorizedCount reflects deals lost before this tracking existed (or where staff skipped selecting a reason) -- only categorizedCount deals have a real reason on file. With a small categorized sample, say so plainly rather than overclaiming a pattern.",
+    };
   }
   if (name === "analyze_pricing_competitiveness") {
     const { data: rates } = await sb.from("market_rates").select("key,label,current,previous");

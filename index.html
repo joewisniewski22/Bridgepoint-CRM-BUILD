@@ -1696,6 +1696,16 @@ var CALL_OUTCOMES = [
   { key:"not-interested", label:"Not interested" },
   { key:"wrong-number", label:"Wrong number" }
 ];
+var LOST_REASONS = [
+  { key:"rate-price", label:"Rate/price — went with a cheaper lender" },
+  { key:"didnt-qualify", label:"Didn't qualify (credit/DSCR/experience/liquidity)" },
+  { key:"other-lender", label:"Went with a different lender/broker" },
+  { key:"deal-fell-through", label:"Deal fell through (property/appraisal/title issue)" },
+  { key:"unresponsive", label:"Unresponsive / went dark" },
+  { key:"timeline", label:"Timeline didn't work for them" },
+  { key:"changed-mind", label:"Changed their mind / didn't move forward with the purchase" },
+  { key:"other", label:"Other" }
+];
 var RATE_KEY_BY_LOAN_TYPE = {
   "DSCR":"dscr", "Fix & Flip":"fixFlip", "Ground Up Construction":"groundUp",
   "Portfolio/Blanket":"portfolio", "Bridge":"bridge", "Mixed-Use":"mixedUse"
@@ -1747,6 +1757,17 @@ function isNewBusinessLead(lead){
   if (lead.status==="cold" || lead.status==="lost" || lead.status==="closed") return true;
   if (lead.status==="active" && CADENCE_STAGES.indexOf(lead.stage) !== -1) return true;
   return false;
+}
+// Joe: "no need to have a call list on weekends... sunday they can be off."
+// Sunday drops the forced new-business quota to 0 (naturally-due items like
+// a hot lead still show -- see computeQueueForLeads, unaffected by this --
+// only the backfill-to-20 padding is skipped). Saturday is "optional" --
+// half quota, light rather than off. dailyQuotaExtra still adds on top if
+// an LO chooses to keep working, since that's their own opt-in, not a push.
+function effectiveDailyQuota(){
+  var day = new Date().getDay(); // 0=Sun, 6=Sat, local time
+  var base = day===0 ? 0 : (day===6 ? Math.round(DAILY_CALL_QUOTA/2) : DAILY_CALL_QUOTA);
+  return base + (ui.dailyQuotaExtra||0);
 }
 
 /* ---------------------------------------------------------------------
@@ -2253,6 +2274,31 @@ function commissionSummaryFor(userId){
   var potential = activePipeline.reduce(function(s,l){ return s + commissionAmount(l); }, 0);
   return { earned: earned, potential: potential, closedCount: closedThisMonth.length, pipelineCount: activePipeline.length };
 }
+// Consecutive days this LO hit the new-business call quota, walking
+// backward from today. Computed purely from call_attempts dates -- no new
+// table needed. Today doesn't break an in-progress streak just because
+// it isn't finished yet; it only counts once it actually hits quota.
+function isoDateNDaysAgo(n){
+  var d = new Date();
+  d.setUTCDate(d.getUTCDate() - n);
+  return d.toISOString().slice(0,10);
+}
+function currentQuotaStreak(userId){
+  var byDate = {};
+  state.leads.filter(function(l){ return l.assignedTo===userId && isNewBusinessLead(l); }).forEach(function(l){
+    (l.callAttempts||[]).forEach(function(a){ byDate[a.date] = (byDate[a.date]||0) + 1; });
+  });
+  var streak = 0, n = 0;
+  var todayStr = todayISO();
+  while (true){
+    var iso = isoDateNDaysAgo(n);
+    var count = byDate[iso] || 0;
+    if (count >= DAILY_CALL_QUOTA){ streak++; n++; continue; }
+    if (iso === todayStr){ n++; continue; }
+    break;
+  }
+  return streak;
+}
 function notifyProcessorOfPricingChange(lead, whatChanged){
   if (stageIndex(lead.stage) < stageIndex("processing")) return;
   var proc = processingContact(lead);
@@ -2410,7 +2456,7 @@ function startDialer(){
   // that renders on "My Queue", regardless of which Today tab happens to be
   // showing when the dialer is started.
   var myId = currentUser().id;
-  var quota = DAILY_CALL_QUOTA + (ui.dailyQuotaExtra||0);
+  var quota = effectiveDailyQuota();
   var dq = buildDailyCallQueue(myId, quota);
   var ids = dq.followUps.concat(dq.newBusiness).map(function(i){ return i.leadId; });
   var seen = {}, uniq = [];
@@ -2621,7 +2667,7 @@ function computeQueueForLeads(leads, userId, today){
 // daily call quota engine so there's always a real 20 to work, per-person.
 function todayQueueScoped(){
   if (isOwner() && ui.todayScope === "team") return computeQueue("owner");
-  var quota = DAILY_CALL_QUOTA + (ui.dailyQuotaExtra||0);
+  var quota = effectiveDailyQuota();
   var dq = buildDailyCallQueue(ui.viewAs, quota);
   return dq.newBusiness.concat(dq.followUps);
 }
@@ -3186,6 +3232,7 @@ function leadToRow(l){
     pricing_review_requested_at: l.pricingReviewRequestedAt || null, pricing_review_note: l.pricingReviewNote || null,
     pricing_review_requested_by: l.pricingReviewRequestedBy || null, pricing_review_resolved_at: l.pricingReviewResolvedAt || null,
     skip_count: l.skipCount || 0, last_skip_at: l.lastSkipAt || null,
+    lost_reason: l.lostReason || null, lost_reason_note: l.lostReasonNote || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -3232,7 +3279,8 @@ function rowToLead(r){
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[],
     pricingReviewRequestedAt: r.pricing_review_requested_at || null, pricingReviewNote: r.pricing_review_note || null,
     pricingReviewRequestedBy: r.pricing_review_requested_by || null, pricingReviewResolvedAt: r.pricing_review_resolved_at || null,
-    skipCount: r.skip_count || 0, lastSkipAt: r.last_skip_at || null
+    skipCount: r.skip_count || 0, lastSkipAt: r.last_skip_at || null,
+    lostReason: r.lost_reason || null, lostReasonNote: r.lost_reason_note || null
   };
 }
 function notifToRow(n){
@@ -4057,6 +4105,22 @@ function logCreditOrder(leadId){
   lead.creditOrderedAt = d;
   lead.activity = lead.activity || [];
   lead.activity.push({ date:d, type:"credit", text:"Opened Xactus to order credit for " + lead.name, author: currentUser().name });
+  persist();
+}
+function markLostWithReason(leadId, reason, note){
+  var lead = leadById(leadId);
+  if (!lead || !reason) return;
+  var d = todayISO();
+  lead.status = "lost"; lead.stage = "lost";
+  lead.lostReason = reason;
+  lead.lostReasonNote = note || "";
+  var reasonLabel = (LOST_REASONS.filter(function(r){ return r.key===reason; })[0] || {}).label || reason;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"system", text:"Marked lost / dead — " + reasonLabel + (note ? (": " + note) : ""), author: currentUser().name });
+  if (sb && lead.assignedTo){
+    sb.functions.invoke("generate-coaching-note", { body:{ leadId: lead.id, staffId: lead.assignedTo, source:"lost_deal" } }).catch(function(){});
+  }
+  showToast("Marked lost — " + reasonLabel);
   persist();
 }
 function moveStage(leadId, target){
@@ -6678,7 +6742,7 @@ function renderToday(){
   var leads = scopedLeads();
   var k = kpisFor(leads);
   var scopeIsMine = !isOwner() || ui.todayScope !== "team";
-  var quota = DAILY_CALL_QUOTA + (ui.dailyQuotaExtra||0);
+  var quota = effectiveDailyQuota();
 
   var dq = null, teamQueue = null;
   if (scopeIsMine) dq = buildDailyCallQueue(ui.viewAs, quota);
@@ -6692,12 +6756,15 @@ function renderToday(){
     state.leads.filter(function(l){ return l.assignedTo === ui.viewAs && isNewBusinessLead(l); }).forEach(function(l){
       loggedToday += (l.callAttempts||[]).filter(function(a){ return a.date === todayStr; }).length;
     });
-    var pct = Math.min(100, Math.round((loggedToday / quota) * 100));
-    var hitQuota = loggedToday >= quota;
+    var isWeekendOff = quota === 0;
+    var pct = quota ? Math.min(100, Math.round((loggedToday / quota) * 100)) : 100;
+    var hitQuota = quota > 0 && loggedToday >= quota;
     quotaBanner = '<div class="section" style="padding:16px 20px">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">' +
-        '<div><b>' + loggedToday + ' of ' + quota + '</b> new-business calls logged today' + (hitQuota ? ' — quota hit 🎉' : '') + '</div>' +
-        (hitQuota ? '<button class="btn btn-sm btn-primary" data-action="extend-daily-quota">Add 20 more</button>' : '') +
+        '<div>' + (isWeekendOff
+          ? '<b>Weekend — no forced quota today.</b> Still want to work? Click below to pull a batch anyway.'
+          : ('<b>' + loggedToday + ' of ' + quota + '</b> new-business calls logged today' + (hitQuota ? ' — quota hit 🎉' : ''))) + '</div>' +
+        ((hitQuota || isWeekendOff) ? '<button class="btn btn-sm btn-primary" data-action="extend-daily-quota">' + (isWeekendOff ? 'Pull 20 Calls' : 'Add 20 more') + '</button>' : '') +
       '</div>' +
       '<div style="height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--brand)"></div></div>' +
       (dq && dq.newBusinessDueCount > quota ? '<div class="footnote" style="padding:6px 0 0">' + dq.newBusinessDueCount + ' new leads are eligible today — showing today\'s ' + quota + ', the rest carry over to tomorrow automatically.</div>' : '') +
@@ -7657,10 +7724,10 @@ function renderRail(lead){
 
   var statusRow = "";
   if (lead.status === "cold") statusRow = '<button class="btn btn-sm" data-action="move-stage" data-lead="' + lead.id + '" data-target="reactivate">Reactivate</button>';
-  else if (lead.status === "lost") statusRow = '<span class="badge badge-neutral">Lost / Dead</span>';
+  else if (lead.status === "lost") statusRow = '<span class="badge badge-neutral">Lost / Dead' + (lead.lostReason ? (' — ' + esc((LOST_REASONS.filter(function(r){ return r.key===lead.lostReason; })[0]||{}).label || lead.lostReason)) : '') + '</span>';
   else if (lead.status === "spam") statusRow = '<span class="badge badge-neutral">🚫 Spam</span>';
   else if (!isProcessor()) statusRow = '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="cold">Mark Cold</button>' +
-      '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="lost">Mark Lost</button>' +
+      '<button class="btn btn-sm btn-danger" data-action="open-modal" data-modal="markLost" data-lead="' + lead.id + '">Mark Lost</button>' +
       '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="spam" title="Clearly a scam or robot — different from Cold/Lost, this never resurfaces in win-back and never auto-reactivates from a connected call">🚫 Mark Spam</button>';
   if (isProcessor() || isOwner()){
     statusRow += '<button class="btn btn-sm' + (lead.onHold ? ' btn-primary' : '') + '" data-action="toggle-on-hold" data-lead="' + lead.id + '">' + (lead.onHold ? "Remove Hold" : "⏸ Put On Hold") + '</button>';
@@ -8720,6 +8787,38 @@ function renderPerformance(){
     '</tr>';
   }).join("");
 
+  var leaderboardHTML = "";
+  if (!isProcessor()){
+    var todayStrLb = todayISO();
+    var monthStartLb = new Date(); monthStartLb.setDate(1); monthStartLb.setHours(0,0,0,0);
+    var lbRows = loanOfficers().map(function(u){
+      var cs = commissionSummaryFor(u.id);
+      var callsToday = 0;
+      state.leads.filter(function(l){ return l.assignedTo===u.id && isNewBusinessLead(l); }).forEach(function(l){
+        callsToday += (l.callAttempts||[]).filter(function(a){ return a.date===todayStrLb; }).length;
+      });
+      var closedVol = state.leads.filter(function(l){ return l.assignedTo===u.id && l.status==="closed" && l.closeDate && new Date(l.closeDate+"T00:00:00")>=monthStartLb; })
+        .reduce(function(s,l){ return s + (l.loanAmount||0); }, 0);
+      return { id:u.id, name:u.name, callsToday:callsToday, streak:currentQuotaStreak(u.id), closedCount:cs.closedCount, closedVol:closedVol, earned:cs.earned };
+    }).sort(function(a,b){ return b.closedVol - a.closedVol || b.closedCount - a.closedCount || b.callsToday - a.callsToday; });
+    var medals = ["🥇","🥈","🥉"];
+    leaderboardHTML = '<div class="section"><div class="section-head"><h2>🏆 Leaderboard — This Month</h2><span class="hint">Ranked by closed volume</span></div>' +
+      '<div class="table-wrap"><table><thead><tr><th></th><th>Loan Officer</th><th>Calls Today</th><th>Quota Streak</th><th>Closed (mo.)</th><th>Closed Volume</th><th>Commission Earned</th></tr></thead><tbody>' +
+      lbRows.map(function(r, i){
+        var isMe = r.id === ui.viewAs;
+        return '<tr' + (isMe ? ' style="background:var(--surface-2)"' : '') + '>' +
+          '<td>' + (medals[i] || (i+1)) + '</td>' +
+          '<td><b>' + esc(r.name) + (isMe ? ' (you)' : '') + '</b></td>' +
+          '<td class="num">' + r.callsToday + ' / ' + DAILY_CALL_QUOTA + '</td>' +
+          '<td class="num">' + (r.streak ? ('🔥 ' + r.streak + ' day' + (r.streak===1?'':'s')) : '—') + '</td>' +
+          '<td class="num">' + r.closedCount + '</td>' +
+          '<td class="num">' + fmtUSD(r.closedVol) + '</td>' +
+          '<td class="num">' + fmtUSD(r.earned) + '</td>' +
+        '</tr>';
+      }).join("") +
+      '</tbody></table></div></div>';
+  }
+
   var loRankingHTML = "";
   if (isOwner()){
     var ranking = loanOfficers().map(function(u){
@@ -8784,6 +8883,7 @@ function renderPerformance(){
         '<div class="kpi"><div class="kpi-label">Avg. Days to Close</div><div class="kpi-value num">' + (velocity.avgDaysToClose===null?"—":(Math.round(velocity.avgDaysToClose*10)/10)) + '</div><div class="kpi-sub">Lead created → funded, closed loans only</div></div>' +
         '<div class="kpi"><div class="kpi-label">Pull-Through Rate</div><div class="kpi-value num">' + (velocity.pullThroughRate===null?"—":velocity.pullThroughRate+"%") + '</div><div class="kpi-sub">Of ' + velocity.everReachedApp + ' completed application(s), ' + velocity.closedCount + ' closed</div></div>' +
       '</div>' +
+      leaderboardHTML +
       loRankingHTML +
       '<div class="section"><div class="section-head"><h2>Speed to Lead — by Lead</h2><span class="hint">First call/text attempt after creation</span></div>' +
         '<div class="table-wrap"><table><thead><tr><th>Lead</th>' + (isOwner() ? '<th>Loan Officer</th>' : '') + '<th>Source</th><th>Created</th><th>Speed to Lead</th></tr></thead><tbody>' + stlRows + '</tbody></table></div>' +
@@ -9187,6 +9287,7 @@ function renderModal(){
   if (ui.modal.type === "createLeadFromPricer") return modalCreateLeadFromPricer();
   if (ui.modal.type === "importLeads") return modalImportLeads();
   if (ui.modal.type === "logCall") return modalLogCall(ui.modal.leadId);
+  if (ui.modal.type === "markLost") return modalMarkLost(ui.modal.leadId);
   if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
   if (ui.modal.type === "mergeDuplicate") return modalMergeDuplicate(ui.modal.leadId, ui.modal.dupId);
   if (ui.modal.type === "sendApplication") return modalSendApplication(ui.modal.leadId);
@@ -10648,6 +10749,22 @@ function modalImportLeads(){
       '<div class="modal-foot">' + foot + '</div>' +
     '</div></div>';
 }
+function modalMarkLost(leadId){
+  var lead = leadById(leadId);
+  var reasonOptions = LOST_REASONS.map(function(r){ return '<option value="' + r.key + '">' + esc(r.label) + '</option>'; }).join("");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Mark Lost — ' + esc(lead?lead.name:"") + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="mark-lost" data-lead="' + leadId + '">' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0 0 10px">Capturing why helps Joe see real patterns — pricing gaps, qualification issues, speed problems — instead of guessing.</div>' +
+        '<div class="form-row"><label>Reason</label><select class="select" name="reason" required>' + reasonOptions + '</select></div>' +
+        '<div class="form-row"><label>Notes (optional)</label><textarea class="textarea" name="note" placeholder="Any detail worth remembering"></textarea></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-danger" type="submit">Mark Lost</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
 function modalLogCall(leadId){
   var lead = leadById(leadId);
   var outOptions = CALL_OUTCOMES.map(function(o){ return '<option value="' + o.key + '">' + o.label + '</option>'; }).join("");
@@ -10714,6 +10831,7 @@ appEl.addEventListener("drop", function(e){
     if (!leadId || !targetStage) return;
     var lead = leadById(leadId);
     if (!lead || lead.stage === targetStage) return;
+    if (targetStage === "lost"){ ui.modal = { type:"markLost", leadId: leadId }; render(); return; }
     moveStage(leadId, targetStage);
     return;
   }
@@ -11310,6 +11428,9 @@ appEl.addEventListener("submit", function(e){
     render();
   } else if (type === "log-call"){
     logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
+    ui.modal = null; render();
+  } else if (type === "mark-lost"){
+    markLostWithReason(form.dataset.lead, fd.get("reason"), fd.get("note"));
     ui.modal = null; render();
   } else if (type === "add-third-party"){
     addThirdParty(form.dataset.lead, { role:fd.get("role"), name:fd.get("name"), phone:fd.get("phone"), email:fd.get("email"), notify:true });
