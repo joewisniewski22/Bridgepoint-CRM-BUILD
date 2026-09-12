@@ -6431,7 +6431,7 @@ function renderToday(){
   var who = isOwner() ? (scopeIsMine ? currentUser().name : "the whole team") : currentUser().name;
 
   var kpis = '<div class="kpi-row">' +
-    '<div class="kpi"><div class="kpi-label">Calls due today</div><div class="kpi-value num">' + k.callsDue + '</div><div class="kpi-sub">Across ' + (isOwner()?"all loan officers":"your desk") + '</div></div>' +
+    '<div class="kpi"><div class="kpi-label">Calls due today</div><div class="kpi-value num">' + k.callsDue + '</div><div class="kpi-sub">' + (!isOwner() ? "Across your desk" : (scopeIsMine ? "Your queue — switch to Whole Team below to see everyone's" : "Across all loan officers")) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Active pipeline</div><div class="kpi-value num">' + k.activeCount + '</div><div class="kpi-sub">' + fmtUSD(k.pipelineValue) + ' in requested volume</div></div>' +
     '<div class="kpi"><div class="kpi-label">Closed this month</div><div class="kpi-value num">' + k.closedCount + '</div><div class="kpi-sub">' + fmtUSD(k.closedValue) + ' funded</div></div>' +
   '</div>';
