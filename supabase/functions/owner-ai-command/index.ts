@@ -52,7 +52,7 @@ const OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN"];
 const CITIZENSHIP_STATUSES = ["US Citizen", "Permanent Resident", "Foreign National", "ITIN"];
 const PREPAY_TERMS = ["5yr", "3yr", "2yr", "1yr", "none"];
 
-async function buildSystemPrompt(caller: Caller): Promise<string> {
+async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string, unknown> | null): Promise<string> {
   const { data: staff } = await sb.from("users").select("id,name,role").order("name");
   const roster = (staff || []).map((u) => u.id + " = " + u.name + " (" + u.role + ")").join("; ");
   const callerLine = caller.isOwner
@@ -71,12 +71,17 @@ async function buildSystemPrompt(caller: Caller): Promise<string> {
     "5. Looking up loans: list_closed_deals for recently funded loans, or search_leads / get_lead_details to find and inspect any loan file by name/phone/email or id.\n" +
     "6. Team communication: email_team and text_team send a REAL email/text to staff -- team-wide announcements, reminders, or a message to one specific person. Only call these when Joe clearly asks you to send/tell/email/text someone or the team, not as a side effect of something else.\n" +
     "7. reassign_lead to change who a loan file is assigned to. add_lead_note to log a note on a loan file's activity history.\n" +
-    "8. Retargeting campaigns: start_retargeting_campaign drafts a personalized email/text batch send to a group of existing leads (e.g. 'all of Taeya's leads', or a specific list), aimed at getting them on the phone with their assigned LO. Write genuinely good, specific copy yourself -- introduce the LO by name as the borrower's real point of contact, reference their loan interest when known (via {{loanTypeLine}}), and drive toward booking a call ({{bookingLink}}) or calling/texting the LO directly ({{loPhone}}). Keep texts SMS-short. This never sends anything itself -- it resolves the real recipient list and returns a preview for Joe to review and confirm in the CRM.\n" +
+    "8. Retargeting campaigns: start_retargeting_campaign drafts a personalized email/text batch send to a group of existing leads. Target them by assignedTo (e.g. 'all of Taeya's leads'), specific leadIds, or noContactDays (e.g. 'anyone with no contact in 30 days' -> noContactDays: 30, computed from real call attempts and logged call/text/email activity, never guessed) -- these can combine, e.g. assignedTo + noContactDays for 'Taeya's leads that have gone quiet for 30 days'. Write genuinely good, specific copy yourself -- introduce the LO by name as the borrower's real point of contact, reference their loan interest when known (via {{loanTypeLine}}), and drive toward booking a call ({{bookingLink}}) or calling/texting the LO directly ({{loPhone}}). Keep texts SMS-short. This never sends anything itself -- it resolves the real recipient list and returns a preview for Joe to review and confirm in the CRM.\n" +
     "9. Learning from real performance: when Joe asks you to 'look at engagement' or 'look and adjust' (he does not want to track this himself), this is ALWAYS a two-tool-call task, never one. Step 1: call analyze_engagement_performance. Step 2, in that same turn after seeing the results: you must do exactly one of (a) call apply_engagement_adjustment for real, or (b) write your reply stating plainly that nothing in the data supports a change. There is no third option -- never write a reply that describes, summarizes, or claims a specific adjustment (a guidance change, a cadence change) as something you did unless that exact apply_engagement_adjustment tool call is present in this turn's actions. If you're weighing whether to make a change, resolve that by calling the tool or by concluding no -- never resolve it by narrating an intention. Weight changes to how thin the data is, and say so plainly rather than overclaiming a pattern from a handful of leads. Always cite the actual numbers.\n" +
-    "10. Growth advising: Joe wants ongoing, business-manager-style guidance toward a real funded-volume goal (call analyze_growth_progress for the current target/deadline/pace and real pipeline/lead/revenue numbers -- never assume the goal, always look it up fresh). Ground spend/channel recommendations in real revenue (points-based revenue on the active pipeline and any closed volume) so a recommendation like 'increase Facebook spend' is actually affordable, not just a lead-volume guess -- his own words: 'you'll know my budget because you should see earnings based on what we already built.' If he tells you a goal, deadline, or baseline changed (ad spend, CIX volume, a month hit the target), call update_growth_goal for real, same discipline as tool 9 -- narrating it isn't enough. For pricing/rate competitiveness questions, call analyze_pricing_competitiveness -- there is no external competitor-rate feed, so frame guidance around Bridgepoint's own margin over its real wholesale par rate, and say explicitly that you don't have live competitor pricing if asked to compare against a specific competitor.\n\n" +
+    "10. Growth advising: Joe wants ongoing, business-manager-style guidance toward a real funded-volume goal (call analyze_growth_progress for the current target/deadline/pace, real pipeline/lead/revenue numbers, AND its perLoanOfficer breakdown -- never assume the goal, always look it up fresh). For a capacity-planning question like 'how do I get to 30 loans this month with the employees I have', combine analyze_growth_progress's perLoanOfficer pace (closed + active pipeline per LO) with analyze_lo_speed_to_lead's missed-leads report (real slack capacity being left on the table per LO) -- reason concretely from both: whether the shortfall is a lead-volume problem, a per-LO conversion/speed problem, or genuinely needs another hire, citing the actual numbers rather than a generic pep talk. Ground spend/channel recommendations in real revenue (points-based revenue on the active pipeline and any closed volume -- or the REAL-TIME REVENUE SNAPSHOT for YSP-inclusive totals) so a recommendation like 'increase Facebook spend' is actually affordable, not just a lead-volume guess -- his own words: 'you'll know my budget because you should see earnings based on what we already built.' If he tells you a goal, deadline, or baseline changed (ad spend, CIX volume, a month hit the target), call update_growth_goal for real, same discipline as tool 9 -- narrating it isn't enough. For pricing/rate competitiveness questions, call analyze_pricing_competitiveness -- there is no external competitor-rate feed, so frame guidance around Bridgepoint's own margin over its real wholesale par rate, and say explicitly that you don't have live competitor pricing if asked to compare against a specific competitor.\n\n" +
     "You still do NOT have: ad platform access, payments/spend, or any destructive/irreversible action (no deleting files, no changing pricing/guidelines). If asked for one of those, say plainly it isn't wired up rather than pretending.\n\n" +
     "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success. " +
-    "CRITICAL: never describe an action (sent, triggered, created, updated, published) as done unless you actually called that exact tool THIS turn and its result confirmed success -- don't narrate an effect from context, from what Joe asked for, or from a tool you called for a different purpose. If you only updated a file and didn't call send_document, do not say anything was sent or triggered -- say what you'd need to do that as a separate, explicit step instead.";
+    "CRITICAL: never describe an action (sent, triggered, created, updated, published) as done unless you actually called that exact tool THIS turn and its result confirmed success -- don't narrate an effect from context, from what Joe asked for, or from a tool you called for a different purpose. If you only updated a file and didn't call send_document, do not say anything was sent or triggered -- say what you'd need to do that as a separate, explicit step instead." +
+    (businessSnapshot ? (
+      "\n\nREAL-TIME REVENUE SNAPSHOT (computed just now by the app's own live pricer, scope: " + String(businessSnapshot.scope) + " -- this is the authoritative source for ANY points/YSP/yield-spread/commission question, more precise than analyze_growth_progress's own revenue field, which is points-only and deliberately excludes YSP to avoid a second, drift-prone copy of the DSCR pricing engine living server-side. Use these numbers directly rather than calling a tool for them):\n" +
+      "Closed this month -- " + (businessSnapshot.closedThisMonth as Record<string, unknown>).loanCount + " loan(s): $" + fmtUSD((businessSnapshot.closedThisMonth as Record<string, unknown>).pointsRevenue as number) + " points + $" + fmtUSD((businessSnapshot.closedThisMonth as Record<string, unknown>).yspRevenue as number) + " YSP = $" + fmtUSD((businessSnapshot.closedThisMonth as Record<string, unknown>).totalRevenue as number) + " total.\n" +
+      "Active pipeline (potential, not yet earned) -- " + (businessSnapshot.activePipeline as Record<string, unknown>).loanCount + " loan(s): $" + fmtUSD((businessSnapshot.activePipeline as Record<string, unknown>).pointsRevenue as number) + " points + $" + fmtUSD((businessSnapshot.activePipeline as Record<string, unknown>).yspRevenue as number) + " YSP = $" + fmtUSD((businessSnapshot.activePipeline as Record<string, unknown>).totalRevenue as number) + " potential total."
+    ) : "");
 }
 
 const TOOLS = [
@@ -267,8 +272,9 @@ const TOOLS = [
     input_schema: {
       type: "object",
       properties: {
-        assignedTo: { type: "string", description: "Staff id to target every one of their active leads (use this for 'all of X's leads')" },
+        assignedTo: { type: "string", description: "Staff id to target every one of their active leads (use this for 'all of X's leads'). Can be combined with noContactDays to scope staleness to one LO." },
         leadIds: { type: "array", items: { type: "string" }, description: "Specific lead ids to target, instead of assignedTo" },
+        noContactDays: { type: "integer", description: "Instead of (or combined with) assignedTo/leadIds: target every active lead with no logged human contact (call, text, or email) in at least this many days -- e.g. 'anyone with no contact in 30 days' -> 30. Company-wide for the owner unless assignedTo also narrows it to one LO; always scoped to the caller's own leads for non-owners." },
         channel: { type: "string", enum: ["email", "text", "both"] },
         emailSubject: { type: "string", description: "Required if channel includes email" },
         emailBodyTemplate: { type: "string", description: "Email body as PLAIN TEXT -- use real newline characters (\\n) for line breaks, never HTML tags like <br>, the send pipeline converts newlines to HTML itself. Merge fields: {{firstName}} {{loName}} {{loPhone}} {{loanTypeLine}} (a COMPLETE standalone sentence about their specific loan interest, or a complete generic sentence if unknown -- always ends in a period, so surrounding text must not run another sentence into it) {{bookingLink}} (in the EMAIL version this becomes a real clickable word 'HERE', e.g. write '...grab a time that works for you {{bookingLink}}.' which renders as '...grab a time that works for you HERE.' with HERE as the link -- don't also print a raw URL)." },
@@ -585,6 +591,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     if (!["email", "text", "both"].includes(channel)) return { error: "invalid_channel" };
     let assignedTo = input.assignedTo as string | undefined;
     let leadIds = input.leadIds as string[] | undefined;
+    const noContactDays = typeof input.noContactDays === "number" ? input.noContactDays : undefined;
     if (!caller.isOwner) {
       if (assignedTo && assignedTo !== caller.id) {
         return { error: "not_authorized", detail: "You can only run a campaign against your own leads." };
@@ -598,13 +605,50 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
         leadIds = undefined;
       }
     }
-    if (!assignedTo && (!leadIds || !leadIds.length)) return { error: "missing_target", detail: "Provide assignedTo or leadIds" };
+    if (!assignedTo && (!leadIds || !leadIds.length) && !noContactDays) return { error: "missing_target", detail: "Provide assignedTo, leadIds, or noContactDays" };
 
-    let q = sb.from("leads").select("id,name,email,phone,loan_type,assigned_to,activity").eq("status", "active");
-    q = assignedTo ? q.eq("assigned_to", assignedTo) : q.in("id", leadIds as string[]);
-    const { data: leadsRaw, error } = await q.limit(500);
+    let q = sb.from("leads").select("id,name,email,phone,loan_type,assigned_to,activity,call_attempts,first_attempt_at,created_at,created_at_ts").eq("status", "active");
+    if (leadIds && leadIds.length) q = q.in("id", leadIds);
+    else if (assignedTo) q = q.eq("assigned_to", assignedTo);
+    const { data: leadsFetched, error } = await q.limit(500);
     if (error) return { error: error.message };
-    if (!leadsRaw || !leadsRaw.length) return { error: "no_matching_leads" };
+    let leadsRaw = leadsFetched || [];
+
+    // "No contact in N days" isn't a single column -- derive last real human
+    // contact from call attempts, first-contact timestamp, and any logged
+    // call/text/email activity, falling back to lead creation if truly never
+    // touched. Skip (never guess stale) any lead with no determinable date.
+    if (noContactDays) {
+      const thresholdMs = noContactDays * 24 * 3600 * 1000;
+      const now = Date.now();
+      leadsRaw = leadsRaw.filter((l) => {
+        const dates: number[] = [];
+        (Array.isArray(l.activity) ? l.activity as Array<Record<string, unknown>> : []).forEach((a) => {
+          if (a && ["call", "text", "email"].includes(a.type as string) && typeof a.date === "string") {
+            const t = new Date(a.date + "T12:00:00Z").getTime();
+            if (!isNaN(t)) dates.push(t);
+          }
+        });
+        (Array.isArray(l.call_attempts) ? l.call_attempts as Array<Record<string, unknown>> : []).forEach((c) => {
+          if (c && typeof c.date === "string") {
+            const t = new Date(c.date + "T12:00:00Z").getTime();
+            if (!isNaN(t)) dates.push(t);
+          }
+        });
+        if (l.first_attempt_at) {
+          const t = new Date(l.first_attempt_at as string).getTime();
+          if (!isNaN(t)) dates.push(t);
+        }
+        let baseline = dates.length ? Math.max(...dates) : null;
+        if (baseline == null) {
+          if (l.created_at_ts) baseline = new Date(l.created_at_ts as string).getTime();
+          else if (l.created_at) baseline = new Date(l.created_at as string + "T12:00:00Z").getTime();
+        }
+        if (baseline == null || isNaN(baseline)) return false;
+        return (now - baseline) >= thresholdMs;
+      });
+    }
+    if (!leadsRaw.length) return { error: "no_matching_leads" };
 
     // Real TCPA opt-outs (a genuine "replied STOP" record in activity) are
     // never texted again -- but TCPA/STOP governs calls and texts, not
@@ -664,6 +708,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
       emailSubject: input.emailSubject, emailBodyTemplate: input.emailBodyTemplate, textBodyTemplate,
       recipients, count: recipients.length, skippedForOptOut,
       skippedForOptOutMeaning: channel === "both" ? "kept for email, text suppressed only" : "excluded entirely",
+      matchedByNoContactDays: noContactDays || null,
     };
   }
   if (name === "analyze_engagement_performance") {
@@ -799,8 +844,9 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
   }
   if (name === "analyze_growth_progress") {
     const { data: goal } = await sb.from("growth_goals").select("*").eq("id", "default").single();
-    const { data: leads } = await sb.from("leads").select("id,source,loan_amount,points_charged,rate,loan_type,stage,status,created_at,close_date");
+    const { data: leads } = await sb.from("leads").select("id,source,loan_amount,points_charged,rate,loan_type,stage,status,created_at,close_date,assigned_to");
     const rows = leads || [];
+    const { data: loStaff } = await sb.from("users").select("id,name").eq("role", "loan_officer");
 
     const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
     const thisMonth = rows.filter((l) => l.created_at && new Date(l.created_at as string) >= monthStart);
@@ -822,6 +868,22 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     const stageBreakdown: Record<string, number> = {};
     rows.forEach((l) => { const st = (l.stage as string) || "unknown"; stageBreakdown[st] = (stageBreakdown[st] || 0) + 1; });
 
+    // Per-LO pace, for "how do I hit the goal with the employees I have"
+    // style questions -- combine with analyze_lo_speed_to_lead for a full
+    // capacity picture (this shows current pace/mix, that shows missed-lead
+    // slack capacity).
+    type LoStat = { loId: string; loName: string; closedCountThisMonth: number; closedVolumeThisMonth: number; activePipelineCount: number; activePipelineVolume: number };
+    const byLo: Record<string, LoStat> = {};
+    (loStaff || []).forEach((u) => { byLo[u.id as string] = { loId: u.id as string, loName: u.name as string, closedCountThisMonth: 0, closedVolumeThisMonth: 0, activePipelineCount: 0, activePipelineVolume: 0 }; });
+    closedThisMonth.forEach((l) => {
+      const id = l.assigned_to as string;
+      if (id && byLo[id]) { byLo[id].closedCountThisMonth++; byLo[id].closedVolumeThisMonth += (l.loan_amount as number) || 0; }
+    });
+    active.forEach((l) => {
+      const id = l.assigned_to as string;
+      if (id && byLo[id]) { byLo[id].activePipelineCount++; byLo[id].activePipelineVolume += (l.loan_amount as number) || 0; }
+    });
+
     const goalStart = goal?.goal_start_date ? new Date(goal.goal_start_date as string) : new Date();
     const monthsElapsed = Math.max(1, Math.round((Date.now() - goalStart.getTime()) / (30 * 24 * 3600 * 1000)));
 
@@ -835,8 +897,9 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
       fundedVolumeThisMonth, fundedLoansThisMonth: closedThisMonth.length,
       totalLeadsAllTime: rows.length, leadsThisMonth: thisMonth.length, leadsThisMonthBySource: bySource,
       activePipelineCount: active.length, activePipelineVolume, avgLoanSize,
-      revenue: { activePipelinePointsRevenue: Math.round(activePointsRevenue), closedPointsRevenueThisMonth: Math.round(closedPointsRevenueThisMonth), note: "Points-based revenue only (loan_amount x points_charged%) -- YSP on DSCR/Portfolio loans is priced live in the app's own Pricer and not independently recomputed here to avoid duplicating/drifting from that logic." },
+      revenue: { activePipelinePointsRevenue: Math.round(activePointsRevenue), closedPointsRevenueThisMonth: Math.round(closedPointsRevenueThisMonth), note: "Points-based revenue only (loan_amount x points_charged%) -- YSP is NOT included here. For any question involving YSP/yield-spread/total commission, use the REAL-TIME REVENUE SNAPSHOT in the system prompt instead, which is computed live by the app's own pricer." },
       pipelineByStage: stageBreakdown,
+      perLoanOfficer: Object.values(byLo).sort((a, b) => b.closedCountThisMonth - a.closedCountThisMonth),
       caveat: "If fundedVolumeThisMonth is 0 or leadsThisMonth is small, the system is early and this is a thin/unreliable sample for pacing math -- say so plainly rather than projecting confidently from noise.",
     };
   }
@@ -913,6 +976,7 @@ Deno.serve(async (req: Request) => {
     // Optional term sheet attachment (PDF or image), base64-encoded.
     const attachmentBase64: string | null = body.attachmentBase64 || null;
     const attachmentMediaType: string | null = body.attachmentMediaType || null;
+    const businessSnapshot: Record<string, unknown> | null = body.businessSnapshot || null;
     if (!message && !attachmentBase64) {
       return new Response(JSON.stringify({ error: "missing_message" }), { status: 400, headers: CORS_HEADERS });
     }
@@ -936,7 +1000,7 @@ Deno.serve(async (req: Request) => {
 
     const messages: Array<Record<string, unknown>> = [...priorMessages, { role: "user", content: userContent }];
     const actionsTaken: Array<Record<string, unknown>> = [];
-    const systemPrompt = await buildSystemPrompt(caller);
+    const systemPrompt = await buildSystemPrompt(caller, businessSnapshot);
 
     let finalText = "";
     for (let iter = 0; iter < 6; iter++) {

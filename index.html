@@ -2130,6 +2130,39 @@ function yspBreakdown(lead){
   if (!info.priceRow) return { amount: null, reason: "rate is more than " + DSCR_MAX_BUYUP + "% above this borrower's par rate (" + fmtPct(info.parRate) + ") — outside the modeled buy-up range, needs manual calculation" };
   return { amount: Math.max(0, Math.round((info.priceRow.price - 100) / 100 * lead.loanAmount * 100) / 100), reason: null };
 }
+// The AI Assistant edge function deliberately does NOT recompute YSP itself
+// (see owner-ai-command's revenue comment) -- the real DSCR pricing engine
+// (FICO/band/geo adjustments, buy-up grid, ineligible states) only exists
+// here in the client, and reimplementing it server-side risks silently
+// drifting from this copy every time pricing changes. Instead, compute the
+// real number here with the actual pricer functions and hand it to the AI
+// as a live snapshot on every message, so YSP/yield-spread questions get a
+// real answer without a second copy of the pricing logic to keep in sync.
+function buildAiBusinessSnapshot(){
+  var leads = isOwner() ? state.leads : state.leads.filter(function(l){ return l.assignedTo === currentUser().id; });
+  var today = startOfToday();
+  var monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  var closedThisMonth = leads.filter(function(l){ return l.status==="closed" && l.closeDate && new Date(l.closeDate+"T00:00:00") >= monthStart; });
+  var active = leads.filter(function(l){ return l.status==="active"; });
+  function sum(arr, fn){ return Math.round(arr.reduce(function(s,l){ return s + fn(l); }, 0)); }
+  function totalRev(l){ return pointsRevenue(l) + yspRevenue(l); }
+  return {
+    asOf: new Date().toISOString(),
+    scope: isOwner() ? "company-wide (every loan officer)" : "your own leads only",
+    closedThisMonth: {
+      loanCount: closedThisMonth.length,
+      pointsRevenue: sum(closedThisMonth, pointsRevenue),
+      yspRevenue: sum(closedThisMonth, yspRevenue),
+      totalRevenue: sum(closedThisMonth, totalRev)
+    },
+    activePipeline: {
+      loanCount: active.length,
+      pointsRevenue: sum(active, pointsRevenue),
+      yspRevenue: sum(active, yspRevenue),
+      totalRevenue: sum(active, totalRev)
+    }
+  };
+}
 function renderEarningsLive(lead){
   var pts = pointsRevenue(lead);
   var yb = yspBreakdown(lead);
@@ -8259,7 +8292,7 @@ function sendAiCommand(message, attachment){
   ui.aiCommandBusy = true;
   render();
   function doSend(attachmentBase64, attachmentMediaType){
-    sb.functions.invoke("owner-ai-command", { body: { message: message, userId: userId, attachmentBase64: attachmentBase64||null, attachmentMediaType: attachmentMediaType||null } }).then(function(res){
+    sb.functions.invoke("owner-ai-command", { body: { message: message, userId: userId, attachmentBase64: attachmentBase64||null, attachmentMediaType: attachmentMediaType||null, businessSnapshot: buildAiBusinessSnapshot() } }).then(function(res){
       ui.aiCommandBusy = false;
       if (res.error || !res.data || !res.data.ok){
         ui.aiChatLog.push({ role:"assistant", content:"Something went wrong — try again." });
