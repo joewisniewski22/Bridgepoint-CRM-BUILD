@@ -67,13 +67,25 @@ Deno.serve(async () => {
     .in("role", ["loan_officer", "owner"]).neq("id", "demo").neq("id", "demo-processor");
   if (staffErr) return new Response(JSON.stringify({ error: staffErr.message }), { status: 500, headers: { "Content-Type": "application/json" } });
 
-  const { data: leads, error: leadsErr } = await sb.from("leads").select("assigned_to,call_attempts");
+  const { data: leads, error: leadsErr } = await sb.from("leads").select("assigned_to,status,stage,call_attempts");
   if (leadsErr) return new Response(JSON.stringify({ error: leadsErr.message }), { status: 500, headers: { "Content-Type": "application/json" } });
+
+  // The 20/day quota is new-business potential only (new-lead cadence,
+  // cold/lost win-back, closed-client referral asks) -- a call logged on a
+  // loan already in progress (app_sent and beyond) doesn't count here,
+  // matching index.html's isNewBusinessLead().
+  const CADENCE_STAGES = ["new", "attempting", "qualifying"];
+  function isNewBusinessLead(l: Record<string, unknown>): boolean {
+    const status = l.status as string;
+    if (status === "cold" || status === "lost" || status === "closed") return true;
+    if (status === "active" && CADENCE_STAGES.includes(l.stage as string)) return true;
+    return false;
+  }
 
   const callsByUser: Record<string, number> = {};
   (leads || []).forEach((l) => {
     const assignedTo = l.assigned_to as string | null;
-    if (!assignedTo) return;
+    if (!assignedTo || !isNewBusinessLead(l)) return;
     const attempts = Array.isArray(l.call_attempts) ? (l.call_attempts as Array<Record<string, unknown>>) : [];
     const todays = attempts.filter((a) => a.date === todayUtc).length;
     if (todays) callsByUser[assignedTo] = (callsByUser[assignedTo] || 0) + todays;

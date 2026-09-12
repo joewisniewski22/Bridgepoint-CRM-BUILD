@@ -1731,6 +1731,23 @@ var WINBACK_POOL_RETRY_DAYS = 21;
 var COLD_SKIP_LOST_THRESHOLD = 6;
 var STAGE_HYGIENE_LATE_STAGES = ["processing","underwriting","approved","ctc"];
 var STAGE_HYGIENE_QUIET_DAYS = 15;
+// The 20/day quota is specifically NEW BUSINESS potential -- new-lead
+// cadence, reviving cold/lost leads, refi/exit on a past closed loan, and
+// relationship/referral-ask calls. An LO with 75 new leads still only sees
+// today's 20 of them, and the rest naturally roll to tomorrow (still "due"
+// since cadence timing is date-driven, not consumed by being skipped over).
+// Everything about servicing an ACTIVE loan already in the pipeline (stale
+// docs/app, expiring term sheet, a scheduled callback, stage hygiene,
+// pricing review, a rate drop on an in-process deal) is shown separately
+// and is never capped -- those are in addition to the 20, not competing
+// with it.
+var NEW_BUSINESS_QUEUE_TYPES = ["hot","cadence","winback","refi","relationship","winback-pool"];
+function isNewBusinessLead(lead){
+  if (!lead) return false;
+  if (lead.status==="cold" || lead.status==="lost" || lead.status==="closed") return true;
+  if (lead.status==="active" && CADENCE_STAGES.indexOf(lead.stage) !== -1) return true;
+  return false;
+}
 
 /* ---------------------------------------------------------------------
    State
@@ -2394,7 +2411,8 @@ function startDialer(){
   // showing when the dialer is started.
   var myId = currentUser().id;
   var quota = DAILY_CALL_QUOTA + (ui.dailyQuotaExtra||0);
-  var ids = buildDailyCallQueue(myId, quota).items.map(function(i){ return i.leadId; });
+  var dq = buildDailyCallQueue(myId, quota);
+  var ids = dq.followUps.concat(dq.newBusiness).map(function(i){ return i.leadId; });
   var seen = {}, uniq = [];
   ids.forEach(function(id){ if (!seen[id]){ seen[id]=true; uniq.push(id); } });
   if (!uniq.length){ showToast("No calls queued right now"); return; }
@@ -2604,7 +2622,8 @@ function computeQueueForLeads(leads, userId, today){
 function todayQueueScoped(){
   if (isOwner() && ui.todayScope === "team") return computeQueue("owner");
   var quota = DAILY_CALL_QUOTA + (ui.dailyQuotaExtra||0);
-  return buildDailyCallQueue(ui.viewAs, quota).items;
+  var dq = buildDailyCallQueue(ui.viewAs, quota);
+  return dq.newBusiness.concat(dq.followUps);
 }
 
 function companyPointsSummary(leads){
@@ -2722,7 +2741,25 @@ function buildDailyCallQueue(userId, quota){
     due.sort(function(a,b){ return b.priority - a.priority; });
   }
 
-  if (due.length >= quota) return { items: due, backfilled: 0, poolExhausted: false };
+  // Split into the two buckets: new-business potential (capped at quota --
+  // reviving cold/lost, refi on a past closed loan, new-lead cadence, hot
+  // leads, plus the referral/win-back backfill pool below) vs. servicing an
+  // ACTIVE loan already in the pipeline (never capped, always shown in
+  // full). A rate drop is new-business framing on a closed loan (refi
+  // opportunity) but pipeline-protection framing on an active one.
+  var newBusinessDue = [], followUps = [];
+  due.forEach(function(it){
+    var lead = leadById(it.leadId);
+    var isNB = NEW_BUSINESS_QUEUE_TYPES.indexOf(it.type) !== -1 ||
+      (it.type === "rate-drop" && lead && lead.status === "closed");
+    (isNB ? newBusinessDue : followUps).push(it);
+  });
+  var newBusinessDueCount = newBusinessDue.length;
+  var newBusiness = newBusinessDue.slice(0, quota);
+
+  if (newBusiness.length >= quota){
+    return { newBusiness: newBusiness, followUps: followUps, backfilled: 0, poolExhausted: false, newBusinessDueCount: newBusinessDueCount };
+  }
 
   var usedIds = {};
   due.forEach(function(it){ usedIds[it.leadId] = true; });
@@ -2743,7 +2780,7 @@ function buildDailyCallQueue(userId, quota){
     return { lead:l, days:days };
   }).sort(function(a,b){ return b.days - a.days; });
 
-  var need = quota - due.length;
+  var need = quota - newBusiness.length;
   var backfillItems = pool.slice(0, Math.max(0, need)).map(function(p){
     var l = p.lead;
     var isReferral = l.status === "closed";
@@ -2757,7 +2794,11 @@ function buildDailyCallQueue(userId, quota){
     };
   });
 
-  return { items: due.concat(backfillItems), backfilled: backfillItems.length, poolExhausted: backfillItems.length < need };
+  return {
+    newBusiness: newBusiness.concat(backfillItems), followUps: followUps,
+    backfilled: backfillItems.length, poolExhausted: backfillItems.length < need,
+    newBusinessDueCount: newBusinessDueCount
+  };
 }
 function skipQueueItem(leadId){
   var lead = leadById(leadId);
@@ -6374,7 +6415,7 @@ function renderTeamSnapshot(){
     var due = computeQueue(u.id).length;
     var todayStr = todayISO();
     var callsToday = 0;
-    state.leads.filter(function(l){ return l.assignedTo===u.id; }).forEach(function(l){
+    state.leads.filter(function(l){ return l.assignedTo===u.id && isNewBusinessLead(l); }).forEach(function(l){
       callsToday += (l.callAttempts||[]).filter(function(a){ return a.date===todayStr; }).length;
     });
     var quotaCls = callsToday >= DAILY_CALL_QUOTA ? "badge-forest" : "badge-rust";
@@ -6601,30 +6642,65 @@ function renderMyCalendarWidget(){
     (next3 || '<div class="hint" style="padding-top:4px">Nothing booked yet — share your link above so clients can grab a time.</div>') +
   '</div>';
 }
+function renderQueueCard(item, opts){
+  var lead = leadById(item.leadId);
+  if (!lead) return "";
+  opts = opts || {};
+  var typeCls = "type-" + item.type;
+  var typeBadge = item.type==="review-request" ? '<span class="badge badge-hot">📋 Review Requested</span>'
+    : item.type==="hot" ? '<span class="badge badge-hot">🔥 Hot Lead</span>'
+    : item.type==="rate-drop" ? '<span class="badge badge-gold">Rate Alert</span>'
+    : item.type==="refi" ? '<span class="badge badge-forest">Refi Radar</span>'
+    : item.type==="followup" ? '<span class="badge badge-rust">Follow-up</span>'
+    : item.type==="birthday" ? '<span class="badge badge-gold">🎂 Birthday</span>'
+    : item.type==="winback" ? '<span class="badge badge-rust">Win-back</span>'
+    : item.type==="relationship" ? '<span class="badge badge-forest">🤝 Relationship / Referral</span>'
+    : item.type==="winback-pool" ? '<span class="badge badge-rust">Win-back</span>'
+    : item.type==="stage-hygiene" ? '<span class="badge badge-slate">⚠ Stage Check</span>'
+    : '<span class="badge badge-slate">New Lead Cadence</span>';
+  var skippable = item.type==="relationship" || item.type==="winback-pool";
+  return '<div class="queue-card ' + typeCls + '">' +
+    '<div class="badge-wrap">' + typeBadge + '</div>' +
+    '<div class="queue-main">' +
+      '<div class="queue-title">' + esc(lead.name) + ' — ' + esc(item.label) + '</div>' +
+      '<div class="queue-reason">' + esc(item.reason) + '</div>' +
+      '<div class="queue-meta"><span>' + esc(lead.loanType) + '</span><span>' + esc(lead.phone) + '</span>' +
+        (opts.showLo ? ('<span>LO: ' + esc(userName(lead.assignedTo)) + '</span>') : '') + '</div>' +
+    '</div>' +
+    '<div class="queue-actions">' +
+      (item.type==="review-request" ? '<button class="btn btn-sm btn-primary" data-action="resolve-review" data-lead="' + lead.id + '">Mark Reviewed</button>' : '<button class="btn btn-sm btn-primary" data-action="open-modal" data-modal="logCall" data-lead="' + lead.id + '">Log Call</button>') +
+      (skippable ? '<button class="btn btn-sm btn-ghost" data-action="skip-call" data-lead="' + lead.id + '" title="Already know them / not a fit for today">Skip</button>' : '') +
+      '<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View</button>' +
+    '</div>' +
+  '</div>';
+}
 function renderToday(){
   var leads = scopedLeads();
   var k = kpisFor(leads);
-  var queue = todayQueueScoped();
-  k.callsDue = queue.length;
   var scopeIsMine = !isOwner() || ui.todayScope !== "team";
-  var who = isOwner() ? (scopeIsMine ? currentUser().name : "the whole team") : currentUser().name;
+  var quota = DAILY_CALL_QUOTA + (ui.dailyQuotaExtra||0);
+
+  var dq = null, teamQueue = null;
+  if (scopeIsMine) dq = buildDailyCallQueue(ui.viewAs, quota);
+  else teamQueue = computeQueue("owner");
+  k.callsDue = dq ? (dq.newBusiness.length + dq.followUps.length) : teamQueue.length;
 
   var quotaBanner = "";
   if (scopeIsMine && !isProcessor()){
-    var quota = DAILY_CALL_QUOTA + (ui.dailyQuotaExtra||0);
     var todayStr = todayISO();
     var loggedToday = 0;
-    state.leads.filter(function(l){ return l.assignedTo === ui.viewAs; }).forEach(function(l){
+    state.leads.filter(function(l){ return l.assignedTo === ui.viewAs && isNewBusinessLead(l); }).forEach(function(l){
       loggedToday += (l.callAttempts||[]).filter(function(a){ return a.date === todayStr; }).length;
     });
     var pct = Math.min(100, Math.round((loggedToday / quota) * 100));
     var hitQuota = loggedToday >= quota;
     quotaBanner = '<div class="section" style="padding:16px 20px">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">' +
-        '<div><b>' + loggedToday + ' of ' + quota + '</b> calls logged today' + (hitQuota ? ' — quota hit 🎉' : '') + '</div>' +
+        '<div><b>' + loggedToday + ' of ' + quota + '</b> new-business calls logged today' + (hitQuota ? ' — quota hit 🎉' : '') + '</div>' +
         (hitQuota ? '<button class="btn btn-sm btn-primary" data-action="extend-daily-quota">Add 20 more</button>' : '') +
       '</div>' +
       '<div style="height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--brand)"></div></div>' +
+      (dq && dq.newBusinessDueCount > quota ? '<div class="footnote" style="padding:6px 0 0">' + dq.newBusinessDueCount + ' new leads are eligible today — showing today\'s ' + quota + ', the rest carry over to tomorrow automatically.</div>' : '') +
     '</div>';
   }
 
@@ -6669,55 +6745,44 @@ function renderToday(){
     '</div>';
   }
 
-  var list = "";
-  if (queue.length === 0){
-    list = '<div class="empty">Nothing on ' + esc(who==="the whole team"?"the team's":who+"'s") + ' call list right now. New leads and rate-driven opportunities will show up here automatically.</div>';
-  } else {
-    list = queue.map(function(item){
-      var lead = leadById(item.leadId);
-      if (!lead) return "";
-      var typeCls = "type-" + item.type;
-      var typeBadge = item.type==="review-request" ? '<span class="badge badge-hot">📋 Review Requested</span>'
-        : item.type==="hot" ? '<span class="badge badge-hot">🔥 Hot Lead</span>'
-        : item.type==="rate-drop" ? '<span class="badge badge-gold">Rate Alert</span>'
-        : item.type==="refi" ? '<span class="badge badge-forest">Refi Radar</span>'
-        : item.type==="followup" ? '<span class="badge badge-rust">Follow-up</span>'
-        : item.type==="birthday" ? '<span class="badge badge-gold">🎂 Birthday</span>'
-        : item.type==="winback" ? '<span class="badge badge-rust">Win-back</span>'
-        : item.type==="relationship" ? '<span class="badge badge-forest">🤝 Relationship / Referral</span>'
-        : item.type==="winback-pool" ? '<span class="badge badge-rust">Win-back</span>'
-        : item.type==="stage-hygiene" ? '<span class="badge badge-slate">⚠ Stage Check</span>'
-        : '<span class="badge badge-slate">New Lead Cadence</span>';
-      var skippable = item.type==="relationship" || item.type==="winback-pool";
-      return '<div class="queue-card ' + typeCls + '">' +
-        '<div class="badge-wrap">' + typeBadge + '</div>' +
-        '<div class="queue-main">' +
-          '<div class="queue-title">' + esc(lead.name) + ' — ' + esc(item.label) + '</div>' +
-          '<div class="queue-reason">' + esc(item.reason) + '</div>' +
-          '<div class="queue-meta"><span>' + esc(lead.loanType) + '</span><span>' + esc(lead.phone) + '</span>' +
-            (isOwner() ? ('<span>LO: ' + esc(userName(lead.assignedTo)) + '</span>') : '') + '</div>' +
-        '</div>' +
-        '<div class="queue-actions">' +
-          (item.type==="review-request" ? '<button class="btn btn-sm btn-primary" data-action="resolve-review" data-lead="' + lead.id + '">Mark Reviewed</button>' : '<button class="btn btn-sm btn-primary" data-action="open-modal" data-modal="logCall" data-lead="' + lead.id + '">Log Call</button>') +
-          (skippable ? '<button class="btn btn-sm btn-ghost" data-action="skip-call" data-lead="' + lead.id + '" title="Already know them / not a fit for today">Skip</button>' : '') +
-          '<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View</button>' +
-        '</div>' +
-      '</div>';
-    }).join("");
-  }
-
-  var dialerBtn = queue.length ? '<button class="btn btn-sm btn-primary" data-action="start-dialer">▶ Start Power Dialer</button>' : '';
   var scopeTabs = isOwner() ? (
     '<div class="seg" style="margin-right:auto">' +
       '<button class="seg-btn' + (scopeIsMine ? ' active' : '') + '" data-action="set-today-scope" data-scope="mine">My Queue</button>' +
       '<button class="seg-btn' + (!scopeIsMine ? ' active' : '') + '" data-action="set-today-scope" data-scope="team">Whole Team</button>' +
     '</div>'
   ) : '';
+
+  var sections;
+  if (dq){
+    // Two unmistakable sections, per Joe: the 20 is new-business potential
+    // only -- servicing an already-active loan is real, necessary work but
+    // it doesn't compete with or get crowded out by the 20, it's shown in
+    // full underneath, always.
+    var dialerBtn = (dq.newBusiness.length + dq.followUps.length) ? '<button class="btn btn-sm btn-primary" data-action="start-dialer">▶ Start Power Dialer</button>' : '';
+    var nbList = dq.newBusiness.length
+      ? dq.newBusiness.map(function(item){ return renderQueueCard(item, { showLo:isOwner() }); }).join("")
+      : '<div class="empty">Nothing left in today\'s new-business 20 — nice work. Come back tomorrow for the next batch.</div>';
+    var fuList = dq.followUps.length
+      ? dq.followUps.map(function(item){ return renderQueueCard(item, { showLo:isOwner() }); }).join("")
+      : '<div class="empty">No active loans need attention right now.</div>';
+    sections =
+      '<div class="section"><div class="section-head"><h2>🎯 Today\'s 20 — New Business Calls</h2>' +
+        '<div style="display:flex;align-items:center;gap:10px;flex:1">' + scopeTabs + '<span class="hint">' + dq.newBusiness.length + ' of ' + quota + '</span>' + dialerBtn + '</div>' +
+      '</div>' + nbList + '</div>' +
+      '<div class="section"><div class="section-head"><h2>🔧 Active Loan Follow-Ups</h2>' +
+        '<div class="hint">In addition to the 20 above — not capped, these keep your in-process deals moving. ' + dq.followUps.length + ' item(s)</div>' +
+      '</div>' + fuList + '</div>';
+  } else {
+    var teamList = teamQueue.length
+      ? teamQueue.map(function(item){ return renderQueueCard(item, { showLo:true }); }).join("")
+      : '<div class="empty">Nothing on the team\'s call list right now.</div>';
+    sections = '<div class="section"><div class="section-head"><h2>Priority call list</h2>' +
+      '<div style="display:flex;align-items:center;gap:10px;flex:1">' + scopeTabs + '<span class="hint">' + teamQueue.length + ' item(s)</span></div>' +
+    '</div>' + teamList + '</div>';
+  }
+
   return topbar("Today", "Call list generated from new-lead cadence, market rate moves, and refinance timing.", "") +
-    '<div class="content">' + kpis + quotaBanner + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML +
-      '<div class="section"><div class="section-head"><h2>Priority call list</h2>' +
-        '<div style="display:flex;align-items:center;gap:10px;flex:1">' + scopeTabs + '<span class="hint">' + queue.length + ' item(s)</span>' + dialerBtn + '</div>' +
-      '</div>' + list + '</div>' +
+    '<div class="content">' + kpis + quotaBanner + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML + sections +
     '</div>';
 }
 
