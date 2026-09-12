@@ -1710,6 +1710,27 @@ var GOOGLE_MAPS_API_KEY = "AIzaSyDS6Qm6Rm2HJYRwo4GQrMMGMm487F8v-sQ";
 var CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 var CADENCE_STAGES = ["new","attempting","qualifying"];
 var CADENCE_MAX = 5;
+// Daily call quota system -- see buildDailyCallQueue(). DAILY_CALL_QUOTA is
+// the floor every LO (owner included) should hit each day; when the day's
+// naturally-due items (cadence/hot/rate-drop/etc, computed above) don't
+// reach it, the pool below backfills with relationship/win-back calls until
+// it does, so there's never a day with nothing left to call.
+var DAILY_CALL_QUOTA = 20;
+// A just-closed borrower needs breathing room before the first relationship/
+// referral-ask call; after that, ~quarterly is a reasonable non-annoying
+// cadence for staying top of mind without being pushy.
+var RELATIONSHIP_CALL_MIN_DAYS_AFTER_CLOSE = 14;
+var RELATIONSHIP_CALL_CADENCE_DAYS = 75;
+// How soon to re-try a cold/lost lead that didn't connect this time.
+var WINBACK_POOL_RETRY_DAYS = 21;
+// A cold/lost lead skipped this many times in the daily queue, with real
+// human contact never made, is being actively avoided rather than genuinely
+// forgotten -- auto-demote it to "lost" so it stops resurfacing forever and
+// the LO's queue stays honest, rather than an LO having to remember to give
+// up on it manually.
+var COLD_SKIP_LOST_THRESHOLD = 6;
+var STAGE_HYGIENE_LATE_STAGES = ["processing","underwriting","approved","ctc"];
+var STAGE_HYGIENE_QUIET_DAYS = 15;
 
 /* ---------------------------------------------------------------------
    State
@@ -1734,7 +1755,8 @@ var ui = {
   toast: null,
   publicApply: null,
   pricerInputs: {},
-  todayScope: "mine"
+  todayScope: "mine",
+  dailyQuotaExtra: 0
 };
 var sessionWasRestored = false;
 try {
@@ -2363,16 +2385,16 @@ function conversionBySource(leads){
    Power dialer
 --------------------------------------------------------------------- */
 function startDialer(){
-  // The Today page's queue is team-wide for the owner (real, useful
-  // oversight), but the dialer itself is a personal calling session --
-  // Joe works his own leads too, and dialing into someone else's client
-  // by accident is exactly what this guards against. Always scope to
-  // leads actually assigned to whoever's using it, owner included.
+  // The Today page's "Whole Team" tab is team-wide for the owner (real,
+  // useful oversight), but the dialer itself is a personal calling session
+  // -- Joe works his own leads too, and dialing into someone else's client
+  // by accident is exactly what this guards against. Always work the same
+  // daily call queue (due items + relationship/win-back backfill to quota)
+  // that renders on "My Queue", regardless of which Today tab happens to be
+  // showing when the dialer is started.
   var myId = currentUser().id;
-  var ids = computeQueue(ui.viewAs).filter(function(i){
-    var l = leadById(i.leadId);
-    return l && l.assignedTo === myId;
-  }).map(function(i){ return i.leadId; });
+  var quota = DAILY_CALL_QUOTA + (ui.dailyQuotaExtra||0);
+  var ids = buildDailyCallQueue(myId, quota).items.map(function(i){ return i.leadId; });
   var seen = {}, uniq = [];
   ids.forEach(function(id){ if (!seen[id]){ seen[id]=true; uniq.push(id); } });
   if (!uniq.length){ showToast("No calls queued right now"); return; }
@@ -2409,9 +2431,16 @@ function scopedLeads(){
 }
 
 function computeQueue(userId){
-  var items = [];
-  var today = startOfToday();
   var leads = (userId==="owner") ? state.leads : state.leads.filter(function(l){ return l.assignedTo===userId; });
+  return computeQueueForLeads(leads, userId, startOfToday());
+}
+// Factored out of computeQueue so personal-quota code (buildDailyCallQueue
+// below) can pass an explicitly-filtered lead list -- computeQueue's own
+// userId==="owner" branch means "everyone, company-wide" everywhere else in
+// the app, which is wrong for "just the leads literally assigned to the
+// owner" (Joe is an LO too, with his own book, same as everyone else).
+function computeQueueForLeads(leads, userId, today){
+  var items = [];
 
   leads.forEach(function(lead){
     if (lead.status==="active" && CADENCE_STAGES.indexOf(lead.stage) !== -1){
@@ -2541,25 +2570,41 @@ function computeQueue(userId){
         });
       }
     }
+
+    // Stage hygiene -- catches files where the data hasn't kept up with
+    // reality, so a loan doesn't sit mislabeled indefinitely and nothing
+    // late-stage goes quiet without someone being told to check it.
+    if (lead.closeDate && lead.stage!=="closed" && lead.stage!=="postclosing"){
+      items.push({
+        type:"stage-hygiene", leadId:lead.id, priority:3,
+        label:"Stage doesn't match reality — has a close date but is still \"" + stageLabel(lead.stage) + "\"",
+        reason:"Closed " + fmtDate(lead.closeDate) + " — move it to Closed/Post-Closing"
+      });
+    } else if (lead.status==="active" && STAGE_HYGIENE_LATE_STAGES.indexOf(lead.stage) !== -1){
+      var lastAct = lastTouchDate(lead);
+      var quietDays = lastAct ? daysDiff(lastAct, today) : null;
+      if (quietDays !== null && quietDays >= STAGE_HYGIENE_QUIET_DAYS){
+        items.push({
+          type:"stage-hygiene", leadId:lead.id, priority:1,
+          label:"No activity logged in " + quietDays + " day(s) while in \"" + stageLabel(lead.stage) + "\"",
+          reason:"Confirm real status with the borrower/processor and update the stage or add a note"
+        });
+      }
+    }
   });
 
   items.sort(function(a,b){ return b.priority - a.priority; });
   return items;
 }
 
-// Owner sees every LO's queue by default via computeQueue("owner"); this narrows
-// it back down to just the owner's own assigned leads (plus review requests, which
-// are always addressed to the owner regardless of whose lead it is) unless the
-// owner explicitly flips the Today page to the "team" tab.
+// "Whole Team" (owner only) stays the full company-wide rollup, unaffected
+// by daily-quota backfill -- that's oversight, not one person's call list.
+// Everyone's own queue (every LO including the owner) runs through the
+// daily call quota engine so there's always a real 20 to work, per-person.
 function todayQueueScoped(){
-  var full = computeQueue(ui.viewAs);
-  if (!isOwner()) return full;
-  if (ui.todayScope === "team") return full;
-  return full.filter(function(item){
-    if (item.type === "review-request") return true;
-    var lead = leadById(item.leadId);
-    return lead && lead.assignedTo === ui.viewAs;
-  });
+  if (isOwner() && ui.todayScope === "team") return computeQueue("owner");
+  var quota = DAILY_CALL_QUOTA + (ui.dailyQuotaExtra||0);
+  return buildDailyCallQueue(ui.viewAs, quota).items;
 }
 
 function companyPointsSummary(leads){
@@ -2619,6 +2664,113 @@ function winbackInfo(lead, today){
   }
   if (!reasons.length) return null;
   return { reasons:reasons, days:days, priority:priority };
+}
+// Referral-ask eligibility for a past (closed) client -- separate from
+// winbackInfo, which is specifically for cold/lost leads trying to revive a
+// stalled deal. This is a happy closed borrower who's a real referral
+// source, not someone being chased for another shot at their own loan.
+function relationshipCallInfo(lead, today){
+  if (lead.status !== "closed") return null;
+  var lt = lastTouchDate(lead);
+  var days = lt ? daysDiff(lt, today) : null;
+  if (days === null) return null;
+  // First-ever relationship call only needs a short breather after closing;
+  // once they've been called at least once, hold to the real quarterly
+  // cadence so the same happy client isn't rung every time the queue is thin.
+  var everCalled = (lead.callAttempts||[]).length > 0;
+  var minDays = everCalled ? RELATIONSHIP_CALL_CADENCE_DAYS : RELATIONSHIP_CALL_MIN_DAYS_AFTER_CLOSE;
+  if (days < minDays) return null;
+  return { days: days };
+}
+var WINBACK_POOL_MIN_GAP_DAYS = 3;
+function skippedInQueueToday(lead, todayStr){
+  return lead.lastSkipAt === todayStr;
+}
+// The daily call quota engine. Today's naturally-due items (hot leads,
+// cadence follow-ups, rate drops, stale docs/apps, scheduled follow-ups,
+// winback, stage hygiene -- all from computeQueueForLeads) always come
+// first and are never bumped. If that falls short of quota, backfill from
+// this person's own closed clients (referral asks) and cold/lost leads
+// (win-back re-attempts), ranked by how long it's been since anyone touched
+// them so the most overdue relationship always surfaces first -- ensuring
+// there's always a next-best call to make, never a dead end. quota can be
+// raised above DAILY_CALL_QUOTA (see ui.dailyQuotaExtra) when an LO asks
+// for another batch after finishing today's.
+function buildDailyCallQueue(userId, quota){
+  var today = startOfToday();
+  var todayStr = todayISO();
+  var myLeads = state.leads.filter(function(l){ return l.assignedTo === userId; });
+  var due = computeQueueForLeads(myLeads, userId, today);
+
+  // Pricing review requests are addressed to the owner regardless of whose
+  // lead it is (an LO requests review on their OWN lead) -- myLeads above
+  // only covers leads literally assigned to "owner", so it'd miss every
+  // review request an LO files on their own book. Merge those back in.
+  if (userId === "owner"){
+    var seenReview = {};
+    due.forEach(function(it){ if (it.type==="review-request") seenReview[it.leadId] = true; });
+    state.leads.forEach(function(lead){
+      if (lead.assignedTo === "owner" || seenReview[lead.id]) return;
+      if (lead.pricingReviewRequestedAt && !lead.pricingReviewResolvedAt){
+        due.push({
+          type:"review-request", leadId:lead.id, priority:5,
+          label:"Pricing review requested" + (lead.pricingReviewNote ? (" — " + lead.pricingReviewNote) : ""),
+          reason:"Requested by " + userName(lead.pricingReviewRequestedBy) + " on " + fmtDate((lead.pricingReviewRequestedAt||"").slice(0,10))
+        });
+      }
+    });
+    due.sort(function(a,b){ return b.priority - a.priority; });
+  }
+
+  if (due.length >= quota) return { items: due, backfilled: 0, poolExhausted: false };
+
+  var usedIds = {};
+  due.forEach(function(it){ usedIds[it.leadId] = true; });
+
+  var pool = myLeads.filter(function(l){
+    if (usedIds[l.id]) return false;
+    if (skippedInQueueToday(l, todayStr)) return false;
+    if (l.status === "closed") return !!relationshipCallInfo(l, today);
+    if (l.status === "cold" || l.status === "lost"){
+      var wbLt = lastTouchDate(l);
+      var wbDays = wbLt ? daysDiff(wbLt, today) : 9999;
+      return wbDays >= WINBACK_POOL_MIN_GAP_DAYS;
+    }
+    return false;
+  }).map(function(l){
+    var lt = lastTouchDate(l);
+    var days = lt ? daysDiff(lt, today) : 9999;
+    return { lead:l, days:days };
+  }).sort(function(a,b){ return b.days - a.days; });
+
+  var need = quota - due.length;
+  var backfillItems = pool.slice(0, Math.max(0, need)).map(function(p){
+    var l = p.lead;
+    var isReferral = l.status === "closed";
+    return {
+      type: isReferral ? "relationship" : "winback-pool",
+      leadId: l.id, priority: 0,
+      label: isReferral ? "Relationship call — ask about referrals" : "Win-back re-attempt",
+      reason: isReferral
+        ? ("Closed " + p.days + " day(s) ago — check in, see how the property's performing, and ask if they know anyone looking to invest")
+        : ("No contact in " + p.days + " day(s) — worth one more try before writing it off")
+    };
+  });
+
+  return { items: due.concat(backfillItems), backfilled: backfillItems.length, poolExhausted: backfillItems.length < need };
+}
+function skipQueueItem(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  lead.skipCount = (lead.skipCount||0) + 1;
+  lead.lastSkipAt = todayISO();
+  if (lead.status==="cold" && lead.skipCount >= COLD_SKIP_LOST_THRESHOLD){
+    lead.status = "lost";
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"system", text:"Auto-marked lost after being skipped " + lead.skipCount + " times in the daily call queue with no contact ever made", author:"System" });
+  }
+  persist();
+  showToast("Skipped — won't show again today");
 }
 function randomToken(){
   return (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2) + Date.now().toString(36)).slice(0, 24);
@@ -2992,6 +3144,7 @@ function leadToRow(l){
     referral_partner_id: l.referralPartnerId || null,
     pricing_review_requested_at: l.pricingReviewRequestedAt || null, pricing_review_note: l.pricingReviewNote || null,
     pricing_review_requested_by: l.pricingReviewRequestedBy || null, pricing_review_resolved_at: l.pricingReviewResolvedAt || null,
+    skip_count: l.skipCount || 0, last_skip_at: l.lastSkipAt || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -3037,7 +3190,8 @@ function rowToLead(r){
     referralPartnerId: r.referral_partner_id || null,
     callAttempts: r.call_attempts||[], activity: r.activity||[], documents: r.documents||[], thirdParties: r.third_parties||[],
     pricingReviewRequestedAt: r.pricing_review_requested_at || null, pricingReviewNote: r.pricing_review_note || null,
-    pricingReviewRequestedBy: r.pricing_review_requested_by || null, pricingReviewResolvedAt: r.pricing_review_resolved_at || null
+    pricingReviewRequestedBy: r.pricing_review_requested_by || null, pricingReviewResolvedAt: r.pricing_review_resolved_at || null,
+    skipCount: r.skip_count || 0, lastSkipAt: r.last_skip_at || null
   };
 }
 function notifToRow(n){
@@ -3519,6 +3673,18 @@ function logCall(leadId, outcome, notes){
       lead.status = "cold";
       lead.activity.push({ date:d, type:"system", text:"Auto-marked cold after " + CADENCE_MAX + " unanswered attempts", author:"System" });
     }
+  }
+  // Auto-schedule the next touch on relationship/win-back calls instead of
+  // leaving it to the LO to remember -- a closed client stays in a periodic
+  // referral-ask rotation regardless of outcome; a cold/lost lead that
+  // didn't connect this time gets one more try in a few weeks rather than
+  // going silent until it happens to resurface again on its own.
+  if (lead.status === "closed"){
+    lead.nextFollowUp = addDaysISO(d, RELATIONSHIP_CALL_CADENCE_DAYS);
+    lead.nextFollowUpNote = "Relationship / referral check-in call";
+  } else if ((lead.status === "cold" || lead.status === "lost") && outcome !== "connected"){
+    lead.nextFollowUp = addDaysISO(d, WINBACK_POOL_RETRY_DAYS);
+    lead.nextFollowUpNote = "Win-back re-attempt";
   }
   showToast("Call logged for " + lead.name);
   persist();
@@ -6206,19 +6372,26 @@ function renderTeamSnapshot(){
     });
     var closedThisMonth = mine.filter(function(l){ return l.status==="closed" && l.closeDate && new Date(l.closeDate+"T00:00:00")>=monthStart; }).length;
     var due = computeQueue(u.id).length;
+    var todayStr = todayISO();
+    var callsToday = 0;
+    state.leads.filter(function(l){ return l.assignedTo===u.id; }).forEach(function(l){
+      callsToday += (l.callAttempts||[]).filter(function(a){ return a.date===todayStr; }).length;
+    });
+    var quotaCls = callsToday >= DAILY_CALL_QUOTA ? "badge-forest" : "badge-rust";
     var s = speedToLeadStats(state.leads.filter(function(l){ return l.assignedTo===u.id; }));
     return '<tr data-action="filter-lo-jump" data-lo="' + u.id + '" style="cursor:pointer">' +
       '<td><b>' + esc(u.name) + '</b></td>' +
       groupCounts.map(function(c){ return '<td class="num">' + (c||0) + '</td>'; }).join("") +
       '<td class="num">' + closedThisMonth + '</td>' +
       '<td class="num">' + (due ? ('<span class="badge badge-gold">' + due + '</span>') : "0") + '</td>' +
+      '<td class="num"><span class="badge ' + quotaCls + '">' + callsToday + ' / ' + DAILY_CALL_QUOTA + '</span></td>' +
       '<td class="num">' + fmtDuration(s.avgMs) + '</td>' +
     '</tr>';
   }).join("");
   return '<div class="section"><div class="section-head"><h2>Team Snapshot</h2><span class="hint">Live counts across everyone\'s pipeline</span></div>' +
     '<div class="table-wrap"><table><thead><tr><th>Loan Officer</th>' +
       STAGE_GROUPS.map(function(g){ return '<th>' + g.label + '</th>'; }).join("") +
-      '<th>Closed (mo.)</th><th>Calls Due</th><th>Avg. Speed to Lead</th>' +
+      '<th>Closed (mo.)</th><th>Calls Due</th><th>Today\'s Calls</th><th>Avg. Speed to Lead</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
   '</div>';
 }
@@ -6436,6 +6609,25 @@ function renderToday(){
   var scopeIsMine = !isOwner() || ui.todayScope !== "team";
   var who = isOwner() ? (scopeIsMine ? currentUser().name : "the whole team") : currentUser().name;
 
+  var quotaBanner = "";
+  if (scopeIsMine && !isProcessor()){
+    var quota = DAILY_CALL_QUOTA + (ui.dailyQuotaExtra||0);
+    var todayStr = todayISO();
+    var loggedToday = 0;
+    state.leads.filter(function(l){ return l.assignedTo === ui.viewAs; }).forEach(function(l){
+      loggedToday += (l.callAttempts||[]).filter(function(a){ return a.date === todayStr; }).length;
+    });
+    var pct = Math.min(100, Math.round((loggedToday / quota) * 100));
+    var hitQuota = loggedToday >= quota;
+    quotaBanner = '<div class="section" style="padding:16px 20px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px">' +
+        '<div><b>' + loggedToday + ' of ' + quota + '</b> calls logged today' + (hitQuota ? ' — quota hit 🎉' : '') + '</div>' +
+        (hitQuota ? '<button class="btn btn-sm btn-primary" data-action="extend-daily-quota">Add 20 more</button>' : '') +
+      '</div>' +
+      '<div style="height:8px;border-radius:4px;background:var(--surface-2);overflow:hidden"><div style="height:100%;width:' + pct + '%;background:var(--brand)"></div></div>' +
+    '</div>';
+  }
+
   var kpis = '<div class="kpi-row">' +
     '<div class="kpi"><div class="kpi-label">Calls due today</div><div class="kpi-value num">' + k.callsDue + '</div><div class="kpi-sub">' + (!isOwner() ? "Across your desk" : (scopeIsMine ? "Your queue — switch to Whole Team below to see everyone's" : "Across all loan officers")) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Active pipeline</div><div class="kpi-value num">' + k.activeCount + '</div><div class="kpi-sub">' + fmtUSD(k.pipelineValue) + ' in requested volume</div></div>' +
@@ -6492,7 +6684,11 @@ function renderToday(){
         : item.type==="followup" ? '<span class="badge badge-rust">Follow-up</span>'
         : item.type==="birthday" ? '<span class="badge badge-gold">🎂 Birthday</span>'
         : item.type==="winback" ? '<span class="badge badge-rust">Win-back</span>'
+        : item.type==="relationship" ? '<span class="badge badge-forest">🤝 Relationship / Referral</span>'
+        : item.type==="winback-pool" ? '<span class="badge badge-rust">Win-back</span>'
+        : item.type==="stage-hygiene" ? '<span class="badge badge-slate">⚠ Stage Check</span>'
         : '<span class="badge badge-slate">New Lead Cadence</span>';
+      var skippable = item.type==="relationship" || item.type==="winback-pool";
       return '<div class="queue-card ' + typeCls + '">' +
         '<div class="badge-wrap">' + typeBadge + '</div>' +
         '<div class="queue-main">' +
@@ -6503,6 +6699,7 @@ function renderToday(){
         '</div>' +
         '<div class="queue-actions">' +
           (item.type==="review-request" ? '<button class="btn btn-sm btn-primary" data-action="resolve-review" data-lead="' + lead.id + '">Mark Reviewed</button>' : '<button class="btn btn-sm btn-primary" data-action="open-modal" data-modal="logCall" data-lead="' + lead.id + '">Log Call</button>') +
+          (skippable ? '<button class="btn btn-sm btn-ghost" data-action="skip-call" data-lead="' + lead.id + '" title="Already know them / not a fit for today">Skip</button>' : '') +
           '<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View</button>' +
         '</div>' +
       '</div>';
@@ -6517,7 +6714,7 @@ function renderToday(){
     '</div>'
   ) : '';
   return topbar("Today", "Call list generated from new-lead cadence, market rate moves, and refinance timing.", "") +
-    '<div class="content">' + kpis + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML +
+    '<div class="content">' + kpis + quotaBanner + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML +
       '<div class="section"><div class="section-head"><h2>Priority call list</h2>' +
         '<div style="display:flex;align-items:center;gap:10px;flex:1">' + scopeTabs + '<span class="hint">' + queue.length + ' item(s)</span>' + dialerBtn + '</div>' +
       '</div>' + list + '</div>' +
@@ -10635,6 +10832,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "tour-back"){ ui.tourStep = Math.max((ui.tourStep||0)-1,0); render(); }
   else if (action === "tour-skip" || action === "tour-finish"){ ui.view = "today"; render(); }
   else if (action === "set-today-scope"){ ui.todayScope = t.dataset.scope; render(); }
+  else if (action === "skip-call"){ skipQueueItem(t.dataset.lead); }
+  else if (action === "extend-daily-quota"){ ui.dailyQuotaExtra = (ui.dailyQuotaExtra||0) + 20; render(); }
   else if (action === "start-dialer"){ startDialer(); }
   else if (action === "dialer-skip"){ dialerAdvance(); }
   else if (action === "close-dialer"){ closeDialer(); }
