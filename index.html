@@ -1788,7 +1788,7 @@ var ui = {
   activeTab: "overview",
   modal: null,
   portalLeadId: null,
-  leadFilter: { q:"", stage:"", loanType:"", assignedTo:"", status:"active" },
+  leadFilter: { q:"", stage:"", loanType:"", assignedTo:"", status:"active", source:"", dateFrom:"", dateTo:"", amountMin:"", amountMax:"", sort:"newest" },
   commFilter: "",
   toast: null,
   publicApply: null,
@@ -6883,26 +6883,52 @@ function renderPipeline(){
     '<div class="content"><div class="board">' + cols + '</div></div>';
 }
 
+function leadSearchHaystack(l){
+  return [
+    l.name, l.propertyAddress, l.phone, l.email, l.entityLegalName,
+    l.guarantorFirstName, l.guarantorLastName, l.guarantorPhone, l.guarantorEmail, l.id
+  ].filter(Boolean).join(" ").toLowerCase();
+}
 function renderLeadsTable(){
   var f = ui.leadFilter;
-  var leads = scopedLeads().filter(function(l){
+  var allScoped = scopedLeads();
+  var leads = allScoped.filter(function(l){
     if (f.status && l.status!==f.status) return false;
     if (f.stage && l.stage!==f.stage) return false;
     if (f.loanType && l.loanType!==f.loanType) return false;
     if (f.assignedTo && l.assignedTo!==f.assignedTo) return false;
+    if (f.source && l.source!==f.source) return false;
+    if (f.dateFrom && (!l.createdAt || l.createdAt < f.dateFrom)) return false;
+    if (f.dateTo && (!l.createdAt || l.createdAt > f.dateTo)) return false;
+    if (f.amountMin && !(l.loanAmount >= Number(f.amountMin))) return false;
+    if (f.amountMax && !(l.loanAmount && l.loanAmount <= Number(f.amountMax))) return false;
     if (f.q){
       var q = f.q.toLowerCase();
-      if (l.name.toLowerCase().indexOf(q)===-1 && (l.propertyAddress||"").toLowerCase().indexOf(q)===-1) return false;
+      if (leadSearchHaystack(l).indexOf(q)===-1) return false;
     }
     return true;
   });
 
+  var sortFns = {
+    newest: function(a,b){ return (b.createdAt||"").localeCompare(a.createdAt||""); },
+    oldest: function(a,b){ return (a.createdAt||"").localeCompare(b.createdAt||""); },
+    amountHigh: function(a,b){ return (b.loanAmount||0) - (a.loanAmount||0); },
+    amountLow: function(a,b){ return (a.loanAmount||0) - (b.loanAmount||0); },
+    name: function(a,b){ return (a.name||"").localeCompare(b.name||""); }
+  };
+  leads = leads.slice().sort(sortFns[f.sort] || sortFns.newest);
+
   var loOptions = ownerOptions(f.assignedTo);
   var stageOptions = STAGES.map(function(s){ return '<option value="' + s.key + '"' + (f.stage===s.key?" selected":"") + '>' + s.label + '</option>'; }).join("");
   var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '"' + (f.loanType===t?" selected":"") + '>' + t + '</option>'; }).join("");
+  var sourceSet = {};
+  allScoped.forEach(function(l){ if (l.source) sourceSet[l.source] = true; });
+  var sourceOptions = Object.keys(sourceSet).sort().map(function(s){ return '<option value="' + esc(s) + '"' + (f.source===s?" selected":"") + '>' + esc(s) + '</option>'; }).join("");
+
+  var hasActiveFilters = f.q || f.stage || f.loanType || f.assignedTo || f.source || f.dateFrom || f.dateTo || f.amountMin || f.amountMax || (f.status !== "active");
 
   var filters = '<div class="filters">' +
-    '<input class="input" placeholder="Search name or address…" value="' + esc(f.q) + '" data-action="filter" data-key="q" style="min-width:220px">' +
+    '<input class="input" placeholder="Search name, address, phone, email, entity, guarantor…" value="' + esc(f.q) + '" data-action="filter" data-key="q" style="min-width:280px">' +
     '<select class="select" data-action="filter" data-key="status">' +
       '<option value="active"' + (f.status==="active"?" selected":"") + '>Active</option>' +
       '<option value="closed"' + (f.status==="closed"?" selected":"") + '>Closed</option>' +
@@ -6913,12 +6939,25 @@ function renderLeadsTable(){
     '</select>' +
     '<select class="select" data-action="filter" data-key="stage"><option value="">Any stage</option>' + stageOptions + '</select>' +
     '<select class="select" data-action="filter" data-key="loanType"><option value="">Any loan type</option>' + typeOptions + '</select>' +
+    '<select class="select" data-action="filter" data-key="source"><option value="">Any source</option>' + sourceOptions + '</select>' +
     (isOwner() ? ('<select class="select" data-action="filter" data-key="assignedTo"><option value="">Any officer</option>' + loOptions + '</select>') : '') +
+  '</div>' +
+  '<div class="filters" style="margin-top:8px">' +
+    '<label class="footnote" style="display:flex;align-items:center;gap:6px">Created<input class="input" type="date" value="' + esc(f.dateFrom) + '" data-action="filter" data-key="dateFrom" style="width:150px"><span>to</span><input class="input" type="date" value="' + esc(f.dateTo) + '" data-action="filter" data-key="dateTo" style="width:150px"></label>' +
+    '<label class="footnote" style="display:flex;align-items:center;gap:6px">Loan amount<input class="input" type="number" placeholder="Min" value="' + esc(f.amountMin) + '" data-action="filter" data-key="amountMin" style="width:110px"><span>to</span><input class="input" type="number" placeholder="Max" value="' + esc(f.amountMax) + '" data-action="filter" data-key="amountMax" style="width:110px"></label>' +
+    '<select class="select" data-action="filter" data-key="sort">' +
+      '<option value="newest"' + (f.sort==="newest"?" selected":"") + '>Newest first</option>' +
+      '<option value="oldest"' + (f.sort==="oldest"?" selected":"") + '>Oldest first</option>' +
+      '<option value="amountHigh"' + (f.sort==="amountHigh"?" selected":"") + '>Amount: high to low</option>' +
+      '<option value="amountLow"' + (f.sort==="amountLow"?" selected":"") + '>Amount: low to high</option>' +
+      '<option value="name"' + (f.sort==="name"?" selected":"") + '>Name A–Z</option>' +
+    '</select>' +
+    (hasActiveFilters ? '<button class="btn btn-ghost btn-sm" type="button" data-action="clear-lead-filters">Clear filters</button>' : '') +
   '</div>';
 
   var rows = leads.map(function(l){
     return '<tr data-action="select-lead" data-lead="' + l.id + '">' +
-      '<td><div class="cell-name">' + esc(l.name) + '</div><div class="cell-sub">' + esc(l.propertyAddress||"") + '</div></td>' +
+      '<td><div class="cell-name">' + esc(l.name) + '</div><div class="cell-sub">' + esc(l.propertyAddress||l.phone||"") + '</div></td>' +
       '<td>' + esc(l.loanType) + '</td>' +
       '<td>' + badgeForStage(l) + '</td>' +
       '<td class="num">' + fmtUSD(l.loanAmount) + '</td>' +
@@ -6935,7 +6974,7 @@ function renderLeadsTable(){
   var actions = '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLeads">⬆ Import</button>' +
     '<button class="btn btn-primary" data-action="open-modal" data-modal="addLead">+ New Lead</button>';
 
-  return topbar("Leads & Loans", leads.length + " record(s)", actions) +
+  return topbar("Leads & Loans", leads.length + " of " + allScoped.length + " record(s)", actions) +
     '<div class="content">' + filters + table + '</div>';
 }
 
@@ -11016,6 +11055,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "tour-skip" || action === "tour-finish"){ ui.view = "today"; render(); }
   else if (action === "set-today-scope"){ ui.todayScope = t.dataset.scope; render(); }
   else if (action === "skip-call"){ skipQueueItem(t.dataset.lead); }
+  else if (action === "clear-lead-filters"){ ui.leadFilter = { q:"", stage:"", loanType:"", assignedTo:"", status:"active", source:"", dateFrom:"", dateTo:"", amountMin:"", amountMax:"", sort:"newest" }; render(); }
   else if (action === "extend-daily-quota"){ ui.dailyQuotaExtra = (ui.dailyQuotaExtra||0) + 20; render(); }
   else if (action === "start-dialer"){ startDialer(); }
   else if (action === "dialer-skip"){ dialerAdvance(); }
