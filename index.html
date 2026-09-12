@@ -300,6 +300,11 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .tab:hover{color:var(--ink)}
 .tab.active{color:var(--brand);border-bottom-color:var(--brand)}
 
+.seg{display:inline-flex;gap:2px;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:2px}
+.seg-btn{padding:6px 14px;background:transparent;border:0;border-radius:999px;color:var(--ink-muted);font-size:12.5px;font-weight:600;cursor:pointer}
+.seg-btn:hover{color:var(--ink)}
+.seg-btn.active{background:var(--brand);color:var(--brand-ink,#fff)}
+
 /* ---------------------------------------------------------------------
    Lead detail layout / rail
 --------------------------------------------------------------------- */
@@ -1728,7 +1733,8 @@ var ui = {
   commFilter: "",
   toast: null,
   publicApply: null,
-  pricerInputs: {}
+  pricerInputs: {},
+  todayScope: "mine"
 };
 var sessionWasRestored = false;
 try {
@@ -2506,6 +2512,21 @@ function computeQueue(userId){
 
   items.sort(function(a,b){ return b.priority - a.priority; });
   return items;
+}
+
+// Owner sees every LO's queue by default via computeQueue("owner"); this narrows
+// it back down to just the owner's own assigned leads (plus review requests, which
+// are always addressed to the owner regardless of whose lead it is) unless the
+// owner explicitly flips the Today page to the "team" tab.
+function todayQueueScoped(){
+  var full = computeQueue(ui.viewAs);
+  if (!isOwner()) return full;
+  if (ui.todayScope === "team") return full;
+  return full.filter(function(item){
+    if (item.type === "review-request") return true;
+    var lead = leadById(item.leadId);
+    return lead && lead.assignedTo === ui.viewAs;
+  });
 }
 
 function companyPointsSummary(leads){
@@ -5965,7 +5986,7 @@ function resetPortalCustomization(){
 }
 function renderShell(){
   var leads = scopedLeads();
-  var callsDue = computeQueue(ui.viewAs).length;
+  var callsDue = todayQueueScoped().length;
   var today = startOfToday();
   var winbackCount = (isOwner() ? state.leads : leads).filter(function(l){ return winbackInfo(l, today); }).length;
   var notifCount = unreadNotifCount(ui.viewAs);
@@ -6371,8 +6392,10 @@ function renderMyCalendarWidget(){
 function renderToday(){
   var leads = scopedLeads();
   var k = kpisFor(leads);
-  var queue = computeQueue(ui.viewAs);
-  var who = isOwner() ? "the whole team" : currentUser().name;
+  var queue = todayQueueScoped();
+  k.callsDue = queue.length;
+  var scopeIsMine = !isOwner() || ui.todayScope !== "team";
+  var who = isOwner() ? (scopeIsMine ? currentUser().name : "the whole team") : currentUser().name;
 
   var kpis = '<div class="kpi-row">' +
     '<div class="kpi"><div class="kpi-label">Calls due today</div><div class="kpi-value num">' + k.callsDue + '</div><div class="kpi-sub">Across ' + (isOwner()?"all loan officers":"your desk") + '</div></div>' +
@@ -6448,10 +6471,16 @@ function renderToday(){
   }
 
   var dialerBtn = queue.length ? '<button class="btn btn-sm btn-primary" data-action="start-dialer">▶ Start Power Dialer</button>' : '';
+  var scopeTabs = isOwner() ? (
+    '<div class="seg" style="margin-right:auto">' +
+      '<button class="seg-btn' + (scopeIsMine ? ' active' : '') + '" data-action="set-today-scope" data-scope="mine">My Queue</button>' +
+      '<button class="seg-btn' + (!scopeIsMine ? ' active' : '') + '" data-action="set-today-scope" data-scope="team">Whole Team</button>' +
+    '</div>'
+  ) : '';
   return topbar("Today", "Call list generated from new-lead cadence, market rate moves, and refinance timing.", "") +
     '<div class="content">' + kpis + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML +
       '<div class="section"><div class="section-head"><h2>Priority call list</h2>' +
-        '<div style="display:flex;align-items:center;gap:10px"><span class="hint">' + queue.length + ' item(s)</span>' + dialerBtn + '</div>' +
+        '<div style="display:flex;align-items:center;gap:10px;flex:1">' + scopeTabs + '<span class="hint">' + queue.length + ' item(s)</span>' + dialerBtn + '</div>' +
       '</div>' + list + '</div>' +
     '</div>';
 }
@@ -10566,6 +10595,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "tour-next"){ ui.tourStep = (ui.tourStep||0)+1; render(); }
   else if (action === "tour-back"){ ui.tourStep = Math.max((ui.tourStep||0)-1,0); render(); }
   else if (action === "tour-skip" || action === "tour-finish"){ ui.view = "today"; render(); }
+  else if (action === "set-today-scope"){ ui.todayScope = t.dataset.scope; render(); }
   else if (action === "start-dialer"){ startDialer(); }
   else if (action === "dialer-skip"){ dialerAdvance(); }
   else if (action === "close-dialer"){ closeDialer(); }
