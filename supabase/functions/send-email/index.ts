@@ -99,6 +99,7 @@ Deno.serve(async (req: Request) => {
         TextBody: plainText,
         HtmlBody: buildHtmlBody(text, fromPhotoUrl, ctaUrl),
         MessageStream: "outbound",
+        TrackOpens: true,
         ...(attachmentBase64 && attachmentName ? {
           Attachments: [{ Name: attachmentName, Content: attachmentBase64, ContentType: attachmentContentType }],
         } : {}),
