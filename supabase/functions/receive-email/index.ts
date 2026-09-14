@@ -72,6 +72,22 @@ Deno.serve(async (req: Request) => {
       postmark_message_id: payload.MessageID,
     });
 
+    // Real text alert, not just an in-app notification -- Joe's explicit
+    // ask (2026-09-14): "I need to be notified of inbound emails somehow."
+    // Fires for every inbound email, lead-tied or not -- an email sent
+    // without a leadId (e.g. a manual broker-to-lender submission with no
+    // +tag reply-to) previously fell through every branch below with zero
+    // notification to anyone. Not gated on leadId being present.
+    async function textStaff(userId: string, message: string) {
+      const { data: user } = await sb.from("users").select("phone").eq("id", userId).single();
+      if (!user?.phone) return;
+      await fetch(SUPABASE_URL + "/functions/v1/send-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+        body: JSON.stringify({ to: user.phone, text: message, fromName: "Bridgepoint CRM" }),
+      }).catch(() => {});
+    }
+
     if (leadId) {
       const { data: leadRow } = await sb.from("leads")
         .select("activity, assigned_to, name, third_parties, documents")
@@ -131,15 +147,17 @@ Deno.serve(async (req: Request) => {
           // Revisit if that routing turns out to be the wrong call.
           const { data: processors } = await sb.from("users").select("id").eq("role", "processor");
           for (const p of processors || []) {
+            const msg = docLabel + " returned for " + (leadRow.name || "a borrower") + " — " + notifyText;
             await sb.from("notifications").insert({
               id: "notif-" + crypto.randomUUID(),
               to_user_id: p.id,
               lead_id: leadId,
               kind: "email",
-              text: docLabel + " returned for " + (leadRow.name || "a borrower") + " — " + notifyText,
+              text: msg,
               date: new Date().toISOString().slice(0, 10),
               read: false,
             });
+            await textStaff(p.id as string, "📧 " + msg);
           }
         } else if (leadRow.assigned_to) {
           await sb.from("notifications").insert({
@@ -151,8 +169,25 @@ Deno.serve(async (req: Request) => {
             date: new Date().toISOString().slice(0, 10),
             read: false,
           });
+          await textStaff(leadRow.assigned_to as string, "📧 " + notifyText);
         }
       }
+    } else {
+      // No lead match at all -- e.g. a manual broker-to-lender email sent
+      // without a leadId, so its reply has no +tag to route by. There's no
+      // other signal to go on, so this always reaches the owner rather than
+      // silently vanishing (which is exactly what was happening before).
+      const preview = (text || "").trim().slice(0, 200);
+      await sb.from("notifications").insert({
+        id: "notif-" + crypto.randomUUID(),
+        to_user_id: "owner",
+        lead_id: null,
+        kind: "email",
+        text: "Untagged inbound email from " + fromAddress + ": " + subject,
+        date: new Date().toISOString().slice(0, 10),
+        read: false,
+      });
+      await textStaff("owner", "📧 Reply from " + fromAddress + " — \"" + subject + "\"" + (preview ? (": " + preview) : ""));
     }
 
     return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
