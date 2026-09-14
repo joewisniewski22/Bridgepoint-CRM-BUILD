@@ -1813,6 +1813,7 @@ try {
   var applyToken = qp.get("t");
   var deepLinkLead = qp.get("lead");
   var bookUserId = qp.get("book");
+  var bookForLead = qp.get("forLead");
   if (deepLinkLead) ui.pendingDeepLinkLead = deepLinkLead;
   if (qp.get("showcase")){
     ui.publicShowcase = { status:"loading", items:[] };
@@ -1821,7 +1822,7 @@ try {
     ui.publicApply = { leadId:applyId, token:applyToken, status:"loading" };
     loadPublicApplication(applyId, applyToken);
   } else if (bookUserId){
-    ui.publicBooking = { userId:bookUserId, status:"loading" };
+    ui.publicBooking = { userId:bookUserId, leadId: bookForLead||null, status:"loading" };
     loadPublicBooking(bookUserId);
   } else if (sessionWasRestored){
     if (isDemoAccountId(ui.viewAs)){
@@ -2915,8 +2916,8 @@ function reallySendBorrowerPortalInvite(leadId, channels){
     persist();
   });
 }
-function bookingLinkFor(userId){
-  return window.location.origin + window.location.pathname + "?book=" + userId;
+function bookingLinkFor(userId, leadId){
+  return window.location.origin + window.location.pathname + "?book=" + userId + (leadId ? ("&forLead=" + leadId) : "");
 }
 function sendSchedulingLink(leadId){
   var lead = leadById(leadId);
@@ -2934,7 +2935,7 @@ function reallySendSchedulingLink(leadId){
   // their real booking calendar, not whoever happened to click send --
   // so a client always books time with their actual loan officer.
   var me = docLoanOfficer(lead);
-  var link = bookingLinkFor(me.id);
+  var link = bookingLinkFor(me.id, leadId);
   var isEs = (lead.preferredLanguage||"en") === "es";
   var firstName = (lead.name||"").split(" ")[0];
   var text = isEs
@@ -7140,6 +7141,33 @@ function renderLoanPlacementBanner(lead){
     editor +
   '</div>';
 }
+// Joe's real report (2026-09-14): a borrower booked a time via a
+// scheduling link, the LO got the text/notification, but the lead's own
+// file showed nothing -- root cause was bookingLinkFor() never carrying
+// a leadId through the booking URL, so every appointment landed with
+// lead_id NULL regardless of which lead's link generated it, un-traceable
+// back to the file after the fact. Fixed at the source (leadId now flows
+// through the link -> ui.publicBooking -> the appointment record); this
+// is the other half -- actually surfacing it on the file once it's there.
+function renderLeadAppointmentBox(lead){
+  var appts = (state.appointments||[]).filter(function(a){ return a.leadId===lead.id && a.status!=="canceled"; })
+    .sort(function(a,b){ return new Date(b.startAt) - new Date(a.startAt); });
+  if (!appts.length) return "";
+  var now = Date.now();
+  var hasUpcoming = appts.some(function(a){ return new Date(a.startAt).getTime() >= now; });
+  var rows = appts.slice(0,5).map(function(a){
+    var when = new Date(a.startAt).toLocaleString([], {weekday:"short", month:"short", day:"numeric", hour:"numeric", minute:"2-digit"});
+    var isPast = new Date(a.startAt).getTime() < now;
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0">' +
+      '<span>' + esc(when) + (isPast ? ' <span class="hint">(past)</span>' : '') + (a.notes ? (' — ' + esc(a.notes)) : '') + '</span>' +
+      (isPast ? '' : '<button class="btn btn-ghost btn-sm" type="button" data-action="cancel-appointment" data-id="' + a.id + '">Cancel</button>') +
+    '</div>';
+  }).join("");
+  return '<div class="panel panel-pad" style="margin-bottom:14px;border-color:var(--brand)">' +
+    '<div class="rail-title" style="margin-bottom:4px">📅 ' + (hasUpcoming ? "Upcoming Appointment" : "Appointment History") + '</div>' +
+    rows +
+  '</div>';
+}
 function renderTabOverview(lead){
   var fu = '<div class="field-grid" style="margin-top:16px">' +
     '<div class="field" style="grid-column:1/-1"><label>Next follow-up</label>' +
@@ -7160,7 +7188,7 @@ function renderTabOverview(lead){
     ? ('<div style="margin-bottom:14px"><button class="btn btn-sm" type="button" data-action="view-term-sheet" data-lead="' + lead.id + '">📄 View Term Sheet</button></div>')
     : "";
 
-  return renderLoanPlacementBanner(lead) + viewTermSheetBtn + '<div class="field-grid">' +
+  return renderLoanPlacementBanner(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + '<div class="field-grid">' +
     field("Borrower", esc(lead.name)) +
     field("Entity Type", esc(lead.entityType||"—")) +
     field("Email", lead.email ? ('<button type="button" class="link-btn" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline, as this file\'s loan officer">' + esc(lead.email) + '</button>') : "—") +
@@ -8476,7 +8504,7 @@ function submitBooking(fd){
   if (!pb || !pb.selectedSlot || !sb) return;
   var id = "apt-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
   var appt = {
-    id:id, userId: pb.userId, leadId:null,
+    id:id, userId: pb.userId, leadId: pb.leadId || null,
     name: fd.get("name"), phone: fd.get("phone")||"", email: fd.get("email")||"", notes: fd.get("notes")||"",
     startAt: pb.selectedSlot.start, endAt: pb.selectedSlot.end, status:"scheduled"
   };
@@ -9468,8 +9496,10 @@ function modalSendPreview(leadId, kind){
     smsMsg = emailBody;
     showPdfBtn = false;
   } else if (kind === "scheduling"){
-    var me = currentUser();
-    var schedLink = bookingLinkFor(me.id);
+    // Match reallySendSchedulingLink exactly: the assigned LO's calendar
+    // (not necessarily whoever's previewing it) and this lead's id, so a
+    // booking made from this link is traceable back to the file.
+    var schedLink = bookingLinkFor(lo.id, leadId);
     var firstNameSched = (lead.name||"").split(" ")[0];
     title = "Preview — Send Scheduling Link";
     subject = "Bridgepoint Lending — Schedule a Call";
