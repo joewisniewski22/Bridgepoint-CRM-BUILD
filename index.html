@@ -3103,12 +3103,70 @@ function buildPreApprovalLetter(lead, langOverride){
   return lines.join("\n");
 }
 var PROCESSING_FEE_DEFAULT = 1200;
+function processingFeeForLead(lead){
+  return lead.processingFeeOverride != null ? lead.processingFeeOverride : PROCESSING_FEE_DEFAULT;
+}
+function setProcessingFee(leadId, fee){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (fee === "" || fee === null || fee === undefined){
+    lead.processingFeeOverride = null;
+    showToast("Processing fee reset to the " + fmtUSD(PROCESSING_FEE_DEFAULT) + " default");
+    persist();
+    return;
+  }
+  var n = Number(fee);
+  if (isNaN(n) || n < 0){ showToast("Enter a valid processing fee"); return; }
+  lead.processingFeeOverride = n;
+  showToast("Processing fee set to " + fmtUSD(n));
+  persist();
+}
 function lenderFeeForLead(lead){
   try {
     var result = evaluatePricing(lead, {});
     if (result && !result.ineligible && result.fee != null) return result.fee;
   } catch(e){}
-  return DSCR_FEE_BY_PROPERTY["SFR"];
+  // evaluatePricing couldn't price this file yet (missing data) -- fall
+  // back to a fee that at least matches the right lender/property-type
+  // table instead of always defaulting to the DSCR SFR fee regardless of
+  // loan type, which was silently wrong for GUC/multifamily/2-4 unit.
+  if (RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1){
+    var isGuc = lead.loanType === "Ground Up Construction";
+    if (isGuc) return pricingPropertyType(lead.propertyType) === "2-4 Unit" ? RTL_FEE_BY_PROJECT.guc_24 : RTL_FEE_BY_PROJECT.guc_sfr;
+    if (pricingPropertyType(lead.propertyType) === "2-4 Unit") return RTL_FEE_BY_PROJECT.multifamily_24;
+    return RTL_FEE_BY_PROJECT[rehabClass(lead)];
+  }
+  return DSCR_FEE_BY_PROPERTY[pricingPropertyType(lead.propertyType)] || DSCR_FEE_BY_PROPERTY["SFR"];
+}
+// Rehab/construction budget funded via draws over the course of the
+// project, not disbursed at the closing table -- separate from the
+// "Initial Advance" actually wired at closing. Only meaningful for RTL
+// rehab-type loans (Fix & Flip / Bridge / Ground Up) with a real budget
+// on file; capped at the loan amount in case of a data-entry mismatch
+// (budget entered larger than the loan itself).
+function rehabHoldbackForLead(lead){
+  if (RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) === -1) return null;
+  if (!lead.rehabBudget || !lead.loanAmount) return null;
+  var holdback = Math.min(lead.rehabBudget, lead.loanAmount);
+  return { holdback: holdback, initialAdvance: lead.loanAmount - holdback };
+}
+// Gives the borrower "some sort of idea of how much they need to close"
+// (Joe's words) from the real figures on file -- purchase price, loan
+// amount, points, lender fee, processing fee. Third-party costs (title,
+// appraisal, recording, etc.) are genuinely unknown at this stage and are
+// deliberately NOT included in the number, only noted separately, so this
+// never understates what's actually needed by silently omitting a real
+// category as if it were zero. Refis don't have a "bring cash" equity
+// figure the same way, so those return fees-only instead of guessing.
+function estimatedCashToClose(lead){
+  var fees = pointsRevenue(lead) + lenderFeeForLead(lead) + processingFeeForLead(lead);
+  var txnType = lead.transactionType || "purchase";
+  if (txnType !== "purchase") return { feesOnly:true, amount: fees };
+  if (!lead.purchasePrice || !lead.loanAmount) return null;
+  var hb = rehabHoldbackForLead(lead);
+  var fundedAtClosing = hb ? hb.initialAdvance : lead.loanAmount;
+  var equityNeeded = lead.purchasePrice - fundedAtClosing;
+  return { feesOnly:false, amount: equityNeeded + fees, equityNeeded: equityNeeded, fees: fees };
 }
 function buildTermSheet(lead, langOverride){
   var lo = docLoanOfficer(lead);
@@ -3140,13 +3198,26 @@ function buildTermSheet(lead, langOverride){
     lines.push((isRehabType ? "Pago Mensual (solo interés): " : "Pago Mensual (capital e interés): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "Por determinar"));
     lines.push("Originación: " + commission);
     lines.push("Cargo del Prestamista (Suscripción): " + fmtUSD(lenderFeeForLead(lead)));
-    lines.push("Cargo de Procesamiento: " + fmtUSD(PROCESSING_FEE_DEFAULT));
+    lines.push("Cargo de Procesamiento: " + fmtUSD(processingFeeForLead(lead)));
+    lines.push("Cargos de Terceros (avalúo, título, registro, etc.): Por determinar — se confirman al cierre");
+    var hbEs = rehabHoldbackForLead(lead);
+    if (hbEs){
+      lines.push("Desembolso Inicial (al cierre): " + fmtUSD(hbEs.initialAdvance));
+      lines.push("Retención para Construcción/Rehabilitación (liberada por avances): " + fmtUSD(hbEs.holdback));
+    }
     lines.push("");
     lines.push("PROPIEDAD");
     lines.push("Dirección: " + (lead.propertyAddress || "Por determinar"));
     lines.push("Tipo de Propiedad: " + (tr(lead.propertyType, "es") || "Por determinar"));
     lines.push("Estrategia de Salida: " + (tr(lead.exitStrategy, "es") || "Por determinar"));
     lines.push("");
+    var cxEs = estimatedCashToClose(lead);
+    if (cxEs){
+      lines.push(cxEs.feesOnly
+        ? ("Cargos Estimados al Cierre: " + fmtUSD(cxEs.amount) + " (no incluye cargos de terceros ni el saldo de cualquier préstamo existente a liquidar)")
+        : ("Efectivo Estimado Necesario al Cierre: " + fmtUSD(cxEs.amount) + " (basado en las cifras actuales del archivo; no incluye cargos de terceros — su oficial de préstamos confirmará la cifra final)"));
+      lines.push("");
+    }
     lines.push("Esta hoja de términos es solo para fines de discusión, no constituye un compromiso de préstamo, y está sujeta a la aprobación de suscripción, avalúo, título y documentación satisfactoria. Las tarifas, costos de terceros y términos finales se detallarán en su divulgación de cierre.");
     lines.push("");
     lines.push("Preparado por,");
@@ -3168,13 +3239,26 @@ function buildTermSheet(lead, langOverride){
     lines.push((isRehabType ? "Monthly Payment (interest only): " : "Monthly Payment (principal & interest): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "TBD"));
     lines.push("Origination: " + commission);
     lines.push("Lender Fee (Underwriting): " + fmtUSD(lenderFeeForLead(lead)));
-    lines.push("Processing Fee: " + fmtUSD(PROCESSING_FEE_DEFAULT));
+    lines.push("Processing Fee: " + fmtUSD(processingFeeForLead(lead)));
+    lines.push("Third-Party Fees (appraisal, title, recording, etc.): TBD — confirmed at closing");
+    var hb = rehabHoldbackForLead(lead);
+    if (hb){
+      lines.push("Initial Advance (at closing): " + fmtUSD(hb.initialAdvance));
+      lines.push("Construction/Rehab Holdback (released via draws): " + fmtUSD(hb.holdback));
+    }
     lines.push("");
     lines.push("PROPERTY");
     lines.push("Address: " + (lead.propertyAddress || "TBD"));
     lines.push("Property Type: " + (lead.propertyType || "TBD"));
     lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
     lines.push("");
+    var cx = estimatedCashToClose(lead);
+    if (cx){
+      lines.push(cx.feesOnly
+        ? ("Estimated Fees Due at Closing: " + fmtUSD(cx.amount) + " (does not include third-party costs or any existing loan payoff)")
+        : ("Estimated Cash Needed to Close: " + fmtUSD(cx.amount) + " (based on the figures currently on file; does not include third-party costs — your loan officer will confirm the final number)"));
+      lines.push("");
+    }
     lines.push("This term sheet is for discussion purposes only, is not a commitment to lend, and is subject to underwriting approval, appraisal, title, and satisfactory documentation. Fees, third-party costs, and final terms will be detailed in your closing disclosure.");
     lines.push("");
     lines.push("Prepared by,");
@@ -3233,6 +3317,7 @@ function leadToRow(l){
     pricing_review_requested_by: l.pricingReviewRequestedBy || null, pricing_review_resolved_at: l.pricingReviewResolvedAt || null,
     skip_count: l.skipCount || 0, last_skip_at: l.lastSkipAt || null,
     lost_reason: l.lostReason || null, lost_reason_note: l.lostReasonNote || null,
+    processing_fee_override: l.processingFeeOverride!=null ? l.processingFeeOverride : null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -3280,7 +3365,8 @@ function rowToLead(r){
     pricingReviewRequestedAt: r.pricing_review_requested_at || null, pricingReviewNote: r.pricing_review_note || null,
     pricingReviewRequestedBy: r.pricing_review_requested_by || null, pricingReviewResolvedAt: r.pricing_review_resolved_at || null,
     skipCount: r.skip_count || 0, lastSkipAt: r.last_skip_at || null,
-    lostReason: r.lost_reason || null, lostReasonNote: r.lost_reason_note || null
+    lostReason: r.lost_reason || null, lostReasonNote: r.lost_reason_note || null,
+    processingFeeOverride: r.processing_fee_override!=null ? r.processing_fee_override : null
   };
 }
 function notifToRow(n){
@@ -7141,7 +7227,11 @@ function renderGuidelineCheck(lead){
     '<div class="footnote" style="padding-top:8px">Preliminary check against BPL/Constructive Loans matrices — not a substitute for full underwriting. Internal use only, never shown to the borrower.</div>';
 }
 function renderOutsideLenderFitBox(lead){
-  if (!isOwner()) return '';
+  // Was owner-only; Joe's explicit ask (2026-09-14): he AND Erika (and
+  // Fiore, who already manages outside-lender placement) need to see
+  // where a deal actually fits when it doesn't fit Constructive --
+  // canViewOutsideLender() already covers exactly that set.
+  if (!canViewOutsideLender()) return '';
   var evaluators = Object.keys(OUTSIDE_LENDER_FIT_EVALUATORS).filter(function(k){ return typeof OUTSIDE_LENDER_FIT_EVALUATORS[k] === "function"; });
   if (!evaluators.length) return '';
   var blocks = evaluators.map(function(name){
@@ -7160,8 +7250,8 @@ function renderOutsideLenderFitBox(lead){
   }).join("");
   var missing = Object.keys(OUTSIDE_LENDER_FIT_EVALUATORS).filter(function(k){ return !OUTSIDE_LENDER_FIT_EVALUATORS[k]; });
   return '<div class="panel panel-pad" style="margin-top:10px;border-color:var(--brand)">' +
-    '<div class="rail-title" style="margin-bottom:4px">Outside Lender Fit (Owner Only)</div>' +
-    '<div class="footnote" style="padding-bottom:6px">Only you can see this — not shown to loan officers or processors.</div>' +
+    '<div class="rail-title" style="margin-bottom:4px">Outside Lender Fit — Where This Places</div>' +
+    '<div class="footnote" style="padding-bottom:6px">Visible to Joe, Erika, and Fiore only — not shown to loan officers.</div>' +
     blocks +
     (missing.length ? ('<div class="footnote" style="padding-top:10px">' + missing.join(", ") + ' guidelines not loaded yet — upload their rate sheet to add ' + (missing.length>1?"them":"it") + ' here.</div>') : '') +
     '<div class="footnote" style="padding-top:8px">Estimate only, from each lender\'s published guidelines — not a submitted quote.</div>' +
@@ -7386,7 +7476,7 @@ function buildPricerOutputHTML(lead, inputs){
       field("Day One Loan Amount", fmtUSD(lead.loanAmount), true) +
       rateField +
       field("Lender Fee", fmtUSD(result.fee), true) +
-      field("Processing Fee", fmtUSD(PROCESSING_FEE_DEFAULT), true) +
+      field("Processing Fee" + (lead.processingFeeOverride!=null ? " (manually set)" : ""), fmtUSD(processingFeeForLead(lead)), true) +
       (isDSCR ? field("Wholesale Price", result.price!=null ? result.price.toFixed(3) : "—", true) : "") +
       (isDSCR ? field("Yield Spread (YSP)", (result.ysp!=null && result.ysp>0) ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : (result.noYspAllowed ? "Not available" : (result.ysp===0 ? "$0 (at par)" : "None (par or better)")), true) : "") +
       (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
@@ -7857,6 +7947,16 @@ function renderRail(lead){
           '</form>')
         ) +
         '<div id="earnings-live-' + lead.id + '">' + renderEarningsLive(lead) + '</div>' +
+      '</div>') +
+      (isProcessor() ? '' :
+      '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft)">' +
+        '<div class="rail-title" style="margin-bottom:6px">Processing Fee</div>' +
+        '<form data-form="set-processing-fee" data-lead="' + lead.id + '" class="points-input-row">' +
+          '<span>$</span>' +
+          '<input class="input" type="number" step="1" min="0" name="fee" placeholder="' + PROCESSING_FEE_DEFAULT + ' (default)" value="' + (lead.processingFeeOverride!=null?lead.processingFeeOverride:"") + '">' +
+          '<button class="btn btn-sm" type="submit">Save</button>' +
+        '</form>' +
+        (lead.processingFeeOverride!=null ? ('<div class="footnote" style="padding-top:4px">Manually set — <button class="btn btn-ghost btn-sm" type="button" data-action="reset-processing-fee" data-lead="' + lead.id + '" style="padding:0;text-decoration:underline">reset to ' + fmtUSD(PROCESSING_FEE_DEFAULT) + ' default</button></div>') : ('<div class="footnote" style="padding-top:4px">Defaults to ' + fmtUSD(PROCESSING_FEE_DEFAULT) + ' — only set a value here to override it for this loan.</div>')) +
       '</div>') +
     '</div>' +
     (isProcessor() ? '' :
@@ -11055,6 +11155,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "tour-skip" || action === "tour-finish"){ ui.view = "today"; render(); }
   else if (action === "set-today-scope"){ ui.todayScope = t.dataset.scope; render(); }
   else if (action === "skip-call"){ skipQueueItem(t.dataset.lead); }
+  else if (action === "reset-processing-fee"){ setProcessingFee(t.dataset.lead, ""); }
   else if (action === "clear-lead-filters"){ ui.leadFilter = { q:"", stage:"", loanType:"", assignedTo:"", status:"active", source:"", dateFrom:"", dateTo:"", amountMin:"", amountMax:"", sort:"newest" }; render(); }
   else if (action === "extend-daily-quota"){ ui.dailyQuotaExtra = (ui.dailyQuotaExtra||0) + 20; render(); }
   else if (action === "start-dialer"){ startDialer(); }
@@ -11576,6 +11677,8 @@ appEl.addEventListener("submit", function(e){
     setOriginationSplit(form.dataset.user, fd.get("split"));
   } else if (type === "set-points"){
     setPointsCharged(form.dataset.lead, fd.get("points"));
+  } else if (type === "set-processing-fee"){
+    setProcessingFee(form.dataset.lead, fd.get("fee"));
   } else if (type === "dialer-log"){
     logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
     dialerAdvance();
