@@ -3412,6 +3412,11 @@ function ensureStaffLeadPolling(leadId){
       staffLeadPollingId = null;
       return;
     }
+    // A local edit is queued (syncTimer) or actively writing (syncInFlight)
+    // -- skip this tick entirely rather than risk overwriting it with a
+    // server copy that predates the edit. Next tick will pick up the
+    // settled state once the write has actually landed.
+    if (syncTimer || syncInFlight) return;
     sb.from("leads").select("*").eq("id", leadId).then(function(res){
       if (res.error || !res.data || !res.data.length) return;
       var fresh = rowToLead(res.data[0]);
@@ -3750,17 +3755,31 @@ function isBirthdayToday(lead){
   var td = new Date();
   return b.getMonth()===td.getMonth() && b.getDate()===td.getDate();
 }
+// syncInFlight tracks a write actually in progress (not just queued) --
+// see ensureStaffLeadPolling, which was blindly overwriting state.leads
+// from a background poll with no idea whether a local edit was still
+// mid-flight to Supabase. A real bug caught in testing 2026-09-14: this
+// upserts EVERY lead (hundreds of rows, some with large JSON blobs) on
+// every single edit, so the round trip can easily run longer than it
+// looks -- long enough for the poll's own much smaller single-row select
+// to land first and clobber the edit with what was still the stale
+// server copy. The poll now refuses to overwrite anything while a sync
+// is queued or in flight, closing that window instead of racing it.
+var syncInFlight = false;
 function syncToSupabase(){
   if (!sb) return;
+  syncInFlight = true;
+  var pending = [];
   if (state.leads && state.leads.length){
-    sb.from("leads").upsert(state.leads.map(leadToRow)).then(function(res){ if (res.error) console.error("lead sync error", res.error); });
+    pending.push(sb.from("leads").upsert(state.leads.map(leadToRow)).then(function(res){ if (res.error) console.error("lead sync error", res.error); }));
   }
   if (state.notifications && state.notifications.length){
-    sb.from("notifications").upsert(state.notifications.map(notifToRow)).then(function(res){ if (res.error) console.error("notification sync error", res.error); });
+    pending.push(sb.from("notifications").upsert(state.notifications.map(notifToRow)).then(function(res){ if (res.error) console.error("notification sync error", res.error); }));
   }
   if (state.teamMessages && state.teamMessages.length){
-    sb.from("team_messages").upsert(state.teamMessages.map(teamMessageToRow)).then(function(res){ if (res.error) console.error("team message sync error", res.error); });
+    pending.push(sb.from("team_messages").upsert(state.teamMessages.map(teamMessageToRow)).then(function(res){ if (res.error) console.error("team message sync error", res.error); }));
   }
+  Promise.all(pending).then(function(){ syncInFlight = false; }).catch(function(){ syncInFlight = false; });
 }
 
 var publishTimer = null;
