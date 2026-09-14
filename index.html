@@ -953,8 +953,12 @@ function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
 // lower, below-par buy-down-curve floor this pricer doesn't model (it
 // never prices below par at all -- see dscrPriceForDelta's negative-
 // delta rejection below).
-var DSCR_BASE_PAR_RATE = 6.25;
-var DSCR_MIN_NOTE_RATE = 6.5;
+// +0.125% AE update received 9/14/26 (on top of the 9/11/26 C3 Surge sheet
+// base of 6.25%/6.5% floor) -- Joe confirmed directly with Constructive's
+// AE that pricing moved again same-day. DSCR_BASE_RATE_PRICE below is
+// shifted by the same +0.125% so quoting at par still prices at 100.000.
+var DSCR_BASE_PAR_RATE = 6.375;
+var DSCR_MIN_NOTE_RATE = 6.625;
 // C3 Surge sheet (eff. 9/9/2026), "Expanded" program -- flat +0.375% for
 // the subject property's state. Confirmed against the live pricing engine
 // spreadsheet (V3 C3 Constructive Capital Pricing Engine.xlsx, Adjustments
@@ -1032,10 +1036,10 @@ var DSCR_FEE_BY_PROPERTY = {
   "Multifamily 5+": 3995
 };
 var DSCR_BASE_RATE_PRICE = [
-  {rate:7.375, price:102.125},{rate:7.250, price:102.000},{rate:7.125, price:101.875},
-  {rate:7.000, price:101.750},{rate:6.875, price:101.500},{rate:6.750, price:101.250},
-  {rate:6.625, price:101.000},{rate:6.500, price:100.750},{rate:6.375, price:100.375},
-  {rate:6.250, price:100.000}
+  {rate:7.500, price:102.125},{rate:7.375, price:102.000},{rate:7.250, price:101.875},
+  {rate:7.125, price:101.750},{rate:7.000, price:101.500},{rate:6.875, price:101.250},
+  {rate:6.750, price:101.000},{rate:6.625, price:100.750},{rate:6.500, price:100.375},
+  {rate:6.375, price:100.000}
 ];
 // The rate/price grid (DSCR_BASE_RATE_PRICE) is a buy-up curve measured from
 // PAR, not a table of absolute rates -- "par" is DSCR_BASE_PAR_RATE (6.25%
@@ -6306,8 +6310,8 @@ function renderOnboardingSignature(){
     '<form data-form="save-signature">' +
       '<div class="form-row"><label>Email signature</label><textarea class="textarea" name="emailSignature" rows="5">' + esc(u.emailSignature || defaultEmailSig) + '</textarea></div>' +
       '<div class="form-row" style="margin-top:10px"><label>Text message sign-off</label><input class="input" name="textSignoff" value="' + esc(u.textSignoff || defaultText) + '"></div>' +
-      '<div class="form-row" style="margin-top:10px"><label>Your Quo phone number</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
-      '<div class="login-sub" style="margin-top:2px">Set up your own line in the Quo app first, then paste the number here — CRM texts will send from it instead of the shared office line. You can add this later if you don\'t have it yet.</div>' +
+      '<div class="form-row" style="margin-top:10px"><label>Your personal texting number (optional)</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
+      '<div class="login-sub" style="margin-top:2px">Leave blank to send from the shared office line. Only set this if you have your own dedicated business number registered for texting.</div>' +
       '<div class="form-row" style="margin-top:10px"><label>Add a photo to your signature (optional)</label><input class="input" type="file" name="photo" accept="image/*">' +
         (u.photoUrl ? '<img src="' + esc(u.photoUrl) + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;margin-top:6px">' : '') +
       '</div>' +
@@ -7210,6 +7214,59 @@ function renderLeadAppointmentBox(lead){
     rows +
   '</div>';
 }
+// Joe's ask (2026-09-14): a borrower with two+ loans needs to be
+// unmistakable at a glance which is which. Walks the previousLeadId/
+// nextLeadId chain in both directions (not just one hop -- a borrower
+// could have 3+ loans over time) and falls back to a phone/email match
+// for same-borrower loans that were never explicitly linked, same
+// matching computeRepeatClients() already uses. Each related loan shows
+// its property address (the thing that actually distinguishes them) up
+// front, not just the borrower's name, which is identical on every one.
+function findRelatedLoans(lead){
+  var seen = {}; seen[lead.id] = true;
+  var chain = [];
+  var cursor = lead.previousLeadId;
+  while (cursor && !seen[cursor]){
+    var prev = leadById(cursor);
+    if (!prev) break;
+    chain.unshift(prev); seen[prev.id] = true;
+    cursor = prev.previousLeadId;
+  }
+  cursor = lead.nextLeadId;
+  while (cursor && !seen[cursor]){
+    var next = leadById(cursor);
+    if (!next) break;
+    chain.push(next); seen[next.id] = true;
+    cursor = next.nextLeadId;
+  }
+  if (lead.phone || lead.email){
+    (state.leads||[]).forEach(function(other){
+      if (seen[other.id]) return;
+      var phoneMatch = lead.phone && other.phone && other.phone.replace(/\D/g,"").slice(-10) === lead.phone.replace(/\D/g,"").slice(-10);
+      var emailMatch = lead.email && other.email && other.email.toLowerCase() === lead.email.toLowerCase();
+      if (phoneMatch || emailMatch){ chain.push(other); seen[other.id] = true; }
+    });
+  }
+  return chain;
+}
+function renderRelatedLoansBox(lead){
+  var related = findRelatedLoans(lead);
+  if (!related.length) return "";
+  var rows = related.map(function(r){
+    var addr = r.propertyAddress || "No property address yet";
+    var amt = r.loanAmount ? fmtUSD(r.loanAmount) : "—";
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border-soft)">' +
+      '<div><div style="font-weight:600">' + esc(addr) + '</div>' +
+        '<div class="hint">' + esc(r.loanType||"Loan type TBD") + ' · ' + amt + ' · ' + esc(stageLabel(r.stage)) + '</div></div>' +
+      '<button class="btn btn-sm btn-ghost" type="button" data-action="select-lead" data-lead="' + r.id + '">View</button>' +
+    '</div>';
+  }).join("");
+  return '<div class="panel panel-pad" style="margin-bottom:14px;border-color:var(--brand)">' +
+    '<div class="rail-title" style="margin-bottom:4px">🔗 Other Loan' + (related.length>1?'s':'') + ' for ' + esc(lead.name) + ' (' + (related.length+1) + ' total)</div>' +
+    '<div class="hint" style="margin-bottom:6px">This loan: <b>' + esc(lead.propertyAddress || "No property address yet") + '</b></div>' +
+    rows +
+  '</div>';
+}
 function renderTabOverview(lead){
   var fu = '<div class="field-grid" style="margin-top:16px">' +
     '<div class="field" style="grid-column:1/-1"><label>Next follow-up</label>' +
@@ -7230,7 +7287,7 @@ function renderTabOverview(lead){
     ? ('<div style="margin-bottom:14px"><button class="btn btn-sm" type="button" data-action="view-term-sheet" data-lead="' + lead.id + '">📄 View Term Sheet</button></div>')
     : "";
 
-  return renderLoanPlacementBanner(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + '<div class="field-grid">' +
+  return renderLoanPlacementBanner(lead) + renderRelatedLoansBox(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + '<div class="field-grid">' +
     field("Borrower", esc(lead.name)) +
     field("Entity Type", esc(lead.entityType||"—")) +
     field("Email", lead.email ? ('<button type="button" class="link-btn" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline, as this file\'s loan officer">' + esc(lead.email) + '</button>') : "—") +
@@ -7872,17 +7929,18 @@ function renderTabActivity(lead){
 function renderConversationThread(lead){
   var msgs = (lead.activity||[]).filter(function(a){
     return a.type === "text" && typeof a.text === "string" &&
-      (a.text.indexOf("Received (via Quo):") === 0 || a.text.indexOf("Texted (via Quo):") === 0);
+      /^(Received|Texted) \(via (Quo|Telnyx)\):/.test(a.text);
   });
   if (!msgs.length) return "";
   var expanded = ui.expandedConversationLead === lead.id;
   var bubbles = msgs.map(function(a){
-    var inbound = a.text.indexOf("Received (via Quo):") === 0;
-    var body = a.text.replace(/^(Received|Texted) \(via Quo\):\s*/, "");
+    var inbound = /^Received \(via (Quo|Telnyx)\):/.test(a.text);
+    var body = a.text.replace(/^(Received|Texted) \(via (Quo|Telnyx)\):\s*/, "");
+    var failedBadge = a.deliveryStatus === "failed" ? ' <span style="color:var(--c-rust)">⚠ not delivered</span>' : "";
     return '<div style="display:flex;' + (inbound ? '' : 'justify-content:flex-end') + ';margin-bottom:8px">' +
       '<div style="max-width:75%;padding:8px 12px;border-radius:10px;background:' + (inbound ? 'var(--surface-2,var(--border-soft))' : 'var(--brand)') + ';color:' + (inbound ? 'inherit' : 'var(--brand-ink)') + '">' +
         '<div style="white-space:pre-wrap">' + esc(body) + '</div>' +
-        '<div class="footnote" style="padding-top:2px;opacity:.8">' + (inbound ? esc(lead.name) : esc(a.author||"Us")) + ' · ' + fmtDate(a.date) + '</div>' +
+        '<div class="footnote" style="padding-top:2px;opacity:.8">' + (inbound ? esc(lead.name) : esc(a.author||"Us")) + ' · ' + fmtDate(a.date) + failedBadge + '</div>' +
       '</div>' +
     '</div>';
   }).join("");
@@ -9643,8 +9701,8 @@ function modalEditSignature(){
           '<div class="footnote" style="padding-top:4px">Paste this into your email signature above so clients can book time with you directly — set your available hours under My Schedule first.</div>' +
         '</div>' +
         '<div class="form-row"><label>Text message sign-off</label><input class="input" name="textSignoff" value="' + esc(u.textSignoff || defaultText) + '"></div>' +
-        '<div class="form-row"><label>Your Quo phone number</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
-        '<div class="footnote" style="padding:0">Find this in the Quo app under your own line. Texts you send from the CRM will go out from this number instead of the shared office line.</div>' +
+        '<div class="form-row"><label>Your personal texting number (optional)</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
+        '<div class="footnote" style="padding:0">Leave blank to send from the shared office line. Only set this if you have your own dedicated business number registered for texting.</div>' +
         '<div class="form-row"><label>Photo in your signature (optional)</label><input class="input" type="file" name="photo" accept="image/*">' +
           (u.photoUrl ? '<img src="' + esc(u.photoUrl) + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;margin-top:6px">' : '') +
         '</div>' +
@@ -9677,11 +9735,11 @@ function modalAddTeamMember(){
           '<div class="form-row"><label>Initial PIN (4–6 digits)</label><input class="input" type="text" inputmode="numeric" pattern="[0-9]*" name="pin" maxlength="6" required></div>' +
         '</div>' +
         '<div class="form-two">' +
-          '<div class="form-row"><label>Their Quo phone number (if known)</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100"></div>' +
+          '<div class="form-row"><label>Their personal texting number (optional)</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100"></div>' +
           '<div class="form-row"><label>Origination Split on Company Leads (%)</label><input class="input" type="number" min="0" max="100" name="originationSplit" value="50" placeholder="50"></div>' +
         '</div>' +
         '<div class="footnote" style="padding:0">Their share of points on company-provided leads — defaults to 50%. Self-generated business always pays 70% to them regardless of this number; yield spread is always split 50/50 for everyone.</div>' +
-        '<div class="footnote" style="padding:4px 0 0">Have them set up their own line in Quo, then confirm it here or from their own Signature settings — CRM texts send from this number instead of the shared office line. They\'ll be walked through setting up their signature and a short tour the first time they log in.</div>' +
+        '<div class="footnote" style="padding:4px 0 0">Leave blank to send from the shared office line, or set it here (or from their own Signature settings) if they have their own dedicated texting number. They\'ll be walked through setting up their signature and a short tour the first time they log in.</div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add</button></div>' +
       '</form>' +
@@ -10826,14 +10884,14 @@ function modalSendText(leadId){
       '<div class="modal-body">' +
         '<div class="form-row"><label>To</label><div class="val mono">' + esc(lead.phone) + '</div></div>' +
         '<div class="form-row"><label>Message</label><textarea class="textarea" id="text-message-box" rows="4">' + esc(msg) + '</textarea></div>' +
-        '<div class="footnote" style="padding:0">Sends instantly through Quo (your business line) and logs it to this lead\'s activity. Or open it in Messages / copy it and log manually.</div>' +
+        '<div class="footnote" style="padding:0">Sends instantly through the CRM\'s business line and logs it to this lead\'s activity. Or open it in Messages / copy it and log manually.</div>' +
       '</div>' +
       '<div class="modal-foot" style="flex-wrap:wrap">' +
         '<button class="btn" type="button" data-action="ai-draft-text" data-lead="' + lead.id + '">✨ AI Draft</button>' +
         '<a class="btn" href="sms:' + esc(digits) + '">Open in Messages</a>' +
         '<button class="btn" type="button" data-action="copy-message">Copy Message</button>' +
         '<form data-form="send-text" data-lead="' + lead.id + '" style="display:inline"><button class="btn" type="submit">Log as Sent</button></form>' +
-        '<button class="btn btn-primary" type="button" data-action="send-text-quo" data-lead="' + lead.id + '">Send via Quo</button>' +
+        '<button class="btn btn-primary" type="button" data-action="send-text-quo" data-lead="' + lead.id + '">Send Text</button>' +
       '</div>' +
     '</div></div>';
 }
