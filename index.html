@@ -3202,6 +3202,16 @@ function buildTermSheet(lead, langOverride){
   // cheap vacant lot on a Ground Up loan produces LTV well over 100%).
   var ltvRatio = (isRehabType && lead.arv && lead.loanAmount) ? (Math.round((lead.loanAmount/lead.arv)*1000)/10) : (isRehabType ? null : lead.ltv);
   var commission = (lead.pointsCharged!=null && lead.loanAmount) ? fmtUSD(pointsRevenue(lead)) : (lang==="es" ? "Por determinar" : "TBD");
+  // Joe's ask (2026-09-14): every DSCR term sheet shows the DSCR ratio
+  // itself, not just the rate/LTV that produced it -- pulls the same
+  // number evaluatePricing already computes for the Pricer tab so it can
+  // never drift from what the borrower was actually qualified at.
+  var dscrRatioText = null;
+  if (lead.loanType === "DSCR"){
+    var dscrPricing = evaluatePricing(lead, {});
+    var dscrVal = (dscrPricing && !dscrPricing.ineligible) ? dscrPricing.dscr : null;
+    dscrRatioText = dscrVal != null ? (Math.round(dscrVal*100)/100).toFixed(2) + "x" : null;
+  }
   var lines = [];
   if (lang === "es"){
     lines.push("BRIDGEPOINT LENDING — HOJA DE TÉRMINOS");
@@ -3217,6 +3227,7 @@ function buildTermSheet(lead, langOverride){
     lines.push("Tasa: " + (lead.rate ? fmtPct(lead.rate) : "Por determinar — sujeta a bloqueo de tasa"));
     lines.push("Plazo: " + (lead.termMonths ? (lead.termMonths + " meses") : "Por determinar"));
     lines.push((isRehabType ? "Préstamo sobre Valor Después de Reparación: " : "Relación Préstamo-Valor: ") + (ltvRatio ? (ltvRatio + "%") : "Por determinar"));
+    if (lead.loanType === "DSCR") lines.push("Relación DSCR: " + (dscrRatioText || "Por determinar"));
     lines.push((isRehabType ? "Pago Mensual (solo interés): " : "Pago Mensual (capital e interés): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "Por determinar"));
     lines.push("Originación: " + commission);
     lines.push("Cargo del Prestamista (Suscripción): " + fmtUSD(lenderFeeForLead(lead)));
@@ -3258,6 +3269,7 @@ function buildTermSheet(lead, langOverride){
     lines.push("Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
     lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
     lines.push((isRehabType ? "Loan to After-Repair Value: " : "Loan-to-Value: ") + (ltvRatio ? (ltvRatio + "%") : "TBD"));
+    if (lead.loanType === "DSCR") lines.push("DSCR Ratio: " + (dscrRatioText || "TBD"));
     lines.push((isRehabType ? "Monthly Payment (interest only): " : "Monthly Payment (principal & interest): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "TBD"));
     lines.push("Origination: " + commission);
     lines.push("Lender Fee (Underwriting): " + fmtUSD(lenderFeeForLead(lead)));
