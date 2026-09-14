@@ -150,7 +150,7 @@ button{font-family:inherit}
 .sidebar-foot{margin-top:auto;display:flex;flex-direction:column}
 .role-box{background:rgba(255,255,255,.08);border-radius:var(--radius-sm);padding:12px;font-size:12.5px;color:rgba(255,255,255,.85)}
 .role-box b{color:#fff;font-size:13.5px}
-.footnote{font-size:11px;color:rgba(255,255,255,.45);line-height:1.5}
+.footnote{font-size:11px;color:var(--ink-faint);line-height:1.5}
 .sidebar .btn{background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.18)}
 .sidebar .btn:hover{background:rgba(255,255,255,.18)}
 .sidebar .btn-ghost{background:transparent}
@@ -2459,11 +2459,19 @@ function startDialer(){
   var myId = currentUser().id;
   var quota = effectiveDailyQuota();
   var dq = buildDailyCallQueue(myId, quota);
-  var ids = dq.followUps.concat(dq.newBusiness).map(function(i){ return i.leadId; });
+  var allItems = dq.followUps.concat(dq.newBusiness);
+  // Joe's real ask (2026-09-14): the dialer showed almost nothing about who
+  // he was calling or why -- just name/loan type/amount, no synopsis. The
+  // queue item itself already carries a real reason ("Application sent 9
+  // day(s) ago, not completed", "New lead", etc.); it just never made it
+  // into the dialer before since only leadIds were kept. Carried through
+  // here as a lookup so modalDialer can show it without recomputing.
+  var itemsByLead = {};
+  var ids = allItems.map(function(i){ if (!itemsByLead[i.leadId]) itemsByLead[i.leadId] = i; return i.leadId; });
   var seen = {}, uniq = [];
   ids.forEach(function(id){ if (!seen[id]){ seen[id]=true; uniq.push(id); } });
   if (!uniq.length){ showToast("No calls queued right now"); return; }
-  ui.dialer = { queueIds: uniq, index: 0 };
+  ui.dialer = { queueIds: uniq, itemsByLead: itemsByLead, index: 0 };
   ui.modal = { type: "dialer" };
   render();
 }
@@ -2589,7 +2597,16 @@ function computeQueueForLeads(leads, userId, today){
       });
     }
 
-    if (lead.status==="active" && lead.applicationSentAt && !lead.applicationTakenByPhone && !lead.applicationTakenAt){
+    // A real bug Joe caught live (2026-09-14): stale-app/stale-docs re-fired
+    // every render purely off days-elapsed, with no idea whether a call or
+    // text had already gone out today -- someone he'd just called (and
+    // logged) reappeared in the same Power Dialer session. callAttempts
+    // already unifies calls AND texted follow-ups (see logCall/logTextSent),
+    // so "contacted today" is a real, already-available signal -- just never
+    // checked here.
+    var contactedToday = (lead.callAttempts||[]).some(function(a){ return a.date === todayISO(); });
+
+    if (lead.status==="active" && lead.applicationSentAt && !lead.applicationTakenByPhone && !lead.applicationTakenAt && !contactedToday){
       var appDays = daysDiff(new Date(lead.applicationSentAt+"T00:00:00"), today);
       if (appDays >= 3){
         items.push({
@@ -2600,7 +2617,7 @@ function computeQueueForLeads(leads, userId, today){
       }
     }
 
-    (lead.documents||[]).forEach(function(doc){
+    if (!contactedToday) (lead.documents||[]).forEach(function(doc){
       if (doc.status==="requested" && doc.requestedAt){
         var docDays = daysDiff(new Date(doc.requestedAt+"T00:00:00"), today);
         if (docDays >= 5){
@@ -9706,13 +9723,27 @@ function modalDialer(){
   var digits = (lead.phone||"").replace(/[^0-9+]/g,"");
   var pos = (ui.dialer.index+1) + " of " + ui.dialer.queueIds.length;
   var outOptions = CALL_OUTCOMES.map(function(o){ return '<option value="' + o.key + '">' + o.label + '</option>'; }).join("");
+  var qItem = ui.dialer.itemsByLead && ui.dialer.itemsByLead[lead.id];
+  var lastNote = null;
+  (lead.callAttempts||[]).slice().reverse().some(function(a){ if (a.notes){ lastNote = a; return true; } return false; });
+  var synopsis = '<div class="panel panel-pad" style="margin:8px 0;background:var(--surface-2)">' +
+    (qItem ? ('<div style="font-weight:600">' + esc(qItem.label) + '</div><div class="footnote" style="padding-top:2px">' + esc(qItem.reason) + '</div>') : '') +
+    '<div class="field-grid" style="margin-top:8px">' +
+      field("Loan Type", esc(lead.loanType||"—"), true) +
+      field("Stage", esc(stageLabel(lead.stage)), true) +
+      (lead.propertyAddress ? field("Property", esc(lead.propertyAddress), true) : "") +
+      (lead.loanAmount ? field("Loan Amount", fmtUSD(lead.loanAmount), true) : "") +
+      (lead.rate ? field("Rate", fmtPct(lead.rate), true) : "") +
+    '</div>' +
+    (lastNote ? ('<div class="footnote" style="padding-top:8px">Last call (' + fmtDate(lastNote.date) + '): ' + esc(lastNote.notes) + '</div>') : '') +
+  '</div>';
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
     '<div class="modal" data-stop="1">' +
       '<div class="modal-head"><h3>Power Dialer — ' + pos + '</h3><button class="btn btn-ghost btn-sm" data-action="close-dialer">✕</button></div>' +
       '<form data-form="dialer-log" data-lead="' + lead.id + '">' +
       '<div class="modal-body">' +
         '<div class="rail-name" style="font-size:1.15rem">' + esc(lead.name) + '</div>' +
-        '<div class="footnote" style="padding:0">' + esc(lead.loanType) + ' · ' + fmtUSD(lead.loanAmount) + '</div>' +
+        synopsis +
         renderCoachingTip(lead.id) +
         '<a class="btn btn-primary" style="width:100%;justify-content:center;font-size:1.05rem;padding:13px" href="' + esc(quoDialLink(lead.phone, currentUser().quoPhoneNumber) || ("tel:" + digits)) + '">📞 Call ' + esc(lead.phone||"") + '</a>' +
         '<div class="form-row"><label>Outcome</label><select class="select" name="outcome">' + outOptions + '</select></div>' +
@@ -11372,10 +11403,22 @@ appEl.addEventListener("change", function(e){
       mpContainer.innerHTML = mpCount ? buildMultiPackRowsHTML(mpCount, mpExisting, mpLang) : '<div class="empty">' + esc(tr("Enter a number above if this is a Blanket/Portfolio loan covering more than one property.", mpLang)) + '</div>';
     }
   } else if (action === "pricer-input"){
+    // Real bug Joe caught (2026-09-14): this used to call
+    // syncPricerRateToLead() on every change, which writes lead.rate the
+    // first time it runs (since lead.rate starts null) -- and from that
+    // point on, syncPricerRateToLead's own "never clobber a locked rate"
+    // guard treats the lead as locked, so every SUBSEQUENT input change
+    // (prepay term, points, transaction/property type) got silently
+    // ignored. The Pricer's entire point is live exploration before
+    // locking anything in -- that only happens explicitly, via "Send Term
+    // Sheet at This Rate" (applyPricerRateAndSendTermSheet) or opening the
+    // Loan Scenario tab fresh on a brand-new lead. A plain render() here
+    // recomputes the live display from ui.pricerInputs without touching
+    // lead.rate at all.
     ui.pricerInputs = ui.pricerInputs || {};
     ui.pricerInputs[t.dataset.lead] = ui.pricerInputs[t.dataset.lead] || {};
     ui.pricerInputs[t.dataset.lead][t.dataset.key] = t.value;
-    syncPricerRateToLead(t.dataset.lead);
+    render();
   } else if (action === "standalone-pricer-field"){
     ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
     var spKey = t.name;
