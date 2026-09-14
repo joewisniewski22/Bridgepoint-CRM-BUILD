@@ -3648,7 +3648,13 @@ function rowToCoachingNote(r){
   return { id:r.id, leadId:r.lead_id, staffId:r.staff_id, source:r.source, note:r.note, createdAt:r.created_at, read:r.read };
 }
 function rowToEmailRecord(r){
-  return { id:r.id, leadId:r.lead_id||null, direction:r.direction, fromAddress:r.from_address, toAddress:r.to_address, subject:r.subject, body:r.body, sentBy:r.sent_by||null, createdAt:r.created_at };
+  return {
+    id:r.id, leadId:r.lead_id||null, direction:r.direction, fromAddress:r.from_address, toAddress:r.to_address,
+    subject:r.subject, body:r.body, sentBy:r.sent_by||null, createdAt:r.created_at,
+    deliveryStatus:r.delivery_status||"sent", deliveredAt:r.delivered_at||null,
+    bouncedAt:r.bounced_at||null, bounceReason:r.bounce_reason||null,
+    openedAt:r.opened_at||null, openCount:r.open_count||0
+  };
 }
 function refreshEmails(){
   if (!sb) return;
@@ -9304,6 +9310,23 @@ function sendComposedEmail(leadId, to, subject, body){
     refreshEmails();
   }).catch(function(){ showToast("Couldn't send — try again"); });
 }
+// The real send/deliver/open/bounce chain, not just "the API accepted it"
+// -- Joe's ask (2026-09-14) after a submission reported success but had
+// actually bounced silently. Only meaningful for outbound mail; inbound
+// emails have no chain to show.
+function renderEmailChainBadge(e){
+  if (e.direction !== "outbound") return "";
+  if (e.deliveryStatus === "bounced" || e.deliveryStatus === "soft_bounced"){
+    return '<span class="badge badge-rust" title="' + esc(e.bounceReason||"") + '">⚠ Bounced' + (e.bouncedAt ? (" " + fmtDate(e.bouncedAt.slice(0,10))) : "") + '</span>';
+  }
+  if (e.openedAt){
+    return '<span class="badge badge-forest">👁 Opened ' + fmtDate(e.openedAt.slice(0,10)) + (e.openCount>1 ? (" (" + e.openCount + "x)") : "") + '</span>';
+  }
+  if (e.deliveryStatus === "delivered"){
+    return '<span class="badge badge-slate">✓ Delivered' + (e.deliveredAt ? (" " + fmtDate(e.deliveredAt.slice(0,10))) : "") + '</span>';
+  }
+  return '<span class="badge badge-neutral">Sent — delivery pending</span>';
+}
 function renderEmailInbox(){
   ensureEmailPolling();
   var emails = myEmails();
@@ -9314,7 +9337,7 @@ function renderEmailInbox(){
     var otherParty = e.direction === "inbound" ? e.fromAddress : e.toAddress;
     return '<div class="queue-card">' +
       '<div class="queue-main" data-action="toggle-email" data-id="' + e.id + '" style="cursor:pointer">' +
-        '<div class="queue-title">' + dirBadge + ' ' + esc(e.subject||"(no subject)") + '</div>' +
+        '<div class="queue-title">' + dirBadge + ' ' + renderEmailChainBadge(e) + ' ' + esc(e.subject||"(no subject)") + '</div>' +
         '<div class="queue-reason">' + (e.direction==="inbound"?"From ":"To ") + esc(otherParty||"") + (lead ? (' · ' + esc(lead.name)) : '') + '</div>' +
         '<div class="queue-meta"><span>' + fmtDate((e.createdAt||"").slice(0,10)) + '</span></div>' +
         (expanded ? ('<div class="footnote" style="white-space:pre-wrap;padding-top:8px;border-top:1px solid var(--border-soft);margin-top:8px">' + esc(e.body||"") + '</div>') : '') +
