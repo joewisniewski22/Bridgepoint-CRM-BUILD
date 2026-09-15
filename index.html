@@ -1678,7 +1678,85 @@ function evaluateRcnFit(lead){
 
   return { lender:"RCN", program:program, eligible: reasons.length===0, reasons:reasons, notes:notes, estMaxLoan:estMaxLoan, maxLtvPct:maxLtvPct };
 }
-var OUTSIDE_LENDER_FIT_EVALUATORS = { RCN: evaluateRcnFit, Kiavi: null, RELIP: null };
+// Angel Oak Investor Cash Flow (ICF Matrix 7.14.26 + Underwriting
+// Guidelines 8.3.26, both from Joe 2026-09-15) -- eligibility/LTV only,
+// no rate sheet was provided so this can't price an actual rate the way
+// Constructive is modeled. Biggest thing worth knowing: 1-Unit and 2-4
+// Unit properties get the IDENTICAL LTV/FICO/DSCR grid on this sheet --
+// unlike Constructive, which knocks LTV/rate down for 2-4 unit. That
+// makes Angel Oak worth checking specifically on duplex/multi-unit DSCR
+// deals. Loan amount changes the available LTV too (bigger loan = lower
+// max LTV at the same FICO), so this is a 3-way lookup (FICO x loan
+// amount x transaction type), not a flat FICO tier like RCN's table.
+var ANGEL_OAK_DSCR_GRID = {
+  purchase: [
+    { maxLoan:1000000, ltv:85, minFico:720 },
+    { maxLoan:2000000, ltv:80, minFico:700 },
+    { maxLoan:2000000, ltv:75, minFico:680 },
+    { maxLoan:3000000, ltv:60, minFico:680 }
+  ],
+  rateTerm: [
+    { maxLoan:1000000, ltv:85, minFico:720 },
+    { maxLoan:2000000, ltv:80, minFico:700 },
+    { maxLoan:2000000, ltv:75, minFico:680 },
+    { maxLoan:3000000, ltv:60, minFico:680 }
+  ],
+  cashOut: [
+    { maxLoan:2000000, ltv:80, minFico:720 },
+    { maxLoan:2000000, ltv:75, minFico:700 },
+    { maxLoan:2000000, ltv:70, minFico:680 },
+    { maxLoan:3000000, ltv:60, minFico:680 }
+  ]
+};
+var ANGEL_OAK_INELIGIBLE_PROPERTY_TYPES = ["Mixed-Use","Land"];
+function angelOakBestLtv(txnKey, loanAmount, creditScore){
+  var rows = ANGEL_OAK_DSCR_GRID[txnKey] || [];
+  var candidates = rows.filter(function(r){ return (!loanAmount || loanAmount <= r.maxLoan) && (creditScore||0) >= r.minFico; });
+  if (!candidates.length) return null;
+  return candidates.reduce(function(best, r){ return (!best || r.ltv > best.ltv) ? r : best; }, null);
+}
+function evaluateAngelOakFit(lead){
+  if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return null;
+  var reasons = [], notes = [];
+  var propertyType = pricingPropertyType(lead.propertyType);
+  if (ANGEL_OAK_INELIGIBLE_PROPERTY_TYPES.indexOf(lead.propertyType) !== -1) reasons.push("Angel Oak doesn't do " + lead.propertyType + " on this program");
+  if (lead.entityType === "Individual" && !lead.entityLegalName) notes.push("Angel Oak allows individual or LLC/Corp title — LLC must be for managing rental properties only");
+  var isFN = lead.citizenshipStatus === "Foreign National";
+  if (isFN && lead.loanAmount && lead.loanAmount > 1500000) reasons.push("Foreign National max loan amount is $1.5M on this program");
+
+  var txnKey = lead.transactionType === "cashout" ? "cashOut" : (lead.transactionType === "ratetermrefi" ? "rateTerm" : "purchase");
+  var valueBasis = dscrValueBasis(lead, null);
+  var minLoan = (lead.ltv && lead.ltv > 80) ? 150000 : 100000;
+  if (lead.loanAmount && lead.loanAmount < minLoan) reasons.push("Below Angel Oak's " + fmtUSD(minLoan) + " minimum loan amount" + (lead.ltv > 80 ? " (>80% LTV)" : ""));
+  if (lead.loanAmount && lead.loanAmount > 3000000) reasons.push("Above Angel Oak's $3,000,000 maximum loan amount");
+
+  var best = angelOakBestLtv(txnKey, lead.loanAmount, lead.creditScore);
+  var maxLtvPct = null, estMaxLoan = null;
+  if (!best){
+    reasons.push((lead.creditScore ? ("FICO " + lead.creditScore) : "Credit score") + " and/or loan amount don't clear any tier on Angel Oak's 1.00+ DSCR grid — would need their sub-1.00 DSCR or No-DSCR programs, priced manually");
+  } else {
+    maxLtvPct = best.ltv;
+    if (valueBasis) estMaxLoan = Math.round(valueBasis * maxLtvPct / 100);
+    notes.push("Angel Oak treats 1-Unit and 2-4 Unit identically on this grid" + (propertyType === "2-4 Unit" ? " — no LTV/rate penalty for the duplex, unlike Constructive" : ""));
+    if (lead.creditScore && lead.creditScore < 720 && lead.loanAmount && lead.loanAmount <= 1000000){
+      notes.push("A sub-$1M loan at 720+ FICO would get 85% LTV on Angel Oak's \"Purchase Only\" tier instead of " + maxLtvPct + "%");
+    }
+  }
+  if (lead.rentEstimate && valueBasis && maxLtvPct){
+    var aoRate = 7.5; // no rate sheet provided -- rough placeholder just to sanity-check DSCR direction, not a real quote
+    var pi = monthlyPayment(Math.round(valueBasis*maxLtvPct/100), aoRate, 360);
+    if (pi){
+      var hasExp = lead.monthlyTaxes!=null || lead.monthlyInsurance!=null;
+      var pitia = hasExp ? pi + (lead.monthlyTaxes||0) + (lead.monthlyInsurance||0) + (lead.monthlyHoa||0) : pi*1.2;
+      var dscrEst = lead.rentEstimate / pitia;
+      notes.push("Rough est. DSCR at a placeholder 7.5% (no Angel Oak rate sheet on file): " + dscrEst.toFixed(2) + "x — get their actual rate sheet before quoting");
+      if (dscrEst < 1.00) notes.push("Below 1.00x may still work on Angel Oak's sub-1.00/No-DSCR tiers at a reduced LTV — not modeled here, needs manual pricing");
+    }
+  }
+  notes.push("No Angel Oak rate sheet on file yet — this shows eligibility and max LTV only, not an actual rate/price. Get their current rate sheet from the AE to quote for real.");
+  return { lender:"Angel Oak", program:"Angel Oak Investor Cash Flow (DSCR)", eligible: reasons.length===0, reasons:reasons, notes:notes, estMaxLoan:estMaxLoan, maxLtvPct:maxLtvPct };
+}
+var OUTSIDE_LENDER_FIT_EVALUATORS = { RCN: evaluateRcnFit, "Angel Oak": evaluateAngelOakFit, Kiavi: null, RELIP: null };
 function rcnRecommendation(lead, fit){
   if (!fit) return null;
   if (!fit.eligible){
