@@ -3276,6 +3276,27 @@ function buildTermSheet(lead, langOverride){
   var lo = docLoanOfficer(lead);
   var today = todayISO();
   var expires = addDaysISO(today, 15);
+  // Joe's ask (2026-09-15): a term sheet should never quote a loan amount
+  // above what the guidelines actually allow at this LTV/LTC (e.g. 80% of
+  // a $100k purchase price caps it at $80k + rehab) -- the Pricing tab's
+  // "Day One Loan Amount" is a free-typed working number an LO can set
+  // ahead of, or out of sync with, the guideline max, but the document
+  // that goes to the borrower should always reflect the real ceiling.
+  // Reuses the exact same cap the Pricer tab already computes, so the two
+  // can never show different numbers.
+  var termSheetMaxLoanInfo = computeMaxLoanAmount(lead);
+  var termSheetCappedAmount = (termSheetMaxLoanInfo && termSheetMaxLoanInfo.amount != null) ? Math.floor(termSheetMaxLoanInfo.amount) : null;
+  if (termSheetCappedAmount != null && lead.loanAmount && termSheetCappedAmount < lead.loanAmount){
+    var termSheetValueBasis = dscrValueBasis(lead, {});
+    lead = Object.assign({}, lead, {
+      loanAmount: termSheetCappedAmount,
+      // lead.ltv is a stored field computed when the loan amount was last
+      // entered -- once the amount above is capped down it goes stale, so
+      // recompute it against the same basis (current value on a refi,
+      // purchase price otherwise) instead of leaving the old, too-high % on screen.
+      ltv: termSheetValueBasis ? Math.round((termSheetCappedAmount/termSheetValueBasis)*1000)/10 : lead.ltv
+    });
+  }
   var lang = langOverride || lead.preferredLanguage || "en";
   var isRehabType = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
   // For rehab/construction loans the meaningful ratio is against the
