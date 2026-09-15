@@ -7279,6 +7279,101 @@ function renderRelatedLoansBox(lead){
     rows +
   '</div>';
 }
+// Joe's ask (2026-09-14): a loan file needs to hold MULTIPLE term sheets
+// side by side -- e.g. an outside lender's actual quote alongside
+// Bridgepoint's own -- for comparison, not as a replacement. Distinct
+// from the existing "outside term sheet" upload flow (processOutsideTermSheet),
+// which reads a file with AI and OVERWRITES this lead's own loan terms --
+// that's still there for "correct my numbers to match this real quote."
+// This is for "keep both and let me compare them." Stored as flagged
+// entries inside the same lead.documents array (no schema change needed)
+// but filtered out of the normal checklist rendering above.
+function termSheetOptions(lead){
+  return (lead.documents||[]).filter(function(d){ return d.isTermSheetOption; });
+}
+function renderTermSheetOptionsBox(lead){
+  var opts = termSheetOptions(lead);
+  var rows = opts.map(function(o, i){
+    var realIdx = (lead.documents||[]).indexOf(o);
+    return '<div class="panel panel-pad" style="margin-bottom:8px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">' +
+        '<div>' +
+          '<div style="font-weight:600">' + esc(o.lender || "Untitled option") + '</div>' +
+          '<div class="hint">' + fmtDate(o.receivedAt) + (o.addedBy ? (' · added by ' + esc(o.addedBy)) : '') + '</div>' +
+        '</div>' +
+        '<button class="btn btn-sm btn-ghost" style="color:var(--c-rust)" type="button" data-action="delete-term-sheet-option" data-lead="' + lead.id + '" data-idx="' + realIdx + '">Delete</button>' +
+      '</div>' +
+      '<div class="field-grid" style="margin-top:8px">' +
+        (o.loanAmount ? ('<div class="field"><label>Loan Amount</label><div class="val">' + fmtUSD(o.loanAmount) + '</div></div>') : '') +
+        (o.rate ? ('<div class="field"><label>Rate</label><div class="val">' + fmtPct(o.rate) + '</div></div>') : '') +
+        (o.termMonths ? ('<div class="field"><label>Term</label><div class="val">' + o.termMonths + ' months</div></div>') : '') +
+        (o.cashToClose ? ('<div class="field"><label>Cash Required at Closing</label><div class="val">' + fmtUSD(o.cashToClose) + '</div></div>') : '') +
+      '</div>' +
+      (o.notes ? ('<div class="hint" style="margin-top:8px;white-space:pre-wrap">' + esc(o.notes) + '</div>') : '') +
+    '</div>';
+  }).join("");
+  return '<div class="panel panel-pad" style="margin-bottom:14px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+      '<div class="rail-title">📑 Term Sheet Options' + (opts.length ? (' (' + opts.length + ')') : '') + '</div>' +
+      '<button class="btn btn-sm" type="button" data-action="add-term-sheet-option" data-lead="' + lead.id + '">+ Add Option</button>' +
+    '</div>' +
+    (opts.length ? rows : '<div class="hint">No alternate term sheets on file yet. Add an outside lender\'s quote or a different structuring scenario to compare side by side — this never changes this loan\'s own numbers.</div>') +
+  '</div>';
+}
+function modalAddTermSheetOption(leadId){
+  var lead = leadById(leadId);
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Add Term Sheet Option — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="add-term-sheet-option" data-lead="' + leadId + '">' +
+      '<div class="modal-body">' +
+        '<div class="form-row"><label>Lender / Label</label><input class="input" name="lender" placeholder="e.g. RCN, Kiavi, or \'Option B — Interest Only\'" required></div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Loan Amount</label><input class="input" type="number" name="loanAmount" placeholder="666000"></div>' +
+          '<div class="form-row"><label>Rate (%)</label><input class="input" type="number" step="0.001" name="rate" placeholder="10.7"></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" placeholder="12"></div>' +
+          '<div class="form-row"><label>Cash Required at Closing</label><input class="input" type="number" name="cashToClose" placeholder="92645"></div>' +
+        '</div>' +
+        '<div class="form-row"><label>Notes (LTV/LTC, ARV, fees, anything else worth capturing)</label><textarea class="textarea" name="notes" rows="5"></textarea></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add Option</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+function addTermSheetOption(leadId, fd){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  lead.documents = lead.documents || [];
+  lead.documents.push({
+    name: "Term Sheet Option: " + (fd.get("lender")||"Untitled"),
+    isTermSheetOption: true,
+    lender: fd.get("lender") || null,
+    loanAmount: fd.get("loanAmount") ? Number(fd.get("loanAmount")) : null,
+    rate: fd.get("rate") ? Number(fd.get("rate")) : null,
+    termMonths: fd.get("termMonths") ? Number(fd.get("termMonths")) : null,
+    cashToClose: fd.get("cashToClose") ? Number(fd.get("cashToClose")) : null,
+    notes: fd.get("notes") || null,
+    receivedAt: todayISO(),
+    addedBy: currentUser().name
+  });
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"note", text: "Added term sheet option: " + (fd.get("lender")||"Untitled"), author: currentUser().name });
+  ui.modal = null;
+  showToast("Term sheet option added");
+  persist();
+}
+function deleteTermSheetOption(leadId, idx){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var doc = (lead.documents||[])[idx];
+  if (!doc || !doc.isTermSheetOption) return;
+  if (!window.confirm('Delete term sheet option "' + (doc.lender||"this option") + '"?')) return;
+  lead.documents.splice(idx, 1);
+  showToast("Term sheet option deleted");
+  persist();
+}
 function renderTabOverview(lead){
   var fu = '<div class="field-grid" style="margin-top:16px">' +
     '<div class="field" style="grid-column:1/-1"><label>Next follow-up</label>' +
@@ -7299,7 +7394,7 @@ function renderTabOverview(lead){
     ? ('<div style="margin-bottom:14px"><button class="btn btn-sm" type="button" data-action="view-term-sheet" data-lead="' + lead.id + '">📄 View Term Sheet</button></div>')
     : "";
 
-  return renderLoanPlacementBanner(lead) + renderRelatedLoansBox(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + '<div class="field-grid">' +
+  return renderLoanPlacementBanner(lead) + renderRelatedLoansBox(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + renderTermSheetOptionsBox(lead) + '<div class="field-grid">' +
     field("Borrower", esc(lead.name)) +
     field("Entity Type", esc(lead.entityType||"—")) +
     field("Email", lead.email ? ('<button type="button" class="link-btn" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline, as this file\'s loan officer">' + esc(lead.email) + '</button>') : "—") +
@@ -7792,7 +7887,7 @@ function deleteDocument(leadId, idx){
   persist();
 }
 function renderTabDocuments(lead){
-  var docs = lead.documents||[];
+  var docs = (lead.documents||[]).filter(function(d){ return !d.isTermSheetOption; });
   var canAiReview = isProcessor() || isOwner();
   var canManage = canManageDocs(lead);
   var receivedCount = docs.filter(function(d){ return d.status==="received"; }).length;
@@ -9592,6 +9687,7 @@ function renderModal(){
   if (ui.modal.type === "changePin") return modalChangePin();
   if (ui.modal.type === "editSignature") return modalEditSignature();
   if (ui.modal.type === "addTeamMember") return modalAddTeamMember();
+  if (ui.modal.type === "addTermSheetOption") return modalAddTermSheetOption(ui.modal.leadId);
   if (ui.modal.type === "sendInvite") return modalSendInvite(ui.modal.user);
   if (ui.modal.type === "dialer") return modalDialer();
   if (ui.modal.type === "scopeOfWork") return modalScopeOfWork(ui.modal.leadId);
@@ -11245,6 +11341,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "start-new-loan"){ startNewLoanForClient(t.dataset.lead); }
   else if (action === "merge-duplicate"){ mergeLeadsAction(t.dataset.lead, t.dataset.dup); }
   else if (action === "delete-document"){ deleteDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
+  else if (action === "add-term-sheet-option"){ ui.modal = { type:"addTermSheetOption", leadId: t.dataset.lead }; render(); }
+  else if (action === "delete-term-sheet-option"){ deleteTermSheetOption(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-lead-document"){ viewLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10)); }
   else if (action === "view-extra-document-file"){ viewExtraDocumentFile(t.dataset.lead, parseInt(t.dataset.idx,10), parseInt(t.dataset.fileidx,10)); }
   else if (action === "delete-extra-document-file"){ deleteExtraDocumentFile(t.dataset.lead, parseInt(t.dataset.idx,10), parseInt(t.dataset.fileidx,10)); }
@@ -11798,6 +11896,8 @@ appEl.addEventListener("submit", function(e){
     setFollowUp(form.dataset.lead, fd.get("date"), fd.get("note"));
   } else if (type === "birthday"){
     setBirthday(form.dataset.lead, fd.get("birthday"));
+  } else if (type === "add-term-sheet-option"){
+    addTermSheetOption(form.dataset.lead, fd);
   } else if (type === "quick-edit-guarantor"){
     quickEditGuarantor(form.dataset.lead, fd);
   } else if (type === "loan-details"){
