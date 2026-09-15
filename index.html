@@ -7291,24 +7291,60 @@ function renderRelatedLoansBox(lead){
 function termSheetOptions(lead){
   return (lead.documents||[]).filter(function(d){ return d.isTermSheetOption; });
 }
+// Joe's ask (2026-09-15): don't make him read every field to spot the
+// difference between options -- call out what actually changed vs. this
+// loan's own terms (LTV first, since that's the one that changes what a
+// borrower qualifies for, then rate/amount) right on the card.
+function termSheetKeyDifferences(lead, o){
+  var diffs = [];
+  if (o.ltv != null && lead.ltv != null && Math.round(o.ltv*10)/10 !== Math.round(lead.ltv*10)/10){
+    diffs.push(o.ltv + "% LTV vs. our " + lead.ltv + "%");
+  }
+  if (o.rate != null && lead.rate != null && Math.abs(o.rate - lead.rate) > 0.001){
+    diffs.push(fmtPct(o.rate) + " rate vs. our " + fmtPct(lead.rate));
+  }
+  if (o.loanAmount != null && lead.loanAmount != null && o.loanAmount !== lead.loanAmount){
+    diffs.push(fmtUSD(o.loanAmount) + " loan vs. our " + fmtUSD(lead.loanAmount));
+  }
+  return diffs;
+}
 function renderTermSheetOptionsBox(lead){
   var opts = termSheetOptions(lead);
+  var ourCard = (lead.loanAmount || lead.rate) ? (
+    '<div class="panel panel-pad" style="margin-bottom:8px;border-color:var(--brand)">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+        '<div style="font-weight:600">Our Terms (Bridgepoint)</div>' +
+        '<button class="btn btn-sm" type="button" data-action="view-term-sheet" data-lead="' + lead.id + '">📄 View</button>' +
+      '</div>' +
+      '<div class="field-grid" style="margin-top:8px">' +
+        (lead.loanAmount ? ('<div class="field"><label>Loan Amount</label><div class="val">' + fmtUSD(lead.loanAmount) + '</div></div>') : '') +
+        (lead.rate ? ('<div class="field"><label>Rate</label><div class="val">' + fmtPct(lead.rate) + '</div></div>') : '') +
+        (lead.ltv ? ('<div class="field"><label>LTV</label><div class="val">' + lead.ltv + '%</div></div>') : '') +
+        (lead.termMonths ? ('<div class="field"><label>Term</label><div class="val">' + lead.termMonths + ' months</div></div>') : '') +
+      '</div>' +
+    '</div>'
+  ) : "";
   var rows = opts.map(function(o, i){
     var realIdx = (lead.documents||[]).indexOf(o);
+    var diffs = termSheetKeyDifferences(lead, o);
+    var diffBar = diffs.length ? ('<div style="margin-top:8px;padding:6px 10px;background:var(--surface-2,var(--border-soft));border-radius:6px;font-size:.9em"><b>Key difference' + (diffs.length>1?'s':'') + ':</b> ' + diffs.map(esc).join(' · ') + '</div>') : "";
+    var viewOptBtn = o.storagePath ? ('<button class="btn btn-sm" type="button" data-action="view-lead-document" data-lead="' + lead.id + '" data-idx="' + realIdx + '">📄 View</button>') : "";
     return '<div class="panel panel-pad" style="margin-bottom:8px">' +
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">' +
         '<div>' +
           '<div style="font-weight:600">' + esc(o.lender || "Untitled option") + '</div>' +
           '<div class="hint">' + fmtDate(o.receivedAt) + (o.addedBy ? (' · added by ' + esc(o.addedBy)) : '') + '</div>' +
         '</div>' +
-        '<button class="btn btn-sm btn-ghost" style="color:var(--c-rust)" type="button" data-action="delete-term-sheet-option" data-lead="' + lead.id + '" data-idx="' + realIdx + '">Delete</button>' +
+        '<div style="display:flex;gap:6px">' + viewOptBtn + '<button class="btn btn-sm btn-ghost" style="color:var(--c-rust)" type="button" data-action="delete-term-sheet-option" data-lead="' + lead.id + '" data-idx="' + realIdx + '">Delete</button></div>' +
       '</div>' +
       '<div class="field-grid" style="margin-top:8px">' +
         (o.loanAmount ? ('<div class="field"><label>Loan Amount</label><div class="val">' + fmtUSD(o.loanAmount) + '</div></div>') : '') +
         (o.rate ? ('<div class="field"><label>Rate</label><div class="val">' + fmtPct(o.rate) + '</div></div>') : '') +
+        (o.ltv ? ('<div class="field"><label>LTV</label><div class="val">' + o.ltv + '%</div></div>') : '') +
         (o.termMonths ? ('<div class="field"><label>Term</label><div class="val">' + o.termMonths + ' months</div></div>') : '') +
         (o.cashToClose ? ('<div class="field"><label>Cash Required at Closing</label><div class="val">' + fmtUSD(o.cashToClose) + '</div></div>') : '') +
       '</div>' +
+      diffBar +
       (o.notes ? ('<div class="hint" style="margin-top:8px;white-space:pre-wrap">' + esc(o.notes) + '</div>') : '') +
     '</div>';
   }).join("");
@@ -7317,7 +7353,7 @@ function renderTermSheetOptionsBox(lead){
       '<div class="rail-title">📑 Term Sheet Options' + (opts.length ? (' (' + opts.length + ')') : '') + '</div>' +
       '<button class="btn btn-sm" type="button" data-action="add-term-sheet-option" data-lead="' + lead.id + '">+ Add Option</button>' +
     '</div>' +
-    (opts.length ? rows : '<div class="hint">No alternate term sheets on file yet. Add an outside lender\'s quote or a different structuring scenario to compare side by side — this never changes this loan\'s own numbers.</div>') +
+    (opts.length ? (ourCard + rows) : '<div class="hint">No alternate term sheets on file yet. Add an outside lender\'s quote or a different structuring scenario to compare side by side — this never changes this loan\'s own numbers.</div>') +
   '</div>';
 }
 function modalAddTermSheetOption(leadId){
@@ -7333,36 +7369,51 @@ function modalAddTermSheetOption(leadId){
           '<div class="form-row"><label>Rate (%)</label><input class="input" type="number" step="0.001" name="rate" placeholder="10.7"></div>' +
         '</div>' +
         '<div class="form-two">' +
+          '<div class="form-row"><label>LTV (%)</label><input class="input" type="number" step="0.1" name="ltv" placeholder="80"></div>' +
           '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" placeholder="12"></div>' +
-          '<div class="form-row"><label>Cash Required at Closing</label><input class="input" type="number" name="cashToClose" placeholder="92645"></div>' +
         '</div>' +
-        '<div class="form-row"><label>Notes (LTV/LTC, ARV, fees, anything else worth capturing)</label><textarea class="textarea" name="notes" rows="5"></textarea></div>' +
+        '<div class="form-row"><label>Cash Required at Closing</label><input class="input" type="number" name="cashToClose" placeholder="92645"></div>' +
+        '<div class="form-row"><label>Notes (LTC, ARV, fees, anything else worth capturing)</label><textarea class="textarea" name="notes" rows="5"></textarea></div>' +
+        '<div class="form-row"><label>Attach the actual term sheet (optional)</label><input class="input" type="file" name="file" accept=".pdf,image/*"></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add Option</button></div>' +
       '</form>' +
     '</div></div>';
 }
-function addTermSheetOption(leadId, fd){
+function addTermSheetOption(leadId, fd, file){
   var lead = leadById(leadId);
   if (!lead) return;
   lead.documents = lead.documents || [];
-  lead.documents.push({
+  var entry = {
     name: "Term Sheet Option: " + (fd.get("lender")||"Untitled"),
     isTermSheetOption: true,
     lender: fd.get("lender") || null,
     loanAmount: fd.get("loanAmount") ? Number(fd.get("loanAmount")) : null,
     rate: fd.get("rate") ? Number(fd.get("rate")) : null,
+    ltv: fd.get("ltv") ? Number(fd.get("ltv")) : null,
     termMonths: fd.get("termMonths") ? Number(fd.get("termMonths")) : null,
     cashToClose: fd.get("cashToClose") ? Number(fd.get("cashToClose")) : null,
     notes: fd.get("notes") || null,
     receivedAt: todayISO(),
     addedBy: currentUser().name
-  });
+  };
+  lead.documents.push(entry);
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"note", text: "Added term sheet option: " + (fd.get("lender")||"Untitled"), author: currentUser().name });
   ui.modal = null;
   showToast("Term sheet option added");
   persist();
+  if (file && sb){
+    var idx = lead.documents.indexOf(entry);
+    var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    var path = leadId + "/" + Date.now() + "-" + safeName;
+    sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+      if (res.error){ showToast("Option saved, but the file upload failed — try attaching it again"); return; }
+      entry.storagePath = path;
+      entry.fileName = file.name;
+      persist();
+    });
+  }
 }
 function deleteTermSheetOption(leadId, idx){
   var lead = leadById(leadId);
@@ -11897,7 +11948,9 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "birthday"){
     setBirthday(form.dataset.lead, fd.get("birthday"));
   } else if (type === "add-term-sheet-option"){
-    addTermSheetOption(form.dataset.lead, fd);
+    var tsoFileInput = form.querySelector('[name="file"]');
+    var tsoFile = tsoFileInput && tsoFileInput.files && tsoFileInput.files[0];
+    addTermSheetOption(form.dataset.lead, fd, tsoFile || null);
   } else if (type === "quick-edit-guarantor"){
     quickEditGuarantor(form.dataset.lead, fd);
   } else if (type === "loan-details"){
