@@ -3600,6 +3600,15 @@ function submitPublicApplication(leadId, patch){
   if (!lead) return;
   var d = todayISO();
   Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  // Joe's ask (2026-09-15): the application captures the guarantor's real
+  // phone/email, but that's a separate field from the lead's own contact
+  // info -- if the lead record didn't already have one (e.g. it was
+  // created from a bare referral with no contact info yet), this was the
+  // only place that real number/address ever lived, so texts/emails sent
+  // "to the lead" silently had nowhere to go. Only fills a gap, never
+  // overwrites a contact value staff already has on file.
+  if (!lead.phone && patch.guarantorPhone) lead.phone = patch.guarantorPhone;
+  if (!lead.email && patch.guarantorEmail) lead.email = patch.guarantorEmail;
   var ltvBasis = (patch.transactionType && patch.transactionType !== "purchase" && patch.currentValue) ? patch.currentValue : patch.purchasePrice;
   if (ltvBasis && patch.loanAmount){
     lead.ltv = Math.round((patch.loanAmount / ltvBasis) * 1000) / 10;
@@ -4122,6 +4131,11 @@ function submitPhoneApplication(leadId, patch){
   if (!lead) return;
   var d = todayISO();
   Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  // See submitPublicApplication's identical fix -- same gap exists when
+  // staff takes the application by phone instead of the borrower
+  // submitting it themselves.
+  if (!lead.phone && patch.guarantorPhone) lead.phone = patch.guarantorPhone;
+  if (!lead.email && patch.guarantorEmail) lead.email = patch.guarantorEmail;
   var ltvBasis = (patch.transactionType && patch.transactionType !== "purchase" && patch.currentValue) ? patch.currentValue : patch.purchasePrice;
   if (ltvBasis && patch.loanAmount){
     lead.ltv = Math.round((patch.loanAmount / ltvBasis) * 1000) / 10;
