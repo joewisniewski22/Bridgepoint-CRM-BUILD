@@ -1874,6 +1874,7 @@ var ui = {
   commFilter: "",
   toast: null,
   publicApply: null,
+  adLanding: null,
   pricerInputs: {},
   todayScope: "mine",
   dailyQuotaExtra: 0
@@ -1896,8 +1897,11 @@ try {
   var deepLinkLead = qp.get("lead");
   var bookUserId = qp.get("book");
   var bookForLead = qp.get("forLead");
+  var adLeadCampaign = qp.get("adlead");
   if (deepLinkLead) ui.pendingDeepLinkLead = deepLinkLead;
-  if (qp.get("showcase")){
+  if (adLeadCampaign){
+    ui.adLanding = { campaign: adLeadCampaign, status: "form" };
+  } else if (qp.get("showcase")){
     ui.publicShowcase = { status:"loading", items:[] };
     loadPublicShowcase();
   } else if (applyId && applyToken){
@@ -3630,6 +3634,85 @@ function submitPublicApplication(leadId, patch){
   ui.publicApply.status = "submitted";
   runGuidelineCheck(leadId);
   sendBorrowerPortalFollowUp(lead);
+}
+// Joe's ask (2026-09-15): a new English-language Facebook campaign, with
+// leads routed straight into the CRM instead of a native Meta Instant
+// Form -- the ad account's token only has ads_management/ads_read (Joe
+// deliberately kept Page/leads permissions out of scope), so there's no
+// way to pull native Lead Ads submissions via API. This CRM-hosted
+// landing page is the destination link on the ad instead: same effect
+// (a short form, no login needed), but it creates the lead here directly
+// with the right source/language/assignee baked in, and needs zero extra
+// Facebook permissions or a webhook.
+var AD_LANDING_CAMPAIGNS = {
+  "fb-en-ff": {
+    loanType: "Fix & Flip",
+    preferredLanguage: "en",
+    assignedTo: "lo-taeya", // every past FB lead (either language) went to Fanis -- Joe's explicit worry is her follow-up capacity, so this one goes to someone with a clean slate on FB volume instead. Easy to redirect if Joe wants someone else.
+    source: "Facebook",
+    headline: "Funded In Days, Not Months.",
+    subhead: "Up to 90% of purchase price + 100% of your rehab budget. No income verification, no tax returns — just a real deal and a fast close."
+  }
+};
+function renderAdLanding(){
+  var camp = AD_LANDING_CAMPAIGNS[ui.adLanding.campaign] || AD_LANDING_CAMPAIGNS["fb-en-ff"];
+  if (ui.adLanding.status === "submitted"){
+    return '<div style="max-width:520px;margin:60px auto;padding:32px;text-align:center;font-family:inherit">' +
+      '<img src="' + LOGO_URL + '" alt="Bridgepoint Lending" style="max-width:220px;margin-bottom:24px">' +
+      '<h2 style="margin-bottom:10px">You\'re In.</h2>' +
+      '<p style="color:var(--ink-faint,#666)">A loan officer will call you shortly with your rate. Keep an eye on your phone.</p>' +
+    '</div>';
+  }
+  return '<div style="max-width:520px;margin:40px auto;padding:24px;font-family:inherit">' +
+    '<img src="' + LOGO_URL + '" alt="Bridgepoint Lending" style="max-width:200px;margin-bottom:20px">' +
+    '<h1 style="font-size:1.6rem;margin-bottom:8px">' + esc(camp.headline) + '</h1>' +
+    '<p style="color:var(--ink-faint,#555);margin-bottom:24px">' + esc(camp.subhead) + '</p>' +
+    '<form data-form="ad-landing-lead">' +
+      '<div class="form-row" style="margin-bottom:10px"><input class="input" name="name" placeholder="Full Name" required></div>' +
+      '<div class="form-row" style="margin-bottom:10px"><input class="input" name="phone" type="tel" placeholder="Phone Number" required></div>' +
+      '<div class="form-row" style="margin-bottom:10px"><input class="input" name="email" type="email" placeholder="Email (optional)"></div>' +
+      '<div class="form-row" style="margin-bottom:16px"><input class="input" name="propertyAddress" placeholder="Property Address (optional)"></div>' +
+      '<button class="btn btn-primary" type="submit" style="width:100%;padding:14px;font-size:1.05rem">Get My Rate →</button>' +
+    '</form>' +
+    '<p class="footnote" style="margin-top:14px;text-align:center">Business-purpose loans only. No obligation, no credit pull to get your rate.</p>' +
+  '</div>';
+}
+function submitAdLandingLead(fd){
+  if (!sb) return;
+  var camp = AD_LANDING_CAMPAIGNS[ui.adLanding.campaign] || AD_LANDING_CAMPAIGNS["fb-en-ff"];
+  var name = (fd.get("name")||"").trim();
+  var phone = (fd.get("phone")||"").trim();
+  if (!name || !phone){ showToast("Name and phone are required"); return; }
+  var id = nextLeadId();
+  var d = todayISO();
+  var lead = {
+    id: id, name: name, email: fd.get("email") || null, phone: phone,
+    source: camp.source, loanType: camp.loanType, preferredLanguage: camp.preferredLanguage,
+    stage: "new", status: "active", assignedTo: camp.assignedTo, createdAt: d, createdAtTs: nowTs(), firstAttemptAt: null,
+    entityType: "LLC", creditScore: null, experienceDeals: null, liquidity: null,
+    propertyAddress: fd.get("propertyAddress") || "", propertyType: null, purchasePrice: null, arv: null, rehabBudget: null,
+    rentEstimate: null, loanAmount: null, ltv: null, rate: null, termMonths: null,
+    exitStrategy: null, closeDate: null, nextFollowUp: null, nextFollowUpNote: null, pointsCharged: null,
+    callAttempts: [], documents: [], thirdParties: [], applicationToken: randomToken(),
+    activity: [{ date: d, type: "note", text: "Submitted via Facebook ad landing page (" + ui.adLanding.campaign + ")", author: name }]
+  };
+  // list_users is a SECURITY DEFINER rpc -- same one loadPublicApplication()
+  // uses -- because the anon key can't read the users table directly under
+  // RLS. Needed here so notifyUser/notifyLoNewLead/startAiEngagement below
+  // can look up the assigned LO's phone/email.
+  sb.rpc("list_users").then(function(res){
+    if (res.data) state.users = res.data;
+    state.leads.push(lead);
+    var addedDocs = applyRequiredDocs(id, { silent:true }) || [];
+    if (addedDocs.length){
+      lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
+    }
+    notifyUser(camp.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id), { dialPhone: lead.phone });
+    notifyLoNewLead(lead);
+    startAiEngagement(lead);
+    ui.adLanding.status = "submitted";
+    persist();
+  }).catch(function(){ showToast("Something went wrong -- please call us instead"); });
 }
 function sendBorrowerPortalFollowUp(lead){
   // Joe: once they finish the application, they should get a follow-up
@@ -6107,6 +6190,12 @@ function render(){
   // on demand the next time a bound input is focused/typed into.
   document.querySelectorAll(".pac-container").forEach(function(el){ el.remove(); });
   var app = document.getElementById("app");
+  if (ui.adLanding){
+    app.innerHTML = renderAdLanding();
+    var toastHostAL = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+    app.insertAdjacentHTML("beforeend", toastHostAL);
+    return;
+  }
   if (ui.publicShowcase){
     app.innerHTML = renderPublicShowcase();
     return;
@@ -11967,6 +12056,8 @@ appEl.addEventListener("submit", function(e){
     var sowPatchPub = extractScopeOfWorkFromForm(fd);
     if (sowPatchPub) saveScopeOfWork(form.dataset.lead, sowPatchPub.items, sowPatchPub.notes);
     render();
+  } else if (type === "ad-landing-lead"){
+    submitAdLandingLead(fd);
   } else if (type === "import-parse"){
     var csvFileInput = form.querySelector('[name="csvFile"]');
     var csvFile = csvFileInput && csvFileInput.files && csvFileInput.files[0];
