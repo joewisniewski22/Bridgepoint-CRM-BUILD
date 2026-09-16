@@ -6866,9 +6866,15 @@ function defaultStandalonePricer(){
 function computeMaxLoanAmount(sp){
   var type = sp.loanType;
   if (type === "Fix & Flip" || type === "Bridge" || type === "Ground Up Construction"){
-    if (!sp.purchasePrice) return null;
-    var tierName = experienceTier(sp.experienceDeals);
     var isGuc = type === "Ground Up Construction";
+    // A Ground Up borrower who already owns the lot enters $0 purchase
+    // price -- that's real data (100% construction financing, 0%
+    // acquisition), not "we don't have enough info," so it should still
+    // get capped by the rehab/ARV formulas below. Fix & Flip and Bridge
+    // always involve an actual purchase, so those still require a real
+    // number before a cap means anything.
+    if (sp.purchasePrice == null || (sp.purchasePrice === 0 && !isGuc)) return null;
+    var tierName = experienceTier(sp.experienceDeals);
     var limits = isGuc ? GROUNDUP_TIERS[tierName] : RTL_TIERS[tierName][type==="Bridge"?"bridge":rehabClass(sp)];
     if (!limits) return null;
     var stateAdj = rtlStateLeverageAdj(sp.propertyAddress);
