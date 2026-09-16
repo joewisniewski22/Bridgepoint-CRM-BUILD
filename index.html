@@ -3285,7 +3285,11 @@ function buildTermSheet(lead, langOverride){
   // Reuses the exact same cap the Pricer tab already computes, so the two
   // can never show different numbers.
   var termSheetMaxLoanInfo = computeMaxLoanAmount(lead);
-  var termSheetCappedAmount = (termSheetMaxLoanInfo && termSheetMaxLoanInfo.amount != null) ? Math.floor(termSheetMaxLoanInfo.amount) : null;
+  // hitFlatCeiling means the $2M number is just this pricer's rough
+  // quoting backstop, not a real LTV/LTC violation -- don't truncate a
+  // genuinely large, already-priced loan (Bridge/Portfolio deals above
+  // $2M exist in this book) down to an arbitrary number nobody approved.
+  var termSheetCappedAmount = (termSheetMaxLoanInfo && termSheetMaxLoanInfo.amount != null && !termSheetMaxLoanInfo.hitFlatCeiling) ? Math.floor(termSheetMaxLoanInfo.amount) : null;
   if (termSheetCappedAmount != null && lead.loanAmount && termSheetCappedAmount < lead.loanAmount){
     var termSheetValueBasis = dscrValueBasis(lead, {});
     lead = Object.assign({}, lead, {
@@ -6875,19 +6879,30 @@ function computeMaxLoanAmount(sp){
       if (limits.ltarv!=null) limits.ltarv += stateAdj.adj;
       if (limits.totalLtc!=null) limits.totalLtc += stateAdj.adj;
     }
-    var caps = [2000000];
+    // 2,000,000 is a sanity backstop for the quick-quote Pricer (so a
+    // half-filled scenario doesn't display some absurd number), NOT a
+    // real Constructive program ceiling -- real files in this book
+    // already carry Bridge/Portfolio loans well above it. Track it
+    // separately (hitFlatCeiling) so callers that need the true
+    // LTV/LTC-guideline max (e.g. capping a term sheet) can tell "this
+    // exceeds guidelines" apart from "this is just bigger than our rough
+    // quoting sheet models — get it priced directly."
+    var formulaCaps = [];
     if (type === "Bridge"){
-      if (limits.ltc!=null) caps.push(limits.ltc/100 * sp.purchasePrice);
+      if (limits.ltc!=null) formulaCaps.push(limits.ltc/100 * sp.purchasePrice);
     } else if (isGuc){
-      if (limits.iltc!=null) caps.push(limits.iltc/100*sp.purchasePrice + (sp.rehabBudget||0));
-      if (limits.totalLtc!=null) caps.push(limits.totalLtc/100 * (sp.purchasePrice+(sp.rehabBudget||0)));
-      if (limits.ltarv!=null && sp.arv) caps.push(limits.ltarv/100 * sp.arv);
+      if (limits.iltc!=null) formulaCaps.push(limits.iltc/100*sp.purchasePrice + (sp.rehabBudget||0));
+      if (limits.totalLtc!=null) formulaCaps.push(limits.totalLtc/100 * (sp.purchasePrice+(sp.rehabBudget||0)));
+      if (limits.ltarv!=null && sp.arv) formulaCaps.push(limits.ltarv/100 * sp.arv);
     } else {
-      if (limits.iltc!=null) caps.push(limits.iltc/100*sp.purchasePrice + (sp.rehabBudget||0));
-      if (limits.ltc!=null) caps.push(limits.ltc/100 * (sp.purchasePrice+(sp.rehabBudget||0)));
-      if (limits.ltarv!=null && sp.arv) caps.push(limits.ltarv/100 * sp.arv);
+      if (limits.iltc!=null) formulaCaps.push(limits.iltc/100*sp.purchasePrice + (sp.rehabBudget||0));
+      if (limits.ltc!=null) formulaCaps.push(limits.ltc/100 * (sp.purchasePrice+(sp.rehabBudget||0)));
+      if (limits.ltarv!=null && sp.arv) formulaCaps.push(limits.ltarv/100 * sp.arv);
     }
-    return { amount: Math.max(0, Math.min.apply(null, caps)), stateAdj: stateAdj, tierName: tierName };
+    var formulaMin = formulaCaps.length ? Math.min.apply(null, formulaCaps) : null;
+    var hitFlatCeiling = formulaMin != null && formulaMin > 2000000;
+    var amount = Math.max(0, Math.min.apply(null, [2000000].concat(formulaCaps)));
+    return { amount: amount, stateAdj: stateAdj, tierName: tierName, hitFlatCeiling: hitFlatCeiling };
   }
   if (type === "DSCR" || type === "Portfolio/Blanket"){
     var dscrValueBasisForCap = dscrValueBasis(sp, sp);
@@ -6909,7 +6924,8 @@ function computeMaxLoanAmount(sp){
       var targetPI = (sp.rentEstimate / minDscr) / 1.2;
       dscrCap = targetPI / factor;
     }
-    return { amount: Math.max(0, Math.min(ltvCap, dscrCap, 2000000)), isRural: isRural };
+    var dscrFormulaMin = Math.min(ltvCap, dscrCap);
+    return { amount: Math.max(0, Math.min(dscrFormulaMin, 2000000)), isRural: isRural, hitFlatCeiling: dscrFormulaMin > 2000000 };
   }
   return null;
 }
@@ -7008,6 +7024,7 @@ function buildStandalonePricerOutputHTML(sp){
     (isDSCR ? '<div class="footnote" style="padding-top:8px">Defaults to this borrower\'s par rate (no yield spread). Use the up/down arrows on Rate to quote higher and earn yield spread — updates live.</div>' : '') +
     (maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.adj ? ('<div class="footnote" style="padding-top:8px">' + maxLoanInfo.stateAdj.state + ' property — max leverage reduced ' + maxLoanInfo.stateAdj.adj + '% per the matrix\'s state adjustment table.</div>') : '') +
     (maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.needsManualCheck ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">NY property — county-specific leverage reduction applies (-15% for the five boroughs, -5% Suffolk/Nassau). Verify manually, not applied here.</div>' : '') +
+    (maxLoanInfo.hitFlatCeiling ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">This scenario qualifies for more than $2,000,000 by the LTV/LTC math above — that\'s past what this quick pricer models with confidence. Get loans this size priced directly rather than trusting this number.</div>' : '') +
     (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
     '<div style="margin-top:14px"><button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button></div>';
 }
@@ -7973,6 +7990,7 @@ function buildPricerOutputHTML(lead, inputs){
       (lockedToActualRate ? '<div class="footnote" style="padding-top:8px">This loan already has a locked-in rate, so these figures reflect that rate rather than the sheet\'s suggested one — matches "Yield Spread Earned" in the rail. Change the rate from Loan Details above, not here.</div>' : '') +
       (maxLoanInfo && maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.adj ? ('<div class="footnote" style="padding-top:8px">' + maxLoanInfo.stateAdj.state + ' property — max leverage reduced ' + maxLoanInfo.stateAdj.adj + '% per the matrix\'s state adjustment table.</div>') : '') +
       (maxLoanInfo && maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.needsManualCheck ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">NY property — county-specific leverage reduction applies (-15% for the five boroughs, -5% Suffolk/Nassau). Verify manually, not applied here.</div>' : '') +
+      (maxLoanInfo && maxLoanInfo.hitFlatCeiling ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">This file qualifies for more than $2,000,000 by the LTV/LTC math above — that\'s past what this pricer models with confidence, so the Day One Loan Amount above is trusted as-is rather than being capped to $2,000,000. Get loans this size priced directly.</div>' : '') +
       (isDSCR && result.yspDollar ? ('<div class="footnote" style="padding-top:8px">Est. YSP commission to ' + esc(userName(lead.assignedTo)) + ' if this closes: <b>' + fmtUSD(result.yspDollar * YSP_SPLIT) + '</b> (50% of ' + fmtPct(result.ysp) + ' × ' + fmtUSD(effectiveLoanAmount) + ')</div>') : '') +
       (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
       (canEditApplication(lead) ? ('<div style="margin-top:10px"><button class="btn btn-sm" type="button" data-action="send-term-sheet-from-pricer" data-lead="' + lead.id + '">Send Term Sheet at This Rate</button></div>') : '');
