@@ -4074,7 +4074,7 @@ function submitAdLandingLead(fd){
     if (addedDocs.length){
       lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
     }
-    notifyUser(camp.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id), { dialPhone: lead.phone });
+    notifyUser(camp.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id));
     notifyLoNewLead(lead);
     startAiEngagement(lead);
     ui.adLanding.status = "submitted";
@@ -4880,7 +4880,7 @@ function reassignLead(leadId, newOwnerId){
   // an existing lead only ever sent the text before this, with no link in
   // it either -- matches addLead()'s hot-lead pattern now.
   var reassignLink = crmLeadLink(lead.id);
-  notifyUser(newOwnerId, lead.id, "reassigned", currentUser().name + " assigned " + lead.name + " to you — open & dial: " + reassignLink, { dialPhone: lead.phone });
+  notifyUser(newOwnerId, lead.id, "reassigned", currentUser().name + " assigned " + lead.name + " to you — open & dial: " + reassignLink);
   var reassignee = userById(newOwnerId);
   if (reassignee && reassignee.email && sb){
     sb.functions.invoke("send-email", { body: { leadId: lead.id, to: reassignee.email, subject: "Lead assigned to you: " + lead.name, text: currentUser().name + " assigned you " + lead.name + " (" + (lead.loanType||"Loan") + "). Open the file here: " + reassignLink, fromName: "Bridgepoint CRM", initiatedBy: "ai" } }).catch(function(){});
@@ -5012,14 +5012,6 @@ function sendBackToLO(leadId, note){
 function crmLeadLink(leadId){
   return CRM_URL + "?lead=" + leadId;
 }
-function quoDialLink(leadPhone, fromNumber){
-  var digits = (leadPhone||"").replace(/\D/g,"");
-  if (!digits) return "";
-  var e164 = digits.length===10 ? ("+1"+digits) : (digits.length===11 ? ("+"+digits) : ("+"+digits));
-  var url = "openphone://dial?number=" + encodeURIComponent(e164) + "&action=call";
-  if (fromNumber) url += "&from=" + encodeURIComponent(fromNumber);
-  return url;
-}
 function startDialerCall(leadId){
   var lead = leadById(leadId);
   if (!lead || !lead.phone){ showToast("No phone number on file for this lead"); return; }
@@ -5080,7 +5072,7 @@ function addLead(data){
     lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
   }
   if (lead.assignedTo && lead.assignedTo !== currentUser().id){
-    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id), { dialPhone: lead.phone });
+    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id));
     notifyLoNewLead(lead);
   }
   startAiEngagement(lead);
@@ -5417,17 +5409,13 @@ function notifyUser(userId, leadId, kind, text, opts){
     id: "N" + Date.now().toString(36) + Math.floor(Math.random()*1000),
     toUserId:userId, leadId:leadId, kind:kind, text:text, date: todayISO(), read:false
   });
-  if (!opts || !opts.skipText) pushStaffAlert(userId, text, opts && opts.dialPhone);
+  if (!opts || !opts.skipText) pushStaffAlert(userId, text);
 }
-function pushStaffAlert(userId, text, dialPhone){
+function pushStaffAlert(userId, text){
   if (!sb) return;
   var u = userById(userId);
   var phone = u && (u.phone || u.quoPhoneNumber);
   if (!phone) return;
-  if (dialPhone){
-    var dialLink = quoDialLink(dialPhone, u.quoPhoneNumber);
-    if (dialLink) text += "\nCall now: " + dialLink;
-  }
   sb.functions.invoke("send-text", { body: { to: phone, text: "Bridgepoint CRM: " + text } }).catch(function(){});
 }
 function submitForReview(leadId, note){
@@ -11724,7 +11712,7 @@ function createLeadFromScenario(data){
     lead.activity.push({ date:d, type:"document", text:"Required document checklist loaded (" + addedDocs.length + " item(s)) for " + lead.loanType, author:"System" });
   }
   if (lead.assignedTo && lead.assignedTo !== currentUser().id){
-    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id), { dialPhone: lead.phone });
+    notifyUser(lead.assignedTo, id, "hot-lead", "🔥 New lead: " + lead.name + " (" + lead.loanType + ") — open & dial: " + crmLeadLink(id));
     notifyLoNewLead(lead);
   }
   startAiEngagement(lead);

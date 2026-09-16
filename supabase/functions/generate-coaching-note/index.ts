@@ -1,5 +1,8 @@
 // Shared coaching-note generator, called for all three sources:
-// - "call": a real Quo call summary/transcript just came in (quo-call-webhook)
+// - "call": a real call summary/transcript just came in (dormant since the
+//   9/16/26 move off Quo for calling -- Quo's call-webhook that fed this is
+//   gone; nothing currently calls generate-coaching-note with this source
+//   until Telnyx call recording/transcription is wired up)
 // - "lost_deal": a loan officer just marked a lead lost (moveStage -> lost)
 // - "next_time": on-demand, before their next conversation with this client
 //
