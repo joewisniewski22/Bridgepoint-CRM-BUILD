@@ -3290,6 +3290,7 @@ function setProcessingFee(leadId, fee){
   persist();
 }
 function lenderFeeForLead(lead){
+  if (lead.lenderFeeOverride != null) return lead.lenderFeeOverride;
   try {
     var result = evaluatePricing(lead, {});
     if (result && !result.ineligible && result.fee != null) return result.fee;
@@ -3305,6 +3306,67 @@ function lenderFeeForLead(lead){
     return RTL_FEE_BY_PROJECT[rehabClass(lead)];
   }
   return DSCR_FEE_BY_PROPERTY[pricingPropertyType(lead.propertyType)] || DSCR_FEE_BY_PROPERTY["SFR"];
+}
+function setLenderFee(leadId, fee){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (fee === "" || fee === null || fee === undefined){
+    lead.lenderFeeOverride = null;
+    showToast("Lender fee reset to the standard pricing-table amount");
+    persist();
+    return;
+  }
+  var n = Number(fee);
+  if (isNaN(n) || n < 0){ showToast("Enter a valid lender fee"); return; }
+  lead.lenderFeeOverride = n;
+  showToast("Lender fee set to " + fmtUSD(n));
+  persist();
+}
+// Distinct from lenderFeeForLead (the wholesale lender's own underwriting
+// fee, pulled from the pricing tables) -- this is a separate line item
+// only used when a deal's terms call one out explicitly (e.g. matching an
+// outside investor's own fee breakdown). Returns 0, not null, so it adds
+// cleanly into fee totals; buildTermSheet only prints the line when set.
+function underwritingFeeForLead(lead){
+  return lead.underwritingFeeOverride != null ? lead.underwritingFeeOverride : 0;
+}
+function setUnderwritingFee(leadId, fee){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (fee === "" || fee === null || fee === undefined){
+    lead.underwritingFeeOverride = null;
+    showToast("Underwriting fee cleared");
+    persist();
+    return;
+  }
+  var n = Number(fee);
+  if (isNaN(n) || n < 0){ showToast("Enter a valid underwriting fee"); return; }
+  lead.underwritingFeeOverride = n;
+  showToast("Underwriting fee set to " + fmtUSD(n));
+  persist();
+}
+// Refundable-at-closing deposit some deals charge upfront -- included in
+// cash-to-close (the borrower needs it in hand at the table) but flagged
+// as refundable wherever it's shown so nobody mistakes it for a sunk cost.
+function commitmentFeeForLead(lead){
+  return lead.commitmentFeeOverride != null ? lead.commitmentFeeOverride : 0;
+}
+function setCommitmentFee(leadId, fee, refundable){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (fee === "" || fee === null || fee === undefined){
+    lead.commitmentFeeOverride = null;
+    lead.commitmentFeeRefundable = false;
+    showToast("Commitment fee cleared");
+    persist();
+    return;
+  }
+  var n = Number(fee);
+  if (isNaN(n) || n < 0){ showToast("Enter a valid commitment fee"); return; }
+  lead.commitmentFeeOverride = n;
+  lead.commitmentFeeRefundable = !!refundable;
+  showToast("Commitment fee set to " + fmtUSD(n) + (refundable ? " (refundable at closing)" : ""));
+  persist();
 }
 // Rehab/construction budget funded via draws over the course of the
 // project, not disbursed at the closing table -- separate from the
@@ -3327,7 +3389,7 @@ function rehabHoldbackForLead(lead){
 // category as if it were zero. Refis don't have a "bring cash" equity
 // figure the same way, so those return fees-only instead of guessing.
 function estimatedCashToClose(lead){
-  var fees = pointsRevenue(lead) + lenderFeeForLead(lead) + processingFeeForLead(lead);
+  var fees = pointsRevenue(lead) + lenderFeeForLead(lead) + processingFeeForLead(lead) + underwritingFeeForLead(lead) + commitmentFeeForLead(lead);
   var txnType = lead.transactionType || "purchase";
   if (txnType !== "purchase") return { feesOnly:true, amount: fees };
   if (!lead.purchasePrice || !lead.loanAmount) return null;
@@ -3401,8 +3463,10 @@ function buildTermSheet(lead, langOverride){
     if (lead.loanType === "DSCR") lines.push("Relación DSCR: " + (dscrRatioText || "Por determinar"));
     lines.push((isRehabType ? "Pago Mensual (solo interés): " : "Pago Mensual (capital e interés): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "Por determinar"));
     lines.push("Originación: " + commission);
-    lines.push("Cargo del Prestamista (Suscripción): " + fmtUSD(lenderFeeForLead(lead)));
+    lines.push("Cargo del Prestamista: " + fmtUSD(lenderFeeForLead(lead)));
+    if (lead.underwritingFeeOverride != null) lines.push("Cargo de Suscripción: " + fmtUSD(underwritingFeeForLead(lead)));
     lines.push("Cargo de Procesamiento: " + fmtUSD(processingFeeForLead(lead)));
+    if (lead.commitmentFeeOverride != null) lines.push("Depósito de Compromiso: " + fmtUSD(commitmentFeeForLead(lead)) + (lead.commitmentFeeRefundable ? " (reembolsable al cierre)" : ""));
     lines.push("Cargos de Terceros (avalúo, título, registro, etc.): Por determinar — se confirman al cierre");
     var hbEs = rehabHoldbackForLead(lead);
     if (hbEs){
@@ -3443,8 +3507,10 @@ function buildTermSheet(lead, langOverride){
     if (lead.loanType === "DSCR") lines.push("DSCR Ratio: " + (dscrRatioText || "TBD"));
     lines.push((isRehabType ? "Monthly Payment (interest only): " : "Monthly Payment (principal & interest): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "TBD"));
     lines.push("Origination: " + commission);
-    lines.push("Lender Fee (Underwriting): " + fmtUSD(lenderFeeForLead(lead)));
+    lines.push("Lender Fee" + (lead.underwritingFeeOverride == null ? " (Underwriting)" : "") + ": " + fmtUSD(lenderFeeForLead(lead)));
+    if (lead.underwritingFeeOverride != null) lines.push("Underwriting Fee: " + fmtUSD(underwritingFeeForLead(lead)));
     lines.push("Processing Fee: " + fmtUSD(processingFeeForLead(lead)));
+    if (lead.commitmentFeeOverride != null) lines.push("Commitment Fee: " + fmtUSD(commitmentFeeForLead(lead)) + (lead.commitmentFeeRefundable ? " (refunded to borrower at closing)" : ""));
     lines.push("Third-Party Fees (appraisal, title, recording, etc.): TBD — confirmed at closing");
     var hb = rehabHoldbackForLead(lead);
     if (hb){
@@ -3801,6 +3867,10 @@ function leadToRow(l){
     skip_count: l.skipCount || 0, last_skip_at: l.lastSkipAt || null,
     lost_reason: l.lostReason || null, lost_reason_note: l.lostReasonNote || null,
     processing_fee_override: l.processingFeeOverride!=null ? l.processingFeeOverride : null,
+    lender_fee_override: l.lenderFeeOverride!=null ? l.lenderFeeOverride : null,
+    underwriting_fee_override: l.underwritingFeeOverride!=null ? l.underwritingFeeOverride : null,
+    commitment_fee_override: l.commitmentFeeOverride!=null ? l.commitmentFeeOverride : null,
+    commitment_fee_refundable: !!l.commitmentFeeRefundable,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -3849,7 +3919,11 @@ function rowToLead(r){
     pricingReviewRequestedBy: r.pricing_review_requested_by || null, pricingReviewResolvedAt: r.pricing_review_resolved_at || null,
     skipCount: r.skip_count || 0, lastSkipAt: r.last_skip_at || null,
     lostReason: r.lost_reason || null, lostReasonNote: r.lost_reason_note || null,
-    processingFeeOverride: r.processing_fee_override!=null ? r.processing_fee_override : null
+    processingFeeOverride: r.processing_fee_override!=null ? r.processing_fee_override : null,
+    lenderFeeOverride: r.lender_fee_override!=null ? r.lender_fee_override : null,
+    underwritingFeeOverride: r.underwriting_fee_override!=null ? r.underwriting_fee_override : null,
+    commitmentFeeOverride: r.commitment_fee_override!=null ? r.commitment_fee_override : null,
+    commitmentFeeRefundable: !!r.commitment_fee_refundable
   };
 }
 function notifToRow(n){
