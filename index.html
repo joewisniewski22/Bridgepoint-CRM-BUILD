@@ -3486,7 +3486,10 @@ function lenderSummaryReadiness(lead){
   if (!lead.propertyAddress) missing.push("Property address");
   if (!lead.propertyType) missing.push("Property type");
   if (!lead.loanAmount) missing.push("Requested loan amount");
-  if (!lead.creditScore) missing.push("Credit score");
+  // Foreign National / ITIN borrowers typically have no US credit score at
+  // all -- that's expected, not missing data, so don't gate on it for them.
+  var noUsCreditExpected = lead.citizenshipStatus === "Foreign National" || lead.citizenshipStatus === "ITIN";
+  if (!lead.creditScore && !noUsCreditExpected) missing.push("Credit score");
   var isRtl = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
   var isGuc = lead.loanType === "Ground Up Construction";
   if (isRtl){
@@ -3518,8 +3521,9 @@ function buildLenderSummary(lead){
   lines.push("BORROWER");
   lines.push("Name / Entity: " + (lead.name || "TBD") + (lead.entityLegalName ? (" (" + lead.entityLegalName + ")") : ""));
   lines.push("Entity Type: " + (lead.entityType || "TBD"));
-  lines.push("Citizenship Status: " + (lead.citizenshipStatus || "TBD") + (lead.citizenshipStatus === "Foreign National" && lead.countryOfDomicile ? (" (" + lead.countryOfDomicile + ")") : ""));
-  lines.push("Credit Score: " + (lead.creditScore || "TBD"));
+  lines.push("Citizenship Status: " + (lead.citizenshipStatus || "TBD") + ((lead.citizenshipStatus === "Foreign National" || lead.citizenshipStatus === "ITIN") && lead.countryOfDomicile ? (" (" + lead.countryOfDomicile + ")") : ""));
+  var noUsCreditForSummary = lead.citizenshipStatus === "Foreign National" || lead.citizenshipStatus === "ITIN";
+  lines.push("Credit Score: " + (lead.creditScore || (noUsCreditForSummary ? "N/A — no U.S. credit history" : "TBD")));
   lines.push("Investing Experience: " + (lead.experienceDeals!=null ? (lead.experienceDeals + " completed deal(s)" + (tierName ? (" — " + tierName + " tier") : "")) : "TBD"));
   lines.push("Liquidity: " + (lead.liquidity!=null ? fmtUSD(lead.liquidity) : "TBD"));
   lines.push("");
@@ -3591,6 +3595,64 @@ function viewLenderSummary(leadId){
     window.open(url, "_blank");
     setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
   }).catch(function(){ showToast("Couldn't generate lender summary"); });
+}
+// Joe's ask (2026-09-16): "any document that is generated" needs an option
+// to email it to an arbitrary address (a lender, not the borrower) after
+// checking it first -- the existing send flows (sendDocumentBoth /
+// modalSendPreview) only ever send to the LEAD's own on-file email/phone,
+// which doesn't fit a lender summary at all and isn't what's wanted for
+// term sheets / pre-approvals either when the destination isn't the client.
+function docKindMeta(lead, kind){
+  if (kind === "termSheet") return { label:"Term Sheet", body: buildTermSheet(lead, "en") };
+  if (kind === "preApproval") return { label:"Pre-Approval Letter", body: buildPreApprovalLetter(lead, "en") };
+  if (kind === "lenderSummary") return { label:"Lender Summary", body: buildLenderSummary(lead) };
+  return null;
+}
+function openEmailDocumentModal(leadId, kind){
+  ui.modal = { type:"emailDocument", leadId: leadId, kind: kind };
+  render();
+}
+function modalEmailDocument(leadId, kind){
+  var lead = leadById(leadId);
+  var meta = lead ? docKindMeta(lead, kind) : null;
+  if (!lead || !meta) return '<div class="modal-backdrop" id="modal-host" data-action="backdrop"><div class="modal" data-stop="1"><div class="modal-head"><h3>Not available</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div></div></div>';
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Email ' + esc(meta.label) + ' — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0 0 10px">Check it first, then send it to whoever you\'re shopping this deal to — a lender, not the borrower.</div>' +
+        '<div class="form-row"><button class="btn btn-sm" type="button" data-action="preview-generated-document" data-lead="' + lead.id + '" data-kind="' + kind + '">👁️ Preview PDF</button></div>' +
+        '<form data-form="email-generated-document" data-lead="' + lead.id + '" data-kind="' + kind + '">' +
+          '<div class="form-row"><label>Send to</label><input class="input" type="email" name="toEmail" placeholder="lender@example.com" required autofocus></div>' +
+          '<div class="form-row"><label>Note (optional, goes above the document in the email)</label><textarea class="textarea" name="note" rows="3" placeholder="Hey, wanted to get your read on this one..."></textarea></div>' +
+          '<div class="modal-foot" style="padding:14px 0 0"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Send</button></div>' +
+        '</form>' +
+      '</div>' +
+    '</div></div>';
+}
+function sendGeneratedDocumentTo(leadId, kind, toEmail, note){
+  var lead = leadById(leadId);
+  var meta = lead ? docKindMeta(lead, kind) : null;
+  if (!lead || !meta || !sb || !toEmail) return;
+  var lo = docLoanOfficer(lead);
+  showToast("Sending " + meta.label + "…");
+  sb.functions.invoke("generate-doc-pdf", { body: { text: meta.body, label: meta.label } }).then(function(pdfRes){
+    var pdfBase64 = (pdfRes && pdfRes.data && pdfRes.data.ok) ? pdfRes.data.pdfBase64 : null;
+    if (!pdfBase64){ showToast("Couldn't generate PDF"); return null; }
+    var filename = docPdfFilename(lead, meta.label);
+    var subject = "Bridgepoint Lending — " + meta.label + " — " + lead.name;
+    var emailBody = (note ? (note.trim() + "\n\n") : "") + "Please see the attached " + meta.label.toLowerCase() + " for " + lead.name + ".";
+    return sb.functions.invoke("send-email", { body: { leadId: lead.id, to: toEmail, subject: subject, text: emailBody, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null, attachmentBase64: pdfBase64, attachmentName: filename } });
+  }).then(function(res){
+    if (res === null) return; // PDF generation already reported its own error
+    if (!res || res.error || !res.data || !res.data.ok){ showToast("Couldn't send " + meta.label); return; }
+    var d = todayISO();
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date:d, type:"application", text: meta.label + " emailed to " + toEmail, author: lo.name || currentUser().name });
+    ui.modal = null;
+    showToast(meta.label + " sent to " + toEmail);
+    persist();
+  }).catch(function(){ showToast("Couldn't send " + meta.label); });
 }
 /* ---------------------------------------------------------------------
    Actions (mutate state, then persist)
@@ -7868,7 +7930,10 @@ function renderTabOverview(lead){
   // errors out, it quietly doesn't render at all until then.
   var lenderSummaryReady = lenderSummaryReadiness(lead);
   var viewLenderSummaryBtn = lenderSummaryReady.ready
-    ? ('<div style="margin-bottom:14px"><button class="btn btn-sm" type="button" data-action="view-lender-summary" data-lead="' + lead.id + '">🏦 Lender Summary</button></div>')
+    ? ('<div style="margin-bottom:14px;display:flex;gap:8px">' +
+        '<button class="btn btn-sm" type="button" data-action="view-lender-summary" data-lead="' + lead.id + '">🏦 Lender Summary</button>' +
+        '<button class="btn btn-sm btn-ghost" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="lenderSummary" title="Check it, then email it to a lender">✉️ Email to Lender</button>' +
+      '</div>')
     : "";
 
   return renderLoanPlacementBanner(lead) + renderRelatedLoansBox(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + viewLenderSummaryBtn + renderTermSheetOptionsBox(lead) + '<div class="field-grid">' +
@@ -8687,6 +8752,15 @@ function renderRail(lead){
       '</div>' +
       (lead.preapprovalSentAt ? ('<div class="footnote" style="padding:6px 0 0">Pre-approval sent ' + fmtDate(lead.preapprovalSentAt) + '</div>') : '') +
       (lead.termsheetSentAt ? ('<div class="footnote" style="padding:2px 0 0">Term sheet sent ' + fmtDate(lead.termsheetSentAt) + '</div>') : '') +
+    '</div>') +
+    (isProcessor() ? '' :
+    '<div class="rail-block">' +
+      '<div class="rail-title">Email to a Lender</div>' +
+      '<div class="footnote" style="padding-bottom:6px">Not the borrower — for shopping this deal to a lender for pricing. You\'ll check the PDF before it sends.</div>' +
+      '<div style="display:flex;flex-direction:column;gap:6px">' +
+        '<button class="btn btn-sm btn-ghost" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="preApproval">✉️ Email Pre-Approval to a Lender</button>' +
+        '<button class="btn btn-sm btn-ghost" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="termSheet">✉️ Email Term Sheet to a Lender</button>' +
+      '</div>' +
     '</div>') +
     '<div class="rail-block">' +
       '<div class="rail-title">Move Stage</div>' +
@@ -10152,6 +10226,7 @@ function renderPortal(){
 --------------------------------------------------------------------- */
 function renderModal(){
   if (!ui.modal) return "";
+  if (ui.modal.type === "emailDocument") return modalEmailDocument(ui.modal.leadId, ui.modal.kind);
   if (ui.modal.type === "addLead") return modalAddLead();
   if (ui.modal.type === "createLeadFromPricer") return modalCreateLeadFromPricer();
   if (ui.modal.type === "importLeads") return modalImportLeads();
@@ -11866,6 +11941,25 @@ appEl.addEventListener("click", function(e){
   else if (action === "view-lender-summary"){
     viewLenderSummary(t.dataset.lead);
   }
+  else if (action === "open-email-document"){
+    openEmailDocumentModal(t.dataset.lead, t.dataset.kind);
+  }
+  else if (action === "preview-generated-document"){
+    var pgdLead = leadById(t.dataset.lead);
+    var pgdMeta = pgdLead ? docKindMeta(pgdLead, t.dataset.kind) : null;
+    if (!pgdLead || !pgdMeta || !sb) return;
+    showToast("Preparing PDF…");
+    sb.functions.invoke("generate-doc-pdf", { body: { text: pgdMeta.body, label: pgdMeta.label } }).then(function(res){
+      if (res.error || !res.data || !res.data.ok){ showToast("Couldn't generate PDF"); return; }
+      var pgdBytes = atob(res.data.pdfBase64);
+      var pgdArr = new Uint8Array(pgdBytes.length);
+      for (var pgdI=0; pgdI<pgdBytes.length; pgdI++) pgdArr[pgdI] = pgdBytes.charCodeAt(pgdI);
+      var pgdBlob = new Blob([pgdArr], { type: "application/pdf" });
+      var pgdUrl = URL.createObjectURL(pgdBlob);
+      window.open(pgdUrl, "_blank");
+      setTimeout(function(){ URL.revokeObjectURL(pgdUrl); }, 60000);
+    }).catch(function(){ showToast("Couldn't generate PDF"); });
+  }
   else if (action === "preview-document-pdf"){
     previewDocumentPdf(t.dataset.lead, t.dataset.kind);
   }
@@ -12307,6 +12401,8 @@ appEl.addEventListener("submit", function(e){
     render();
   } else if (type === "ad-landing-lead"){
     submitAdLandingLead(fd);
+  } else if (type === "email-generated-document"){
+    sendGeneratedDocumentTo(form.dataset.lead, form.dataset.kind, (fd.get("toEmail")||"").trim(), fd.get("note"));
   } else if (type === "import-parse"){
     var csvFileInput = form.querySelector('[name="csvFile"]');
     var csvFile = csvFileInput && csvFileInput.files && csvFileInput.files[0];
