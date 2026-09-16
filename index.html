@@ -3472,6 +3472,126 @@ function buildTermSheet(lead, langOverride){
   lines = lines.concat(loContactLines(lo, lang));
   return lines.join("\n");
 }
+// Joe's ask (2026-09-16): a wholesale-submission document going the OTHER
+// direction from a term sheet -- this one goes TO a lender (Constructive
+// or an outside lender), not to the borrower, so it's the borrower's real
+// deal facts (credit, experience, property, requested terms), not
+// Bridgepoint's own quoted rate -- the lender is the one pricing it.
+// Deliberately the mirror image of the "never name the lender" rule on
+// borrower-facing docs: this document's whole job is to go to a lender.
+var GUIDELINE_LOAN_TYPES_FOR_SUMMARY = ["DSCR","Fix & Flip","Bridge","Ground Up Construction","Portfolio/Blanket"];
+function lenderSummaryReadiness(lead){
+  var missing = [];
+  if (!lead.name) missing.push("Borrower name");
+  if (!lead.propertyAddress) missing.push("Property address");
+  if (!lead.propertyType) missing.push("Property type");
+  if (!lead.loanAmount) missing.push("Requested loan amount");
+  if (!lead.creditScore) missing.push("Credit score");
+  var isRtl = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
+  var isGuc = lead.loanType === "Ground Up Construction";
+  if (isRtl){
+    if (lead.purchasePrice == null && !(isGuc && lead.purchasePrice === 0)) missing.push("Purchase price (or $0 if the lot is already owned)");
+    if (lead.rehabBudget == null) missing.push("Rehab/construction budget");
+    if (!lead.arv) missing.push("After-repair value (ARV)");
+    if (lead.experienceDeals == null) missing.push("Investing experience (deals completed)");
+  } else if (lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket"){
+    if (!lead.purchasePrice && !lead.currentValue) missing.push("Purchase price or current value");
+    if (!lead.rentEstimate) missing.push("Monthly rent estimate");
+  } else {
+    missing.push("Loan type not set");
+  }
+  return { ready: missing.length === 0, missing: missing };
+}
+function buildLenderSummary(lead){
+  var lo = docLoanOfficer(lead);
+  var today = todayISO();
+  var isRtl = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
+  var isDscr = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
+  var tierName = isRtl ? experienceTier(lead.experienceDeals) : null;
+  var rClass = isRtl ? (lead.loanType === "Bridge" ? "bridge" : rehabClass(lead)) : null;
+  var lines = [];
+  lines.push("BRIDGEPOINT LENDING — WHOLESALE SUBMISSION SUMMARY");
+  lines.push("Date: " + fmtDate(today));
+  lines.push("Submitted by: " + (lo.name || "") + ", Bridgepoint Lending");
+  lines.push("Contact: " + (lo.email || "") + (lo.quoPhoneNumber ? ("  ·  " + lo.quoPhoneNumber) : ""));
+  lines.push("");
+  lines.push("BORROWER");
+  lines.push("Name / Entity: " + (lead.name || "TBD") + (lead.entityLegalName ? (" (" + lead.entityLegalName + ")") : ""));
+  lines.push("Entity Type: " + (lead.entityType || "TBD"));
+  lines.push("Citizenship Status: " + (lead.citizenshipStatus || "TBD") + (lead.citizenshipStatus === "Foreign National" && lead.countryOfDomicile ? (" (" + lead.countryOfDomicile + ")") : ""));
+  lines.push("Credit Score: " + (lead.creditScore || "TBD"));
+  lines.push("Investing Experience: " + (lead.experienceDeals!=null ? (lead.experienceDeals + " completed deal(s)" + (tierName ? (" — " + tierName + " tier") : "")) : "TBD"));
+  lines.push("Liquidity: " + (lead.liquidity!=null ? fmtUSD(lead.liquidity) : "TBD"));
+  lines.push("");
+  lines.push("LOAN REQUEST");
+  lines.push("Loan Type: " + (lead.loanType || "TBD"));
+  lines.push("Transaction Type: " + ((TRANSACTION_TYPES.filter(function(t){ return t.key===lead.transactionType; })[0]||{}).label || "Purchase"));
+  lines.push("Requested Loan Amount: " + fmtUSD(lead.loanAmount));
+  lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
+  lines.push("Prepayment Structure: " + (PREPAY_TERMS.filter(function(t){ return t.key===lead.prepayTerm; })[0]||{}).label || (lead.prepayTerm || "TBD"));
+  lines.push("");
+  lines.push("PROPERTY");
+  lines.push("Address: " + (lead.propertyAddress || "TBD"));
+  lines.push("Property Type: " + (lead.propertyType || "TBD"));
+  if (isDscr){
+    lines.push("Purchase Price: " + fmtUSD(lead.purchasePrice));
+    if (lead.currentValue) lines.push("Current Value: " + fmtUSD(lead.currentValue));
+    lines.push("Monthly Rent Estimate: " + (lead.rentEstimate ? fmtUSD(lead.rentEstimate) : "TBD"));
+    var dscrPricing = evaluatePricing(lead, {});
+    var dscrVal = (dscrPricing && !dscrPricing.ineligible) ? dscrPricing.dscr : null;
+    lines.push("Estimated DSCR: " + (dscrVal!=null ? ((Math.round(dscrVal*100)/100).toFixed(2) + "x") : "TBD"));
+    var dscrValueBasisForSummary = dscrValueBasis(lead, {});
+    if (dscrValueBasisForSummary && lead.loanAmount){
+      lines.push("LTV: " + (Math.round((lead.loanAmount/dscrValueBasisForSummary)*1000)/10) + "%");
+    }
+    if (lead.ruralStatus === "rural") lines.push("Note: Property appears to be in a rural area (65% max LTV / 1.20x min DSCR overlay may apply)");
+  } else if (isRtl){
+    lines.push("Purchase Price: " + (lead.purchasePrice ? fmtUSD(lead.purchasePrice) : "$0 (lot already owned)"));
+    lines.push("Rehab/Construction Budget: " + fmtUSD(lead.rehabBudget));
+    lines.push("After-Repair Value (ARV): " + fmtUSD(lead.arv));
+    lines.push("Rehab Scope: " + (rClass === "bridge" ? "Bridge (no rehab)" : (rClass === "heavy" ? "Heavy rehab" : "Light rehab")));
+    if (lead.purchasePrice && lead.loanAmount){
+      var initialLtcForSummary = (lead.loanAmount - (lead.rehabBudget||0)) / lead.purchasePrice * 100;
+      lines.push("Initial LTC (at closing): " + (Math.round(initialLtcForSummary*10)/10) + "%");
+    }
+    if (lead.purchasePrice && lead.loanAmount){
+      var totalLtcForSummary = lead.loanAmount / (lead.purchasePrice + (lead.rehabBudget||0)) * 100;
+      lines.push("Total LTC: " + (Math.round(totalLtcForSummary*10)/10) + "%");
+    }
+    if (lead.arv && lead.loanAmount){
+      lines.push("LTARV: " + (Math.round((lead.loanAmount/lead.arv)*1000)/10) + "%");
+    }
+  }
+  lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
+  lines.push("");
+  lines.push("This summary reflects the figures currently on file at Bridgepoint Lending and is provided for the purpose of obtaining wholesale pricing. Subject to underwriting, appraisal, title, and full documentation.");
+  lines.push("");
+  lines.push("Prepared by,");
+  lines.push("");
+  lines = lines.concat(loContactLines(lo, "en"));
+  return lines.join("\n");
+}
+function viewLenderSummary(leadId){
+  var lead = leadById(leadId);
+  if (!lead || !sb) return;
+  var readiness = lenderSummaryReadiness(lead);
+  if (!readiness.ready){
+    showToast("Missing: " + readiness.missing.join(", "));
+    return;
+  }
+  var body = buildLenderSummary(lead);
+  showToast("Preparing lender summary…");
+  sb.functions.invoke("generate-doc-pdf", { body: { text: body, label: "Lender Summary" } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){ showToast("Couldn't generate lender summary"); return; }
+    var bytes = atob(res.data.pdfBase64);
+    var arr = new Uint8Array(bytes.length);
+    for (var i=0;i<bytes.length;i++) arr[i] = bytes.charCodeAt(i);
+    var blob = new Blob([arr], { type: "application/pdf" });
+    var url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+  }).catch(function(){ showToast("Couldn't generate lender summary"); });
+}
 /* ---------------------------------------------------------------------
    Actions (mutate state, then persist)
 --------------------------------------------------------------------- */
@@ -7743,8 +7863,15 @@ function renderTabOverview(lead){
   var viewTermSheetBtn = (lead.loanAmount || lead.rate)
     ? ('<div style="margin-bottom:14px"><button class="btn btn-sm" type="button" data-action="view-term-sheet" data-lead="' + lead.id + '">📄 View Term Sheet</button></div>')
     : "";
+  // Joe's ask (2026-09-16): only show this once the file actually has
+  // enough on it for a lender to price -- rather than a button that just
+  // errors out, it quietly doesn't render at all until then.
+  var lenderSummaryReady = lenderSummaryReadiness(lead);
+  var viewLenderSummaryBtn = lenderSummaryReady.ready
+    ? ('<div style="margin-bottom:14px"><button class="btn btn-sm" type="button" data-action="view-lender-summary" data-lead="' + lead.id + '">🏦 Lender Summary</button></div>')
+    : "";
 
-  return renderLoanPlacementBanner(lead) + renderRelatedLoansBox(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + renderTermSheetOptionsBox(lead) + '<div class="field-grid">' +
+  return renderLoanPlacementBanner(lead) + renderRelatedLoansBox(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + viewLenderSummaryBtn + renderTermSheetOptionsBox(lead) + '<div class="field-grid">' +
     field("Borrower", esc(lead.name)) +
     field("Entity Type", esc(lead.entityType||"—")) +
     field("Email", lead.email ? ('<button type="button" class="link-btn" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline, as this file\'s loan officer">' + esc(lead.email) + '</button>') : "—") +
@@ -11735,6 +11862,9 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "view-term-sheet"){
     viewTermSheet(t.dataset.lead);
+  }
+  else if (action === "view-lender-summary"){
+    viewLenderSummary(t.dataset.lead);
   }
   else if (action === "preview-document-pdf"){
     previewDocumentPdf(t.dataset.lead, t.dataset.kind);
