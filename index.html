@@ -1243,7 +1243,7 @@ function syncPricerRateToLead(leadId){
 function applyPricerRateAndSendTermSheet(leadId){
   var result = syncPricerRateToLead(leadId);
   if (!result){ showToast("Fix the pricing inputs before sending a term sheet"); return; }
-  sendDocumentBoth(leadId, "termSheet");
+  promptSendTermSheet(leadId);
 }
 // Constructive's 9/16/26 RTL restructure (RTL_Lists tab): "1-2" needs 1+
 // completed investment project (or qualifying industry experience) in
@@ -9667,7 +9667,7 @@ function sendAiCommand(message, attachment){
       (res.data.actions||[]).forEach(function(a){
         var r = a.result;
         if (r && r.requiresFrontendAction === "send_document"){
-          sendDocumentBoth(r.leadId, r.kind);
+          if (r.kind === "termSheet"){ promptSendTermSheet(r.leadId); } else { sendDocumentBoth(r.leadId, r.kind); }
         } else if (r && (r.requiresFrontendAction === "email_team" || r.requiresFrontendAction === "text_team")){
           ui.modal = { type:"sendTeamMessage", channel: r.requiresFrontendAction === "email_team" ? "email" : "text", staff: r.staff, subject: r.subject, body: r.body };
           render();
