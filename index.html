@@ -3609,6 +3609,7 @@ function docKindMeta(lead, kind){
   return null;
 }
 function openEmailDocumentModal(leadId, kind){
+  if (!canManageOutsideLender()) return;
   ui.modal = { type:"emailDocument", leadId: leadId, kind: kind };
   render();
 }
@@ -3631,6 +3632,7 @@ function modalEmailDocument(leadId, kind){
     '</div></div>';
 }
 function sendGeneratedDocumentTo(leadId, kind, toEmail, note){
+  if (!canManageOutsideLender()) return;
   var lead = leadById(leadId);
   var meta = lead ? docKindMeta(lead, kind) : null;
   if (!lead || !meta || !sb || !toEmail) return;
@@ -7929,10 +7931,16 @@ function renderTabOverview(lead){
   // enough on it for a lender to price -- rather than a button that just
   // errors out, it quietly doesn't render at all until then.
   var lenderSummaryReady = lenderSummaryReadiness(lead);
+  // Joe's ask (2026-09-16): everyone can VIEW the Lender Summary -- it
+  // doubles as a quick "is this what you're actually asking for?" sanity
+  // check with the borrower -- but actually EMAILING it out to a lender
+  // is restricted to him, Fiore, and Erika, same allowlist as outside-
+  // lender placement since it's the same "who talks to outside lenders"
+  // boundary.
   var viewLenderSummaryBtn = lenderSummaryReady.ready
     ? ('<div style="margin-bottom:14px;display:flex;gap:8px">' +
         '<button class="btn btn-sm" type="button" data-action="view-lender-summary" data-lead="' + lead.id + '">🏦 Lender Summary</button>' +
-        '<button class="btn btn-sm btn-ghost" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="lenderSummary" title="Check it, then email it to a lender">✉️ Email to Lender</button>' +
+        (canManageOutsideLender() ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="lenderSummary" title="Check it, then email it to a lender">✉️ Email to Lender</button>') : '') +
       '</div>')
     : "";
 
@@ -8753,7 +8761,7 @@ function renderRail(lead){
       (lead.preapprovalSentAt ? ('<div class="footnote" style="padding:6px 0 0">Pre-approval sent ' + fmtDate(lead.preapprovalSentAt) + '</div>') : '') +
       (lead.termsheetSentAt ? ('<div class="footnote" style="padding:2px 0 0">Term sheet sent ' + fmtDate(lead.termsheetSentAt) + '</div>') : '') +
     '</div>') +
-    (isProcessor() ? '' :
+    (canManageOutsideLender() ?
     '<div class="rail-block">' +
       '<div class="rail-title">Email to a Lender</div>' +
       '<div class="footnote" style="padding-bottom:6px">Not the borrower — for shopping this deal to a lender for pricing. You\'ll check the PDF before it sends.</div>' +
@@ -8761,7 +8769,7 @@ function renderRail(lead){
         '<button class="btn btn-sm btn-ghost" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="preApproval">✉️ Email Pre-Approval to a Lender</button>' +
         '<button class="btn btn-sm btn-ghost" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="termSheet">✉️ Email Term Sheet to a Lender</button>' +
       '</div>' +
-    '</div>') +
+    '</div>' : '') +
     '<div class="rail-block">' +
       '<div class="rail-title">Move Stage</div>' +
       '<select class="select" style="width:100%" data-action="move-stage" data-lead="' + lead.id + '">' + stageOptions + '</select>' +
