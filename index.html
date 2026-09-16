@@ -859,15 +859,32 @@ var SOW_CATEGORIES = [
    This is a preliminary triage tool for the LO/processor/owner only —
    never shown to the borrower — not a substitute for full underwriting.
 --------------------------------------------------------------------- */
+// Constructive's 9/16/26 RTL restructure (RTL_Grid tab, V6 C3 Pricing
+// Engine) replaced the old 3-tier Silver/Gold/Platinum experience system
+// with 4 bands keyed by deal count (see experienceTier below), and
+// collapsed the old 3-way rehab class (light/standard/super) down to 2
+// (Light/Heavy) -- "heavy" here is what "super" used to be. The 50%
+// rehab/purchase-price cutoff used in rehabClass() to split light vs.
+// heavy is carried over from the old light/standard boundary since the
+// new sheet doesn't restate one -- worth confirming with Constructive if
+// a real file lands right on that line.
 var RTL_TIERS = {
-  silver:   { bridge:{ltc:75}, light:{iltc:85,ltc:90,ltarv:75}, standard:{iltc:80,ltc:85,ltarv:75}, super:null },
-  gold:     { bridge:{ltc:75}, light:{iltc:85,ltc:90,ltarv:75}, standard:{iltc:85,ltc:90,ltarv:75}, super:{iltc:75,ltc:85,ltarv:70} },
-  platinum: { bridge:{ltc:75}, light:{iltc:85,ltc:90,ltarv:75}, standard:{iltc:85,ltc:90,ltarv:75}, super:{iltc:80,ltc:85,ltarv:75} }
+  "1-2": { bridge:{ltc:75}, light:{iltc:80,ltc:85,ltarv:75}, heavy:null },
+  "3-4": { bridge:{ltc:75}, light:{iltc:85,ltc:85,ltarv:75}, heavy:{iltc:80,ltc:80,ltarv:75} },
+  "5+":  { bridge:{ltc:75}, light:{iltc:90,ltc:95,ltarv:75}, heavy:{iltc:80,ltc:90,ltarv:75} },
+  "11+": { bridge:{ltc:75}, light:{iltc:85,ltc:90,ltarv:75}, heavy:{iltc:80,ltc:90,ltarv:75} }
 };
+// Ground Up Construction wasn't part of Constructive's 9/16/26 RTL_Grid
+// update at all (it only covers Fix & Flip / Bridge) -- these caps are
+// still the same figures as before, just carried over onto the new tier
+// key names so computeMaxLoanAmount's shared tierName lookup keeps
+// working. "11+" reuses the "5+" figures since there's no dedicated GUC
+// number for it yet.
 var GROUNDUP_TIERS = {
-  silver: null,
-  gold:     { iltc:65, totalLtc:85, ltarv:70 },
-  platinum: { iltc:70, totalLtc:90, ltarv:70 }
+  "1-2": null,
+  "3-4": { iltc:65, totalLtc:85, ltarv:70 },
+  "5+":  { iltc:70, totalLtc:90, ltarv:70 },
+  "11+": { iltc:70, totalLtc:90, ltarv:70 }
 };
 var DSCR_LTV_BY_FICO = [
   { minFico:720, purchase:80, rateTerm:80, cashOut:75 },
@@ -877,21 +894,24 @@ var DSCR_LTV_BY_FICO = [
 ];
 
 /* ---------------------------------------------------------------------
-   Pricer — from Constructive Capital's live wholesale rate sheets:
-   "Wholesale (Tier 1) - RTL Rate Sheet" (eff. 2/2/2026) for Fix & Flip /
-   Bridge / Ground Up, and "Wholesale (Tier 1) Surge Rate Sheet"
-   (eff. 7/9/2026) for DSCR. Covers the common-path adjustments only —
-   foreign national, 5-8 unit, cross-collateral, IO and short-term
-   rental overlays are not modeled and fall back to "needs manual
-   pricing." Internal use only, never shown to the borrower.
+   Pricer — from Constructive Capital's live wholesale rate sheets. RTL
+   (Fix & Flip / Bridge) base rates below are from the 9/16/26 restructure
+   (V6 C3 Pricing Engine, RTL_Loan Sizer tab, scraped scenario-by-scenario
+   since the sheet only exposes a live calculator, not a static table);
+   Ground Up Construction keeps its pre-existing rate/tier behavior since
+   Constructive didn't send updated GUC numbers this round. DSCR is the
+   C3 Surge Rate Sheet (eff. 9/15/26), further down. Covers the
+   common-path adjustments only — 5-8 unit, cross-collateral, non-warrantable
+   condo, IO and short-term rental overlays are not modeled and fall back
+   to "needs manual pricing." Internal use only, never shown to the borrower.
 --------------------------------------------------------------------- */
 var RTL_BASE_RATES = {
-  "1.00": { platinum:8.75, gold:9.49, silver:9.99 },
-  "0.50": { platinum:9.99, gold:10.49, silver:10.99 },
-  "0.00": { platinum:10.99, gold:11.49, silver:11.99 }
+  "1.00": { "11+":9.99, "5+":9.99, "3-4":10.49, "1-2":10.99 },
+  "0.50": { "11+":10.99, "5+":10.99, "3-4":11.49, "1-2":11.99 },
+  "0.00": { "11+":12.25, "5+":12.25, "3-4":12.75, "1-2":13.25 }
 };
 var RTL_FEE_BY_PROJECT = {
-  bridge: 1995, light: 1995, standard: 1995, super: 1995,
+  bridge: 1995, light: 1995, heavy: 1995,
   guc_sfr: 2195, guc_24: 2695, multifamily_24: 2495
 };
 var RTL_TXN_ADJ = { purchase: 0, ratetermrefi: 0.50, cashout: 1.00 };
@@ -904,8 +924,8 @@ function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
   if (isFN && lead.countryOfDomicile && isIneligibleCountry(lead.countryOfDomicile)){
     return { ineligible:true, reason: lead.countryOfDomicile + " is on BPL's ineligible-countries list — this borrower cannot be a guarantor on this loan, period. Find out if they can bring in a partner/co-guarantor who qualifies independently (different citizenship or a country not on the list) — the ineligible person can't be added as a guarantor even alongside someone who does qualify." };
   }
-  if (isFN && tier === "silver"){
-    return { ineligible:true, reason: "Foreign National borrowers need Gold or Platinum experience (3+ completed RTL/GUC projects) — Silver (0-2) is not eligible per the Foreign Nationals guidelines." };
+  if (isFN && tier === "1-2"){
+    return { ineligible:true, reason: "Foreign National borrowers need at least the \"3-4\" experience tier (3+ completed RTL/GUC projects) — the \"1-2\" tier (0-2 deals) is not eligible per the Foreign Nationals guidelines." };
   }
   var base = RTL_BASE_RATES[points] && RTL_BASE_RATES[points][tier];
   if (base === undefined || base === null) return { ineligible:true, reason:"No pricing for this experience tier at this origination fee." };
@@ -913,12 +933,12 @@ function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
   var notes = [];
   var isGuc = lead.loanType === "Ground Up Construction";
   if (isGuc){
-    if (tier === "silver") return { ineligible:true, reason:"Ground Up Construction requires Gold or Platinum experience tier." };
+    if (tier === "1-2") return { ineligible:true, reason:"Ground Up Construction requires at least the \"3-4\" experience tier." };
     rate += 0.75;
     notes.push("Ground Up add-on +0.75%");
   }
   if (isFN){
-    var fnPct = tier === "platinum" ? 0.20 : 0.25;
+    var fnPct = (tier === "5+" || tier === "11+") ? 0.20 : 0.25;
     var fnMin = Math.max(50000, Math.round((lead.loanAmount||0) * fnPct));
     if (lead.liquidity != null && lead.liquidity < fnMin){
       return { ineligible:true, reason: "Foreign National liquidity requirement not met — needs " + fmtUSD(fnMin) + " (" + (fnPct*100) + "% of loan amount, $50,000 minimum) seasoned 60+ days in a U.S. bank; has " + fmtUSD(lead.liquidity) + " on file." };
@@ -955,10 +975,14 @@ function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
 // delta rejection below).
 // +0.125% AE update received 9/14/26 (on top of the 9/11/26 C3 Surge sheet
 // base of 6.25%/6.5% floor) -- Joe confirmed directly with Constructive's
-// AE that pricing moved again same-day. DSCR_BASE_RATE_PRICE below is
-// shifted by the same +0.125% so quoting at par still prices at 100.000.
-var DSCR_BASE_PAR_RATE = 6.375;
-var DSCR_MIN_NOTE_RATE = 6.625;
+// AE that pricing moved again same-day.
+// +0.125% again per the C3 Surge Rate Sheet effective 9/15/26 (par/6.500%,
+// min note rate 6.750%, confirmed against both the rate sheet PDF's price
+// ladder and the "LOAN PRICING" Base Rate cell in the V6 pricing engine
+// workbook). DSCR_BASE_RATE_PRICE below is shifted by the same +0.125% so
+// quoting at par still prices at 100.000.
+var DSCR_BASE_PAR_RATE = 6.500;
+var DSCR_MIN_NOTE_RATE = 6.750;
 // C3 Surge sheet (eff. 9/9/2026), "Expanded" program -- flat +0.375% for
 // the subject property's state. Confirmed against the live pricing engine
 // spreadsheet (V3 C3 Constructive Capital Pricing Engine.xlsx, Adjustments
@@ -1036,24 +1060,24 @@ var DSCR_FEE_BY_PROPERTY = {
   "Multifamily 5+": 3995
 };
 var DSCR_BASE_RATE_PRICE = [
-  {rate:7.500, price:102.125},{rate:7.375, price:102.000},{rate:7.250, price:101.875},
-  {rate:7.125, price:101.750},{rate:7.000, price:101.500},{rate:6.875, price:101.250},
-  {rate:6.750, price:101.000},{rate:6.625, price:100.750},{rate:6.500, price:100.375},
-  {rate:6.375, price:100.000}
+  {rate:7.625, price:102.125},{rate:7.500, price:102.000},{rate:7.375, price:101.875},
+  {rate:7.250, price:101.750},{rate:7.125, price:101.500},{rate:7.000, price:101.250},
+  {rate:6.875, price:101.000},{rate:6.750, price:100.750},{rate:6.625, price:100.375},
+  {rate:6.500, price:100.000}
 ];
 // The rate/price grid (DSCR_BASE_RATE_PRICE) is a buy-up curve measured from
-// PAR, not a table of absolute rates -- "par" is DSCR_BASE_PAR_RATE (6.25%
-// as of 9/11/26) PLUS this specific borrower's own risk-based adjustments
-// (FICO/LTV/DSCR band/property/transaction/loan amount/prepay/geography),
-// so two borrowers with different risk profiles have different par rates.
-// Quoting AT a borrower's own par rate always prices at 100.000 (zero YSP)
-// by definition; only choosing a HIGHER rate than that borrower's par earns
-// YSP, looked up by how far above par the chosen rate is (delta), reusing
-// this same table's shape since it already spans par (6.25, delta 0)
-// through the max buy-up (7.375, delta 1.125) in 0.125% steps. Per
-// Constructive's AE (eff. 9/11/26), a hard floor of DSCR_MIN_NOTE_RATE
-// (6.5%) still applies below this curve's own par for exceptionally strong
-// borrowers.
+// PAR, not a table of absolute rates -- "par" is DSCR_BASE_PAR_RATE (6.500%
+// as of the 9/15/26 C3 Surge sheet) PLUS this specific borrower's own
+// risk-based adjustments (FICO/LTV/DSCR band/property/transaction/loan
+// amount/prepay/geography), so two borrowers with different risk profiles
+// have different par rates. Quoting AT a borrower's own par rate always
+// prices at 100.000 (zero YSP) by definition; only choosing a HIGHER rate
+// than that borrower's par earns YSP, looked up by how far above par the
+// chosen rate is (delta), reusing this same table's shape since it already
+// spans par (6.500, delta 0) through the max buy-up (7.625, delta 1.125) in
+// 0.125% steps. Per the same rate sheet, a hard floor of DSCR_MIN_NOTE_RATE
+// (6.750%) still applies below this curve's own par for exceptionally
+// strong borrowers.
 function dscrPriceForDelta(deltaFromPar){
   if (deltaFromPar < -0.0001) return null;
   var tableRate = Math.round((DSCR_BASE_PAR_RATE + deltaFromPar) * 1000) / 1000;
@@ -1221,18 +1245,26 @@ function applyPricerRateAndSendTermSheet(leadId){
   if (!result){ showToast("Fix the pricing inputs before sending a term sheet"); return; }
   sendDocumentBoth(leadId, "termSheet");
 }
+// Constructive's 9/16/26 RTL restructure (RTL_Lists tab): "1-2" needs 1+
+// completed investment project (or qualifying industry experience) in
+// the past 3 years, "3-4" needs 3+, "5+" needs 6+ (max 4 rentals counted
+// toward it), "11+" needs 10-11+ (source doc reads "ten (11)", an
+// apparent typo -- using 11 as the literal threshold since that's the
+// tier's own name). The tier LABELS are Constructive's names, not literal
+// deal-count ranges -- e.g. someone with 4 deals is still in the "3-4"
+// bucket since they haven't hit the "5+" bucket's real 6-deal gate.
 function experienceTier(deals){
   deals = deals || 0;
-  if (deals >= 5) return "platinum";
-  if (deals >= 3) return "gold";
-  return "silver";
+  if (deals >= 11) return "11+";
+  if (deals >= 6) return "5+";
+  if (deals >= 3) return "3-4";
+  return "1-2";
 }
 function rehabClass(lead){
   if (!lead.rehabBudget || !lead.purchasePrice) return "bridge";
   var ratio = lead.rehabBudget / lead.purchasePrice;
-  if (ratio < 0.25) return "light";
-  if (ratio < 0.50) return "standard";
-  return "super";
+  if (ratio < 0.50) return "light";
+  return "heavy";
 }
 function monthlyPayment(principal, annualRatePct, termMonths){
   if (!principal || !annualRatePct || !termMonths) return null;
@@ -1278,18 +1310,26 @@ function stateFromAddress(address){
   }
   return null;
 }
-// RTL/Ground Up Matrix "Non-Cumulative Adjustments to Max LTV, ILTC/LTC & LTARV" --
-// same table appears in both the RTL Matrix (1.1.26) and Ground Up Matrix (1.1.26).
-// Adjustments don't stack; only the state-based one is applied here since
-// Foreign National is already routed to manual pricing separately. NY is
-// county-dependent (-15% for the five boroughs, -5% for Suffolk/Nassau, 0
-// elsewhere in-state) which isn't reliably parseable from a mailing address,
-// so it's flagged for manual verification instead of guessing a bucket.
-function rtlStateLeverageAdj(address){
-  var state = stateFromAddress(address);
-  if (state === "FL" || state === "TX") return { adj:-5, state:state, needsManualCheck:false };
-  if (state === "NY") return { adj:0, state:state, needsManualCheck:true };
-  return { adj:0, state:state, needsManualCheck:false };
+// RTL_Grid tab's "Non-Cumulative Adjustments" (Constructive's 9/16/26
+// restructure) -- FL/TX no longer carry a leverage reduction at all (the
+// old -5% for those two is gone from the new sheet), NY is now a real
+// flat -15% instead of the old "needs manual check" placeholder (still
+// worth a human glance on the specific restricted counties the sizer's
+// own alert names: New York, Queens, Richmond, Kings, Bronx, Suffolk,
+// and Nassau counties), and Cash-Out Refinance / Foreign National are
+// newly-modeled at -5% each. "Non-cumulative" means these don't stack --
+// when more than one applies, only the single worst (most negative) one
+// is used. Non-warrantable condo's "lesser of -10% or 65%" rule isn't
+// modeled here (different shape than a flat delta) -- falls through to
+// manual pricing same as before.
+function rtlNonCumulativeAdj(lead){
+  var state = stateFromAddress(lead.propertyAddress);
+  var candidates = [0];
+  if (state === "NY") candidates.push(-15);
+  if (lead.transactionType === "cashout") candidates.push(-5);
+  if (lead.citizenshipStatus === "Foreign National") candidates.push(-5);
+  var worst = Math.min.apply(null, candidates);
+  return { adj: worst, state: state, needsManualCheck: state === "NY" };
 }
 // Constructive Capital's RTL Foreign Nationals appendix (Appendix E,
 // 2.1.26). Only the parts we can actually check against data we collect:
@@ -1309,10 +1349,10 @@ function foreignNationalGuidelineChecks(lead, tier){
       detail: lead.countryOfDomicile + " is on BPL's ineligible-countries list — this borrower cannot be a guarantor on this loan, period, regardless of experience or liquidity. They can still get the deal done if they bring in a partner/co-guarantor who meets eligibility on their own (different citizenship or a country not on the list) — that person would need to qualify independently." });
     return out;
   }
-  out.push({ label:"Foreign National eligibility", pass: tier !== "silver",
-    detail: tier + " tier — Foreign Nationals need Gold or Platinum (3+ completed RTL/GUC projects); Silver (0-2) is not eligible per the Foreign Nationals guidelines" });
-  if (tier !== "silver"){
-    var fnPct = tier === "platinum" ? 0.20 : 0.25;
+  out.push({ label:"Foreign National eligibility", pass: tier !== "1-2",
+    detail: tier + " tier — Foreign Nationals need at least the \"3-4\" tier (3+ completed RTL/GUC projects); the \"1-2\" tier (0-2 deals) is not eligible per the Foreign Nationals guidelines" });
+  if (tier !== "1-2"){
+    var fnPct = (tier === "5+" || tier === "11+") ? 0.20 : 0.25;
     var fnMin = Math.max(50000, Math.round((lead.loanAmount||0) * fnPct));
     out.push({ label:"Foreign National liquidity", pass: lead.liquidity!=null && lead.liquidity >= fnMin,
       detail: (lead.liquidity!=null ? fmtUSD(lead.liquidity) : "not on file") + " — needs " + fmtUSD(fnMin) + " (" + (fnPct*100) + "% of loan amount, $50,000 minimum), seasoned 60+ days in a U.S. bank" });
@@ -1328,7 +1368,7 @@ function evaluateGuidelines(lead){
   function check(label, pass, detail){ checks.push({ label:label, pass:!!pass, detail:detail }); }
   var type = lead.loanType;
   var stateAdj = (type === "Fix & Flip" || type === "Bridge" || type === "Ground Up Construction")
-    ? rtlStateLeverageAdj(lead.propertyAddress) : null;
+    ? rtlNonCumulativeAdj(lead) : null;
   var propState = stateFromAddress(lead.propertyAddress);
   if (propState){
     check("State eligibility", ["ND","SD","NV"].indexOf(propState) === -1,
@@ -1440,10 +1480,10 @@ function evaluateGuidelines(lead){
       (lead.experienceDeals||0) + " deal(s) (" + tierName + ") — " + rClass + " rehab" + (limits ? "" : " isn't eligible at this experience level"));
     foreignNationalGuidelineChecks(lead, tierName).forEach(function(c){ check(c.label, c.pass, c.detail); });
     if (stateAdj && stateAdj.adj){
-      check("State leverage adjustment", true, stateAdj.state + " property — max leverage reduced " + stateAdj.adj + "% per the RTL Matrix's non-cumulative state adjustment table");
+      check("Non-cumulative leverage adjustment", true, "Max leverage reduced " + stateAdj.adj + "% (worst of NY property / cash-out refi / Foreign National, non-cumulative — they don't stack) per the RTL Matrix's adjustment table" + (stateAdj.state ? " — property state: " + stateAdj.state : ""));
     }
     if (stateAdj && stateAdj.needsManualCheck){
-      check("NY county leverage adjustment", false, "NY properties in Bronx/New York/Richmond/Kings/Queens are -15%, Suffolk/Nassau are -5% — verify the county manually, not auto-applied");
+      check("NY restricted-county confirmation", false, "The -15% NY leverage reduction above is already applied automatically, but properties specifically in New York, Queens, Richmond, Kings, Bronx, Suffolk, or Nassau County need manual underwriting approval per Constructive's restricted-geography list — confirm the county.");
     }
     if (limits){
       if (rClass === "bridge"){
@@ -1483,10 +1523,10 @@ function evaluateGuidelines(lead){
       (lead.experienceDeals||0) + " deal(s) (" + guTierName + ") — ground-up isn't eligible under 3 completed deals");
     foreignNationalGuidelineChecks(lead, guTierName).forEach(function(c){ check(c.label, c.pass, c.detail); });
     if (stateAdj && stateAdj.adj){
-      check("State leverage adjustment", true, stateAdj.state + " property — max leverage reduced " + stateAdj.adj + "% per the Ground Up Matrix's non-cumulative state adjustment table");
+      check("Non-cumulative leverage adjustment", true, "Max leverage reduced " + stateAdj.adj + "% (worst of NY property / cash-out refi / Foreign National, non-cumulative — they don't stack) per the Ground Up Matrix's adjustment table" + (stateAdj.state ? " — property state: " + stateAdj.state : ""));
     }
     if (stateAdj && stateAdj.needsManualCheck){
-      check("NY county leverage adjustment", false, "NY properties in Bronx/New York/Richmond/Kings/Queens are -15%, Suffolk/Nassau are -5% — verify the county manually, not auto-applied");
+      check("NY restricted-county confirmation", false, "The -15% NY leverage reduction above is already applied automatically, but properties specifically in New York, Queens, Richmond, Kings, Bronx, Suffolk, or Nassau County need manual underwriting approval per Constructive's restricted-geography list — confirm the county.");
     }
     if (guLimits){
       if (lead.purchasePrice && lead.loanAmount){
@@ -4556,7 +4596,17 @@ function reassignLead(leadId, newOwnerId){
   lead.assignedTo = newOwnerId;
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"system", text:"Reassigned from " + oldOwnerName + " to " + userName(newOwnerId), author: currentUser().name });
-  notifyUser(newOwnerId, lead.id, "reassigned", currentUser().name + " assigned " + lead.name + " to you.", { dialPhone: lead.phone });
+  // Joe's ask (2026-09-16): every assignment -- not just a brand-new lead --
+  // needs BOTH a text (to the LO's personal cell, via notifyUser/
+  // pushStaffAlert) AND an email, each with a link to the file. Reassigning
+  // an existing lead only ever sent the text before this, with no link in
+  // it either -- matches addLead()'s hot-lead pattern now.
+  var reassignLink = crmLeadLink(lead.id);
+  notifyUser(newOwnerId, lead.id, "reassigned", currentUser().name + " assigned " + lead.name + " to you — open & dial: " + reassignLink, { dialPhone: lead.phone });
+  var reassignee = userById(newOwnerId);
+  if (reassignee && reassignee.email && sb){
+    sb.functions.invoke("send-email", { body: { leadId: lead.id, to: reassignee.email, subject: "Lead assigned to you: " + lead.name, text: currentUser().name + " assigned you " + lead.name + " (" + (lead.loanType||"Loan") + "). Open the file here: " + reassignLink, fromName: "Bridgepoint CRM", initiatedBy: "ai" } }).catch(function(){});
+  }
   showToast("Reassigned to " + userName(newOwnerId));
   persist();
 }
@@ -6165,13 +6215,13 @@ function aiFlaggedDocs(){
 // track the delta for "rates just dropped" messaging, but get overwritten
 // by these authoritative numbers on every load rather than trusted as-is.
 function applyAuthoritativeMarketRates(mr){
-  var rtlGoldBase = RTL_BASE_RATES["0.00"].gold;
+  var rtlMidTierBase = RTL_BASE_RATES["0.00"]["3-4"]; // representative mid-tier rate for dashboard display, same role "gold" played before the 9/16/26 tier restructure
   var authoritative = {
     dscr: DSCR_BASE_PAR_RATE,
     portfolio: DSCR_BASE_PAR_RATE,
-    fixFlip: rtlGoldBase,
-    bridge: rtlGoldBase,
-    groundUp: Math.round((rtlGoldBase + 0.75) * 1000) / 1000
+    fixFlip: rtlMidTierBase,
+    bridge: rtlMidTierBase,
+    groundUp: Math.round((rtlMidTierBase + 0.75) * 1000) / 1000
   };
   Object.keys(authoritative).forEach(function(key){
     if (mr[key]) mr[key].current = authoritative[key];
@@ -6901,7 +6951,7 @@ function computeMaxLoanAmount(sp){
     var tierName = experienceTier(sp.experienceDeals);
     var limits = isGuc ? GROUNDUP_TIERS[tierName] : RTL_TIERS[tierName][type==="Bridge"?"bridge":rehabClass(sp)];
     if (!limits) return null;
-    var stateAdj = rtlStateLeverageAdj(sp.propertyAddress);
+    var stateAdj = rtlNonCumulativeAdj(sp);
     limits = Object.assign({}, limits);
     if (stateAdj.adj){
       if (limits.ltc!=null) limits.ltc += stateAdj.adj;

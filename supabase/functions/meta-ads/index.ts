@@ -91,6 +91,32 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, result: result.data }), { headers: CORS_HEADERS });
     }
 
+    if (action === "upload-image") {
+      const base64: string = body.base64;
+      const filename: string = body.filename || "creative.png";
+      if (!base64) return new Response(JSON.stringify({ error: "missing_fields", detail: "base64 is required" }), { status: 400, headers: CORS_HEADERS });
+      const url = new URL(GRAPH_BASE + "/" + actAccount() + "/adimages");
+      url.searchParams.set("access_token", META_ACCESS_TOKEN);
+      const form = new FormData();
+      const bin = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      form.append(filename, new Blob([bin]), filename);
+      const res = await fetch(url.toString(), { method: "POST", body: form });
+      const data = await res.json();
+      if (!res.ok) return new Response(JSON.stringify({ error: "meta_error", detail: data }), { status: 502, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ ok: true, images: data.images }), { headers: CORS_HEADERS });
+    }
+
+    if (action === "ad-images") {
+      const hashes: string[] = body.hashes || [];
+      if (!hashes.length) return new Response(JSON.stringify({ error: "missing_fields", detail: "hashes (array) is required" }), { status: 400, headers: CORS_HEADERS });
+      const result = await graphFetch("/" + actAccount() + "/adimages", {
+        hashes: JSON.stringify(hashes),
+        fields: "hash,url,url_128,permalink_url,width,height",
+      });
+      if (!result.ok) return new Response(JSON.stringify({ error: "meta_error", detail: result.data }), { status: 502, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ ok: true, images: result.data.data }), { headers: CORS_HEADERS });
+    }
+
     if (action === "page-instagram") {
       const pageId: string = body.pageId;
       if (!pageId) return new Response(JSON.stringify({ error: "missing_fields", detail: "pageId is required" }), { status: 400, headers: CORS_HEADERS });
