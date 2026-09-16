@@ -10422,6 +10422,7 @@ function renderModal(){
   if (ui.modal.type === "sendInvite") return modalSendInvite(ui.modal.user);
   if (ui.modal.type === "dialer") return modalDialer();
   if (ui.modal.type === "quickDial") return modalQuickDial();
+  if (ui.modal.type === "callDisposition") return modalCallDisposition(ui.modal.leadId);
   if (ui.modal.type === "scopeOfWork") return modalScopeOfWork(ui.modal.leadId);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   if (ui.modal.type === "mySchedule") return modalMySchedule();
@@ -10638,6 +10639,33 @@ function requestCoachingTip(leadId){
 // in a queue. Uses the exact same Telnyx bridge-call line (make-call /
 // startDialerCall for a known lead, startManualDialerCall for a raw
 // number) so outcomes still log to a lead's file when one is matched.
+// Disposition prompt shown after any call placed from the standalone
+// dialer (lead rail, win-back queue, quick-dial search result, or a
+// manually-dialed number that happens to match a lead) -- Joe's ask,
+// 2026-09-16: a disposition menu for every outbound call, same
+// CALL_OUTCOMES/logCall the Power Dialer already uses, just triggered
+// from a single call instead of a queue. Purely a logging convenience --
+// the call itself is already placed by the time this shows, and skipping
+// this prompt doesn't cancel it. voice-webhook also auto-logs a basic
+// connected/no-answer outcome server-side regardless, so nothing is lost
+// if staff skip this.
+function modalCallDisposition(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return "";
+  var outOptions = CALL_OUTCOMES.map(function(o){ return '<option value="' + o.key + '">' + o.label + '</option>'; }).join("");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Log Call — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="log-call-outcome" data-lead="' + lead.id + '">' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding-bottom:8px">Ringing now — answer to connect. Log what happened whenever you\'re done.</div>' +
+        '<div class="form-row"><label>Outcome</label><select class="select" name="outcome">' + outOptions + '</select></div>' +
+        '<div class="form-row"><label>Notes</label><textarea class="textarea" name="notes" rows="2" placeholder="What did you discuss?"></textarea></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Skip</button><button class="btn btn-primary" type="submit">Save</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
 function modalQuickDial(){
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
     '<div class="modal" data-stop="1">' +
@@ -10683,13 +10711,22 @@ function startManualDialerCall(rawPhone){
   var digits = (rawPhone||"").replace(/\D/g,"");
   if (digits.length < 10){ showToast("Enter a valid phone number"); return; }
   if (!sb){ showToast("Dialer needs a live connection"); return; }
-  showToast("Calling your cell now — answer to connect to " + rawPhone);
-  sb.functions.invoke("make-call", { body: { phone: rawPhone, userId: currentUser().id } }).then(function(res){
+  // Direct mode -- dials the number and your cell at the same instant
+  // instead of ringing you first, then dialing out once you answer. Joe's
+  // ask (2026-09-16): the wait-for-staff-then-dial delay was causing the
+  // other party to hang up before ever hearing a ring.
+  showToast("Calling " + rawPhone + " and your cell now...");
+  sb.functions.invoke("make-call", { body: { phone: rawPhone, userId: currentUser().id, direct: true } }).then(function(res){
     if (res.error || (res.data && res.data.error)){
       var msg = (res.data && res.data.error) || "Couldn't place the call";
       showToast(msg);
     }
   }).catch(function(){ showToast("Couldn't reach the dialer"); });
+}
+function findLeadByPhone(phone){
+  var digits = (phone||"").replace(/\D/g,"").slice(-10);
+  if (!digits) return null;
+  return scopedLeads().filter(function(l){ return (l.phone||"").replace(/\D/g,"").slice(-10) === digits; })[0] || null;
 }
 function modalDialer(){
   if (!ui.dialer) return "";
@@ -12095,7 +12132,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
   else if (action === "dialer-call"){
     startDialerCall(t.dataset.lead);
-    if (ui.modal && ui.modal.type === "quickDial"){ ui.modal = null; render(); }
+    ui.modal = { type:"callDisposition", leadId: t.dataset.lead };
+    render();
   }
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
@@ -12819,7 +12857,13 @@ appEl.addEventListener("submit", function(e){
     saveScopeOfWork(form.dataset.lead, items, fd.get("notes"));
     render();
   } else if (type === "quick-dial-manual"){
-    startManualDialerCall(fd.get("phone"));
+    var qdPhone = fd.get("phone");
+    startManualDialerCall(qdPhone);
+    var qdMatch = findLeadByPhone(qdPhone);
+    ui.modal = qdMatch ? { type:"callDisposition", leadId: qdMatch.id } : null;
+    render();
+  } else if (type === "log-call-outcome"){
+    logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
     ui.modal = null;
     render();
   }

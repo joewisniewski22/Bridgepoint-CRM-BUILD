@@ -59,7 +59,8 @@ const SPANISH_LO_ID = "lo-fanis"; // Joe's explicit choice for the Spanish IVR b
 const PROCESSING_STAFF_ID = "proc-erika";
 
 type Stage =
-  | "ringing_staff" | "connecting_lead"                       // outbound dialer
+  | "ringing_staff" | "connecting_lead"                       // outbound dialer (sequential mode)
+  | "direct_dial_leg"                                         // outbound quick-dial (direct/parallel mode)
   | "answering_inbound" | "connecting_staff"                  // inbound, matched lead
   | "ivr_lang_menu" | "ivr_main_menu" | "ivr_directory_menu"   // inbound, unmatched caller
   | "ivr_single_connect" | "ivr_ring_all_leg"
@@ -80,6 +81,8 @@ interface CallState {
   ringGroupId?: string;             // ivr_ring_all_leg: which ring group this leg belongs to
   originalCallControlId?: string;   // ivr_ring_all_leg / voicemail: the caller's own leg
   vmTarget?: { kind: "staff" | "all_los" | "owner"; staffId?: string | null; label: string };
+  pairId?: string;                  // direct_dial_leg: which pair this leg belongs to
+  role?: "destination" | "staff";   // direct_dial_leg: which side of the pair this leg is
 }
 
 function last10(phone: string | null | undefined): string {
@@ -368,6 +371,20 @@ Deno.serve(async (req: Request) => {
         }
       } else if (state.stage === "voicemail_recording") {
         // n/a -- record_start doesn't produce a call.answered event on this leg.
+      } else if (state.stage === "direct_dial_leg" && state.pairId) {
+        // Mark this side answered; bridge only once BOTH sides have picked up
+        // (bridging a leg that hasn't answered yet has no media to connect).
+        const field = state.role === "staff" ? "staff_answered" : "destination_answered";
+        const { data: pairRow } = await sb.from("voice_direct_dial_pairs").update({ [field]: true }).eq("id", state.pairId).select().single();
+        if (pairRow && pairRow.staff_answered && pairRow.destination_answered && !pairRow.bridged) {
+          const claim = await sb.from("voice_direct_dial_pairs").update({ bridged: true }).eq("id", state.pairId).eq("bridged", false).select().single();
+          if (claim.data) {
+            await telnyxAction(pairRow.staff_call_control_id as string, "bridge", { call_control_id: pairRow.destination_call_control_id as string });
+          }
+        } else if (pairRow && !pairRow.bridged) {
+          // Other side hasn't answered yet -- let them know we're connecting rather than leaving dead air.
+          await speak(callControlId, "Please hold while we connect your call.", "en");
+        }
       }
       return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
     }
@@ -558,6 +575,31 @@ Deno.serve(async (req: Request) => {
           await startVoicemail(group.original_call_control_id as string,
             "All of our loan officers are currently unavailable. Please leave your name, number, and a brief description of your project after the tone, and we'll call you back as soon as possible.",
             "en", { kind: "all_los", label: "New loan inquiry" }, null, undefined);
+        }
+      } else if (state.stage === "direct_dial_leg" && state.pairId) {
+        const { data: pairRow } = await sb.from("voice_direct_dial_pairs").select("*").eq("id", state.pairId).single();
+        if (pairRow) {
+          // Whichever leg is still up when the other ends should be hung up too --
+          // no point leaving one side ringing alone or connected to a dead line.
+          const otherLegId = state.role === "staff" ? pairRow.destination_call_control_id : pairRow.staff_call_control_id;
+          if (otherLegId && otherLegId !== callControlId) {
+            await telnyxAction(otherLegId as string, "hangup", {});
+          }
+          if (state.leadId) {
+            // Computed from the pair's own answered flags, not this leg's
+            // hangup_cause -- both legs fire this handler independently
+            // (one hangs up naturally, the other via the hangup call just
+            // above), and pairId is used as the dedup key in
+            // logCallOutcome, so this must produce the SAME outcome/note
+            // regardless of which leg's event runs first.
+            const outcome = pairRow.bridged ? "connected" : "no-answer";
+            const note = pairRow.bridged
+              ? "Direct-dial call connected with " + (state.leadName || "lead")
+              : !pairRow.staff_answered
+                ? "Direct-dial call to " + (state.leadName || "lead") + " — staff didn't pick up in time"
+                : "Direct-dial call to " + (state.leadName || "lead") + " — they did not pick up";
+            await logCallOutcome({ leadId: state.leadId, sessionId: state.pairId, outcome, note });
+          }
         }
       }
       return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
