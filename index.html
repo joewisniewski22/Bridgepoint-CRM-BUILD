@@ -3656,6 +3656,100 @@ function sendGeneratedDocumentTo(leadId, kind, toEmail, note){
     persist();
   }).catch(function(){ showToast("Couldn't send " + meta.label); });
 }
+// Joe's ask (2026-09-16): once a file has more than one term sheet option
+// stored on it, "Send Term Sheet" needs to ask which one before it sends
+// anything -- otherwise it always silently sent "Our Terms" (the primary,
+// built fresh from the lead's own fields) even when an alternate option
+// (e.g. a different lender's pricing) was the one actually meant to go out.
+function promptSendTermSheet(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (termSheetOptions(lead).length === 0){ sendDocumentBoth(leadId, "termSheet"); return; }
+  ui.modal = { type:"pickTermSheet", leadId: leadId };
+  render();
+}
+function modalPickTermSheet(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return '<div class="modal-backdrop" id="modal-host" data-action="backdrop"><div class="modal" data-stop="1"><div class="modal-head"><h3>Not available</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div></div></div>';
+  var opts = termSheetOptions(lead);
+  var optBtn = function(label, sub, dataAttrs){
+    return '<button class="btn" style="width:100%;text-align:left;margin-bottom:8px;padding:10px 14px" type="button" ' + dataAttrs + '>' +
+      '<div style="font-weight:600">' + esc(label) + '</div>' +
+      (sub ? ('<div class="hint">' + esc(sub) + '</div>') : '') +
+    '</button>';
+  };
+  var rows = optBtn(
+    "Our Terms (Bridgepoint)",
+    (lead.loanAmount ? fmtUSD(lead.loanAmount) : "") + (lead.rate ? (" at " + fmtPct(lead.rate)) : "") + (lead.ltv ? (" — " + lead.ltv + "% LTV") : ""),
+    'data-action="pick-term-sheet-primary" data-lead="' + lead.id + '"'
+  ) + opts.map(function(o){
+    var realIdx = (lead.documents||[]).indexOf(o);
+    // Internal lender identity (o.lender) never appears here or anywhere
+    // borrower-facing -- staff picking a document to send only ever see
+    // it labeled by what changed (o.name), same as the options box itself.
+    return optBtn(
+      (o.name || "Alternate option").replace(/^Term Sheet Option:\s*/,""),
+      (o.loanAmount ? fmtUSD(o.loanAmount) : "") + (o.rate ? (" at " + fmtPct(o.rate)) : "") + (o.ltv ? (" — " + o.ltv + "% LTV") : ""),
+      'data-action="pick-term-sheet-option" data-lead="' + lead.id + '" data-idx="' + realIdx + '"'
+    );
+  }).join("");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Which term sheet? — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding-bottom:10px">This file has more than one term sheet on it. Pick which one to send.</div>' +
+        rows +
+      '</div>' +
+    '</div></div>';
+}
+function sendStoredTermSheetOption(leadId, idx){
+  var lead = leadById(leadId);
+  var doc = lead && lead.documents && lead.documents[idx];
+  if (!lead || !doc || !doc.storagePath || !sb) return;
+  if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
+  var optionLabel = (doc.name || "Alternate option").replace(/^Term Sheet Option:\s*/,"");
+  ui.modal = null;
+  render();
+  showToast("Sending term sheet…");
+  sb.storage.from("lead-documents").download(doc.storagePath).then(function(res){
+    if (res.error || !res.data){ showToast("Couldn't load that term sheet — try again"); return; }
+    var reader = new FileReader();
+    reader.onload = function(){
+      var pdfBase64 = String(reader.result).split(",")[1];
+      var lo = docLoanOfficer(lead);
+      var filename = doc.fileName || docPdfFilename(lead, "Term Sheet");
+      var isEs = (lead.preferredLanguage||"en") === "es";
+      var firstName = (lead.name||"").split(" ")[0];
+      var subject = "Bridgepoint Lending — Your Term Sheet";
+      var smsMsg = isEs
+        ? ("Hola " + firstName + ", es " + (lo.name||"") + " de Bridgepoint Lending — le acabo de enviar por correo electrónico su hoja de términos con todos los detalles. Revise su bandeja de entrada (" + (lead.email||"su correo") + ") y avíseme si tiene preguntas.")
+        : ("Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your term sheet with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!");
+      var calls = [];
+      if (lead.email){
+        calls.push(sb.functions.invoke("send-email", {
+          body: { leadId: lead.id, to: lead.email, subject: subject, text: "Please see the attached term sheet.", fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null,
+            attachmentBase64: pdfBase64, attachmentName: filename }
+        }).then(function(r){ return { channel:"email", ok: !(r.error || !r.data || !r.data.ok) }; }).catch(function(){ return { channel:"email", ok:false }; }));
+      }
+      if (lead.phone){
+        calls.push(sb.functions.invoke("send-text", {
+          body: { leadId: lead.id, to: lead.phone, text: smsMsg, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
+        }).then(function(r){ return { channel:"text", ok: !(r.error || !r.data || !r.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
+      }
+      Promise.all(calls).then(function(results){
+        var sentVia = results.filter(function(r){ return r.ok; }).map(function(r){ return r.channel; });
+        if (!sentVia.length){ showToast("Couldn't send term sheet — try again"); return; }
+        var d = todayISO();
+        lead.termsheetSentAt = d;
+        lead.activity = lead.activity || [];
+        lead.activity.push({ date:d, type:"application", text: "Term Sheet (" + optionLabel + ") sent to " + lead.name + " via " + sentVia.join(" + "), author: lo.name || currentUser().name });
+        showToast("Term sheet sent to " + lead.name + " via " + sentVia.join(" + ") + (sentVia.length < results.length ? " (one channel failed)" : ""));
+        persist();
+      });
+    };
+    reader.readAsDataURL(res.data);
+  }).catch(function(){ showToast("Couldn't load that term sheet — try again"); });
+}
 /* ---------------------------------------------------------------------
    Actions (mutate state, then persist)
 --------------------------------------------------------------------- */
@@ -10235,6 +10329,7 @@ function renderPortal(){
 function renderModal(){
   if (!ui.modal) return "";
   if (ui.modal.type === "emailDocument") return modalEmailDocument(ui.modal.leadId, ui.modal.kind);
+  if (ui.modal.type === "pickTermSheet") return modalPickTermSheet(ui.modal.leadId);
   if (ui.modal.type === "addLead") return modalAddLead();
   if (ui.modal.type === "createLeadFromPricer") return modalCreateLeadFromPricer();
   if (ui.modal.type === "importLeads") return modalImportLeads();
@@ -11932,7 +12027,22 @@ appEl.addEventListener("click", function(e){
     reallySendApplication(t.dataset.lead, t.dataset.channels.split(","));
   }
   else if (action === "send-document-both"){
-    sendDocumentBoth(t.dataset.lead, t.dataset.kind);
+    // Joe's ask (2026-09-16): once a file has more than one term sheet
+    // option on it, "Send Term Sheet" shouldn't just fire off the primary
+    // one -- ask which one first. Pre-approval and single-option files
+    // keep going straight through, unchanged.
+    if (t.dataset.kind === "termSheet" && termSheetOptions(leadById(t.dataset.lead)||{}).length > 0){
+      promptSendTermSheet(t.dataset.lead);
+    } else {
+      sendDocumentBoth(t.dataset.lead, t.dataset.kind);
+    }
+  }
+  else if (action === "pick-term-sheet-primary"){
+    ui.modal = null;
+    sendDocumentBoth(t.dataset.lead, "termSheet");
+  }
+  else if (action === "pick-term-sheet-option"){
+    sendStoredTermSheetOption(t.dataset.lead, parseInt(t.dataset.idx,10));
   }
   else if (action === "download-document-pdf"){
     downloadDocumentPdf(t.dataset.lead, t.dataset.kind);
