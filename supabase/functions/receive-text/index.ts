@@ -191,6 +191,23 @@ Deno.serve(async (req: Request) => {
         }
       }
     } else if (staffMatch) {
+      // Joe's phone-system poll (2026-09-16): a bare "1" or "2" reply from
+      // a staff member is a vote, not a portal-chat message -- capture it
+      // and stop, before falling through to the portal-chat guess below.
+      // One-off for this specific poll, not a general poll feature.
+      const bareDigit = msg.text.trim();
+      if (bareDigit === "1" || bareDigit === "2") {
+        const vote = bareDigit === "1" ? "softphone_in_crm" : "ring_cell_first";
+        await sb.from("team_polls").upsert({
+          id: "poll-phone_system_2026_09_16-" + staffMatch.id,
+          poll_key: "phone_system_2026_09_16",
+          staff_id: staffMatch.id,
+          vote,
+          raw_text: msg.text,
+        }, { onConflict: "poll_key,staff_id" });
+        console.log("receive-text: captured poll vote", staffMatch.id, vote);
+        return new Response(JSON.stringify({ ok: true, pollVote: vote }), { headers: CORS_HEADERS });
+      }
       // Not a borrower's own number -- staff member replying to a portal
       // chat notification from their own phone/Quo line. SMS has no thread
       // ID, so route to whichever of this staff member's leads most
