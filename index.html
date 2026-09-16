@@ -1249,10 +1249,34 @@ function termSheetMonthlyPayment(lead){
     ? interestOnlyPayment(lead.loanAmount, lead.rate)
     : monthlyPayment(lead.loanAmount, lead.rate, lead.termMonths);
 }
+var US_STATE_NAME_TO_ABBR = {
+  alabama:"AL", alaska:"AK", arizona:"AZ", arkansas:"AR", california:"CA", colorado:"CO",
+  connecticut:"CT", delaware:"DE", florida:"FL", georgia:"GA", hawaii:"HI", idaho:"ID",
+  illinois:"IL", indiana:"IN", iowa:"IA", kansas:"KS", kentucky:"KY", louisiana:"LA",
+  maine:"ME", maryland:"MD", massachusetts:"MA", michigan:"MI", minnesota:"MN",
+  mississippi:"MS", missouri:"MO", montana:"MT", nebraska:"NE", nevada:"NV",
+  "new hampshire":"NH", "new jersey":"NJ", "new mexico":"NM", "new york":"NY",
+  "north carolina":"NC", "north dakota":"ND", ohio:"OH", oklahoma:"OK", oregon:"OR",
+  pennsylvania:"PA", "rhode island":"RI", "south carolina":"SC", "south dakota":"SD",
+  tennessee:"TN", texas:"TX", utah:"UT", vermont:"VT", virginia:"VA", washington:"WA",
+  "west virginia":"WV", wisconsin:"WI", wyoming:"WY", "district of columbia":"DC"
+};
 function stateFromAddress(address){
   if (!address) return null;
-  var m = /,\s*([A-Za-z]{2})\s*\d{0,5}\s*$/.exec(address.trim());
-  return m ? m[1].toUpperCase() : null;
+  var trimmed = address.trim();
+  var m = /,\s*([A-Za-z]{2})\s*\d{0,5}\s*$/.exec(trimmed);
+  if (m) return m[1].toUpperCase();
+  // Some addresses (phone-taken applications especially) spell the state
+  // out in full ("Houston, Texas") instead of abbreviating it -- without
+  // this fallback those silently fail to match any state at all, which
+  // for FL/TX/NY means a real leverage adjustment (or manual-check flag)
+  // that should apply just gets skipped.
+  var mFull = /,\s*([A-Za-z][A-Za-z ]*[A-Za-z])\s*\d{0,5}\s*$/.exec(trimmed);
+  if (mFull){
+    var abbr = US_STATE_NAME_TO_ABBR[mFull[1].toLowerCase().trim()];
+    if (abbr) return abbr;
+  }
+  return null;
 }
 // RTL/Ground Up Matrix "Non-Cumulative Adjustments to Max LTV, ILTC/LTC & LTARV" --
 // same table appears in both the RTL Matrix (1.1.26) and Ground Up Matrix (1.1.26).
