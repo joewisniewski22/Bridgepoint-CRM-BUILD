@@ -1,7 +1,13 @@
-// Staff-initiated click-to-call for the power dialer. Rings the staff
-// member's own personal cell first; voice-webhook takes over from there
-// and transfers that leg to the lead once the staff member answers. See
-// voice-webhook/index.ts for the full bridge-call flow and why.
+// Staff-initiated click-to-call for the power dialer AND the standalone
+// quick-dial (Joe's ask, 2026-09-16: a phone icon anywhere in the CRM to
+// dial any number or a searched lead, outside the Power Dialer's queue
+// flow). Rings the staff member's own personal cell first; voice-webhook
+// takes over from there and transfers that leg to the destination once
+// the staff member answers. See voice-webhook/index.ts for the full
+// bridge-call flow and why. Accepts either a leadId (looks up that lead's
+// phone, and outcomes log to their file) or a raw phone (quick-dial's
+// manual-number path -- no lead to log against, which voice-webhook
+// already handles gracefully).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -28,27 +34,36 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return new Response(JSON.stringify({ error: "method_not_allowed" }), { status: 405, headers: CORS_HEADERS });
 
   try {
-    const { leadId, userId } = await req.json();
-    if (!leadId || !userId) {
-      return new Response(JSON.stringify({ error: "leadId and userId required" }), { status: 400, headers: CORS_HEADERS });
+    const { leadId, phone, userId } = await req.json();
+    if ((!leadId && !phone) || !userId) {
+      return new Response(JSON.stringify({ error: "leadId or phone, plus userId, required" }), { status: 400, headers: CORS_HEADERS });
     }
 
     const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-    const { data: lead } = await sb.from("leads").select("id, name, phone").eq("id", leadId).single();
-    if (!lead?.phone) {
-      return new Response(JSON.stringify({ error: "This lead has no phone number on file." }), { status: 400, headers: CORS_HEADERS });
+    let destPhone: string | null = phone || null;
+    let leadName: string | null = null;
+    if (leadId) {
+      const { data: lead } = await sb.from("leads").select("id, name, phone").eq("id", leadId).single();
+      if (!lead?.phone) {
+        return new Response(JSON.stringify({ error: "This lead has no phone number on file." }), { status: 400, headers: CORS_HEADERS });
+      }
+      destPhone = lead.phone as string;
+      leadName = lead.name as string;
     }
     const { data: staff } = await sb.from("users").select("id, name, phone").eq("id", userId).single();
     if (!staff?.phone) {
       return new Response(JSON.stringify({ error: "Your personal cell isn't on file yet — ask an admin to add it before using the dialer." }), { status: 400, headers: CORS_HEADERS });
     }
 
-    const leadE164 = toE164(lead.phone as string);
+    const destE164 = toE164(destPhone);
     const staffE164 = toE164(staff.phone as string);
+    if (!destE164) {
+      return new Response(JSON.stringify({ error: "That doesn't look like a valid phone number." }), { status: 400, headers: CORS_HEADERS });
+    }
 
     const clientState = btoa(JSON.stringify({
-      v: 1, stage: "ringing_staff", leadId, userId,
-      leadPhone: leadE164, leadName: lead.name, staffName: staff.name,
+      v: 1, stage: "ringing_staff", leadId: leadId || null, userId,
+      leadPhone: destE164, leadName: leadName, staffName: staff.name,
     }));
 
     const res = await fetch("https://api.telnyx.com/v2/calls", {

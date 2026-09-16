@@ -3192,7 +3192,7 @@ function addDaysISO(dateStr, days){
 function docLoanOfficer(lead){
   return userById(lead.assignedTo) || currentUser();
 }
-var OFFICE_PHONE = "(850) 719-4419";
+var OFFICE_PHONE = "(850) 279-8588";
 var GOOGLE_REVIEW_LINK = "https://g.page/r/CbJVKQumLqOQEAE/review";
 function loContactLines(lo, lang){
   if (lo.emailSignature) return lo.emailSignature.split("\n");
@@ -7087,6 +7087,7 @@ function renderShell(){
         '<div><div class="brand-word">Bridgepoint</div><div class="brand-tag">Lending Desk</div></div>' +
       '</div>' +
       '<nav class="nav">' +
+        '<button class="nav-item" type="button" data-action="open-quick-dial"><span class="ic">📞</span><span>Dialer</span></button>' +
         navItem("today","☎","Today", callsDue||null) +
         ((isOwner() || !isProcessor()) && navVisible("pricer") ? navItem("pricer","🧮","Pricer") : "") +
         (navVisible("pipeline") ? navItem("pipeline","▤","Pipeline") : "") +
@@ -10420,6 +10421,7 @@ function renderModal(){
   if (ui.modal.type === "addTermSheetOption") return modalAddTermSheetOption(ui.modal.leadId);
   if (ui.modal.type === "sendInvite") return modalSendInvite(ui.modal.user);
   if (ui.modal.type === "dialer") return modalDialer();
+  if (ui.modal.type === "quickDial") return modalQuickDial();
   if (ui.modal.type === "scopeOfWork") return modalScopeOfWork(ui.modal.leadId);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   if (ui.modal.type === "mySchedule") return modalMySchedule();
@@ -10629,6 +10631,65 @@ function requestCoachingTip(leadId){
     showToast("Couldn't generate a tip — try again");
     render();
   });
+}
+// Standalone quick-dial: a phone icon available everywhere, separate from
+// the Power Dialer's queue/outcome-logging flow (modalDialer above) --
+// Joe's ask (2026-09-16): dial any number, or search leads, without being
+// in a queue. Uses the exact same Telnyx bridge-call line (make-call /
+// startDialerCall for a known lead, startManualDialerCall for a raw
+// number) so outcomes still log to a lead's file when one is matched.
+function modalQuickDial(){
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>📞 Dialer</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="form-row">' +
+          '<label>Search your leads</label>' +
+          '<input class="input" type="text" placeholder="Name or phone number" data-action="quick-dial-search" autofocus>' +
+        '</div>' +
+        '<div id="quick-dial-results">' + renderQuickDialResults("") + '</div>' +
+        '<div class="divider" style="margin:16px 0"></div>' +
+        '<form data-form="quick-dial-manual">' +
+          '<div class="form-row">' +
+            '<label>Or dial a number directly</label>' +
+            '<div style="display:flex;gap:8px">' +
+              '<input class="input" type="tel" name="phone" placeholder="(555) 555-5555" style="flex:1">' +
+              '<button class="btn btn-primary" type="submit">📞 Call</button>' +
+            '</div>' +
+          '</div>' +
+        '</form>' +
+        '<div class="footnote" style="padding-top:8px">Uses the same business line as the power dialer — rings your cell first, then bridges you in.</div>' +
+      '</div>' +
+    '</div></div>';
+}
+function renderQuickDialResults(query){
+  var q = (query||"").trim().toLowerCase();
+  if (!q) return '<div class="hint" style="padding:4px 0">Start typing a name or number…</div>';
+  var qDigits = q.replace(/\D/g,"");
+  var matches = scopedLeads().filter(function(l){
+    var nameMatch = (l.name||"").toLowerCase().indexOf(q) !== -1;
+    var phoneMatch = qDigits.length>=3 && (l.phone||"").replace(/\D/g,"").indexOf(qDigits) !== -1;
+    return nameMatch || phoneMatch;
+  }).slice(0,8);
+  if (!matches.length) return '<div class="hint" style="padding:4px 0">No matches</div>';
+  return matches.map(function(l){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--border-soft)">' +
+      '<div><div style="font-weight:600">' + esc(l.name||"—") + '</div><div class="footnote">' + esc(l.phone||"No number on file") + (l.loanType ? (" · " + esc(l.loanType)) : "") + '</div></div>' +
+      (l.phone ? ('<button class="btn btn-sm btn-primary" type="button" data-action="dialer-call" data-lead="' + l.id + '">📞 Call</button>') : "") +
+    '</div>';
+  }).join("");
+}
+function startManualDialerCall(rawPhone){
+  var digits = (rawPhone||"").replace(/\D/g,"");
+  if (digits.length < 10){ showToast("Enter a valid phone number"); return; }
+  if (!sb){ showToast("Dialer needs a live connection"); return; }
+  showToast("Calling your cell now — answer to connect to " + rawPhone);
+  sb.functions.invoke("make-call", { body: { phone: rawPhone, userId: currentUser().id } }).then(function(res){
+    if (res.error || (res.data && res.data.error)){
+      var msg = (res.data && res.data.error) || "Couldn't place the call";
+      showToast(msg);
+    }
+  }).catch(function(){ showToast("Couldn't reach the dialer"); });
 }
 function modalDialer(){
   if (!ui.dialer) return "";
@@ -12032,7 +12093,11 @@ appEl.addEventListener("click", function(e){
   else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
   else if (action === "delete-lead"){ deleteLead(t.dataset.lead, t.dataset.name); }
   else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
-  else if (action === "dialer-call"){ startDialerCall(t.dataset.lead); }
+  else if (action === "dialer-call"){
+    startDialerCall(t.dataset.lead);
+    if (ui.modal && ui.modal.type === "quickDial"){ ui.modal = null; render(); }
+  }
+  else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
   else if (action === "toggle-email"){ ui.expandedEmailId = ui.expandedEmailId===t.dataset.id ? null : t.dataset.id; render(); }
   else if (action === "toggle-conversation"){ ui.expandedConversationLead = ui.expandedConversationLead===t.dataset.lead ? null : t.dataset.lead; render(); }
@@ -12429,6 +12494,11 @@ appEl.addEventListener("input", function(e){
     if (spOutBox) spOutBox.innerHTML = buildStandalonePricerOutputHTML(ui.standalonePricer);
     return;
   }
+  if (t.dataset.action === "quick-dial-search"){
+    var qdResultsBox = document.getElementById("quick-dial-results");
+    if (qdResultsBox) qdResultsBox.innerHTML = renderQuickDialResults(t.value);
+    return;
+  }
   if (t.dataset.action !== "address-lookup") return;
   var leadIdForLookup = t.dataset.lead;
   var query = t.value;
@@ -12747,6 +12817,10 @@ appEl.addEventListener("submit", function(e){
       return { category: cat, cost: (raw===null||raw==="") ? null : Number(raw) };
     });
     saveScopeOfWork(form.dataset.lead, items, fd.get("notes"));
+    render();
+  } else if (type === "quick-dial-manual"){
+    startManualDialerCall(fd.get("phone"));
+    ui.modal = null;
     render();
   }
   } catch(submitErr){
