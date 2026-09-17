@@ -5090,8 +5090,12 @@ function startDialerCall(leadId){
   var lead = leadById(leadId);
   if (!lead || !lead.phone){ showToast("No phone number on file for this lead"); return; }
   if (!sb){ showToast("Dialer needs a live connection"); return; }
-  showToast("Calling your cell now — answer to connect to " + lead.name);
-  sb.functions.invoke("make-call", { body: { leadId: leadId, userId: currentUser().id } }).then(function(res){
+  // Direct (parallel) dial for every outbound call from the dialer, not
+  // just the manual-number box -- Joe's call (2026-09-17), team poll went
+  // unanswered so he decided it himself: single simultaneous dial-out is
+  // faster than ringing staff first and only then dialing the lead.
+  showToast("Calling you and " + lead.name + " now...");
+  sb.functions.invoke("make-call", { body: { leadId: leadId, userId: currentUser().id, direct: true } }).then(function(res){
     if (res.error || (res.data && res.data.error)){
       var msg = (res.data && res.data.error) || "Couldn't place the call";
       showToast(msg);

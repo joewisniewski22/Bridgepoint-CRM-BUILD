@@ -7,12 +7,15 @@
 // - Sequential (leadId, or phone without `direct`): rings the staff
 //   member's own cell first; voice-webhook transfers that leg to the
 //   destination once staff answers. See voice-webhook/index.ts.
-// - Direct (`direct: true`, quick-dial's manual-number box only -- Joe's
-//   ask, 2026-09-16: "that delay causes people to hang up"): dials BOTH
-//   the destination and the staff member's cell in parallel, at the same
-//   instant, instead of waiting for staff to pick up before the
-//   destination phone even starts ringing. voice-webhook bridges them
-//   together once both sides have answered.
+// - Direct (`direct: true`): dials BOTH the destination and the staff
+//   member's cell in parallel, at the same instant, instead of waiting on
+//   staff to pick up before the destination phone even starts ringing.
+//   voice-webhook bridges them together once both sides have answered.
+//   As of 2026-09-17 this is the default for every call the dialer places
+//   (startDialerCall) -- Joe decided it himself after the team's phone-
+//   system poll went unanswered ("they don't vote, they don't get a
+//   say"), on the reasoning that a single simultaneous dial-out is
+//   faster than the sequential ring-staff-then-transfer pattern.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
