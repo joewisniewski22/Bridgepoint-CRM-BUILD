@@ -449,6 +449,7 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@telnyx/webrtc@2.27.10/lib/bundle.min.js"></script>
 <script id="app-script">(function(){
 "use strict";
 var SUPABASE_URL = "https://idzkigmvovehjpapatxv.supabase.co";
@@ -1989,6 +1990,7 @@ try {
           render();
         } else {
           hydrateFromSupabase();
+          initSoftphone();
         }
       });
     } else {
@@ -2126,6 +2128,7 @@ function attemptLogin(username, pin){
         if (res2.data){ state.users = res2.data; render(); }
       });
       hydrateFromSupabase();
+      if (!isDemoAccountId(u.id)) initSoftphone();
     };
     if (session){
       sb.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token }).then(function(){
@@ -2154,6 +2157,7 @@ function logout(){
   ui.loginError = null;
   ui.loginUsername = "";
   try { localStorage.removeItem("bp_authed_for"); } catch(e){}
+  if (telnyxClient){ telnyxClient.disconnect(); telnyxClient = null; telnyxActiveCall = null; telnyxReady = false; ui.softphoneCall = null; }
   if (sb && sb.auth) sb.auth.signOut().catch(function(){});
   render();
 }
@@ -5086,21 +5090,101 @@ function sendBackToLO(leadId, note){
 function crmLeadLink(leadId){
   return CRM_URL + "?lead=" + leadId;
 }
+// Softphone (2026-09-17): Joe's final word after the team's phone-system
+// poll went unanswered -- no cell-phone ring at all when dialing out,
+// staff talk to clients straight through the computer via Telnyx's
+// WebRTC SDK. telnyxClient/telnyxActiveCall live outside ui/state
+// deliberately -- render() does a full DOM rebuild on every call, and a
+// live WebSocket connection (and its underlying RTCPeerConnection) must
+// never get torn down or re-created by that, only the small bit of
+// display state (ui.softphoneCall) goes through the normal render cycle.
+var telnyxClient = null;
+var telnyxActiveCall = null;
+var telnyxReady = false;
+var TELNYX_CRM_NUMBER = "+18502798588";
+function toE164Phone(raw){
+  var digits = (raw||"").replace(/\D/g,"");
+  if (!digits) return "";
+  return digits.length===10 ? ("+1"+digits) : ("+"+digits);
+}
+function initSoftphone(){
+  if (!sb || telnyxClient) return;
+  var uid = currentUser().id;
+  sb.functions.invoke("get-webrtc-token", { body: { userId: uid } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){
+      console.warn("softphone: couldn't get a token yet", res.error || (res.data && res.data.error));
+      return;
+    }
+    var TelnyxNs = window.TelnyxWebRTC;
+    if (!TelnyxNs || !TelnyxNs.TelnyxRTC){ console.warn("softphone: SDK didn't load"); return; }
+    var client = new TelnyxNs.TelnyxRTC({ login_token: res.data.token });
+    client.remoteElement = "telnyx-remote-audio";
+    client.on("telnyx.ready", function(){ telnyxReady = true; console.log("softphone: connected"); });
+    client.on("telnyx.error", function(err){
+      console.error("softphone error", err);
+      showToast("Softphone connection issue — try your call again in a moment");
+    });
+    client.on("telnyx.notification", function(notification){
+      if (notification.type !== "callUpdate") return;
+      var call = notification.call;
+      telnyxActiveCall = call;
+      if (!ui.softphoneCall) return;
+      ui.softphoneCall.state = call.state;
+      if (call.state === "hangup"){
+        var endedLeadId = ui.softphoneCall.leadId;
+        ui.softphoneCall = null;
+        telnyxActiveCall = null;
+        if (endedLeadId) { ui.modal = { type:"callDisposition", leadId: endedLeadId }; }
+      }
+      render();
+    });
+    client.on("telnyx.warning", function(warning){
+      if (warning.code !== 34001) return; // TOKEN_EXPIRING_SOON
+      sb.functions.invoke("get-webrtc-token", { body: { userId: uid } }).then(function(r2){
+        if (r2.data && r2.data.token) client.updateToken(r2.data.token);
+      });
+    });
+    client.connect();
+    telnyxClient = client;
+  }).catch(function(err){ console.warn("softphone init failed", err); });
+}
+function placeSoftphoneCall(leadId, displayName, e164){
+  if (!telnyxClient || !telnyxReady){
+    showToast("Softphone still connecting — try again in a couple seconds");
+    if (!telnyxClient) initSoftphone();
+    return;
+  }
+  ui.softphoneCall = { leadId: leadId||null, leadName: displayName, phone: e164, state: "new", muted:false };
+  render();
+  telnyxActiveCall = telnyxClient.newCall({ destinationNumber: e164, callerNumber: TELNYX_CRM_NUMBER });
+}
+function hangupSoftphoneCall(){
+  if (telnyxActiveCall) telnyxActiveCall.hangup();
+}
+function toggleSoftphoneMute(){
+  if (!telnyxActiveCall || !ui.softphoneCall) return;
+  if (ui.softphoneCall.muted){ telnyxActiveCall.unmuteAudio(); ui.softphoneCall.muted = false; }
+  else { telnyxActiveCall.muteAudio(); ui.softphoneCall.muted = true; }
+  render();
+}
+function renderSoftphoneBar(){
+  if (!ui.softphoneCall) return "";
+  var c = ui.softphoneCall;
+  var stateLabel = c.state === "active" ? "Connected" : c.state === "ringing" || c.state === "trying" || c.state === "new" || c.state === "requesting" ? "Calling…" : c.state;
+  return '<div class="softphone-bar" style="position:fixed;bottom:16px;right:16px;z-index:500;background:var(--ink,#1a2b22);color:#fff;border-radius:12px;padding:12px 16px;box-shadow:0 8px 24px rgba(0,0,0,.3);display:flex;align-items:center;gap:14px;min-width:260px">' +
+    '<div><div style="font-weight:700">' + esc(c.leadName||c.phone||"") + '</div><div style="font-size:.78rem;opacity:.8">' + esc(stateLabel) + '</div></div>' +
+    '<div style="display:flex;gap:6px;margin-left:auto">' +
+      '<button class="btn btn-sm" type="button" data-action="softphone-mute" style="background:rgba(255,255,255,.15);color:#fff;border:none">' + (c.muted ? "Unmute" : "Mute") + '</button>' +
+      '<button class="btn btn-sm" type="button" data-action="softphone-hangup" style="background:var(--c-rust,#c0392b);color:#fff;border:none">Hang Up</button>' +
+    '</div>' +
+  '</div>';
+}
 function startDialerCall(leadId){
   var lead = leadById(leadId);
   if (!lead || !lead.phone){ showToast("No phone number on file for this lead"); return; }
-  if (!sb){ showToast("Dialer needs a live connection"); return; }
-  // Direct (parallel) dial for every outbound call from the dialer, not
-  // just the manual-number box -- Joe's call (2026-09-17), team poll went
-  // unanswered so he decided it himself: single simultaneous dial-out is
-  // faster than ringing staff first and only then dialing the lead.
-  showToast("Calling you and " + lead.name + " now...");
-  sb.functions.invoke("make-call", { body: { leadId: leadId, userId: currentUser().id, direct: true } }).then(function(res){
-    if (res.error || (res.data && res.data.error)){
-      var msg = (res.data && res.data.error) || "Couldn't place the call";
-      showToast(msg);
-    }
-  }).catch(function(){ showToast("Couldn't reach the dialer"); });
+  var e164 = toE164Phone(lead.phone);
+  if (!e164){ showToast("No phone number on file for this lead"); return; }
+  placeSoftphoneCall(leadId, lead.name, e164);
 }
 function notifyLoNewLead(lead){
   // notifyUser()'s own pushStaffAlert already texts the LO for "hot-lead"
@@ -7146,7 +7230,7 @@ function renderShell(){
   else if (ui.view === "coaching") body = renderCoaching();
   else body = renderToday();
 
-  return sidebar + '<div class="main"' + accentStyle + '>' + (prefs.welcomeNote && ui.view==="today" ? ('<div class="panel panel-pad" style="margin:16px 16px 0;border-color:var(--brand)">✨ ' + esc(prefs.welcomeNote) + '</div>') : '') + body + '</div>';
+  return sidebar + '<div class="main"' + accentStyle + '>' + (prefs.welcomeNote && ui.view==="today" ? ('<div class="panel panel-pad" style="margin:16px 16px 0;border-color:var(--brand)">✨ ' + esc(prefs.welcomeNote) + '</div>') : '') + body + '</div>' + renderSoftphoneBar();
 }
 
 function topbar(title, sub, actionsHTML){
@@ -8870,7 +8954,7 @@ function renderRail(lead){
     '<div class="rail-block">' +
       '<div class="rail-title">Contact</div>' +
       '<div class="contact-row">' +
-        '<button class="btn btn-sm" data-action="dialer-call" data-lead="' + lead.id + '" title="Rings your personal cell, then bridges you to ' + esc(lead.name) + '">📞 Call</button>' +
+        '<button class="btn btn-sm" data-action="dialer-call" data-lead="' + lead.id + '" title="Calls ' + esc(lead.name) + ' straight through your computer">📞 Call</button>' +
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<button class="btn btn-sm" type="button" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline">Email</button>' +
         '<button class="btn btn-sm" data-action="send-scheduling-link" data-lead="' + lead.id + '" title="Sends your personal booking link by email and text so they can grab a time with you directly">📅 Schedule Appointment</button>' +
@@ -10690,7 +10774,7 @@ function modalQuickDial(){
             '</div>' +
           '</div>' +
         '</form>' +
-        '<div class="footnote" style="padding-top:8px">Uses the same business line as the power dialer — rings your cell first, then bridges you in.</div>' +
+        '<div class="footnote" style="padding-top:8px">Calls straight through the CRM using the business line — talk through your computer, no phone involved.</div>' +
       '</div>' +
     '</div></div>';
 }
@@ -10712,20 +10796,10 @@ function renderQuickDialResults(query){
   }).join("");
 }
 function startManualDialerCall(rawPhone){
-  var digits = (rawPhone||"").replace(/\D/g,"");
-  if (digits.length < 10){ showToast("Enter a valid phone number"); return; }
-  if (!sb){ showToast("Dialer needs a live connection"); return; }
-  // Direct mode -- dials the number and your cell at the same instant
-  // instead of ringing you first, then dialing out once you answer. Joe's
-  // ask (2026-09-16): the wait-for-staff-then-dial delay was causing the
-  // other party to hang up before ever hearing a ring.
-  showToast("Calling " + rawPhone + " and your cell now...");
-  sb.functions.invoke("make-call", { body: { phone: rawPhone, userId: currentUser().id, direct: true } }).then(function(res){
-    if (res.error || (res.data && res.data.error)){
-      var msg = (res.data && res.data.error) || "Couldn't place the call";
-      showToast(msg);
-    }
-  }).catch(function(){ showToast("Couldn't reach the dialer"); });
+  var e164 = toE164Phone(rawPhone);
+  if (!e164){ showToast("Enter a valid phone number"); return; }
+  var match = findLeadByPhone(rawPhone);
+  placeSoftphoneCall(match ? match.id : null, match ? match.name : rawPhone, e164);
 }
 function findLeadByPhone(phone){
   var digits = (phone||"").replace(/\D/g,"").slice(-10);
@@ -12025,6 +12099,16 @@ function modalLogCall(leadId){
    Event delegation
 --------------------------------------------------------------------- */
 var appEl = document.getElementById("app");
+// Lives outside appEl deliberately -- render() replaces appEl.innerHTML
+// wholesale on every state change, which would tear down and recreate
+// this element (killing the live audio stream) if it were part of the
+// normal render tree. Created once, here, and never touched again.
+(function(){
+  var remoteAudio = document.createElement("audio");
+  remoteAudio.id = "telnyx-remote-audio";
+  remoteAudio.autoplay = true;
+  document.body.appendChild(remoteAudio);
+})();
 
 appEl.addEventListener("dragstart", function(e){
   var card = e.target.closest && e.target.closest(".pcard");
@@ -12136,10 +12220,12 @@ appEl.addEventListener("click", function(e){
   else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
   else if (action === "dialer-call"){
     startDialerCall(t.dataset.lead);
-    ui.modal = { type:"callDisposition", leadId: t.dataset.lead };
+    ui.modal = null;
     render();
   }
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
+  else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
+  else if (action === "softphone-mute"){ toggleSoftphoneMute(); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
   else if (action === "toggle-email"){ ui.expandedEmailId = ui.expandedEmailId===t.dataset.id ? null : t.dataset.id; render(); }
   else if (action === "toggle-conversation"){ ui.expandedConversationLead = ui.expandedConversationLead===t.dataset.lead ? null : t.dataset.lead; render(); }
@@ -12861,10 +12947,8 @@ appEl.addEventListener("submit", function(e){
     saveScopeOfWork(form.dataset.lead, items, fd.get("notes"));
     render();
   } else if (type === "quick-dial-manual"){
-    var qdPhone = fd.get("phone");
-    startManualDialerCall(qdPhone);
-    var qdMatch = findLeadByPhone(qdPhone);
-    ui.modal = qdMatch ? { type:"callDisposition", leadId: qdMatch.id } : null;
+    startManualDialerCall(fd.get("phone"));
+    ui.modal = null;
     render();
   } else if (type === "log-call-outcome"){
     logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
