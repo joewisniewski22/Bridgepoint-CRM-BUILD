@@ -2625,7 +2625,7 @@ function startDialer(){
   var seen = {}, uniq = [];
   ids.forEach(function(id){ if (!seen[id]){ seen[id]=true; uniq.push(id); } });
   if (!uniq.length){ showToast("No calls queued right now"); return; }
-  ui.dialer = { queueIds: uniq, itemsByLead: itemsByLead, index: 0 };
+  ui.dialer = { queueIds: uniq, itemsByLead: itemsByLead, index: 0, userId: myId };
   ui.modal = { type: "dialer" };
   render();
 }
@@ -2638,6 +2638,36 @@ function dialerAdvance(){
     showToast("Dialer session complete — nice work");
   }
   render();
+}
+// Joe's ask (2026-09-17): some leads genuinely aren't worth calling today
+// (bad number, know-they'll-say-no, whatever the LO's judgment says) --
+// but skipping one can't be a way to quietly dodge the real 20-a-day
+// quota, so it backfills one replacement lead into today's queue right
+// away. Reuses skipQueueItem() (the existing Today-page skip mechanism)
+// so this counts the same way toward skipCount/cold-auto-lost and won't
+// resurface in today's win-back pool -- asking buildDailyCallQueue for
+// one slot more than the current queue size and taking the first
+// candidate not already in it is a simple, safe way to find "the next
+// name in line" without needing buildDailyCallQueue to expose its
+// internal backfill pool directly.
+function dialerSkipCurrent(){
+  if (!ui.dialer) return;
+  var skippedId = ui.dialer.queueIds[ui.dialer.index];
+  if (skippedId) skipQueueItem(skippedId);
+
+  var myId = ui.dialer.userId || currentUser().id;
+  var expanded = buildDailyCallQueue(myId, ui.dialer.queueIds.length + 1);
+  var expandedItems = expanded.newBusiness.concat(expanded.followUps);
+  var already = {};
+  ui.dialer.queueIds.forEach(function(id){ already[id] = true; });
+  var next = expandedItems.filter(function(item){ return !already[item.leadId]; })[0];
+  if (next){
+    ui.dialer.queueIds.push(next.leadId);
+    ui.dialer.itemsByLead[next.leadId] = next;
+  } else {
+    showToast("Skipped — no more leads available to backfill today");
+  }
+  dialerAdvance();
 }
 function closeDialer(){
   ui.modal = null;
@@ -12421,7 +12451,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "clear-lead-filters"){ ui.leadFilter = { q:"", stage:"", loanType:"", assignedTo:"", status:"active", source:"", dateFrom:"", dateTo:"", amountMin:"", amountMax:"", sort:"newest" }; render(); }
   else if (action === "extend-daily-quota"){ ui.dailyQuotaExtra = (ui.dailyQuotaExtra||0) + 20; render(); }
   else if (action === "start-dialer"){ startDialer(); }
-  else if (action === "dialer-skip"){ dialerAdvance(); }
+  else if (action === "dialer-skip"){ dialerSkipCurrent(); }
   else if (action === "close-dialer"){ closeDialer(); }
   else if (action === "copy-app-link"){
     var linkBox = document.getElementById("app-link-box");
