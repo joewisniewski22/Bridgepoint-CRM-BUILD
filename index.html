@@ -5157,7 +5157,17 @@ function placeSoftphoneCall(leadId, displayName, e164){
   ui.softphoneCall = { leadId: leadId||null, leadName: displayName, phone: e164, state: "new", muted:false };
   ui.modal = { type:"callDisposition", leadId: leadId||null, leadName: displayName, phone: e164 };
   render();
-  telnyxActiveCall = telnyxClient.newCall({ destinationNumber: e164, callerNumber: TELNYX_CRM_NUMBER });
+  // clientState travels with the call to Telnyx's server-side webhook (the
+  // WebRTC Credential Connection has the same webhook_event_url as the
+  // Call Control app) -- voice-webhook uses it to fire the automatic
+  // "sorry I missed you" text on a real no-answer, without needing the
+  // staff member to have picked a disposition first. Joe's ask, 2026-09-17.
+  var me = currentUser();
+  var stateForWebhook = btoa(JSON.stringify({
+    v: 1, stage: "webrtc_outbound", leadId: leadId||null, leadName: displayName,
+    staffId: me.id, staffName: me.name,
+  }));
+  telnyxActiveCall = telnyxClient.newCall({ destinationNumber: e164, callerNumber: TELNYX_CRM_NUMBER, clientState: stateForWebhook });
 }
 function hangupSoftphoneCall(){
   if (telnyxActiveCall) telnyxActiveCall.hangup();

@@ -49,6 +49,8 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const TELNYX_API_KEY = Deno.env.get("TELNYX_API_KEY")!;
 const TELNYX_FROM_NUMBER = Deno.env.get("TELNYX_FROM_NUMBER")!;
+const TELNYX_MESSAGING_PROFILE_ID = Deno.env.get("TELNYX_MESSAGING_PROFILE_ID")!;
+const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -59,8 +61,9 @@ const SPANISH_LO_ID = "lo-fanis"; // Joe's explicit choice for the Spanish IVR b
 const PROCESSING_STAFF_ID = "proc-erika";
 
 type Stage =
-  | "ringing_staff" | "connecting_lead"                       // outbound dialer (sequential mode)
-  | "direct_dial_leg"                                         // outbound quick-dial (direct/parallel mode)
+  | "ringing_staff" | "connecting_lead"                       // outbound dialer (sequential mode, unused since the softphone)
+  | "direct_dial_leg"                                         // outbound quick-dial (direct/parallel mode, unused since the softphone)
+  | "webrtc_outbound"                                         // outbound softphone call (current dialer)
   | "answering_inbound" | "connecting_staff"                  // inbound, matched lead
   | "ivr_lang_menu" | "ivr_main_menu" | "ivr_directory_menu"   // inbound, unmatched caller
   | "ivr_single_connect" | "ivr_ring_all_leg"
@@ -233,6 +236,54 @@ async function logCallOutcome(opts: { leadId: string; staffId?: string | null; s
 
   activity.push({ date: d, type: "call", text: opts.note, author: staffName });
   await sb.from("leads").update({ call_attempts: attempts, activity, last_contact_at: d }).eq("id", opts.leadId);
+}
+
+// "Sorry I missed you" text, sent automatically on a real no-answer from
+// the softphone dialer -- Joe's ask (2026-09-17): no waiting on staff to
+// pick a disposition first. Sent directly via Telnyx's Messages API (not
+// the Quo-based send-text function) so it comes from the SAME number
+// that just called -- Joe was explicit this should only go live once his
+// 10DLC (A2P) registration clears, since until then Telnyx SMS is
+// blocked the same way the rest of Telnyx texting is (see send-text's
+// git history) -- this will return a real carrier rejection until then,
+// by design, not a bug to chase.
+async function sendMissedCallText(opts: { leadId: string; staffId: string | null }) {
+  const { data: lead } = await sb.from("leads").select("id, name, phone, loan_type, activity").eq("id", opts.leadId).single();
+  if (!lead?.phone) return;
+
+  let lo: { name?: string; phone?: string } | null = null;
+  if (opts.staffId) {
+    const { data } = await sb.from("users").select("name, phone").eq("id", opts.staffId).single();
+    lo = data;
+  }
+  const firstName = ((lead.name as string) || "").split(" ")[0] || "there";
+  const loFirstName = ((lo?.name as string) || "your loan officer").split(" ")[0];
+  const loanType = (lead.loan_type as string) || "loan";
+  const loPhone = (lo?.phone as string) || "";
+  const bookingLink = opts.staffId ? (CRM_URL + "?book=" + opts.staffId) : "";
+
+  const message = "Hi " + firstName + ", sorry I missed you — this is " + loFirstName + " with Bridgepoint Lending calling about your " + loanType + " loan." +
+    (loPhone ? (" Call or text me back anytime at " + loPhone + ".") : "") +
+    (bookingLink ? (" Or grab a time that works here: " + bookingLink) : "");
+
+  const res = await fetch("https://api.telnyx.com/v2/messages", {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + TELNYX_API_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: TELNYX_FROM_NUMBER, to: lead.phone, text: message,
+      messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
+    }),
+  });
+  const data = await res.json().catch(() => null);
+  const d = new Date().toISOString().slice(0, 10);
+  const activity = (Array.isArray(lead.activity) ? lead.activity : []) as Array<Record<string, unknown>>;
+  if (!res.ok) {
+    console.error("voice-webhook: missed-call text failed", JSON.stringify(data));
+    activity.push({ date: d, type: "system", text: "Missed-call text NOT sent -- Telnyx SMS isn't live yet (10DLC pending)", author: "System" });
+  } else {
+    activity.push({ date: d, type: "text", text: "Texted (via Telnyx, automatic missed-call follow-up): " + message, author: (lo?.name as string) || "System" });
+  }
+  await sb.from("leads").update({ activity }).eq("id", opts.leadId);
 }
 
 // Rings every loan officer's personal cell at once; whichever answers
@@ -513,7 +564,11 @@ Deno.serve(async (req: Request) => {
       const neverConnected = ["no_answer", "timeout", "call_rejected", "originator_cancel", "unspecified", "user_busy"].includes(cause);
       const sessionId = (payload.call_session_id as string) || callControlId;
 
-      if (state.stage === "ringing_staff") {
+      if (state.stage === "webrtc_outbound") {
+        if (state.leadId && neverConnected) {
+          await sendMissedCallText({ leadId: state.leadId, staffId: state.staffId || null });
+        }
+      } else if (state.stage === "ringing_staff") {
         if (state.leadId) {
           await logCallOutcome({
             leadId: state.leadId, staffId: state.userId, sessionId, outcome: "no-answer",
