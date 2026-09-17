@@ -5155,6 +5155,7 @@ function placeSoftphoneCall(leadId, displayName, e164){
     return;
   }
   ui.softphoneCall = { leadId: leadId||null, leadName: displayName, phone: e164, state: "new", muted:false };
+  ui.modal = { type:"callDisposition", leadId: leadId||null, leadName: displayName, phone: e164 };
   render();
   telnyxActiveCall = telnyxClient.newCall({ destinationNumber: e164, callerNumber: TELNYX_CRM_NUMBER });
 }
@@ -5166,18 +5167,6 @@ function toggleSoftphoneMute(){
   if (ui.softphoneCall.muted){ telnyxActiveCall.unmuteAudio(); ui.softphoneCall.muted = false; }
   else { telnyxActiveCall.muteAudio(); ui.softphoneCall.muted = true; }
   render();
-}
-function renderSoftphoneBar(){
-  if (!ui.softphoneCall) return "";
-  var c = ui.softphoneCall;
-  var stateLabel = c.state === "active" ? "Connected" : c.state === "ringing" || c.state === "trying" || c.state === "new" || c.state === "requesting" ? "Calling…" : c.state;
-  return '<div class="softphone-bar" style="position:fixed;bottom:16px;right:16px;z-index:500;background:var(--ink,#1a2b22);color:#fff;border-radius:12px;padding:12px 16px;box-shadow:0 8px 24px rgba(0,0,0,.3);display:flex;align-items:center;gap:14px;min-width:260px">' +
-    '<div><div style="font-weight:700">' + esc(c.leadName||c.phone||"") + '</div><div style="font-size:.78rem;opacity:.8">' + esc(stateLabel) + '</div></div>' +
-    '<div style="display:flex;gap:6px;margin-left:auto">' +
-      '<button class="btn btn-sm" type="button" data-action="softphone-mute" style="background:rgba(255,255,255,.15);color:#fff;border:none">' + (c.muted ? "Unmute" : "Mute") + '</button>' +
-      '<button class="btn btn-sm" type="button" data-action="softphone-hangup" style="background:var(--c-rust,#c0392b);color:#fff;border:none">Hang Up</button>' +
-    '</div>' +
-  '</div>';
 }
 function startDialerCall(leadId){
   var lead = leadById(leadId);
@@ -7230,7 +7219,7 @@ function renderShell(){
   else if (ui.view === "coaching") body = renderCoaching();
   else body = renderToday();
 
-  return sidebar + '<div class="main"' + accentStyle + '>' + (prefs.welcomeNote && ui.view==="today" ? ('<div class="panel panel-pad" style="margin:16px 16px 0;border-color:var(--brand)">✨ ' + esc(prefs.welcomeNote) + '</div>') : '') + body + '</div>' + renderSoftphoneBar();
+  return sidebar + '<div class="main"' + accentStyle + '>' + (prefs.welcomeNote && ui.view==="today" ? ('<div class="panel panel-pad" style="margin:16px 16px 0;border-color:var(--brand)">✨ ' + esc(prefs.welcomeNote) + '</div>') : '') + body + '</div>';
 }
 
 function topbar(title, sub, actionsHTML){
@@ -10510,7 +10499,7 @@ function renderModal(){
   if (ui.modal.type === "sendInvite") return modalSendInvite(ui.modal.user);
   if (ui.modal.type === "dialer") return modalDialer();
   if (ui.modal.type === "quickDial") return modalQuickDial();
-  if (ui.modal.type === "callDisposition") return modalCallDisposition(ui.modal.leadId);
+  if (ui.modal.type === "callDisposition") return modalCallDisposition(ui.modal);
   if (ui.modal.type === "scopeOfWork") return modalScopeOfWork(ui.modal.leadId);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   if (ui.modal.type === "mySchedule") return modalMySchedule();
@@ -10737,16 +10726,51 @@ function requestCoachingTip(leadId){
 // this prompt doesn't cancel it. voice-webhook also auto-logs a basic
 // connected/no-answer outcome server-side regardless, so nothing is lost
 // if staff skip this.
-function modalCallDisposition(leadId){
-  var lead = leadById(leadId);
-  if (!lead) return "";
+// One box for the whole call lifecycle -- Joe's ask (2026-09-17): "you
+// dial out, you see it on the screen, and you can hang up and mark right
+// from that big box." Same modal, two stages: while ui.softphoneCall is
+// live it shows the in-progress call (Mute/Hang Up); once the call ends
+// (ui.softphoneCall cleared by the hangup handler in initSoftphone, but
+// ui.modal itself is left alone) it flips to the outcome-logging form,
+// without ever closing and reopening a different modal in between. No
+// backdrop-dismiss while a call is live -- Hang Up is the only way out,
+// so the control is never accidentally lost with nothing left to click.
+function modalCallDisposition(modalInfo){
+  var sp = ui.softphoneCall;
+  if (sp && sp.state !== "hangup"){
+    var stateLabel = sp.state === "active" ? "Connected" : "Calling…";
+    return '<div class="modal-backdrop" id="modal-host">' +
+      '<div class="modal" data-stop="1">' +
+        '<div class="modal-head"><h3>📞 Call</h3></div>' +
+        '<div class="modal-body" style="text-align:center;padding:36px 20px">' +
+          '<div style="font-size:1.4rem;font-weight:700;margin-bottom:8px">' + esc(sp.leadName || sp.phone || "") + '</div>' +
+          '<div class="footnote" style="font-size:1rem">' + esc(stateLabel) + '</div>' +
+        '</div>' +
+        '<div class="modal-foot" style="justify-content:center;gap:10px">' +
+          '<button class="btn" type="button" data-action="softphone-mute">' + (sp.muted ? "Unmute" : "Mute") + '</button>' +
+          '<button class="btn btn-primary" type="button" data-action="softphone-hangup" style="background:var(--c-rust)">Hang Up</button>' +
+        '</div>' +
+      '</div></div>';
+  }
+
+  var leadId = modalInfo && modalInfo.leadId;
+  var lead = leadId ? leadById(leadId) : null;
+  if (!lead){
+    var displayName = (modalInfo && (modalInfo.leadName || modalInfo.phone)) || "the call";
+    return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+      '<div class="modal" data-stop="1">' +
+        '<div class="modal-head"><h3>Call Ended</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+        '<div class="modal-body"><div class="footnote">Call with ' + esc(displayName) + ' has ended. No matching lead on file to log it against.</div></div>' +
+        '<div class="modal-foot"><button class="btn btn-primary" type="button" data-action="close-modal">Close</button></div>' +
+      '</div></div>';
+  }
   var outOptions = CALL_OUTCOMES.map(function(o){ return '<option value="' + o.key + '">' + o.label + '</option>'; }).join("");
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
     '<div class="modal" data-stop="1">' +
       '<div class="modal-head"><h3>Log Call — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
       '<form data-form="log-call-outcome" data-lead="' + lead.id + '">' +
       '<div class="modal-body">' +
-        '<div class="footnote" style="padding-bottom:8px">Ringing now — answer to connect. Log what happened whenever you\'re done.</div>' +
+        '<div class="footnote" style="padding-bottom:8px">Call ended — log what happened.</div>' +
         '<div class="form-row"><label>Outcome</label><select class="select" name="outcome">' + outOptions + '</select></div>' +
         '<div class="form-row"><label>Notes</label><textarea class="textarea" name="notes" rows="2" placeholder="What did you discuss?"></textarea></div>' +
       '</div>' +
@@ -12218,11 +12242,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
   else if (action === "delete-lead"){ deleteLead(t.dataset.lead, t.dataset.name); }
   else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
-  else if (action === "dialer-call"){
-    startDialerCall(t.dataset.lead);
-    ui.modal = null;
-    render();
-  }
+  else if (action === "dialer-call"){ startDialerCall(t.dataset.lead); }
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
   else if (action === "softphone-mute"){ toggleSoftphoneMute(); }
@@ -12948,8 +12968,6 @@ appEl.addEventListener("submit", function(e){
     render();
   } else if (type === "quick-dial-manual"){
     startManualDialerCall(fd.get("phone"));
-    ui.modal = null;
-    render();
   } else if (type === "log-call-outcome"){
     logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
     ui.modal = null;
