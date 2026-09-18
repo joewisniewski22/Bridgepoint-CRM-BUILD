@@ -379,6 +379,11 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .modal-body{padding:18px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;flex:1 1 auto;min-height:0}
 .modal>form{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
 .modal-foot{display:flex;gap:8px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--border)}
+.call-float{position:fixed;z-index:60;width:360px;max-width:calc(100vw - 16px);background:var(--surface);border-radius:var(--radius);
+  box-shadow:var(--shadow-modal);border:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.call-float-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);
+  cursor:move;user-select:none;touch-action:none}
+.call-float-head h3{margin:0}
 
 /* ---------------------------------------------------------------------
    Login
@@ -5185,7 +5190,8 @@ function placeSoftphoneCall(leadId, displayName, e164){
     return;
   }
   ui.softphoneCall = { leadId: leadId||null, leadName: displayName, phone: e164, state: "new", muted:false };
-  ui.modal = { type:"callDisposition", leadId: leadId||null, leadName: displayName, phone: e164 };
+  ui.callNotes = "";
+  ui.modal ={ type:"callDisposition", leadId: leadId||null, leadName: displayName, phone: e164 };
   render();
   // clientState travels with the call to Telnyx's server-side webhook (the
   // WebRTC Credential Connection has the same webhook_event_url as the
@@ -5448,6 +5454,28 @@ function saveGuarantorSsn(leadId, ssn){
       render();
     }
   }).catch(function(){ showToast("Couldn't save SSN — try again"); });
+}
+// Full-SSN reveal for owner / full-access staff (Erika's ask, 2026-09-18).
+// The decrypt happens server-side in get_guarantor_ssn_full, which enforces
+// the same owner/full_access/assigned-LO rule -- the isOwner() check here
+// only decides whether to show the button. Held in memory only, auto-hides
+// after 30s, and never written to lead state or persisted.
+var ssnReveal = null;
+function revealGuarantorSsn(leadId){
+  if (!sb) return;
+  sb.rpc("get_guarantor_ssn_full", { p_lead_id: leadId }).then(function(res){
+    if (res.error || !res.data){ showToast("Couldn't reveal SSN"); return; }
+    if (ssnReveal && ssnReveal.timer) clearTimeout(ssnReveal.timer);
+    var d = String(res.data).replace(/\D/g,"");
+    var shown = d.length === 9 ? (d.slice(0,3) + "-" + d.slice(3,5) + "-" + d.slice(5)) : String(res.data);
+    ssnReveal = { leadId: leadId, value: shown, timer: setTimeout(function(){ ssnReveal = null; render(); }, 30000) };
+    render();
+  }).catch(function(){ showToast("Couldn't reveal SSN"); });
+}
+function hideGuarantorSsn(){
+  if (ssnReveal && ssnReveal.timer) clearTimeout(ssnReveal.timer);
+  ssnReveal = null;
+  render();
 }
 function quickEditGuarantor(leadId, fd){
   var lead = leadById(leadId);
@@ -6758,6 +6786,11 @@ function render(){
   // on demand the next time a bound input is focused/typed into.
   document.querySelectorAll(".pac-container").forEach(function(el){ el.remove(); });
   var app = document.getElementById("app");
+  // The live call-notes box must keep focus and cursor when a call-state
+  // event triggers a full re-render mid-typing.
+  var ae = document.activeElement;
+  var keepNotesFocus = !!(ae && ae.id === "call-live-notes");
+  var notesSel = keepNotesFocus ? [ae.selectionStart, ae.selectionEnd] : null;
   if (ui.adLanding){
     app.innerHTML = renderAdLanding();
     var toastHostAL = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
@@ -6815,6 +6848,10 @@ function render(){
   // the oldest message instead of staying on the newest one.
   var chatLog = document.getElementById("ai-chat-log");
   if (chatLog) chatLog.scrollTop = chatLog.scrollHeight;
+  if (keepNotesFocus){
+    var notesEl = document.getElementById("call-live-notes");
+    if (notesEl){ notesEl.focus(); try { notesEl.setSelectionRange(notesSel[0], notesSel[1]); } catch(e){} }
+  }
 }
 var lastHistoryKey = null;
 function syncHistory(){
@@ -8250,7 +8287,13 @@ function renderTabOverview(lead){
     '<div class="field"><label>Guarantor First Name</label><input class="input" name="guarantorFirstName" value="' + esc(lead.guarantorFirstName||"") + '"></div>' +
     '<div class="field"><label>Guarantor Last Name</label><input class="input" name="guarantorLastName" value="' + esc(lead.guarantorLastName||"") + '"></div>' +
     '<div class="field"><label>Guarantor DOB</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
-    '<div class="field"><label>Guarantor SSN</label><input class="input" type="password" autocomplete="off" name="guarantorSsn" value="" placeholder="' + (lead.guarantorSsnLast4 ? ("On file, ending " + lead.guarantorSsnLast4 + " — leave blank to keep") : "XXX-XX-XXXX") + '"></div>' +
+    '<div class="field"><label>Guarantor SSN</label><input class="input" type="password" autocomplete="off" name="guarantorSsn" value="" placeholder="' + (lead.guarantorSsnLast4 ? ("On file, ending " + lead.guarantorSsnLast4 + " — leave blank to keep") : "XXX-XX-XXXX") + '">' +
+      (lead.guarantorSsnLast4 && isOwner() ? (
+        (ssnReveal && ssnReveal.leadId === lead.id)
+          ? '<div class="hint" style="margin-top:6px"><strong style="font-family:monospace;font-size:1rem">' + esc(ssnReveal.value) + '</strong> <button type="button" class="link-btn" data-action="hide-ssn">Hide</button> · auto-hides in 30s</div>'
+          : '<div class="hint" style="margin-top:6px"><button type="button" class="link-btn" data-action="reveal-ssn" data-lead="' + lead.id + '">Show full SSN</button></div>'
+      ) : '') +
+    '</div>' +
     '<div class="field"><label>Guarantor Phone</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||"") + '" placeholder="' + esc(lead.phone||"") + '"></div>' +
     '<div class="field"><label>Guarantor Email</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||"") + '" placeholder="' + esc(lead.email||"") + '"></div>' +
     '<div class="field" style="grid-column:1/-1"><label>Guarantor Physical / Mailing Address</label><input class="input" name="guarantorAddress" value="' + esc(lead.guarantorAddress || (lead.rtlApp && lead.rtlApp.homeAddress) || (lead.dscrApp && lead.dscrApp.homeAddress) || "") + '" placeholder="Street Address, City, State, ZIP"></div>' +
@@ -10779,18 +10822,24 @@ function modalCallDisposition(modalInfo){
   var sp = ui.softphoneCall;
   if (sp && sp.state !== "hangup"){
     var stateLabel = sp.state === "active" ? "Connected" : "Calling…";
-    return '<div class="modal-backdrop" id="modal-host">' +
-      '<div class="modal" data-stop="1">' +
-        '<div class="modal-head"><h3>📞 Call</h3></div>' +
-        '<div class="modal-body" style="text-align:center;padding:36px 20px">' +
-          '<div style="font-size:1.4rem;font-weight:700;margin-bottom:8px">' + esc(sp.leadName || sp.phone || "") + '</div>' +
-          '<div class="footnote" style="font-size:1rem">' + esc(stateLabel) + '</div>' +
-        '</div>' +
-        '<div class="modal-foot" style="justify-content:center;gap:10px">' +
-          '<button class="btn" type="button" data-action="softphone-mute">' + (sp.muted ? "Unmute" : "Mute") + '</button>' +
-          '<button class="btn btn-primary" type="button" data-action="softphone-hangup" style="background:var(--c-rust)">Hang Up</button>' +
-        '</div>' +
-      '</div></div>';
+    // Floating, draggable, non-blocking panel (no full-screen backdrop) so
+    // staff can move it aside and still use the CRM, and type live notes
+    // into it -- Taeya's report (2026-09-18): she couldn't move the call
+    // box or type anything while on a call.
+    var pos = ui.callBoxPos;
+    var posStyle = pos ? ('left:' + pos.x + 'px;top:' + pos.y + 'px') : 'right:24px;top:80px';
+    return '<div class="call-float" id="modal-host" style="' + posStyle + '">' +
+      '<div class="call-float-head" data-drag-handle="1"><h3>📞 ' + esc(sp.leadName || sp.phone || "Call") + '</h3><span class="footnote">' + esc(stateLabel) + ' · drag to move</span></div>' +
+      '<div class="modal-body" style="padding:14px 16px;gap:8px">' +
+        '<label class="footnote" for="call-live-notes" style="font-weight:600">Live notes</label>' +
+        '<textarea class="textarea" id="call-live-notes" data-action="call-live-notes" rows="7" placeholder="Type notes while you talk…">' + esc(ui.callNotes || "") + '</textarea>' +
+        '<div class="footnote">Saved automatically — they\'ll be waiting in the log form when the call ends.</div>' +
+      '</div>' +
+      '<div class="modal-foot" style="justify-content:center;gap:10px">' +
+        '<button class="btn" type="button" data-action="softphone-mute">' + (sp.muted ? "Unmute" : "Mute") + '</button>' +
+        '<button class="btn btn-primary" type="button" data-action="softphone-hangup" style="background:var(--c-rust)">Hang Up</button>' +
+      '</div>' +
+    '</div>';
   }
 
   var leadId = modalInfo && modalInfo.leadId;
@@ -10800,7 +10849,8 @@ function modalCallDisposition(modalInfo){
     return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
       '<div class="modal" data-stop="1">' +
         '<div class="modal-head"><h3>Call Ended</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
-        '<div class="modal-body"><div class="footnote">Call with ' + esc(displayName) + ' has ended. No matching lead on file to log it against.</div></div>' +
+        '<div class="modal-body"><div class="footnote">Call with ' + esc(displayName) + ' has ended. No matching lead on file to log it against.</div>' +
+        (ui.callNotes ? '<div class="form-row"><label>Your call notes (copy before closing)</label><textarea class="textarea" rows="6" readonly>' + esc(ui.callNotes) + '</textarea></div>' : '') + '</div>' +
         '<div class="modal-foot"><button class="btn btn-primary" type="button" data-action="close-modal">Close</button></div>' +
       '</div></div>';
   }
@@ -10812,7 +10862,7 @@ function modalCallDisposition(modalInfo){
       '<div class="modal-body">' +
         '<div class="footnote" style="padding-bottom:8px">Call ended — log what happened.</div>' +
         '<div class="form-row"><label>Outcome</label><select class="select" name="outcome">' + outOptions + '</select></div>' +
-        '<div class="form-row"><label>Notes</label><textarea class="textarea" name="notes" rows="2" placeholder="What did you discuss?"></textarea></div>' +
+        '<div class="form-row"><label>Notes</label><textarea class="textarea" name="notes" rows="' + (ui.callNotes ? 6 : 2) + '" placeholder="What did you discuss?">' + esc(ui.callNotes || "") + '</textarea></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Skip</button><button class="btn btn-primary" type="submit">Save</button></div>' +
       '</form>' +
@@ -12286,6 +12336,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
   else if (action === "softphone-mute"){ toggleSoftphoneMute(); }
+  else if (action === "reveal-ssn"){ revealGuarantorSsn(t.dataset.lead); }
+  else if (action === "hide-ssn"){ hideGuarantorSsn(); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
   else if (action === "toggle-email"){ ui.expandedEmailId = ui.expandedEmailId===t.dataset.id ? null : t.dataset.id; render(); }
   else if (action === "toggle-conversation"){ ui.expandedConversationLead = ui.expandedConversationLead===t.dataset.lead ? null : t.dataset.lead; render(); }
@@ -12647,6 +12699,32 @@ appEl.addEventListener("change", function(e){
   }
 });
 
+// Drag-to-move for the live call panel. Listens on document (not the
+// panel) and re-queries the element every move because render() rebuilds
+// the DOM wholesale on call-state changes -- the panel node can be replaced
+// mid-drag, but ui.callBoxPos survives.
+var callDrag = null;
+appEl.addEventListener("pointerdown", function(e){
+  var handle = e.target.closest && e.target.closest("[data-drag-handle]");
+  if (!handle) return;
+  var box = document.getElementById("modal-host");
+  if (!box) return;
+  var r = box.getBoundingClientRect();
+  callDrag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+  e.preventDefault();
+});
+document.addEventListener("pointermove", function(e){
+  if (!callDrag) return;
+  var box = document.getElementById("modal-host");
+  if (!box) return;
+  var x = Math.max(0, Math.min(window.innerWidth - 80, e.clientX - callDrag.dx));
+  var y = Math.max(0, Math.min(window.innerHeight - 60, e.clientY - callDrag.dy));
+  ui.callBoxPos = { x: x, y: y };
+  box.style.left = x + "px";
+  box.style.top = y + "px";
+  box.style.right = "auto";
+});
+document.addEventListener("pointerup", function(){ callDrag = null; });
 var addressLookupTimer = null;
 appEl.addEventListener("input", function(e){
   var t = e.target;
@@ -12680,6 +12758,10 @@ appEl.addEventListener("input", function(e){
     ui.standalonePricer.rateOverride = t.value !== "" ? Number(t.value) : null;
     var spOutBox = document.getElementById("pricer-output-standalone");
     if (spOutBox) spOutBox.innerHTML = buildStandalonePricerOutputHTML(ui.standalonePricer);
+    return;
+  }
+  if (t.dataset.action === "call-live-notes"){
+    ui.callNotes = t.value;
     return;
   }
   if (t.dataset.action === "quick-dial-search"){
