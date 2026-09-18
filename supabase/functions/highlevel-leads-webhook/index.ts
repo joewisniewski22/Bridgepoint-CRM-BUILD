@@ -40,10 +40,11 @@ const CORS_HEADERS = {
   "Content-Type": "application/json",
 };
 
-// Weighted-random 70/30 split (Fanis/David) -- probabilistic per Joe's own
-// phrasing ("70% to Fanis, 30% to David"), not a strict rotating quota.
+// All Spanish-ad leads go to Fanis now -- Joe's instruction 2026-09-18:
+// David isn't calling anyone. This replaced the earlier 70/30 Fanis/David
+// split; restore a split here if David starts working leads again.
 function pickSpanishAdLO(): string {
-  return Math.random() < 0.7 ? "lo-fanis" : "lo-david";
+  return "lo-fanis";
 }
 
 function firstOf(obj: Record<string, unknown>, ...keys: string[]): string | null {
