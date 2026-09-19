@@ -1,5 +1,11 @@
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1b2a47">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bridgepoint">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="assets/icon-180.png">
 <title>Bridgepoint Lending Desk</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -448,6 +454,34 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
   .board{max-height:none}
 }
 .pac-container{z-index:9999 !important}
+
+/* Mobile salesperson view (phone-sized screens, or ?m=1) */
+.m-shell{max-width:560px;margin:0 auto;width:100%;padding:0 12px calc(24px + env(safe-area-inset-bottom));min-height:100vh}
+.m-head{position:sticky;top:0;z-index:20;background:var(--bg);padding:calc(10px + env(safe-area-inset-top)) 0 10px;border-bottom:1px solid var(--border)}
+.m-head-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.m-title{font-weight:700;font-size:.95rem;line-height:1.25}
+.m-head .m-btn{white-space:nowrap;padding:0 12px}
+.m-progress{height:8px;border-radius:99px;background:var(--border);overflow:hidden;margin-top:8px}
+.m-progress>span{display:block;height:100%;background:var(--c-forest, #3b6b4a)}
+.m-tabs{display:flex;gap:6px;margin-top:10px}
+.m-tab{flex:1;min-height:44px;border:1px solid var(--border);background:var(--surface);border-radius:10px;font:inherit;font-weight:600;color:inherit;cursor:pointer}
+.m-tab.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+.m-section{font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted, #6b6459);margin:18px 2px 8px;font-weight:600}
+.m-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:12px;margin-bottom:10px}
+.m-card-top{cursor:pointer}
+.m-name{font-weight:700;font-size:1.05rem}
+.m-sub{font-size:.85rem;color:var(--muted, #6b6459);margin-top:2px}
+.m-reason{font-size:.85rem;margin-top:6px}
+.m-detail{margin-top:8px;padding:8px 10px;background:var(--surface-2);border-radius:10px;font-size:.85rem;display:flex;flex-direction:column;gap:4px}
+.m-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.m-btn{min-height:46px;border:1px solid var(--border);background:var(--surface);border-radius:10px;font:inherit;font-weight:600;color:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;padding:0 8px}
+.m-btn.primary{grid-column:1/-1;background:var(--brand);color:#fff;border-color:var(--brand);font-size:1.05rem;min-height:52px}
+.m-btn.ghost{background:transparent;color:var(--muted, #6b6459)}
+.m-foot{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:22px;font-size:.85rem}
+@media (prefers-color-scheme: dark){ .m-tab.on,.m-btn.primary{color:#10151f} }
+@media (max-width:700px){
+  .call-float{left:8px !important;right:8px !important;top:auto !important;bottom:8px;width:auto}
+}
 </style>
 <div id="app"></div>
 <script id="state-json" type="application/json">{"company":{"name":"Bridgepoint Lending","tagline":"Real Estate Financing Solutions"},"marketRates":{"dscr":{"label":"DSCR","previous":6.625,"current":6.375,"updatedAt":"2026-08-29"},"fixFlip":{"label":"Fix & Flip","previous":9.25,"current":8.75,"updatedAt":"2026-08-29"},"groundUp":{"label":"Ground Up Construction","previous":10.0,"current":9.5,"updatedAt":"2026-08-29"},"portfolio":{"label":"Portfolio / Blanket","previous":6.625,"current":6.375,"updatedAt":"2026-08-29"},"bridge":{"label":"Bridge","previous":9.25,"current":8.75,"updatedAt":"2026-08-29"},"mixedUse":{"label":"Mixed-Use","previous":9.75,"current":9.75,"updatedAt":"2026-06-01"}},"users":[],"notifications":[],"leads":[]}</script>
@@ -6828,7 +6862,7 @@ function render(){
   } else if (ui.view === "portal"){
     app.innerHTML = renderPortal();
   } else {
-    app.innerHTML = renderShell();
+    app.innerHTML = isMobileMode() ? renderMobileShell() : renderShell();
   }
   var modalHost = document.getElementById("modal-host");
   if (modalHost) modalHost.outerHTML = renderModal();
@@ -6853,6 +6887,12 @@ function render(){
     if (notesEl){ notesEl.focus(); try { notesEl.setSelectionRange(notesSel[0], notesSel[1]); } catch(e){} }
   }
 }
+var lastMobileMode = null;
+window.addEventListener("resize", function(){
+  var m = isMobileMode();
+  if (lastMobileMode === null) lastMobileMode = m;
+  if (m !== lastMobileMode){ lastMobileMode = m; if (ui.loggedIn) render(); }
+});
 var lastHistoryKey = null;
 function syncHistory(){
   // Every screen change in this app is just a JS state change (ui.view /
@@ -7297,6 +7337,122 @@ function renderShell(){
   else body = renderToday();
 
   return sidebar + '<div class="main"' + accentStyle + '>' + (prefs.welcomeNote && ui.view==="today" ? ('<div class="panel panel-pad" style="margin:16px 16px 0;border-color:var(--brand)">✨ ' + esc(prefs.welcomeNote) + '</div>') : '') + body + '</div>';
+}
+
+/* ---------------------------------------------------------------------
+   Mobile salesperson view -- Joe's ask (2026-09-18): a simple phone
+   version for the sales team built around the daily 20-call list, with
+   call / text / email / schedule / send application / send term sheet, and
+   a Contacts tab with all of their clients. Every button reuses an existing
+   desktop action -- no separate logic to keep in sync.
+--------------------------------------------------------------------- */
+function isMobileMode(){
+  if (ui.forceDesktop) return false;
+  try {
+    if (/[?&]m=1\b/.test(location.search)) return true;
+    return !!(window.matchMedia && window.matchMedia("(max-width:700px)").matches);
+  } catch(e){ return false; }
+}
+function myCallsToday(userId){
+  var t = todayISO(), n = 0;
+  state.leads.filter(function(l){ return l.assignedTo===userId && isNewBusinessLead(l); }).forEach(function(l){
+    n += (l.callAttempts||[]).filter(function(a){ return a.date===t; }).length;
+  });
+  return n;
+}
+// Skips persist on the lead (lastSkipAt) so they survive a reload; each one
+// asks the queue for one extra slot so today's list still totals the quota.
+function mobileQueue(){
+  var uid = ui.viewAs, quota = effectiveDailyQuota(), t = todayISO();
+  var skippedN = state.leads.filter(function(l){ return l.assignedTo===uid && l.lastSkipAt===t; }).length;
+  var dq = buildDailyCallQueue(uid, quota + skippedN);
+  var keep = function(it){ var l = leadById(it.leadId); return l && l.lastSkipAt !== t; };
+  return { newBusiness: dq.newBusiness.filter(keep).slice(0, quota), followUps: dq.followUps.filter(keep), quota: quota };
+}
+function mobileBtn(label, attrs, cls){
+  return '<button type="button" class="m-btn ' + (cls||"") + '" ' + attrs + '>' + label + '</button>';
+}
+function renderMobileCard(item, opts){
+  opts = opts || {};
+  var lead = leadById(item.leadId);
+  if (!lead) return "";
+  var open = ui.mobileOpen === lead.id;
+  var id = 'data-lead="' + lead.id + '"';
+  var canSendDocs = !isProcessor() && lead.rate && lead.loanAmount;
+  var lastNote = null;
+  (lead.callAttempts||[]).slice().reverse().some(function(a){ if (a.notes){ lastNote = a; return true; } return false; });
+  var detail = open ? ('<div class="m-detail">' +
+    '<div><b>Phone:</b> ' + esc(lead.phone||"—") + '</div>' +
+    (lead.email ? ('<div><b>Email:</b> ' + esc(lead.email) + '</div>') : '') +
+    (lead.propertyAddress ? ('<div><b>Property:</b> ' + esc(lead.propertyAddress) + '</div>') : '') +
+    (lead.loanAmount ? ('<div><b>Loan amount:</b> ' + fmtUSD(lead.loanAmount) + (lead.rate ? (' @ ' + fmtPct(lead.rate)) : '') + '</div>') : '') +
+    (lastNote ? ('<div><b>Last call (' + fmtDate(lastNote.date) + '):</b> ' + esc(lastNote.notes) + '</div>') : '') +
+  '</div>') : '';
+  var actions = '';
+  if (!opts.compact || open){
+    actions = '<div class="m-actions">' +
+      mobileBtn('📞 Call', 'data-action="dialer-call" ' + id, 'primary') +
+      mobileBtn('💬 Text', 'data-action="open-modal" data-modal="sendText" ' + id) +
+      mobileBtn('✉ Email', 'data-action="compose-lead-email" ' + id) +
+      mobileBtn('📝 Log call', 'data-action="open-modal" data-modal="logCall" ' + id) +
+      mobileBtn('📅 Schedule', 'data-action="send-scheduling-link" ' + id) +
+      ((!isProcessor() && canEditApplication(lead)) ? mobileBtn('📄 Send app' + (lead.applicationSentAt ? ' ✓' : ''), 'data-action="open-modal" data-modal="sendApplication" ' + id) : '') +
+      (canSendDocs ? mobileBtn('📑 Term sheet' + (lead.termsheetSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="termSheet" ' + id) : '') +
+      (canSendDocs ? mobileBtn('✅ Pre-approval' + (lead.preapprovalSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="preapproval" ' + id) : '') +
+      (lead.phone ? ('<a class="m-btn ghost" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Use my phone</a>') : '') +
+      (opts.skippable ? mobileBtn('Skip today', 'data-action="m-skip" ' + id, 'ghost') : '') +
+    '</div>';
+  }
+  return '<div class="m-card">' +
+    '<div class="m-card-top" data-action="m-toggle" ' + id + '>' +
+      '<div class="m-name">' + esc(lead.name) + '</div>' +
+      '<div class="m-sub">' + esc(item.label || stageLabel(lead.stage)) + (lead.loanType ? (' · ' + esc(lead.loanType)) : '') + '</div>' +
+      (item.reason && !opts.compact ? ('<div class="m-reason">' + esc(item.reason) + '</div>') : '') +
+    '</div>' + detail + actions +
+  '</div>';
+}
+function mobileContactResults(q){
+  q = (q||"").trim().toLowerCase();
+  var qd = q.replace(/\D/g,"");
+  var all = scopedLeads().filter(function(l){ return l.status !== "spam"; });
+  var hits = all.filter(function(l){
+    if (!q) return true;
+    return (l.name||"").toLowerCase().indexOf(q) !== -1 || (l.email||"").toLowerCase().indexOf(q) !== -1 ||
+      (qd.length >= 3 && (l.phone||"").replace(/\D/g,"").indexOf(qd) !== -1);
+  }).sort(function(a,b){ return (a.name||"").toLowerCase() < (b.name||"").toLowerCase() ? -1 : 1; });
+  var shown = hits.slice(0, 50);
+  return '<div class="footnote" style="padding:4px 2px 8px">' + hits.length + ' contact' + (hits.length===1 ? '' : 's') + (hits.length > shown.length ? ' — showing the first 50, search to narrow' : '') + '</div>' +
+    (shown.length ? shown.map(function(l){ return renderMobileCard({ leadId:l.id, label: stageLabel(l.stage) }, { compact:true }); }).join("") : '<div class="empty">No matches.</div>');
+}
+function renderMobileShell(){
+  var me = currentUser();
+  var tab = ui.mobileTab || "today";
+  var quota = effectiveDailyQuota();
+  var done = myCallsToday(me.id);
+  var pct = quota ? Math.min(100, Math.round(done / quota * 100)) : 100;
+  var body = "";
+  if (tab === "contacts"){
+    body = '<div class="form-row" style="margin-top:12px"><input class="input" type="search" placeholder="Search name, phone or email" value="' + esc(ui.mobileQuery||"") + '" data-action="m-search" style="min-height:46px"></div>' +
+      '<div id="m-search-results">' + mobileContactResults(ui.mobileQuery) + '</div>';
+  } else {
+    var mq = mobileQueue();
+    body = '<div class="m-section">Today\'s calls (' + mq.newBusiness.length + ')</div>' +
+      (mq.newBusiness.length ? mq.newBusiness.map(function(it){ return renderMobileCard(it, { skippable:true }); }).join("") : '<div class="empty">Nothing queued right now.</div>') +
+      (mq.followUps.length ? ('<div class="m-section">Pipeline follow-ups (' + mq.followUps.length + ')</div>' + mq.followUps.map(function(it){ return renderMobileCard(it, {}); }).join("")) : '');
+  }
+  return '<div class="m-shell">' +
+    '<div class="m-head">' +
+      '<div class="m-head-row"><div class="m-title">' + esc((me.name||"").split(" ")[0]) + ' · ' + done + ' / ' + quota + ' calls today</div>' +
+        '<div style="display:flex;gap:6px"><button type="button" class="m-btn" style="min-height:40px" data-action="open-modal" data-modal="addLead">＋ Lead</button>' +
+        '<button type="button" class="m-btn" style="min-height:40px" data-action="start-dialer">▶ Dialer</button></div></div>' +
+      '<div class="m-progress"><span style="width:' + pct + '%"></span></div>' +
+      '<div class="m-tabs"><button type="button" class="m-tab' + (tab==="today" ? " on" : "") + '" data-action="m-tab" data-tab="today">Today</button>' +
+        '<button type="button" class="m-tab' + (tab==="contacts" ? " on" : "") + '" data-action="m-tab" data-tab="contacts">Contacts</button></div>' +
+    '</div>' + body +
+    '<div class="m-foot"><button type="button" class="link-btn" data-action="m-desktop">Desktop site</button>' +
+      '<button type="button" class="link-btn" data-action="open-modal" data-modal="changePin">Change PIN</button>' +
+      '<button type="button" class="link-btn" data-action="logout">Log out</button></div>' +
+  '</div>';
 }
 
 function topbar(title, sub, actionsHTML){
@@ -12336,6 +12492,10 @@ appEl.addEventListener("click", function(e){
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
   else if (action === "softphone-mute"){ toggleSoftphoneMute(); }
+  else if (action === "m-tab"){ ui.mobileTab = t.dataset.tab; ui.mobileOpen = null; render(); }
+  else if (action === "m-toggle"){ ui.mobileOpen = ui.mobileOpen === t.dataset.lead ? null : t.dataset.lead; render(); }
+  else if (action === "m-skip"){ skipQueueItem(t.dataset.lead); ui.mobileOpen = null; render(); }
+  else if (action === "m-desktop"){ ui.forceDesktop = true; render(); }
   else if (action === "reveal-ssn"){ revealGuarantorSsn(t.dataset.lead); }
   else if (action === "hide-ssn"){ hideGuarantorSsn(); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
@@ -12764,6 +12924,12 @@ appEl.addEventListener("input", function(e){
     ui.callNotes = t.value;
     return;
   }
+  if (t.dataset.action === "m-search"){
+    ui.mobileQuery = t.value;
+    var mBox = document.getElementById("m-search-results");
+    if (mBox) mBox.innerHTML = mobileContactResults(t.value);
+    return;
+  }
   if (t.dataset.action === "quick-dial-search"){
     var qdResultsBox = document.getElementById("quick-dial-results");
     if (qdResultsBox) qdResultsBox.innerHTML = renderQuickDialResults(t.value);
@@ -13105,6 +13271,7 @@ appEl.addEventListener("submit", function(e){
    Init
 --------------------------------------------------------------------- */
 render();
+if ("serviceWorker" in navigator){ window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); }); }
 
 })();
 </script>
