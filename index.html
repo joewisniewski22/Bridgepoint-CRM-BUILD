@@ -5291,7 +5291,9 @@ var softphoneResetTimer = null;
 function resetSoftphone(){
   softphoneResetTimer = null;
   if (!ui.loggedIn) return;
-  if (telnyxActiveCall && ui.softphoneCall && ui.softphoneCall.state === "active") return; // never tear down a live conversation
+  // Never tear down the connection while any call exists (ringing or live) --
+  // disconnecting cancels it. Try again once the call is over.
+  if (ui.softphoneCall){ setTimeout(scheduleSoftphoneReset, 5000); return; }
   try { if (telnyxClient) telnyxClient.disconnect(); } catch(e){}
   telnyxClient = null; telnyxReady = false;
   initSoftphone();
@@ -5331,6 +5333,9 @@ function initSoftphone(){
     client.on("telnyx.notification", function(notification){
       if (notification.type !== "callUpdate") return;
       var call = notification.call;
+      // Ignore updates about some other (older) call object -- a stale
+      // "hangup" for a previous call must not end the one now ringing.
+      if (ui.softphoneCall && ui.softphoneCall.callId && call.id && call.id !== ui.softphoneCall.callId && ["hangup","destroy","purge"].indexOf(call.state) !== -1) return;
       telnyxActiveCall = call;
       if (!ui.softphoneCall) { stopRingback(); return; }
       ui.softphoneCall.state = call.state;
@@ -5338,6 +5343,13 @@ function initSoftphone(){
       else stopRingback();
       if (call.state === "hangup"){
         var endedLeadId = ui.softphoneCall.leadId;
+        var lasted = Date.now() - (ui.softphoneCall.startedAt || Date.now());
+        console.warn("softphone: call ended", { cause: call.cause, causeCode: call.causeCode, sipCode: call.sipCode, sipReason: call.sipReason, ms: lasted });
+        // A call that ends within a few seconds on its own (nobody pressed Hang Up)
+        // says why, instead of silently vanishing.
+        if (lasted < 6000 && !ui.softphoneCall.hangupRequested){
+          showToast("Call ended right away" + (call.cause ? (" — " + call.cause) : "") + (call.sipReason ? (" (" + call.sipReason + ")") : "") + ". Try again.");
+        }
         ui.softphoneCall = null;
         telnyxActiveCall = null;
         if (endedLeadId) { ui.modal = { type:"callDisposition", leadId: endedLeadId, fromDialer: !!(ui.modal && ui.modal.fromDialer) }; }
@@ -5380,6 +5392,8 @@ function placeSoftphoneCall(leadId, displayName, e164){
   }));
   try {
     telnyxActiveCall = telnyxClient.newCall({ destinationNumber: e164, callerNumber: TELNYX_CRM_NUMBER, clientState: stateForWebhook });
+    ui.softphoneCall.callId = telnyxActiveCall && telnyxActiveCall.id;
+    ui.softphoneCall.startedAt = Date.now();
   } catch(err){
     console.error("softphone: newCall failed", err);
     abortStuckCall("Couldn't start the call — check that this site is allowed to use your microphone, then try again.");
@@ -5405,6 +5419,7 @@ function abortStuckCall(message){
   scheduleSoftphoneReset();
 }
 function hangupSoftphoneCall(){
+  if (ui.softphoneCall) ui.softphoneCall.hangupRequested = true;
   if (telnyxActiveCall) telnyxActiveCall.hangup();
 }
 function toggleSoftphoneMute(){
