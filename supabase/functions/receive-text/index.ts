@@ -21,6 +21,24 @@ const CORS_HEADERS = {
 
 function extractMessage(body: Record<string, unknown>) {
   const data = (body.data as Record<string, unknown>) || {};
+  // Telnyx (the company number's messaging profile posts here too):
+  // data.event_type "message.received" with data.payload.{from.phone_number,
+  // to[0].phone_number, text, direction}. Other Telnyx event types
+  // (message.sent / message.finalized delivery receipts) are flagged so the
+  // handler can ignore them instead of mistaking them for unrecognized input.
+  if (typeof data.event_type === "string" && data.payload && typeof data.payload === "object") {
+    const p = data.payload as Record<string, unknown>;
+    if (data.event_type !== "message.received") return { ignore: true } as const;
+    const from = (p.from as Record<string, unknown> | undefined)?.phone_number as string | undefined;
+    const toArr = Array.isArray(p.to) ? (p.to as Array<Record<string, unknown>>) : [];
+    return {
+      from: from || null,
+      to: (toArr[0]?.phone_number as string) || null,
+      text: typeof p.text === "string" ? p.text : "",
+      direction: (p.direction as string) || "inbound",
+      via: "Telnyx",
+    };
+  }
   // Newer shape: data.resource.text / data.context.senderIdentifier / recipientIdentifiers
   const resource = data.resource as Record<string, unknown> | undefined;
   const context = data.context as Record<string, unknown> | undefined;
@@ -53,8 +71,13 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json();
-    const msg = extractMessage(body);
+    const extracted = extractMessage(body);
     const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    if (extracted && "ignore" in extracted) {
+      return new Response(JSON.stringify({ ok: true, ignored: "non-received telnyx event" }), { headers: CORS_HEADERS });
+    }
+    const msg = extracted as { from: string | null; to: string | null; text: string; direction: string; via?: string } | null;
+    const via = (msg && msg.via) || "Quo";
 
     if (!msg || !msg.from) {
       // Log the raw payload shape so it can be inspected/fixed without losing the event.
@@ -100,7 +123,7 @@ Deno.serve(async (req: Request) => {
       activity.push({
         date: new Date().toISOString().slice(0, 10),
         type: "text",
-        text: "Received (via Quo): " + msg.text,
+        text: "Received (via " + via + "): " + msg.text,
         author: (match.name as string) || "Borrower",
       });
       await sb.from("leads").update({ activity }).eq("id", match.id as string);

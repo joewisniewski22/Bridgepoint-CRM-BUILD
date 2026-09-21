@@ -399,10 +399,17 @@ Deno.serve(async (req: Request) => {
           to: state.leadPhone, from: TELNYX_FROM_NUMBER, client_state: encodeState(nextState),
         });
       } else if (state.stage === "answering_inbound") {
-        const nextState: CallState = { ...state, stage: "connecting_staff" };
+        const nextState: CallState = { ...state, stage: "connecting_staff", originalCallControlId: callControlId };
         await telnyxAction(callControlId, "transfer", {
           to: state.staffPhone, from: TELNYX_FROM_NUMBER, timeout_secs: TRANSFER_TIMEOUT_SECS, client_state: encodeState(nextState),
         });
+      } else if (state.stage === "ivr_lang_menu") {
+        // First prompt of the unrecognized-caller menu. Nothing ever played
+        // this before (the answer set the stage but no branch spoke), so
+        // callers heard dead air -- caught in review 2026-09-21.
+        await gather(callControlId,
+          "Thank you for calling Bridgepoint Lending. For English, press 1. Para español, oprima 2.",
+          "12", state);
       } else if (state.stage === "ivr_single_connect") {
         // Already mid-transfer -- nothing to do, the eventual hangup/timeout handles the outcome.
       } else if (state.stage === "ivr_ring_all_leg" && state.ringGroupId) {
@@ -452,7 +459,7 @@ Deno.serve(async (req: Request) => {
           if (fanis?.phone) {
             await speak(callControlId, "Un momento, por favor, le comunicamos con un oficial de préstamos.", "es");
             const nextState: CallState = {
-              v: 1, stage: "ivr_single_connect", staffId: fanis.id as string, staffName: fanis.name as string,
+              v: 1, stage: "ivr_single_connect", originalCallControlId: callControlId, staffId: fanis.id as string, staffName: fanis.name as string,
               staffPhone: toE164(fanis.phone as string), callerNumber: state.callerNumber,
               vmTarget: { kind: "staff", staffId: fanis.id as string, label: fanis.name as string },
             };
@@ -491,7 +498,7 @@ Deno.serve(async (req: Request) => {
           const { data: erika } = await sb.from("users").select("id, name, phone").eq("id", PROCESSING_STAFF_ID).single();
           if (erika?.phone) {
             const nextState: CallState = {
-              v: 1, stage: "ivr_single_connect", staffId: erika.id as string, staffName: erika.name as string,
+              v: 1, stage: "ivr_single_connect", originalCallControlId: callControlId, staffId: erika.id as string, staffName: erika.name as string,
               staffPhone: toE164(erika.phone as string), callerNumber: state.callerNumber,
               vmTarget: { kind: "staff", staffId: erika.id as string, label: "Processing" },
             };
@@ -512,7 +519,7 @@ Deno.serve(async (req: Request) => {
           const { data: lo } = await sb.from("users").select("id, name, phone").eq("id", targetId).single();
           if (lo?.phone) {
             const nextState: CallState = {
-              v: 1, stage: "ivr_single_connect", staffId: lo.id as string, staffName: lo.name as string,
+              v: 1, stage: "ivr_single_connect", originalCallControlId: callControlId, staffId: lo.id as string, staffName: lo.name as string,
               staffPhone: toE164(lo.phone as string), callerNumber: state.callerNumber,
               vmTarget: { kind: "staff", staffId: lo.id as string, label: lo.name as string },
             };
@@ -596,7 +603,10 @@ Deno.serve(async (req: Request) => {
         if (neverConnected) {
           // The assigned staff member didn't pick up -- fall to a
           // personalized voicemail instead of just dropping the call.
-          await startVoicemail(callControlId,
+          // The timed-out transfer's hangup event may carry the dead staff
+          // leg's id rather than the caller's -- voicemail has to run on the
+          // caller's own leg.
+          await startVoicemail(state.originalCallControlId || callControlId,
             "You've reached " + (state.staffName || "your loan officer") + " at Bridgepoint Lending. Please leave your name, number, and a brief message after the tone.",
             "en", { kind: "staff", staffId: state.staffId || null, label: state.staffName || "Loan officer" }, state.leadId, state.callerNumber);
         } else if (state.leadId) {
@@ -607,7 +617,7 @@ Deno.serve(async (req: Request) => {
         }
       } else if (state.stage === "ivr_single_connect") {
         if (neverConnected) {
-          await startVoicemail(callControlId,
+          await startVoicemail(state.originalCallControlId || callControlId,
             "You've reached " + (state.staffName || "Bridgepoint Lending") + ". Please leave your name, number, and a brief message after the tone.",
             "en", state.vmTarget, null, state.callerNumber);
         }

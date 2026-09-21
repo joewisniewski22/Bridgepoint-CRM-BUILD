@@ -5238,6 +5238,24 @@ function stopRingback(){
   ringbackOscs.forEach(function(o){ try { o.stop(); } catch(e){} });
   ringbackOscs = [];
 }
+var softphoneResetTimer = null;
+function resetSoftphone(){
+  softphoneResetTimer = null;
+  if (!ui.loggedIn) return;
+  if (telnyxActiveCall && ui.softphoneCall && ui.softphoneCall.state === "active") return; // never tear down a live conversation
+  try { if (telnyxClient) telnyxClient.disconnect(); } catch(e){}
+  telnyxClient = null; telnyxReady = false;
+  initSoftphone();
+}
+function scheduleSoftphoneReset(){
+  if (softphoneResetTimer) return;
+  telnyxReady = false;
+  softphoneResetTimer = setTimeout(resetSoftphone, 1500);
+}
+document.addEventListener("visibilitychange", function(){
+  if (!document.hidden && ui.loggedIn && !telnyxReady && !ui.softphoneCall) scheduleSoftphoneReset();
+});
+window.addEventListener("online", function(){ if (ui.loggedIn && !ui.softphoneCall) scheduleSoftphoneReset(); });
 function initSoftphone(){
   if (!sb || telnyxClient) return;
   var uid = currentUser().id;
@@ -5253,8 +5271,14 @@ function initSoftphone(){
     client.on("telnyx.ready", function(){ telnyxReady = true; console.log("softphone: connected"); });
     client.on("telnyx.error", function(err){
       console.error("softphone error", err);
-      showToast("Softphone connection issue — try your call again in a moment");
+      showToast("Softphone connection issue — reconnecting…");
+      scheduleSoftphoneReset();
     });
+    // The phone connection can silently die (laptop sleep, network blip,
+    // long-idle tab). A dead one leaves calls stuck on "Calling…" forever,
+    // so rebuild it as soon as the socket drops -- Joe's report 2026-09-21.
+    client.on("telnyx.socket.close", function(){ console.warn("softphone: socket closed"); scheduleSoftphoneReset(); });
+    client.on("telnyx.socket.error", function(){ console.warn("softphone: socket error"); scheduleSoftphoneReset(); });
     client.on("telnyx.notification", function(notification){
       if (notification.type !== "callUpdate") return;
       var call = notification.call;
@@ -5302,7 +5326,31 @@ function placeSoftphoneCall(leadId, displayName, e164){
     v: 1, stage: "webrtc_outbound", leadId: leadId||null, leadName: displayName,
     staffId: me.id, staffName: me.name,
   }));
-  telnyxActiveCall = telnyxClient.newCall({ destinationNumber: e164, callerNumber: TELNYX_CRM_NUMBER, clientState: stateForWebhook });
+  try {
+    telnyxActiveCall = telnyxClient.newCall({ destinationNumber: e164, callerNumber: TELNYX_CRM_NUMBER, clientState: stateForWebhook });
+  } catch(err){
+    console.error("softphone: newCall failed", err);
+    abortStuckCall("Couldn't start the call — check that this site is allowed to use your microphone, then try again.");
+    return;
+  }
+  // Watchdog: if the call never even reaches the phone network (state never
+  // moves past new/requesting), don't leave the user staring at "Calling…".
+  var watched = ui.softphoneCall;
+  setTimeout(function(){
+    if (ui.softphoneCall === watched && (watched.state === "new" || watched.state === "requesting")){
+      abortStuckCall("Couldn't reach the phone system — reconnecting. Try the call again in a few seconds.");
+    }
+  }, 12000);
+}
+function abortStuckCall(message){
+  try { if (telnyxActiveCall) telnyxActiveCall.hangup(); } catch(e){}
+  stopRingback();
+  telnyxActiveCall = null;
+  ui.softphoneCall = null;
+  ui.modal = null;
+  showToast(message);
+  render();
+  scheduleSoftphoneReset();
 }
 function hangupSoftphoneCall(){
   if (telnyxActiveCall) telnyxActiveCall.hangup();
