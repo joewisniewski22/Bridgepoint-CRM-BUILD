@@ -59,6 +59,9 @@ const TRANSFER_TIMEOUT_SECS = 25;
 const RING_ALL_TIMEOUT_SECS = 25;
 const SPANISH_LO_ID = "lo-fanis"; // Joe's explicit choice for the Spanish IVR branch
 const PROCESSING_STAFF_ID = "proc-erika";
+// Natural-sounding neural voices chosen by Joe on 2026-09-21: English = option D (Ava Multilingual), Spanish = option 2 (Dalia, native es-MX).
+const VOICE_EN = "Azure.en-US-AvaMultilingualNeural";
+const VOICE_ES = "Azure.es-MX-DaliaNeural";
 // Loan officers who are not taking calls: left out of ring-all, the directory
 // and team voicemail alerts. David -- Joe, 2026-09-21 (he is not calling anyone).
 // Remove the id from this list to put someone back in.
@@ -145,7 +148,7 @@ async function telnyxCreateCall(body: Record<string, unknown>) {
 function speak(callControlId: string, text: string, lang: "en" | "es") {
   return telnyxAction(callControlId, "speak", {
     payload: text,
-    voice: "female",
+    voice: lang === "es" ? VOICE_ES : VOICE_EN,
     language: lang === "es" ? "es-MX" : "en-US",
   });
 }
@@ -153,7 +156,7 @@ function speak(callControlId: string, text: string, lang: "en" | "es") {
 function gather(callControlId: string, text: string, validDigits: string, state: CallState, lang: "en" | "es" = "en") {
   return telnyxAction(callControlId, "gather_using_speak", {
     payload: text,
-    voice: "female",
+    voice: lang === "es" ? VOICE_ES : VOICE_EN,
     language: lang === "es" ? "es-MX" : "en-US",
     valid_digits: validDigits,
     minimum_digits: 1,
