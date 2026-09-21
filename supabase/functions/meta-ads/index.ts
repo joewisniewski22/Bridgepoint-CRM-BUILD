@@ -125,6 +125,28 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, result: result.data }), { headers: CORS_HEADERS });
     }
 
+    if (action === "whoami") {
+      const result = await graphFetch("/me", { fields: "id,name" });
+      return new Response(JSON.stringify({ ok: result.ok, result: result.data }), { headers: CORS_HEADERS });
+    }
+
+    if (action === "page-token-check") {
+      const pageId: string = body.pageId;
+      if (!pageId) return new Response(JSON.stringify({ error: "missing_fields", detail: "pageId is required" }), { status: 400, headers: CORS_HEADERS });
+      const result = await graphFetch("/" + pageId, { fields: "access_token,name" });
+      return new Response(JSON.stringify({ ok: result.ok, result: result.data }), { headers: CORS_HEADERS });
+    }
+
+    // Account-level check -- doesn't need the extra Page permissions
+    // (pages_read_engagement) that "page-instagram" above requires;
+    // ads_management alone is enough to see which Instagram account(s)
+    // the ad account itself can already use for ad creative.
+    if (action === "account-instagram") {
+      const result = await graphFetch("/act_" + META_AD_ACCOUNT_ID + "/instagram_accounts", { fields: "id,username" });
+      if (!result.ok) return new Response(JSON.stringify({ error: "meta_error", detail: result.data }), { status: 502, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ ok: true, result: result.data }), { headers: CORS_HEADERS });
+    }
+
     if (action === "set-status") {
       const campaignId: string = body.campaignId;
       const status: string = body.status; // "ACTIVE" | "PAUSED"
