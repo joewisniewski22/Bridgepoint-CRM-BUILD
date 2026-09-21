@@ -5221,10 +5221,11 @@ var telnyxActiveCall = null;
 var telnyxReady = false;
 var TELNYX_CRM_NUMBER = "+18502798588";
 // Master switch for calling through the computer (WebRTC softphone). Joe paused
-// it 2026-09-21 ("stop the soft phone for now" -- it kept reconnecting). Flip to
-// true to bring it back; nothing else needs to change. Inbound calls, texting
-// and the phone menu don't use it.
-var SOFTPHONE_ENABLED = false;
+// it 2026-09-21 ("stop the soft phone for now" -- it kept reconnecting), then
+// turned it back on the same day with a capped reconnect. Set to false to pause
+// it again; nothing else needs to change. Inbound calls, texting and the phone
+// menu don't use it.
+var SOFTPHONE_ENABLED = true;
 function toE164Phone(raw){
   var digits = (raw||"").replace(/\D/g,"");
   if (!digits) return "";
@@ -5293,20 +5294,33 @@ function stopRingback(){
   ringbackOscs = [];
 }
 var softphoneResetTimer = null;
+// Reconnecting backs off (1.5s, 3s, 6s, 12s) and gives up after 4 tries with
+// one clear message, instead of reconnecting forever -- the endless loop is why
+// Joe paused the softphone on 2026-09-21. A successful connection resets it.
+var softphoneResetCount = 0;
+var softphoneGaveUp = false;
 function resetSoftphone(){
   softphoneResetTimer = null;
   if (!ui.loggedIn) return;
   // Never tear down the connection while any call exists (ringing or live) --
   // disconnecting cancels it. Try again once the call is over.
   if (ui.softphoneCall){ setTimeout(scheduleSoftphoneReset, 5000); return; }
+  softphoneResetCount++;
   try { if (telnyxClient) telnyxClient.disconnect(); } catch(e){}
   telnyxClient = null; telnyxReady = false;
   initSoftphone();
 }
 function scheduleSoftphoneReset(){
   if (!SOFTPHONE_ENABLED || softphoneResetTimer) return;
+  if (softphoneResetCount >= 4){
+    if (!softphoneGaveUp){
+      softphoneGaveUp = true;
+      showToast("The softphone can't stay connected. Refresh the page and close any other CRM tabs or windows, then try again.");
+    }
+    return;
+  }
   telnyxReady = false;
-  softphoneResetTimer = setTimeout(resetSoftphone, 1500);
+  softphoneResetTimer = setTimeout(resetSoftphone, Math.min(12000, 1500 * Math.pow(2, softphoneResetCount)));
 }
 document.addEventListener("visibilitychange", function(){
   if (!document.hidden && ui.loggedIn && !telnyxReady && !ui.softphoneCall) scheduleSoftphoneReset();
@@ -5324,10 +5338,10 @@ function initSoftphone(){
     if (!TelnyxNs || !TelnyxNs.TelnyxRTC){ console.warn("softphone: SDK didn't load"); return; }
     var client = new TelnyxNs.TelnyxRTC({ login_token: res.data.token });
     client.remoteElement = "telnyx-remote-audio";
-    client.on("telnyx.ready", function(){ telnyxReady = true; console.log("softphone: connected"); });
+    client.on("telnyx.ready", function(){ telnyxReady = true; softphoneResetCount = 0; softphoneGaveUp = false; console.log("softphone: connected"); });
     client.on("telnyx.error", function(err){
       console.error("softphone error", err);
-      showToast("Softphone connection issue — reconnecting…");
+      if (softphoneResetCount === 0) showToast("Softphone connection issue — reconnecting…");
       scheduleSoftphoneReset();
     });
     // The phone connection can silently die (laptop sleep, network blip,
@@ -5376,6 +5390,10 @@ function placeSoftphoneCall(leadId, displayName, e164){
   if (!SOFTPHONE_ENABLED){
     showToast("Calling from the computer is paused for now — dial " + (displayName || "them") + " from your phone, then log the call here.");
     return;
+  }
+  if (softphoneGaveUp && !telnyxReady){
+    // Clicking Call is an explicit retry: start the reconnect cycle over.
+    softphoneGaveUp = false; softphoneResetCount = 0; scheduleSoftphoneReset();
   }
   if (!telnyxClient || !telnyxReady){
     showToast("Softphone still connecting — try again in a couple seconds");
