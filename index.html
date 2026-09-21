@@ -2678,7 +2678,7 @@ function startDialer(){
   var seen = {}, uniq = [];
   ids.forEach(function(id){ if (!seen[id]){ seen[id]=true; uniq.push(id); } });
   if (!uniq.length){ showToast(effectiveDailyQuota() > 0 && remainingDailyQuota(myId) === 0 ? "You've made all of today's calls — nice work" : "No calls queued right now"); return; }
-  ui.dialer = { queueIds: uniq, itemsByLead: itemsByLead, index: 0, userId: myId, autoDial: true };
+  ui.dialer = { queueIds: uniq, itemsByLead: itemsByLead, index: 0, userId: myId, autoDial: SOFTPHONE_ENABLED };
   ui.modal = { type: "dialer" };
   render();
 }
@@ -5220,6 +5220,11 @@ var telnyxClient = null;
 var telnyxActiveCall = null;
 var telnyxReady = false;
 var TELNYX_CRM_NUMBER = "+18502798588";
+// Master switch for calling through the computer (WebRTC softphone). Joe paused
+// it 2026-09-21 ("stop the soft phone for now" -- it kept reconnecting). Flip to
+// true to bring it back; nothing else needs to change. Inbound calls, texting
+// and the phone menu don't use it.
+var SOFTPHONE_ENABLED = false;
 function toE164Phone(raw){
   var digits = (raw||"").replace(/\D/g,"");
   if (!digits) return "";
@@ -5299,7 +5304,7 @@ function resetSoftphone(){
   initSoftphone();
 }
 function scheduleSoftphoneReset(){
-  if (softphoneResetTimer) return;
+  if (!SOFTPHONE_ENABLED || softphoneResetTimer) return;
   telnyxReady = false;
   softphoneResetTimer = setTimeout(resetSoftphone, 1500);
 }
@@ -5308,7 +5313,7 @@ document.addEventListener("visibilitychange", function(){
 });
 window.addEventListener("online", function(){ if (ui.loggedIn && !ui.softphoneCall) scheduleSoftphoneReset(); });
 function initSoftphone(){
-  if (!sb || telnyxClient) return;
+  if (!SOFTPHONE_ENABLED || !sb || telnyxClient) return;
   var uid = currentUser().id;
   sb.functions.invoke("get-webrtc-token", { body: { userId: uid } }).then(function(res){
     if (res.error || !res.data || !res.data.ok){
@@ -5368,6 +5373,10 @@ function initSoftphone(){
   }).catch(function(err){ console.warn("softphone init failed", err); });
 }
 function placeSoftphoneCall(leadId, displayName, e164){
+  if (!SOFTPHONE_ENABLED){
+    showToast("Calling from the computer is paused for now — dial " + (displayName || "them") + " from your phone, then log the call here.");
+    return;
+  }
   if (!telnyxClient || !telnyxReady){
     showToast("Softphone still connecting — try again in a couple seconds");
     if (!telnyxClient) initSoftphone();
@@ -7570,7 +7579,9 @@ function renderMobileCard(item, opts){
   var actions = '';
   if (!opts.compact || open){
     actions = '<div class="m-actions">' +
-      mobileBtn('📞 Call', 'data-action="dialer-call" ' + id, 'primary') +
+      (SOFTPHONE_ENABLED
+        ? mobileBtn('📞 Call', 'data-action="dialer-call" ' + id, 'primary')
+        : (lead.phone ? ('<a class="m-btn primary" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">📞 Call from my phone</a>') : '')) +
       mobileBtn('💬 Text', 'data-action="open-modal" data-modal="sendText" ' + id) +
       mobileBtn('✉ Email', 'data-action="compose-lead-email" ' + id) +
       mobileBtn('📝 Log call', 'data-action="open-modal" data-modal="logCall" ' + id) +
@@ -7578,7 +7589,7 @@ function renderMobileCard(item, opts){
       ((!isProcessor() && canEditApplication(lead)) ? mobileBtn('📄 Send app' + (lead.applicationSentAt ? ' ✓' : ''), 'data-action="open-modal" data-modal="sendApplication" ' + id) : '') +
       (canSendDocs ? mobileBtn('📑 Term sheet' + (lead.termsheetSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="termSheet" ' + id) : '') +
       (canSendDocs ? mobileBtn('✅ Pre-approval' + (lead.preapprovalSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="preapproval" ' + id) : '') +
-      (lead.phone ? ('<a class="m-btn ghost" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Use my phone</a>') : '') +
+      ((SOFTPHONE_ENABLED && lead.phone) ? ('<a class="m-btn ghost" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Use my phone</a>') : '') +
       (opts.skippable ? mobileBtn('Skip today', 'data-action="m-skip" ' + id, 'ghost') : '') +
     '</div>';
   }
@@ -11214,7 +11225,7 @@ function modalQuickDial(){
             '</div>' +
           '</div>' +
         '</form>' +
-        '<div class="footnote" style="padding-top:8px">Calls straight through the CRM using the business line — talk through your computer, no phone involved.</div>' +
+        '<div class="footnote" style="padding-top:8px">' + (SOFTPHONE_ENABLED ? 'Calls straight through the CRM using the business line — talk through your computer, no phone involved.' : 'Calling from the computer is paused for now — dial from your phone, then log the call here.') + '</div>' +
       '</div>' +
     '</div></div>';
 }
