@@ -282,13 +282,13 @@ async function sendMissedCallText(opts: { leadId: string; staffId: string | null
 // first gets bridged to the caller, the rest get hung up. voice_ring_groups
 // is the only way to coordinate that across separate, stateless webhook
 // invocations for each leg.
-async function startRingAllLoanOfficers(originalCallControlId: string) {
+async function startRingAllLoanOfficers(originalCallControlId: string, callerNumber?: string) {
   const { data: los } = await sb.from("users").select("id, name, phone").eq("role", "loan_officer").not("id", "like", "demo%").not("id", "in", PHONE_TREE_EXCLUDED_FILTER);
   const withPhones = (los || []).filter((u) => u.phone);
   if (!withPhones.length) {
     await startVoicemail(originalCallControlId,
       "All of our loan officers are currently unavailable. Please leave your name, number, and a brief description of your project after the tone, and we'll call you back as soon as possible.",
-      "en", { kind: "all_los", label: "New loan inquiry" }, null, undefined);
+      "en", { kind: "all_los", label: "New loan inquiry" }, null, callerNumber);
     return;
   }
 
@@ -296,7 +296,7 @@ async function startRingAllLoanOfficers(originalCallControlId: string) {
   const legIds: string[] = [];
   for (const lo of withPhones) {
     const legState: CallState = {
-      v: 1, stage: "ivr_ring_all_leg", ringGroupId, originalCallControlId,
+      v: 1, stage: "ivr_ring_all_leg", ringGroupId, originalCallControlId, callerNumber,
       staffId: lo.id as string, staffName: lo.name as string,
     };
     const res = await telnyxCreateCall({
@@ -313,7 +313,7 @@ async function startRingAllLoanOfficers(originalCallControlId: string) {
   if (!legIds.length) {
     await startVoicemail(originalCallControlId,
       "All of our loan officers are currently unavailable. Please leave your name, number, and a brief description of your project after the tone, and we'll call you back as soon as possible.",
-      "en", { kind: "all_los", label: "New loan inquiry" }, null, undefined);
+      "en", { kind: "all_los", label: "New loan inquiry" }, null, callerNumber);
     return;
   }
 
@@ -474,7 +474,7 @@ Deno.serve(async (req: Request) => {
       } else if (state.stage === "ivr_main_menu") {
         if (digits === "1") {
           await speak(callControlId, "Please hold while we connect you to one of our loan officers.", "en");
-          await startRingAllLoanOfficers(callControlId);
+          await startRingAllLoanOfficers(callControlId, state.callerNumber);
         } else if (digits === "2") {
           const { data: los } = await sb.from("users").select("id, name, phone").eq("role", "loan_officer").not("phone", "is", null).not("id", "like", "demo%").not("id", "in", PHONE_TREE_EXCLUDED_FILTER).order("name");
           const list = los || [];
@@ -637,21 +637,16 @@ Deno.serve(async (req: Request) => {
       } else if (state.stage === "ivr_ring_all_leg" && state.ringGroupId) {
         // One leg of the ring group ended (answered-and-lost, timed out, or busy).
         // If this was the LAST leg to end and nobody ever won, send the caller to voicemail.
-        // Read-increment-write, not atomic -- fine here since legs_ended only
-        // needs to reach legs_total once, and a rare double-fire just re-checks
-        // a condition that's already true (startVoicemail on an already-recording
-        // leg just fails harmlessly, logged by telnyxAction).
-        const { data: row } = await sb.from("voice_ring_groups").select("*").eq("id", state.ringGroupId).single();
-        let group = row;
-        if (row) {
-          const newEnded = (row.legs_ended as number) + 1;
-          const { data: updated } = await sb.from("voice_ring_groups").update({ legs_ended: newEnded }).eq("id", state.ringGroupId).select().single();
-          group = updated || row;
-        }
-        if (group && !group.winner_call_control_id && (group.legs_ended as number) >= (group.legs_total as number)) {
+        // The increment is atomic in the database (voice_ring_group_leg_ended):
+        // every leg usually times out in the same second, and the old
+        // read-then-write could lose counts so the last leg never saw the
+        // total and the caller got silence instead of voicemail. Exactly one
+        // invocation gets legs_ended === legs_total, so voicemail starts once.
+        const { data: group } = await sb.rpc("voice_ring_group_leg_ended", { p_id: state.ringGroupId });
+        if (group && !group.winner_call_control_id && (group.legs_ended as number) === (group.legs_total as number)) {
           await startVoicemail(group.original_call_control_id as string,
             "All of our loan officers are currently unavailable. Please leave your name, number, and a brief description of your project after the tone, and we'll call you back as soon as possible.",
-            "en", { kind: "all_los", label: "New loan inquiry" }, null, undefined);
+            "en", { kind: "all_los", label: "New loan inquiry" }, null, state.callerNumber);
         }
       } else if (state.stage === "direct_dial_leg" && state.pairId) {
         const { data: pairRow } = await sb.from("voice_direct_dial_pairs").select("*").eq("id", state.pairId).single();
