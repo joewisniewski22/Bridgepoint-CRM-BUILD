@@ -93,7 +93,7 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, skipped: true }), { headers: CORS_HEADERS });
     }
 
-    const { data: lo } = await sb.from("users").select("id,name,phone,email,quo_phone_number").eq("id", lead.assigned_to).single();
+    const { data: lo } = await sb.from("users").select("id,name,phone,email").eq("id", lead.assigned_to).single();
     const loName = (lo && lo.name) || "your loan officer";
     const awaitingLanguage = lead.ai_stage === "awaiting_language";
     const lang = lead.preferred_language === "es" ? "Spanish" : "English";
@@ -215,7 +215,7 @@ Deno.serve(async (req: Request) => {
       if (lead.phone) {
         await fetch(SUPABASE_URL + "/functions/v1/send-text", {
           method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-          body: JSON.stringify({ leadId, to: lead.phone, text: appMsg, fromName: loName, fromNumber: (lo && lo.quo_phone_number) || null, initiatedBy: "ai" }),
+          body: JSON.stringify({ leadId, to: lead.phone, text: appMsg, fromName: loName, initiatedBy: "ai" }),
         }).catch(() => {});
       }
       if (lead.email) {
@@ -231,7 +231,7 @@ Deno.serve(async (req: Request) => {
       const sendRes = await fetch(SUPABASE_URL + "/functions/v1/send-text", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-        body: JSON.stringify({ leadId, to: lead.phone, text: replyText, fromName: loName, fromNumber: (lo && lo.quo_phone_number) || null, initiatedBy: "ai" }),
+        body: JSON.stringify({ leadId, to: lead.phone, text: replyText, fromName: loName, initiatedBy: "ai" }),
       });
       sendResult = await sendRes.json();
     }

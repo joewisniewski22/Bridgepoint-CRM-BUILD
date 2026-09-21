@@ -37,7 +37,7 @@ Deno.serve(async (req: Request) => {
       // Only ever an inbound message with literally nothing after it --
       // never a lead that already got a reply and simply hasn't answered
       // back yet.
-      if (last.type === "text" && typeof last.text === "string" && last.text.indexOf("Received (via Quo):") === 0) {
+      if (last.type === "text" && typeof last.text === "string" && /^Received (via (Quo|Telnyx)):/.test(last.text)) {
         stalled.push(lead.id as string);
       }
     }

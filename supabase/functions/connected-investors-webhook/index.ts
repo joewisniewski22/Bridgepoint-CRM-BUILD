@@ -188,7 +188,7 @@ Deno.serve(async (req: Request) => {
       id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: assignedTo, lead_id: id,
       kind: "hot-lead", text: alertText, date: today, read: false,
     });
-    const { data: assignee } = await sb.from("users").select("id,name,email,phone,quo_phone_number,photo_url").eq("id", assignedTo).single();
+    const { data: assignee } = await sb.from("users").select("id,name,email,phone,photo_url").eq("id", assignedTo).single();
     if (assignee?.phone) {
       fetch(SUPABASE_URL + "/functions/v1/send-text", {
         method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
@@ -248,7 +248,7 @@ Deno.serve(async (req: Request) => {
           if (phone) {
             sendCalls.push(fetch(SUPABASE_URL + "/functions/v1/send-text", {
               method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-              body: JSON.stringify({ leadId: id, to: phone, text: message, fromName: assignee.name, fromNumber: assignee.quo_phone_number || null, initiatedBy: "ai" }),
+              body: JSON.stringify({ leadId: id, to: phone, text: message, fromName: assignee.name, initiatedBy: "ai" }),
             }).catch(() => {}));
           }
           await Promise.all(sendCalls);

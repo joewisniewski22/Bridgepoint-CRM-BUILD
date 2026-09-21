@@ -424,7 +424,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     if (error) return { error: error.message };
     const link = "https://bridgepoint-crm-build.vercel.app/?lead=" + id;
     if (input.notifyAssignee !== false && assignedTo) {
-      const { data: assignee } = await sb.from("users").select("email,phone,name,quo_phone_number").eq("id", assignedTo).single();
+      const { data: assignee } = await sb.from("users").select("email,phone,name").eq("id", assignedTo).single();
       if (assignee?.email) {
         fetch(SUPABASE_URL + "/functions/v1/send-email", {
           method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
@@ -562,7 +562,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     return { ok: true, leadId: input.leadId };
   }
   if (name === "email_team" || name === "text_team") {
-    let query = sb.from("users").select("id,name,email,phone,quo_phone_number,role").neq("id", "demo").neq("id", "demo-processor");
+    let query = sb.from("users").select("id,name,email,phone,role").neq("id", "demo").neq("id", "demo-processor");
     const recipients = input.recipients as string;
     if (recipients === "loan_officers") query = query.eq("role", "loan_officer");
     else if (recipients === "processors") query = query.eq("role", "processor");
@@ -678,10 +678,10 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
 
     const loIds = [...new Set(leads.map((l) => l.assigned_to).filter(Boolean))] as string[];
     const { data: staffRows } = loIds.length
-      ? await sb.from("users").select("id,name,phone,quo_phone_number").in("id", loIds)
+      ? await sb.from("users").select("id,name,phone").in("id", loIds)
       : { data: [] as Record<string, unknown>[] };
-    const staffMap: Record<string, { name?: string; phone?: string; quo_phone_number?: string }> = {};
-    (staffRows || []).forEach((s) => { staffMap[s.id as string] = s as { name?: string; phone?: string; quo_phone_number?: string }; });
+    const staffMap: Record<string, { name?: string; phone?: string }> = {};
+    (staffRows || []).forEach((s) => { staffMap[s.id as string] = s as { name?: string; phone?: string }; });
 
     const recipients = leads
       .map((l) => {
@@ -694,7 +694,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
           leadId: l.id, name: l.name, firstName: (l.name || "there").split(" ")[0],
           email: l.email || null, phone: phoneAllowed ? (l.phone || null) : null, loanType: l.loan_type || null,
           loId: l.assigned_to || null, loName: lo.name || "your Bridgepoint contact",
-          loPhone: lo.quo_phone_number || lo.phone || "",
+          loPhone: "(850) 279-8588", // the one company number -- never a personal cell
           bookingLink: "https://bridgepoint-crm-build.vercel.app/?book=" + (l.assigned_to || "owner"),
         };
       })
@@ -729,7 +729,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     const converted = rows.filter((l) => ["app_sent", "app_completed", "docs", "processing", "underwriting", "approved", "ctc", "closed", "postclosing"].includes(l.stage as string));
     const optedOut = rows.filter((l) => (Array.isArray(l.activity) ? l.activity : []).some((a: Record<string, unknown>) => typeof a.text === "string" && a.text.toLowerCase().includes("tcpa opt-out")));
     const cold = rows.filter((l) => l.status === "cold" || l.status === "lost");
-    const repliedToAiText = rows.filter((l) => l.ai_stage && (Array.isArray(l.activity) ? l.activity : []).some((a: Record<string, unknown>) => typeof a.text === "string" && a.text.startsWith("Received (via Quo)")));
+    const repliedToAiText = rows.filter((l) => l.ai_stage && (Array.isArray(l.activity) ? l.activity : []).some((a: Record<string, unknown>) => typeof a.text === "string" && /^Received (via (Quo|Telnyx))/.test(a.text)));
 
     const byLoanType: Record<string, { total: number; converted: number }> = {};
     rows.forEach((l) => {

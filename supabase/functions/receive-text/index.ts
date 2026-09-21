@@ -1,11 +1,7 @@
-// Inbound webhook for texts received via Quo (formerly OpenPhone). Point
-// Quo's webhook (message.received event) at this function's URL.
-//
-// Quo's own docs disagree with themselves on the exact payload shape across
-// two doc versions found during setup, so this parses defensively and
-// accepts either the newer nested shape or the older flatter one rather
-// than assuming one is correct. If Quo's real payload turns out to be a
-// third shape, check the "raw" activity note this logs and adjust.
+// Inbound webhook for the company number's Telnyx messaging profile
+// (message.received = a client/staff text arriving; message.finalized = the
+// carrier's final verdict on something we sent). Replaced the Quo webhook
+// 2026-09-21. A failed delivery is logged onto the lead so it isn't silent.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -19,48 +15,36 @@ const CORS_HEADERS = {
   "Content-Type": "application/json",
 };
 
-function extractMessage(body: Record<string, unknown>) {
+type Extracted =
+  | { kind: "message"; from: string | null; to: string | null; text: string; direction: string }
+  | { kind: "receipt"; to: string | null; status: string; detail: string }
+  | { kind: "ignore" };
+
+function extractMessage(body: Record<string, unknown>): Extracted | null {
   const data = (body.data as Record<string, unknown>) || {};
-  // Telnyx (the company number's messaging profile posts here too):
-  // data.event_type "message.received" with data.payload.{from.phone_number,
-  // to[0].phone_number, text, direction}. Other Telnyx event types
-  // (message.sent / message.finalized delivery receipts) are flagged so the
-  // handler can ignore them instead of mistaking them for unrecognized input.
-  if (typeof data.event_type === "string" && data.payload && typeof data.payload === "object") {
-    const p = data.payload as Record<string, unknown>;
-    if (data.event_type !== "message.received") return { ignore: true } as const;
-    const from = (p.from as Record<string, unknown> | undefined)?.phone_number as string | undefined;
-    const toArr = Array.isArray(p.to) ? (p.to as Array<Record<string, unknown>>) : [];
+  if (typeof data.event_type !== "string" || !data.payload || typeof data.payload !== "object") return null;
+  const p = data.payload as Record<string, unknown>;
+  const toArr = Array.isArray(p.to) ? (p.to as Array<Record<string, unknown>>) : [];
+
+  if (data.event_type === "message.finalized") {
+    const errors = Array.isArray(p.errors) ? (p.errors as Array<Record<string, unknown>>) : [];
     return {
-      from: from || null,
+      kind: "receipt",
       to: (toArr[0]?.phone_number as string) || null,
-      text: typeof p.text === "string" ? p.text : "",
-      direction: (p.direction as string) || "inbound",
-      via: "Telnyx",
+      status: (toArr[0]?.status as string) || "",
+      detail: (errors[0]?.detail as string) || (errors[0]?.title as string) || "",
     };
   }
-  // Newer shape: data.resource.text / data.context.senderIdentifier / recipientIdentifiers
-  const resource = data.resource as Record<string, unknown> | undefined;
-  const context = data.context as Record<string, unknown> | undefined;
-  if (resource && typeof resource.text === "string") {
-    return {
-      from: (context && (context.senderIdentifier as string)) || null,
-      to: (context && Array.isArray(context.recipientIdentifiers) ? (context.recipientIdentifiers as string[])[0] : null),
-      text: resource.text as string,
-      direction: (resource.direction as string) || "incoming",
-    };
-  }
-  // Older shape: data.object.from / to / body
-  const obj = data.object as Record<string, unknown> | undefined;
-  if (obj && typeof obj.body === "string") {
-    return {
-      from: (obj.from as string) || null,
-      to: Array.isArray(obj.to) ? (obj.to as string[])[0] : (obj.to as string) || null,
-      text: obj.body as string,
-      direction: (obj.direction as string) || "incoming",
-    };
-  }
-  return null;
+  if (data.event_type !== "message.received") return { kind: "ignore" };
+
+  const from = (p.from as Record<string, unknown> | undefined)?.phone_number as string | undefined;
+  return {
+    kind: "message",
+    from: from || null,
+    to: (toArr[0]?.phone_number as string) || null,
+    text: typeof p.text === "string" ? p.text : "",
+    direction: (p.direction as string) || "inbound",
+  };
 }
 
 Deno.serve(async (req: Request) => {
@@ -73,43 +57,67 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const extracted = extractMessage(body);
     const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-    if (extracted && "ignore" in extracted) {
-      return new Response(JSON.stringify({ ok: true, ignored: "non-received telnyx event" }), { headers: CORS_HEADERS });
-    }
-    const msg = extracted as { from: string | null; to: string | null; text: string; direction: string; via?: string } | null;
-    const via = (msg && msg.via) || "Quo";
 
-    if (!msg || !msg.from) {
-      // Log the raw payload shape so it can be inspected/fixed without losing the event.
+    if (!extracted) {
+      // Log the raw payload shape so it can be inspected without losing the event.
       console.log("receive-text: unrecognized payload", JSON.stringify(body));
       return new Response(JSON.stringify({ ok: true, note: "payload not recognized, logged for inspection" }), { headers: CORS_HEADERS });
     }
+    if (extracted.kind === "ignore") {
+      return new Response(JSON.stringify({ ok: true, ignored: "non-received telnyx event" }), { headers: CORS_HEADERS });
+    }
+
+    if (extracted.kind === "receipt") {
+      // Carrier's final verdict on something we sent. Only failures matter --
+      // Telnyx accepts a send instantly, so a blocked/undeliverable text would
+      // otherwise vanish without a trace.
+      const failed = ["delivery_failed", "sending_failed", "delivery_unconfirmed"].indexOf(extracted.status) !== -1;
+      if (!failed || !extracted.to) return new Response(JSON.stringify({ ok: true }), { headers: CORS_HEADERS });
+      const toDigits = extracted.to.replace(/\D/g, "").slice(-10);
+      const { data: allLeads } = await sb.from("leads").select("id, phone, name, activity, assigned_to");
+      const lead = (allLeads || []).find((l: Record<string, unknown>) => ((l.phone as string) || "").replace(/\D/g, "").slice(-10) === toDigits);
+      if (lead) {
+        const d = new Date().toISOString().slice(0, 10);
+        const activity = (lead.activity as unknown[]) || [];
+        activity.push({ date: d, type: "system", text: "Text to " + extracted.to + " was NOT delivered" + (extracted.detail ? (": " + extracted.detail) : ""), author: "System" });
+        await sb.from("leads").update({ activity }).eq("id", lead.id as string);
+        if (lead.assigned_to) {
+          await sb.from("notifications").insert({
+            id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: lead.assigned_to, lead_id: lead.id, kind: "text",
+            text: "Your text to " + (lead.name as string) + " wasn't delivered" + (extracted.detail ? (" — " + extracted.detail) : ""),
+            date: d, read: false,
+          });
+        }
+      }
+      return new Response(JSON.stringify({ ok: true, loggedFailure: !!lead }), { headers: CORS_HEADERS });
+    }
+
+    const msg = extracted;
+    if (!msg.from) {
+      console.log("receive-text: message without a sender", JSON.stringify(body));
+      return new Response(JSON.stringify({ ok: true, note: "no sender" }), { headers: CORS_HEADERS });
+    }
     if (msg.direction === "outgoing" || msg.direction === "outbound") {
-      // Ignore delivery receipts for our own outbound sends.
       return new Response(JSON.stringify({ ok: true }), { headers: CORS_HEADERS });
     }
     if (msg.text.indexOf(CRM_URL) !== -1) {
-      // This IS one of our own system-generated alerts (they always contain
-      // a CRM link) being echoed back by Quo as a "received" event on the
-      // recipient staff member's own line -- never real lead content. A
-      // real client would essentially never text us this exact link back.
-      // Without this check, alerting a staff member (whose number is also a
-      // monitored Quo line) can loop forever: alert -> Quo reports it as
-      // received -> we alert again about "receiving" our own alert.
+      // One of our own system alerts (they always contain a CRM link) coming
+      // back as a "received" event -- never real lead content. Ignoring it
+      // guards against an alert -> reply -> alert loop.
       console.log("receive-text: ignoring echo of our own system message");
       return new Response(JSON.stringify({ ok: true, ignoredEcho: true }), { headers: CORS_HEADERS });
     }
 
     const senderDigits = msg.from.replace(/\D/g, "");
 
-    // Check staff/system numbers BEFORE lead numbers -- if a sender number
-    // happens to also belong to a staff member (or is our shared send-from
-    // line), that takes priority so a coincidental overlap with a lead's
-    // phone can never misroute a staff/system message as borrower content.
-    const { data: staffRows } = await sb.from("users").select("id, name, phone, quo_phone_number");
+    // Check staff numbers BEFORE lead numbers -- if a sender number happens to
+    // also belong to a staff member, that takes priority so a coincidental
+    // overlap with a lead's phone can never misroute a staff message as
+    // borrower content.
+    const { data: staffRows } = await sb.from("users").select("id, name, phone");
     const staffMatch = (staffRows || []).find((u: Record<string, unknown>) => {
-      const phones = [u.phone as string, u.quo_phone_number as string].filter(Boolean);
-      return phones.some((p) => p.replace(/\D/g, "").slice(-10) === senderDigits.slice(-10));
+      const p = (u.phone as string) || "";
+      return !!p && p.replace(/\D/g, "").slice(-10) === senderDigits.slice(-10);
     });
 
     const { data: leads } = await sb.from("leads").select("id, phone, name, activity, assigned_to, automation_paused, ai_stage");
@@ -123,7 +131,7 @@ Deno.serve(async (req: Request) => {
       activity.push({
         date: new Date().toISOString().slice(0, 10),
         type: "text",
-        text: "Received (via " + via + "): " + msg.text,
+        text: "Received (via Telnyx): " + msg.text,
         author: (match.name as string) || "Borrower",
       });
       await sb.from("leads").update({ activity }).eq("id", match.id as string);
@@ -144,9 +152,9 @@ Deno.serve(async (req: Request) => {
         // If they're mid-conversation with the AI (ai_stage set), that's the
         // hottest possible signal -- a real person actively engaging right
         // now -- so it gets URGENT framing, sent to their actual personal
-        // cell (users.phone), not their Quo line, since staff don't
-        // reliably check Quo itself. Open the CRM link and use the Call
-        // button there to dial (Telnyx power dialer), not a Quo deep link.
+        // cell (users.phone), since staff
+        // reliably check other apps. Open the CRM link and use the Call
+        // button there to dial (Telnyx power dialer).
         const { data: lo } = await sb.from("users").select("name,phone,email").eq("id", match.assigned_to).single();
         if (lo) {
           const link = CRM_URL + "?lead=" + match.id;
@@ -232,7 +240,7 @@ Deno.serve(async (req: Request) => {
         return new Response(JSON.stringify({ ok: true, pollVote: vote }), { headers: CORS_HEADERS });
       }
       // Not a borrower's own number -- staff member replying to a portal
-      // chat notification from their own phone/Quo line. SMS has no thread
+      // chat notification from their own phone. SMS has no thread
       // ID, so route to whichever of this staff member's leads most
       // recently has an unanswered borrower portal message (the last
       // portal_chat entry is still "from: borrower"). Imperfect if a staff

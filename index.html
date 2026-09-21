@@ -1950,6 +1950,23 @@ function isNewBusinessLead(lead){
 // only the backfill-to-20 padding is skipped). Saturday is "optional" --
 // half quota, light rather than off. dailyQuotaExtra still adds on top if
 // an LO chooses to keep working, since that's their own opt-in, not a push.
+// How many of today's quota calls this person has actually made. Counts real
+// call attempts only (not texts), and uses the new-business flag stamped on
+// each attempt when it was logged -- classifying the lead as it is NOW would
+// stop counting a call the moment that lead moved to a later stage.
+function callsMadeToday(userId){
+  var t = todayISO(), n = 0;
+  state.leads.filter(function(l){ return l.assignedTo === userId; }).forEach(function(l){
+    (l.callAttempts||[]).forEach(function(a){
+      if (a.date !== t || a.outcome === "texted") return;
+      if (a.newBusiness === undefined ? isNewBusinessLead(l) : a.newBusiness) n++;
+    });
+  });
+  return n;
+}
+function remainingDailyQuota(userId){
+  return Math.max(0, effectiveDailyQuota() - callsMadeToday(userId));
+}
 function effectiveDailyQuota(){
   var day = new Date().getDay(); // 0=Sun, 6=Sat, local time
   var base = day===0 ? 0 : (day===6 ? Math.round(DAILY_CALL_QUOTA/2) : DAILY_CALL_QUOTA);
@@ -2209,19 +2226,17 @@ function uploadUserPhoto(userId, base64, contentType, onDone){
     onDone((res.data && res.data.url) || null);
   }).catch(function(){ onDone(null); });
 }
-function saveSignature(emailSignature, textSignoff, quoPhoneNumber, photoUrl){
+function saveSignature(emailSignature, textSignoff, photoUrl){
   var u = currentUser();
   if (!u || !sb) return;
   var calls = [
-    sb.rpc("save_signature", { p_user_id: u.id, p_email_signature: emailSignature||"", p_text_signoff: textSignoff||"" }),
-    sb.rpc("set_quo_phone_number", { p_user_id: u.id, p_quo_phone_number: quoPhoneNumber||null })
+    sb.rpc("save_signature", { p_user_id: u.id, p_email_signature: emailSignature||"", p_text_signoff: textSignoff||"" })
   ];
   if (photoUrl) calls.push(sb.rpc("set_photo_url", { p_user_id: u.id, p_photo_url: photoUrl }));
   Promise.all(calls).then(function(results){
     if (results[0].error){ showToast("Couldn't save — try again"); return; }
     u.emailSignature = emailSignature || "";
     u.textSignoff = textSignoff || "";
-    u.quoPhoneNumber = quoPhoneNumber || null;
     if (photoUrl) u.photoUrl = photoUrl;
     var wasOnboarding = !u.onboarded;
     u.onboarded = true;
@@ -2277,7 +2292,6 @@ function addTeamMember(data){
   sb.rpc("create_user", {
     p_name: data.name, p_role: data.role, p_title: data.title||"", p_phone: data.phone||"",
     p_email: data.email||"", p_username: data.username||"", p_pin: data.pin,
-    p_quo_phone_number: data.quoPhoneNumber||null,
     p_origination_split: data.originationSplit ? (Number(data.originationSplit)/100) : 0.5
   }).then(function(res){
     if (res.error){
@@ -2650,7 +2664,7 @@ function startDialer(){
   // that renders on "My Queue", regardless of which Today tab happens to be
   // showing when the dialer is started.
   var myId = currentUser().id;
-  var quota = effectiveDailyQuota();
+  var quota = remainingDailyQuota(myId);
   var dq = buildDailyCallQueue(myId, quota);
   var allItems = dq.followUps.concat(dq.newBusiness);
   // Joe's real ask (2026-09-14): the dialer showed almost nothing about who
@@ -2663,8 +2677,8 @@ function startDialer(){
   var ids = allItems.map(function(i){ if (!itemsByLead[i.leadId]) itemsByLead[i.leadId] = i; return i.leadId; });
   var seen = {}, uniq = [];
   ids.forEach(function(id){ if (!seen[id]){ seen[id]=true; uniq.push(id); } });
-  if (!uniq.length){ showToast("No calls queued right now"); return; }
-  ui.dialer = { queueIds: uniq, itemsByLead: itemsByLead, index: 0, userId: myId };
+  if (!uniq.length){ showToast(effectiveDailyQuota() > 0 && remainingDailyQuota(myId) === 0 ? "You've made all of today's calls — nice work" : "No calls queued right now"); return; }
+  ui.dialer = { queueIds: uniq, itemsByLead: itemsByLead, index: 0, userId: myId, autoDial: true };
   ui.modal = { type: "dialer" };
   render();
 }
@@ -2677,6 +2691,25 @@ function dialerAdvance(){
     showToast("Dialer session complete — nice work");
   }
   render();
+  if (ui.dialer && ui.dialer.autoDial && ui.modal && ui.modal.type === "dialer") scheduleAutoDial();
+}
+// A power dialer keeps going by itself: after each call is logged (or a lead
+// is skipped) the next lead comes up and dials after a short pause -- Joe's
+// report 2026-09-21 that it only made one call at a time. Unchecking
+// "Auto-dial" or closing the dialer cancels a pending dial.
+var autoDialTimer = null;
+function scheduleAutoDial(){
+  if (autoDialTimer) clearTimeout(autoDialTimer);
+  var idx = ui.dialer.index;
+  ui.dialer.autoDialPending = true;
+  render();
+  autoDialTimer = setTimeout(function(){
+    autoDialTimer = null;
+    if (!ui.dialer || ui.dialer.index !== idx) return;
+    ui.dialer.autoDialPending = false;
+    if (!ui.dialer.autoDial || ui.softphoneCall || !ui.modal || ui.modal.type !== "dialer"){ render(); return; }
+    startDialerCall(ui.dialer.queueIds[idx]);
+  }, 3000);
 }
 // Joe's ask (2026-09-17): some leads genuinely aren't worth calling today
 // (bad number, know-they'll-say-no, whatever the LO's judgment says) --
@@ -3138,7 +3171,7 @@ function reallySendBorrowerPortalInvite(leadId, channels){
   }
   if (channels.indexOf("text") !== -1 && lead.phone){
     calls.push(sb.functions.invoke("send-text", {
-      body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
+      body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name }
     }).then(function(res){ return { channel:"text", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
   }
   if (!calls.length){ showToast("Add an email or phone number first"); return; }
@@ -3191,7 +3224,7 @@ function reallySendSchedulingLink(leadId){
   }
   if (lead.phone){
     calls.push(sb.functions.invoke("send-text", {
-      body: { leadId: lead.id, to: lead.phone, text: text, fromName: me.name, fromNumber: me.quoPhoneNumber || null }
+      body: { leadId: lead.id, to: lead.phone, text: text, fromName: me.name }
     }).then(function(res){ return { channel:"text", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
   }
   Promise.all(calls).then(function(results){
@@ -3274,7 +3307,7 @@ function loContactLines(lo, lang){
   lines.push(lo.name || (isEs ? "Oficial de Préstamos" : "Loan Officer"));
   lines.push(lo.title || (isEs ? "Oficial de Préstamos" : "Loan Officer"));
   lines.push("Bridgepoint Lending — " + (isEs ? "Soluciones de Financiamiento Inmobiliario" : "Real Estate Financing Solutions"));
-  var contact = [lo.quoPhoneNumber, lo.email].filter(Boolean).join("  ·  ");
+  var contact = [lo.email].filter(Boolean).join("  ·  ");
   if (contact) lines.push(contact);
   lines.push((isEs ? "Oficina: " : "Office: ") + OFFICE_PHONE);
   return lines;
@@ -3655,7 +3688,7 @@ function buildLenderSummary(lead){
   lines.push("BRIDGEPOINT LENDING — WHOLESALE SUBMISSION SUMMARY");
   lines.push("Date: " + fmtDate(today));
   lines.push("Submitted by: " + (lo.name || "") + ", Bridgepoint Lending");
-  lines.push("Contact: " + (lo.email || "") + (lo.quoPhoneNumber ? ("  ·  " + lo.quoPhoneNumber) : ""));
+  lines.push("Contact: " + (lo.email || "") + "  ·  " + OFFICE_PHONE);
   lines.push("");
   lines.push("BORROWER");
   lines.push("Name / Entity: " + (lead.name || "TBD") + (lead.entityLegalName ? (" (" + lead.entityLegalName + ")") : ""));
@@ -3872,7 +3905,7 @@ function sendStoredTermSheetOption(leadId, idx){
       }
       if (lead.phone){
         calls.push(sb.functions.invoke("send-text", {
-          body: { leadId: lead.id, to: lead.phone, text: smsMsg, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
+          body: { leadId: lead.id, to: lead.phone, text: smsMsg, fromName: lo.name }
         }).then(function(r){ return { channel:"text", ok: !(r.error || !r.data || !r.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
       }
       Promise.all(calls).then(function(results){
@@ -4104,7 +4137,7 @@ function sendPortalMessage(leadId, text){
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"text", text: "Portal message from borrower: " + msg, author: lead.name });
   var lo = userById(lead.assignedTo);
-  var toNumber = lo && (lo.quoPhoneNumber || lo.phone);
+  var toNumber = lo && lo.phone;
   if (toNumber && sb){
     sb.functions.invoke("send-text", {
       body: { leadId: lead.id, to: toNumber, text: "Portal message from " + lead.name + ": " + msg }
@@ -4246,7 +4279,7 @@ function sendBorrowerPortalFollowUp(lead){
     sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lead.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null } }).catch(function(){});
   }
   if (lead.phone){
-    sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name, fromNumber: lo.quoPhoneNumber||null } }).catch(function(){});
+    sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name } }).catch(function(){});
   }
 }
 var globalPollTimer = null;
@@ -4564,7 +4597,7 @@ function logCall(leadId, outcome, notes){
   var d = todayISO();
   if (!lead.firstAttemptAt) lead.firstAttemptAt = nowTs();
   lead.callAttempts = lead.callAttempts || [];
-  lead.callAttempts.push({ date:d, outcome:outcome, notes:notes||"" });
+  lead.callAttempts.push({ date:d, outcome:outcome, notes:notes||"", newBusiness: isNewBusinessLead(lead) });
   lead.activity = lead.activity || [];
   var outLabel = (CALL_OUTCOMES.filter(function(o){ return o.key===outcome; })[0] || {}).label || outcome;
   lead.activity.push({ date:d, type:"call", text:"Call logged — " + outLabel + (notes ? ": " + notes : ""), author: currentUser().name });
@@ -4606,6 +4639,22 @@ function logCall(leadId, outcome, notes){
   }
   showToast("Call logged for " + lead.name);
   persist();
+  // Joe's ask (2026-09-21): whenever a call is marked No Answer or Voicemail,
+  // text the person under the logging loan officer's own name. The server
+  // skips it if they opted out, are a closed client, or were already sent one
+  // in the last 12 hours (which also covers the automatic missed-call text).
+  if (sb && lead.phone && (outcome === "no-answer" || outcome === "left-voicemail")) sendMissedCallFollowUp(lead);
+}
+function sendMissedCallFollowUp(lead){
+  sb.functions.invoke("send-missed-call-text", { body: { leadId: lead.id, staffId: currentUser().id } }).then(function(res){
+    var data = res && res.data;
+    if (res.error || !data || !data.ok){ showToast("Call logged, but the follow-up text didn't send"); return; }
+    if (!data.sent) return;
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"text", kind:"missed-call-text", at:data.at, text:"Texted (via Telnyx, missed-call follow-up): " + data.message, author: currentUser().name, initiatedBy:"staff" });
+    persist();
+    showToast("Follow-up text sent to " + lead.name);
+  }).catch(function(){ showToast("Call logged, but the follow-up text didn't send"); });
 }
 
 function logTextSent(leadId, message){
@@ -4627,7 +4676,7 @@ function logTextSent(leadId, message){
   persist();
 }
 
-function sendTextViaQuo(leadId, message){
+function sendTextMessage(leadId, message){
   var lead = leadById(leadId);
   if (!lead || !lead.phone) return;
   if (!message || !message.trim()){ showToast("Write a message first"); return; }
@@ -4636,7 +4685,7 @@ function sendTextViaQuo(leadId, message){
   var targetLang = lead.preferredLanguage || "en";
   var doSend = function(textToSend, wasTranslated){
     sb.functions.invoke("send-text", {
-      body: { leadId: lead.id, to: lead.phone, text: textToSend, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
+      body: { leadId: lead.id, to: lead.phone, text: textToSend, fromName: lo.name }
     }).then(function(res){
       if (res.error || !res.data || !res.data.ok){
         showToast("Couldn't send the text — try again, or use Copy Message");
@@ -4649,7 +4698,7 @@ function sendTextViaQuo(leadId, message){
       lead.activity = lead.activity || [];
       lead.activity.push({
         date:d, type:"text",
-        text: "Texted (via Quo): " + textToSend + (wasTranslated ? (' [you wrote in English: "' + message + '"]') : ""),
+        text: "Texted (via Telnyx): " + textToSend + (wasTranslated ? (' [you wrote in English: "' + message + '"]') : ""),
         author: lo.name
       });
       lead.lastContactAt = d;
@@ -4704,7 +4753,7 @@ function reallySendApplication(leadId, channels){
   }
   if (channels.indexOf("text") !== -1 && lead.phone){
     calls.push(sb.functions.invoke("send-text", {
-      body: { leadId: lead.id, to: lead.phone, text: msg, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
+      body: { leadId: lead.id, to: lead.phone, text: msg, fromName: lo.name }
     }).then(function(res){ return { channel:"text", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
   }
   if (!calls.length){ showToast("Add an email or phone number first"); return; }
@@ -4786,7 +4835,7 @@ function reallySendDocumentBoth(leadId, kind){
     }
     if (lead.phone){
       calls.push(sb.functions.invoke("send-text", {
-        body: { leadId: lead.id, to: lead.phone, text: smsMsg, fromName: lo.name, fromNumber: lo.quoPhoneNumber || null }
+        body: { leadId: lead.id, to: lead.phone, text: smsMsg, fromName: lo.name }
       }).then(function(res){ return { channel:"text", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
     }
     return Promise.all(calls);
@@ -5291,7 +5340,8 @@ function initSoftphone(){
         var endedLeadId = ui.softphoneCall.leadId;
         ui.softphoneCall = null;
         telnyxActiveCall = null;
-        if (endedLeadId) { ui.modal = { type:"callDisposition", leadId: endedLeadId }; }
+        if (endedLeadId) { ui.modal = { type:"callDisposition", leadId: endedLeadId, fromDialer: !!(ui.modal && ui.modal.fromDialer) }; }
+        else if (ui.modal && ui.modal.fromDialer && ui.dialer) { ui.modal = { type:"dialer" }; }
       }
       render();
     });
@@ -5314,7 +5364,9 @@ function placeSoftphoneCall(leadId, displayName, e164){
   ui.softphoneCall = { leadId: leadId||null, leadName: displayName, phone: e164, state: "new", muted:false };
   ui.callNotes = "";
   primeRingback(); // must be created inside this click gesture or the browser blocks audio
-  ui.modal ={ type:"callDisposition", leadId: leadId||null, leadName: displayName, phone: e164 };
+  // A call placed from inside the Power Dialer must come back to it: after
+  // hangup and logging, the dialer moves to the next lead by itself.
+  ui.modal ={ type:"callDisposition", leadId: leadId||null, leadName: displayName, phone: e164, fromDialer: !!(ui.dialer && ui.modal && ui.modal.type === "dialer") };
   render();
   // clientState travels with the call to Telnyx's server-side webhook (the
   // WebRTC Credential Connection has the same webhook_event_url as the
@@ -5390,7 +5442,7 @@ function startAiEngagement(lead){
   var text = isBilingual
     ? ("Hi " + firstName + "! It's " + loName + " with Bridgepoint Lending, following up on your " + (lead.loanType||"loan") + " inquiry. Would you prefer English or Spanish? (Reply STOP to opt out)\n\n¡Hola " + firstName + "! Soy " + loName + " de Bridgepoint Lending, dándole seguimiento a su consulta de préstamo. ¿Prefiere inglés o español? (Responda STOP para cancelar)")
     : ("Hi " + firstName + "! It's " + loName + " with Bridgepoint Lending, following up on your " + (lead.loanType||"loan") + " inquiry. What property are you looking to finance? (Reply STOP to opt out)");
-  sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: loName, fromNumber: lo.quoPhoneNumber||null, initiatedBy: "ai" } }).then(function(res){
+  sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: loName, initiatedBy: "ai" } }).then(function(res){
     if (res.error || !res.data || !res.data.ok) return;
     lead.aiStage = isBilingual ? "awaiting_language" : "engaging";
     persist();
@@ -5780,7 +5832,7 @@ function notifyUser(userId, leadId, kind, text, opts){
 function pushStaffAlert(userId, text){
   if (!sb) return;
   var u = userById(userId);
-  var phone = u && (u.phone || u.quoPhoneNumber);
+  var phone = u && u.phone;
   if (!phone) return;
   sb.functions.invoke("send-text", { body: { to: phone, text: "Bridgepoint CRM: " + text } }).catch(function(){});
 }
@@ -5919,7 +5971,7 @@ function sendReviewRequests(lead){
     }
     if (r.phone){
       sb.functions.invoke("send-text", {
-        body: { leadId: lead.id, to: r.phone, text: r.textBody, fromName: lo.name, fromNumber: lo.quoPhoneNumber||null }
+        body: { leadId: lead.id, to: r.phone, text: r.textBody, fromName: lo.name }
       }).catch(function(){});
     }
     sentTo.push(r.label);
@@ -6309,7 +6361,7 @@ function addUnderwritingCondition(leadId, description, file){
   var lo = docLoanOfficer(lead);
   var portalLink = applicationLink(lead);
   var msgText = "Hi " + (lead.name||"").split(" ")[0] + ", underwriting needs the following to keep your loan moving: " + description + "\n\nView details and respond here: " + portalLink;
-  if (sb && lead.phone) sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: msgText, fromName: lo.name, fromNumber: lo.quoPhoneNumber||null } }).catch(function(){});
+  if (sb && lead.phone) sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: msgText, fromName: lo.name } }).catch(function(){});
   if (sb && lead.email) sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lead.email, subject: "Action needed on your loan — underwriting condition", text: msgText, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null } }).catch(function(){});
   showToast("Condition added — borrower and loan officer notified");
   persist();
@@ -7147,7 +7199,7 @@ function buildBorrowerPortalHTML(lead, opts){
       '<div>' +
         '<div style="font-weight:700">' + esc(lo.name||"—") + '</div>' +
         '<div class="portal-lo-actions">' +
-          (lo.quoPhoneNumber ? ('<a href="tel:' + esc(lo.quoPhoneNumber) + '">📞 ' + esc(lo.quoPhoneNumber) + '</a>') : '') +
+          ('<a href="tel:' + esc(OFFICE_PHONE) + '">📞 ' + esc(OFFICE_PHONE) + '</a>') +
           (lo.email ? ('<a href="mailto:' + esc(lo.email) + '">✉️ ' + L("Email") + '</a>') : '') +
         '</div>' +
       '</div>' +
@@ -7261,7 +7313,6 @@ function renderOnboardingSignature(){
     '<form data-form="save-signature">' +
       '<div class="form-row"><label>Email signature</label><textarea class="textarea" name="emailSignature" rows="5">' + esc(u.emailSignature || defaultEmailSig) + '</textarea></div>' +
       '<div class="form-row" style="margin-top:10px"><label>Text message sign-off</label><input class="input" name="textSignoff" value="' + esc(u.textSignoff || defaultText) + '"></div>' +
-      '<div class="form-row" style="margin-top:10px"><label>Your personal texting number (optional)</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
       '<div class="login-sub" style="margin-top:2px">Leave blank to send from the shared office line. Only set this if you have your own dedicated business number registered for texting.</div>' +
       '<div class="form-row" style="margin-top:10px"><label>Add a photo to your signature (optional)</label><input class="input" type="file" name="photo" accept="image/*">' +
         (u.photoUrl ? '<img src="' + esc(u.photoUrl) + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;margin-top:6px">' : '') +
@@ -7476,7 +7527,7 @@ function myCallsToday(userId){
 // Skips persist on the lead (lastSkipAt) so they survive a reload; each one
 // asks the queue for one extra slot so today's list still totals the quota.
 function mobileQueue(){
-  var uid = ui.viewAs, quota = effectiveDailyQuota(), t = todayISO();
+  var uid = ui.viewAs, quota = remainingDailyQuota(ui.viewAs), t = todayISO();
   var skippedN = state.leads.filter(function(l){ return l.assignedTo===uid && l.lastSkipAt===t; }).length;
   var dq = buildDailyCallQueue(uid, quota + skippedN);
   var keep = function(it){ var l = leadById(it.leadId); return l && l.lastSkipAt !== t; };
@@ -7679,10 +7730,7 @@ function renderTeamSnapshot(){
     var closedThisMonth = mine.filter(function(l){ return l.status==="closed" && l.closeDate && new Date(l.closeDate+"T00:00:00")>=monthStart; }).length;
     var due = computeQueue(u.id).length;
     var todayStr = todayISO();
-    var callsToday = 0;
-    state.leads.filter(function(l){ return l.assignedTo===u.id && isNewBusinessLead(l); }).forEach(function(l){
-      callsToday += (l.callAttempts||[]).filter(function(a){ return a.date===todayStr; }).length;
-    });
+    var callsToday = callsMadeToday(u.id);
     var quotaCls = callsToday >= DAILY_CALL_QUOTA ? "badge-forest" : "badge-rust";
     var s = speedToLeadStats(state.leads.filter(function(l){ return l.assignedTo===u.id; }));
     return '<tr data-action="filter-lo-jump" data-lo="' + u.id + '" style="cursor:pointer">' +
@@ -7902,7 +7950,7 @@ function renderCoaching(){
     '</div>';
   }).join("");
   return topbar("Coaching", isOwner() ? "AI coaching notes across the team — real calls, lost deals, and next-conversation tips." : "Your AI coaching notes — real calls, lost deals, and tips for your next conversation with each client.", "") +
-    '<div class="content">' + (rows || '<div class="empty">No coaching notes yet — they show up after real calls come in from Quo, when a deal is marked lost, or when you click Get Tip on a lead.</div>') + '</div>';
+    '<div class="content">' + (rows || '<div class="empty">No coaching notes yet — they show up after calls, when a deal is marked lost, or when you click Get Tip on a lead.</div>') + '</div>';
 }
 function renderMyCalendarWidget(){
   if (isDemo()) return "";
@@ -7965,17 +8013,16 @@ function renderToday(){
   var quota = effectiveDailyQuota();
 
   var dq = null, teamQueue = null;
-  if (scopeIsMine) dq = buildDailyCallQueue(ui.viewAs, quota);
+  // The list counts DOWN: it asks for only what's left of today's quota
+  // (quota minus calls actually made), so "20" becomes 19, 18... as calls are logged.
+  if (scopeIsMine) dq = buildDailyCallQueue(ui.viewAs, remainingDailyQuota(ui.viewAs));
   else teamQueue = computeQueue("owner");
   k.callsDue = dq ? (dq.newBusiness.length + dq.followUps.length) : teamQueue.length;
 
   var quotaBanner = "";
   if (scopeIsMine && !isProcessor()){
     var todayStr = todayISO();
-    var loggedToday = 0;
-    state.leads.filter(function(l){ return l.assignedTo === ui.viewAs && isNewBusinessLead(l); }).forEach(function(l){
-      loggedToday += (l.callAttempts||[]).filter(function(a){ return a.date === todayStr; }).length;
-    });
+    var loggedToday = callsMadeToday(ui.viewAs);
     var isWeekendOff = quota === 0;
     var pct = quota ? Math.min(100, Math.round((loggedToday / quota) * 100)) : 100;
     var hitQuota = quota > 0 && loggedToday >= quota;
@@ -8054,7 +8101,7 @@ function renderToday(){
       : '<div class="empty">No active loans need attention right now.</div>';
     sections =
       '<div class="section"><div class="section-head"><h2>🎯 Today\'s 20 — New Business Calls</h2>' +
-        '<div style="display:flex;align-items:center;gap:10px;flex:1">' + scopeTabs + '<span class="hint">' + dq.newBusiness.length + ' of ' + quota + '</span>' + dialerBtn + '</div>' +
+        '<div style="display:flex;align-items:center;gap:10px;flex:1">' + scopeTabs + '<span class="hint">' + dq.newBusiness.length + ' left of ' + quota + '</span>' + dialerBtn + '</div>' +
       '</div>' + nbList + '</div>' +
       '<div class="section"><div class="section-head"><h2>🔧 Active Loan Follow-Ups</h2>' +
         '<div class="hint">In addition to the 20 above — not capped, these keep your in-process deals moving. ' + dq.followUps.length + ' item(s)</div>' +
@@ -9185,13 +9232,13 @@ function renderTabActivity(lead){
 function renderConversationThread(lead){
   var msgs = (lead.activity||[]).filter(function(a){
     return a.type === "text" && typeof a.text === "string" &&
-      /^(Received|Texted) \(via (Quo|Telnyx)\):/.test(a.text);
+      /^(Received|Texted) \(via (Quo|Telnyx)[^)]*\):/.test(a.text);
   });
   if (!msgs.length) return "";
   var expanded = ui.expandedConversationLead === lead.id;
   var bubbles = msgs.map(function(a){
-    var inbound = /^Received \(via (Quo|Telnyx)\):/.test(a.text);
-    var body = a.text.replace(/^(Received|Texted) \(via (Quo|Telnyx)\):\s*/, "");
+    var inbound = /^Received \(via (Quo|Telnyx)[^)]*\):/.test(a.text);
+    var body = a.text.replace(/^(Received|Texted) \(via (Quo|Telnyx)[^)]*\):\s*/, "");
     var failedBadge = a.deliveryStatus === "failed" ? ' <span style="color:var(--c-rust)">⚠ not delivered</span>' : "";
     return '<div style="display:flex;' + (inbound ? '' : 'justify-content:flex-end') + ';margin-bottom:8px">' +
       '<div style="max-width:75%;padding:8px 12px;border-radius:10px;background:' + (inbound ? 'var(--surface-2,var(--border-soft))' : 'var(--brand)') + ';color:' + (inbound ? 'inherit' : 'var(--brand-ink)') + '">' +
@@ -10325,10 +10372,7 @@ function renderPerformance(){
     var monthStartLb = new Date(); monthStartLb.setDate(1); monthStartLb.setHours(0,0,0,0);
     var lbRows = loanOfficers().map(function(u){
       var cs = commissionSummaryFor(u.id);
-      var callsToday = 0;
-      state.leads.filter(function(l){ return l.assignedTo===u.id && isNewBusinessLead(l); }).forEach(function(l){
-        callsToday += (l.callAttempts||[]).filter(function(a){ return a.date===todayStrLb; }).length;
-      });
+      var callsToday = callsMadeToday(u.id);
       var closedVol = state.leads.filter(function(l){ return l.assignedTo===u.id && l.status==="closed" && l.closeDate && new Date(l.closeDate+"T00:00:00")>=monthStartLb; })
         .reduce(function(s,l){ return s + (l.loanAmount||0); }, 0);
       return { id:u.id, name:u.name, callsToday:callsToday, streak:currentQuotaStreak(u.id), closedCount:cs.closedCount, closedVol:closedVol, earned:cs.earned };
@@ -10971,7 +11015,6 @@ function modalEditSignature(){
           '<div class="footnote" style="padding-top:4px">Paste this into your email signature above so clients can book time with you directly — set your available hours under My Schedule first.</div>' +
         '</div>' +
         '<div class="form-row"><label>Text message sign-off</label><input class="input" name="textSignoff" value="' + esc(u.textSignoff || defaultText) + '"></div>' +
-        '<div class="form-row"><label>Your personal texting number (optional)</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100" value="' + esc(u.quoPhoneNumber||"") + '"></div>' +
         '<div class="footnote" style="padding:0">Leave blank to send from the shared office line. Only set this if you have your own dedicated business number registered for texting.</div>' +
         '<div class="form-row"><label>Photo in your signature (optional)</label><input class="input" type="file" name="photo" accept="image/*">' +
           (u.photoUrl ? '<img src="' + esc(u.photoUrl) + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;margin-top:6px">' : '') +
@@ -11005,7 +11048,6 @@ function modalAddTeamMember(){
           '<div class="form-row"><label>Initial PIN (4–6 digits)</label><input class="input" type="text" inputmode="numeric" pattern="[0-9]*" name="pin" maxlength="6" required></div>' +
         '</div>' +
         '<div class="form-two">' +
-          '<div class="form-row"><label>Their personal texting number (optional)</label><input class="input" name="quoPhoneNumber" placeholder="e.g. (850) 555-0100"></div>' +
           '<div class="form-row"><label>Origination Split on Company Leads (%)</label><input class="input" type="number" min="0" max="100" name="originationSplit" value="50" placeholder="50"></div>' +
         '</div>' +
         '<div class="footnote" style="padding:0">Their share of points on company-provided leads — defaults to 50%. Self-generated business always pays 70% to them regardless of this number; yield spread is always split 50/50 for everyone.</div>' +
@@ -11224,6 +11266,8 @@ function modalDialer(){
         synopsis +
         renderCoachingTip(lead.id) +
         '<button type="button" class="btn btn-primary" style="width:100%;justify-content:center;font-size:1.05rem;padding:13px" data-action="dialer-call" data-lead="' + lead.id + '">📞 Call ' + esc(lead.phone||"") + '</button>' +
+        (ui.dialer.autoDialPending ? '<div class="panel panel-pad" style="background:var(--surface-2);font-weight:600">📞 Dialing ' + esc(lead.name) + ' in a moment… press Skip to pass, or uncheck Auto-dial to stop.</div>' : '') +
+        '<label class="footnote" style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" data-action="dialer-toggle-auto"' + (ui.dialer.autoDial ? ' checked' : '') + '> Auto-dial the next lead after each call</label>' +
         '<div class="form-row"><label>Outcome</label><select class="select" name="outcome">' + outOptions + '</select></div>' +
         '<div class="form-row"><label>Notes</label><textarea class="textarea" name="notes" rows="2" placeholder="What did you discuss?"></textarea></div>' +
       '</div>' +
@@ -12288,7 +12332,7 @@ function modalSendText(leadId){
         '<a class="btn" href="sms:' + esc(digits) + '">Open in Messages</a>' +
         '<button class="btn" type="button" data-action="copy-message">Copy Message</button>' +
         '<form data-form="send-text" data-lead="' + lead.id + '" style="display:inline"><button class="btn" type="submit">Log as Sent</button></form>' +
-        '<button class="btn btn-primary" type="button" data-action="send-text-quo" data-lead="' + lead.id + '">Send Text</button>' +
+        '<button class="btn btn-primary" type="button" data-action="send-text-now" data-lead="' + lead.id + '">Send Text</button>' +
       '</div>' +
     '</div></div>';
 }
@@ -12571,7 +12615,11 @@ appEl.addEventListener("drop", function(e){
 appEl.addEventListener("click", function(e){
   try {
   var backdrop = e.target.closest && e.target.closest("[data-action='backdrop']");
-  if (backdrop && e.target === backdrop){ ui.modal = null; ui.dialer = null; render(); return; }
+  if (backdrop && e.target === backdrop){
+    // An accidental click outside the post-call log form shouldn't throw away the dialer session.
+    if (ui.modal && ui.modal.type === "callDisposition" && ui.modal.fromDialer) return;
+    ui.modal = null; ui.dialer = null; render(); return;
+  }
 
   var t = e.target.closest && e.target.closest("[data-action]");
   if (!t) return;
@@ -12595,7 +12643,11 @@ appEl.addEventListener("click", function(e){
     if (t.dataset.modal === "composeEmail" && prefersOutlook()){ openMailto("", "", ""); return; }
     ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null, dupId:t.dataset.dup||null }; ui.teamMemberError = null; if (t.dataset.modal === "importLeads") ui.importState = null; render();
   }
-  else if (action === "close-modal"){ ui.modal = null; ui.importState = null; render(); }
+  else if (action === "close-modal"){
+    // Skipping the call log inside a Power Dialer session still moves on to the next lead.
+    if (ui.modal && ui.modal.type === "callDisposition" && ui.modal.fromDialer && ui.dialer){ ui.modal = { type:"dialer" }; dialerAdvance(); return; }
+    ui.modal = null; ui.importState = null; render();
+  }
   else if (action === "import-back"){ ui.importState = null; render(); }
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
   else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
@@ -12667,9 +12719,9 @@ appEl.addEventListener("click", function(e){
   else if (action === "toggle-processing"){ toggleProcessingAction(t.dataset.lead, t.dataset.kind); }
   else if (action === "confirm-processing"){ confirmProcessingAction(t.dataset.lead, t.dataset.kind); }
   else if (action === "request-third-party-doc"){ requestThirdPartyDoc(t.dataset.lead, t.dataset.role); }
-  else if (action === "send-text-quo"){
+  else if (action === "send-text-now"){
     var textBox = document.getElementById("text-message-box");
-    sendTextViaQuo(t.dataset.lead, textBox ? textBox.value : "");
+    sendTextMessage(t.dataset.lead, textBox ? textBox.value : "");
   }
   else if (action === "mark-notif-read"){ markNotificationRead(t.dataset.id); }
   else if (action === "send-application"){
@@ -12777,6 +12829,13 @@ appEl.addEventListener("click", function(e){
   else if (action === "extend-daily-quota"){ ui.dailyQuotaExtra = (ui.dailyQuotaExtra||0) + 20; render(); }
   else if (action === "start-dialer"){ startDialer(); }
   else if (action === "dialer-skip"){ dialerSkipCurrent(); }
+  else if (action === "dialer-toggle-auto"){
+    if (ui.dialer){
+      ui.dialer.autoDial = !ui.dialer.autoDial;
+      if (!ui.dialer.autoDial){ ui.dialer.autoDialPending = false; if (autoDialTimer){ clearTimeout(autoDialTimer); autoDialTimer = null; } }
+      render();
+    }
+  }
   else if (action === "close-dialer"){ closeDialer(); }
   else if (action === "copy-app-link"){
     var linkBox = document.getElementById("app-link-box");
@@ -13328,7 +13387,7 @@ appEl.addEventListener("submit", function(e){
     var photoInput = form.querySelector('[name="photo"]');
     var photoFile = photoInput && photoInput.files && photoInput.files[0];
     var finishSaveSig = function(photoUrl){
-      saveSignature(fd.get("emailSignature"), fd.get("textSignoff"), fd.get("quoPhoneNumber"), photoUrl);
+      saveSignature(fd.get("emailSignature"), fd.get("textSignoff"), photoUrl);
     };
     if (photoFile){
       var photoReader = new FileReader();
@@ -13348,7 +13407,7 @@ appEl.addEventListener("submit", function(e){
     addTeamMember({
       name: fd.get("name"), role: fd.get("role"), title: fd.get("title"),
       phone: fd.get("phone"), email: fd.get("email"), username: fd.get("username"), pin: fd.get("pin"),
-      quoPhoneNumber: fd.get("quoPhoneNumber"), originationSplit: fd.get("originationSplit")
+      originationSplit: fd.get("originationSplit")
     });
     form.reset();
   } else if (type === "set-origination-split"){
@@ -13371,6 +13430,11 @@ appEl.addEventListener("submit", function(e){
     startManualDialerCall(fd.get("phone"));
   } else if (type === "log-call-outcome"){
     logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"));
+    if (ui.modal && ui.modal.fromDialer && ui.dialer){
+      ui.modal = { type:"dialer" };
+      dialerAdvance(); // pulls up the next lead in the Power Dialer list
+      return;
+    }
     ui.modal = null;
     render();
   }

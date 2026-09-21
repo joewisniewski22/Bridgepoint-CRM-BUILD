@@ -1,10 +1,14 @@
-// Sends an outbound SMS through Quo (formerly OpenPhone) and logs it to the CRM.
-// Called from the CRM frontend with the Supabase publishable (anon) key.
+// Sends an outbound SMS through Telnyx from the single company number and
+// logs it to the CRM. Called from the CRM frontend with the Supabase
+// publishable (anon) key. Replaced Quo on 2026-09-21 once the 10DLC campaign
+// cleared -- one company number for everyone, so fromNumber is no longer
+// accepted. Telnyx only queues the message here; a carrier rejection shows up
+// later as a message.finalized webhook, which receive-text logs to the lead.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const QUO_API_KEY = Deno.env.get("QUO_API_KEY")!;
-const QUO_FROM_NUMBER = Deno.env.get("QUO_FROM_NUMBER") || "";
-const QUO_DEFAULT_USER_ID = Deno.env.get("QUO_DEFAULT_USER_ID") || "";
+const TELNYX_API_KEY = Deno.env.get("TELNYX_API_KEY")!;
+const TELNYX_FROM_NUMBER = Deno.env.get("TELNYX_FROM_NUMBER")!;
+const TELNYX_MESSAGING_PROFILE_ID = Deno.env.get("TELNYX_MESSAGING_PROFILE_ID")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
@@ -14,7 +18,7 @@ function toE164(raw: string): string {
   const digits = raw.replace(/\D/g, "");
   if (digits.length === 10) return "+1" + digits;
   if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
-  return raw; // let Quo reject it with a clear error rather than silently mis-format
+  return raw; // let Telnyx reject it with a clear error rather than silently mis-format
 }
 
 const CORS_HEADERS = {
@@ -44,34 +48,24 @@ Deno.serve(async (req: Request) => {
     // attempt apart from an automated one -- this can. Lets speed-to-lead
     // reporting count only genuine LO actions, not AI activity.
     const initiatedBy: string = body.initiatedBy === "ai" ? "ai" : "staff";
-    // Each team member's own Quo line, passed from the CRM (their Team
-    // record) -- falls back to the shared office line when not set.
-    const fromNumber = toE164(body.fromNumber || QUO_FROM_NUMBER);
-    const toNumber = toE164(to);
 
     if (!to || !text) {
       return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400, headers: CORS_HEADERS });
     }
-    if (!fromNumber) {
-      return new Response(JSON.stringify({ error: "no_from_number", detail: "No Quo number to send from -- set a personal line in Signature settings, or set the QUO_FROM_NUMBER secret for a shared default." }), { status: 500, headers: CORS_HEADERS });
-    }
 
-    const quoRes = await fetch("https://api.quo.com/v1/messages", {
+    const telnyxRes = await fetch("https://api.telnyx.com/v2/messages", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": QUO_API_KEY,
-      },
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + TELNYX_API_KEY },
       body: JSON.stringify({
-        content: text,
-        from: fromNumber,
-        to: [toNumber],
-        userId: QUO_DEFAULT_USER_ID || undefined,
+        from: TELNYX_FROM_NUMBER,
+        to: toE164(to),
+        text,
+        messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
       }),
     });
-    const quoData = await quoRes.json();
-    if (!quoRes.ok) {
-      return new Response(JSON.stringify({ error: "quo_error", detail: quoData }), { status: 502, headers: CORS_HEADERS });
+    const telnyxData = await telnyxRes.json().catch(() => null);
+    if (!telnyxRes.ok) {
+      return new Response(JSON.stringify({ error: "telnyx_error", detail: telnyxData }), { status: 502, headers: CORS_HEADERS });
     }
 
     if (leadId) {
@@ -81,14 +75,14 @@ Deno.serve(async (req: Request) => {
       activity.push({
         date: new Date().toISOString().slice(0, 10),
         type: "text",
-        text: "Texted (via Quo): " + text,
+        text: "Texted (via Telnyx): " + text,
         author: fromName || "System",
         initiatedBy,
       });
       await sb.from("leads").update({ activity: activity }).eq("id", leadId);
     }
 
-    return new Response(JSON.stringify({ ok: true, messageId: (quoData.data && quoData.data.id) || null }), { headers: CORS_HEADERS });
+    return new Response(JSON.stringify({ ok: true, messageId: (telnyxData && telnyxData.data && telnyxData.data.id) || null }), { headers: CORS_HEADERS });
   } catch (err) {
     return new Response(JSON.stringify({ error: "server_error", detail: String(err) }), { status: 500, headers: CORS_HEADERS });
   }

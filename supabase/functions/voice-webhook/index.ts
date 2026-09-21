@@ -238,50 +238,29 @@ async function logCallOutcome(opts: { leadId: string; staffId?: string | null; s
   await sb.from("leads").update({ call_attempts: attempts, activity, last_contact_at: d }).eq("id", opts.leadId);
 }
 
-// "Sorry I missed you" text, sent automatically on a real no-answer from
-// the softphone dialer -- Joe's ask (2026-09-17): no waiting on staff to
-// pick a disposition first. Sent directly via Telnyx's Messages API (not
-// the Quo-based send-text function) so it comes from the SAME number
-// that just called -- Joe was explicit this should only go live once his
-// 10DLC (A2P) registration clears, since until then Telnyx SMS is
-// blocked the same way the rest of Telnyx texting is (see send-text's
-// git history) -- this will return a real carrier rejection until then,
-// by design, not a bug to chase.
+// Automatic "sorry I missed you" text on a real no-answer from the softphone
+// (Joe, 2026-09-17: no waiting on staff to pick a disposition). The message,
+// opt-out handling and 12-hour de-dupe live in send-missed-call-text so a
+// manually-logged No Answer / Voicemail sends the identical text without
+// doubling up. This side only records the result on the lead.
 async function sendMissedCallText(opts: { leadId: string; staffId: string | null }) {
-  const { data: lead } = await sb.from("leads").select("id, name, phone, loan_type, activity").eq("id", opts.leadId).single();
-  if (!lead?.phone) return;
-
-  let lo: { name?: string; phone?: string } | null = null;
-  if (opts.staffId) {
-    const { data } = await sb.from("users").select("name, phone").eq("id", opts.staffId).single();
-    lo = data;
-  }
-  const firstName = ((lead.name as string) || "").split(" ")[0] || "there";
-  const loFirstName = ((lo?.name as string) || "your loan officer").split(" ")[0];
-  const loanType = (lead.loan_type as string) || "loan";
-  const loPhone = (lo?.phone as string) || "";
-  const bookingLink = opts.staffId ? (CRM_URL + "?book=" + opts.staffId) : "";
-
-  const message = "Hi " + firstName + ", sorry I missed you — this is " + loFirstName + " with Bridgepoint Lending calling about your " + loanType + " loan." +
-    (loPhone ? (" Call or text me back anytime at " + loPhone + ".") : "") +
-    (bookingLink ? (" Or grab a time that works here: " + bookingLink) : "");
-
-  const res = await fetch("https://api.telnyx.com/v2/messages", {
+  if (!opts.staffId) return;
+  const res = await fetch(SUPABASE_URL + "/functions/v1/send-missed-call-text", {
     method: "POST",
-    headers: { "Authorization": "Bearer " + TELNYX_API_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      from: TELNYX_FROM_NUMBER, to: lead.phone, text: message,
-      messaging_profile_id: TELNYX_MESSAGING_PROFILE_ID,
-    }),
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+    body: JSON.stringify({ leadId: opts.leadId, staffId: opts.staffId }),
   });
   const data = await res.json().catch(() => null);
+  if (data && data.ok && data.sent === false) return; // skipped: opted out, closed, or already texted recently
+  const { data: lead } = await sb.from("leads").select("activity").eq("id", opts.leadId).single();
+  if (!lead) return;
   const d = new Date().toISOString().slice(0, 10);
   const activity = (Array.isArray(lead.activity) ? lead.activity : []) as Array<Record<string, unknown>>;
-  if (!res.ok) {
-    console.error("voice-webhook: missed-call text failed", JSON.stringify(data));
-    activity.push({ date: d, type: "system", text: "Missed-call text NOT sent -- Telnyx SMS isn't live yet (10DLC pending)", author: "System" });
+  if (data && data.ok && data.sent) {
+    activity.push({ date: d, type: "text", kind: "missed-call-text", at: data.at, text: "Texted (via Telnyx, automatic missed-call follow-up): " + data.message, author: data.staffName || "System" });
   } else {
-    activity.push({ date: d, type: "text", text: "Texted (via Telnyx, automatic missed-call follow-up): " + message, author: (lo?.name as string) || "System" });
+    console.error("voice-webhook: missed-call text failed", JSON.stringify(data));
+    activity.push({ date: d, type: "system", text: "Missed-call text was NOT sent (carrier or system error)", author: "System" });
   }
   await sb.from("leads").update({ activity }).eq("id", opts.leadId);
 }
