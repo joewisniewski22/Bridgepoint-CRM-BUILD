@@ -5176,6 +5176,39 @@ function toE164Phone(raw){
   if (!digits) return "";
   return digits.length===10 ? ("+1"+digits) : ("+"+digits);
 }
+// Local US-style ringback (440+480 Hz, 2s on / 4s off). Carriers don't
+// always send their own ringback into a WebRTC leg, so without this the call
+// says "ringing" but the caller hears silence -- Joe's report 2026-09-21.
+var ringbackCtx = null, ringbackTimer = null, ringbackOscs = [];
+function primeRingback(){
+  try {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    ringbackCtx = ringbackCtx || new AC();
+    if (ringbackCtx.state === "suspended") ringbackCtx.resume();
+  } catch(e){}
+}
+function startRingback(){
+  if (ringbackTimer) return;
+  primeRingback();
+  if (!ringbackCtx) return;
+  var burst = function(){
+    var ctx = ringbackCtx, g = ctx.createGain();
+    g.gain.value = 0.08; g.connect(ctx.destination);
+    [440, 480].forEach(function(f){
+      var o = ctx.createOscillator();
+      o.frequency.value = f; o.connect(g); o.start(); o.stop(ctx.currentTime + 2);
+      ringbackOscs.push(o);
+    });
+  };
+  burst();
+  ringbackTimer = setInterval(burst, 6000);
+}
+function stopRingback(){
+  if (ringbackTimer){ clearInterval(ringbackTimer); ringbackTimer = null; }
+  ringbackOscs.forEach(function(o){ try { o.stop(); } catch(e){} });
+  ringbackOscs = [];
+}
 function initSoftphone(){
   if (!sb || telnyxClient) return;
   var uid = currentUser().id;
@@ -5197,8 +5230,10 @@ function initSoftphone(){
       if (notification.type !== "callUpdate") return;
       var call = notification.call;
       telnyxActiveCall = call;
-      if (!ui.softphoneCall) return;
+      if (!ui.softphoneCall) { stopRingback(); return; }
       ui.softphoneCall.state = call.state;
+      if (["requesting","trying","ringing","early"].indexOf(call.state) !== -1) startRingback();
+      else stopRingback();
       if (call.state === "hangup"){
         var endedLeadId = ui.softphoneCall.leadId;
         ui.softphoneCall = null;
@@ -5225,6 +5260,7 @@ function placeSoftphoneCall(leadId, displayName, e164){
   }
   ui.softphoneCall = { leadId: leadId||null, leadName: displayName, phone: e164, state: "new", muted:false };
   ui.callNotes = "";
+  primeRingback(); // must be created inside this click gesture or the browser blocks audio
   ui.modal ={ type:"callDisposition", leadId: leadId||null, leadName: displayName, phone: e164 };
   render();
   // clientState travels with the call to Telnyx's server-side webhook (the
@@ -10977,7 +11013,7 @@ function requestCoachingTip(leadId){
 function modalCallDisposition(modalInfo){
   var sp = ui.softphoneCall;
   if (sp && sp.state !== "hangup"){
-    var stateLabel = sp.state === "active" ? "Connected" : "Calling…";
+    var stateLabel = sp.state === "active" ? "Connected" : (sp.state === "ringing" || sp.state === "early") ? "Ringing…" : "Calling…";
     // Floating, draggable, non-blocking panel (no full-screen backdrop) so
     // staff can move it aside and still use the CRM, and type live notes
     // into it -- Taeya's report (2026-09-18): she couldn't move the call
