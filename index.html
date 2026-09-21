@@ -385,7 +385,7 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .modal-body{padding:18px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;flex:1 1 auto;min-height:0}
 .modal>form{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
 .modal-foot{display:flex;gap:8px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--border)}
-.call-float{position:fixed;z-index:60;width:360px;max-width:calc(100vw - 16px);background:var(--surface);border-radius:var(--radius);
+.call-float{position:fixed;z-index:60;width:360px;max-width:calc(100vw - 16px);max-height:calc(100vh - 24px);background:var(--surface);border-radius:var(--radius);
   box-shadow:var(--shadow-modal);border:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
 .call-float-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);
   cursor:move;user-select:none;touch-action:none}
@@ -11183,9 +11183,27 @@ function modalCallDisposition(modalInfo){
     // box or type anything while on a call.
     var pos = ui.callBoxPos;
     var posStyle = pos ? ('left:' + pos.x + 'px;top:' + pos.y + 'px') : 'right:24px;top:80px';
-    return '<div class="call-float" id="modal-host" style="' + posStyle + '">' +
+    // Keep the coaching tip and client synopsis on screen for the whole call --
+    // Joe's report 2026-09-21: the Power Dialer's coaching tip vanished the
+    // moment the call connected, because the dialer box is replaced by this
+    // call box. Same context the dialer showed, carried over.
+    var ctxLead = sp.leadId ? leadById(sp.leadId) : null;
+    var ctxHTML = "";
+    if (ctxLead){
+      var ctxItem = ui.dialer && ui.dialer.itemsByLead && ui.dialer.itemsByLead[ctxLead.id];
+      var ctxLastNote = null;
+      (ctxLead.callAttempts||[]).slice().reverse().some(function(a){ if (a.notes){ ctxLastNote = a; return true; } return false; });
+      ctxHTML = '<div class="panel panel-pad" style="background:var(--surface-2);font-size:.9rem;display:flex;flex-direction:column;gap:3px">' +
+        (ctxItem ? ('<div style="font-weight:600">' + esc(ctxItem.label) + '</div><div class="footnote" style="padding:0 0 4px">' + esc(ctxItem.reason) + '</div>') : '') +
+        '<div><b>Loan:</b> ' + esc(ctxLead.loanType || "—") + ' · <b>Stage:</b> ' + esc(stageLabel(ctxLead.stage)) + '</div>' +
+        (ctxLead.propertyAddress ? ('<div><b>Property:</b> ' + esc(ctxLead.propertyAddress) + '</div>') : '') +
+        ((ctxLead.loanAmount || ctxLead.rate) ? ('<div>' + (ctxLead.loanAmount ? ('<b>Amount:</b> ' + fmtUSD(ctxLead.loanAmount)) : '') + (ctxLead.rate ? (' · <b>Rate:</b> ' + fmtPct(ctxLead.rate)) : '') + '</div>') : '') +
+        (ctxLastNote ? ('<div class="footnote" style="padding-top:4px">Last call (' + fmtDate(ctxLastNote.date) + '): ' + esc(ctxLastNote.notes) + '</div>') : '') +
+      '</div>' + renderCoachingTip(ctxLead.id);
+    }
+    return '<div class="call-float" id="modal-host" style="' + posStyle + (ctxLead ? ';width:440px' : '') + '">' +
       '<div class="call-float-head" data-drag-handle="1"><h3>📞 ' + esc(sp.leadName || sp.phone || "Call") + '</h3><span class="footnote">' + esc(stateLabel) + ' · drag to move</span></div>' +
-      '<div class="modal-body" style="padding:14px 16px;gap:8px">' +
+      '<div class="modal-body" style="padding:14px 16px;gap:8px">' + ctxHTML +
         '<label class="footnote" for="call-live-notes" style="font-weight:600">Live notes</label>' +
         '<textarea class="textarea" id="call-live-notes" data-action="call-live-notes" rows="7" placeholder="Type notes while you talk…">' + esc(ui.callNotes || "") + '</textarea>' +
         '<div class="footnote">Saved automatically — they\'ll be waiting in the log form when the call ends.</div>' +
