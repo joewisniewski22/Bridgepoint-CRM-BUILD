@@ -458,7 +458,7 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 /* Mobile salesperson view (phone-sized screens, or ?m=1) */
 .m-shell{max-width:560px;margin:0 auto;width:100%;padding:0 12px calc(24px + env(safe-area-inset-bottom));min-height:100vh}
 .m-head{position:sticky;top:0;z-index:20;background:var(--bg);padding:calc(10px + env(safe-area-inset-top)) 0 10px;border-bottom:1px solid var(--border)}
-.m-head-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.m-head-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
 .m-title{font-weight:700;font-size:.95rem;line-height:1.25}
 .m-head .m-btn{white-space:nowrap;padding:0 12px}
 .m-progress{height:8px;border-radius:99px;background:var(--border);overflow:hidden;margin-top:8px}
@@ -471,6 +471,8 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .m-card-top{cursor:pointer}
 .m-name{font-weight:700;font-size:1.05rem}
 .m-sub{font-size:.85rem;color:var(--muted, #6b6459);margin-top:2px}
+.m-badge{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.03em;padding:3px 8px;border-radius:99px;background:var(--surface-2);margin-bottom:6px}
+.m-badge.hot{background:var(--c-rust, #a4472d);color:#fff}
 .m-reason{font-size:.85rem;margin-top:6px}
 .m-detail{margin-top:8px;padding:8px 10px;background:var(--surface-2);border-radius:10px;font-size:.85rem;display:flex;flex-direction:column;gap:4px}
 .m-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
@@ -4348,7 +4350,11 @@ function hydrateFromSupabase(){
     if (res.data){ state.leads = res.data.map(rowToLead); }
     if (ui.pendingDeepLinkLead){
       var pl = leadById(ui.pendingDeepLinkLead);
-      if (pl){ ui.view = "detail"; ui.selectedLeadId = pl.id; ui.activeTab = "overview"; }
+      if (pl){
+        ui.view = "detail"; ui.selectedLeadId = pl.id; ui.activeTab = "overview";
+        // In the phone app, a text-alert link lands on that lead, open, in the New tab.
+        ui.mobileTab = "new"; ui.mobileOpen = pl.id;
+      }
       ui.pendingDeepLinkLead = null;
     }
     render();
@@ -7650,11 +7656,33 @@ function mobileQueue(){
 function mobileBtn(label, attrs, cls){
   return '<button type="button" class="m-btn ' + (cls||"") + '" ' + attrs + '>' + label + '</button>';
 }
+// The app's home screen (Joe, 2026-09-21): the rep's own active leads,
+// NEWEST FIRST, so the first thing they see is the lead that just came in.
+function leadCreatedMs(l){
+  if (l.createdAtTs) return new Date(l.createdAtTs).getTime();
+  return l.createdAt ? new Date(l.createdAt + "T12:00:00").getTime() : 0;
+}
+function mobileNewLeads(){
+  var uid = ui.viewAs;
+  return state.leads.filter(function(l){ return l.assignedTo === uid && l.status === "active"; })
+    .sort(function(a, b){ return leadCreatedMs(b) - leadCreatedMs(a); });
+}
+function leadUncontacted(l){ return !(l.callAttempts || []).length; }
+function refreshLeadsNow(){
+  if (!sb) return;
+  sb.from("leads").select("*").then(function(res){
+    if (res.error || !res.data){ showToast("Couldn't refresh — check your connection"); return; }
+    state.leads = res.data.map(rowToLead);
+    showToast("Updated");
+    render();
+  });
+}
 function renderMobileCard(item, opts){
   opts = opts || {};
   var lead = leadById(item.leadId);
   if (!lead) return "";
-  var open = ui.mobileOpen === lead.id;
+  // The newest lead opens by itself until the rep taps something else.
+  var open = ui.mobileOpen === lead.id || (!!opts.autoOpen && ui.mobileOpen === undefined);
   var id = 'data-lead="' + lead.id + '"';
   var canSendDocs = !isProcessor() && lead.rate && lead.loanAmount;
   var lastNote = null;
@@ -7675,16 +7703,17 @@ function renderMobileCard(item, opts){
       mobileBtn('💬 Text', 'data-action="open-modal" data-modal="sendText" ' + id) +
       mobileBtn('✉ Email', 'data-action="compose-lead-email" ' + id) +
       mobileBtn('📝 Log call', 'data-action="open-modal" data-modal="logCall" ' + id) +
-      mobileBtn('📅 Schedule', 'data-action="send-scheduling-link" ' + id) +
+      mobileBtn('📅 Send calendar link', 'data-action="send-scheduling-link" ' + id) +
       ((!isProcessor() && canEditApplication(lead)) ? mobileBtn('📄 Send app' + (lead.applicationSentAt ? ' ✓' : ''), 'data-action="open-modal" data-modal="sendApplication" ' + id) : '') +
       (canSendDocs ? mobileBtn('📑 Term sheet' + (lead.termsheetSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="termSheet" ' + id) : '') +
       (canSendDocs ? mobileBtn('✅ Pre-approval' + (lead.preapprovalSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="preapproval" ' + id) : '') +
-      ((SOFTPHONE_ENABLED && lead.phone) ? ('<a class="m-btn ghost" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Use my phone</a>') : '') +
+      ((SOFTPHONE_ENABLED && lead.phone) ? ('<a class="m-btn ghost" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Use my phone (shows your own number)</a>') : '') +
       (opts.skippable ? mobileBtn('Skip today', 'data-action="m-skip" ' + id, 'ghost') : '') +
     '</div>';
   }
   return '<div class="m-card">' +
     '<div class="m-card-top" data-action="m-toggle" ' + id + '>' +
+      (item.badge ? ('<div class="m-badge' + (item.badgeHot ? ' hot' : '') + '">' + esc(item.badge) + '</div>') : '') +
       '<div class="m-name">' + esc(lead.name) + '</div>' +
       '<div class="m-sub">' + esc(item.label || stageLabel(lead.stage)) + (lead.loanType ? (' · ' + esc(lead.loanType)) : '') + '</div>' +
       (item.reason && !opts.compact ? ('<div class="m-reason">' + esc(item.reason) + '</div>') : '') +
@@ -7706,12 +7735,32 @@ function mobileContactResults(q){
 }
 function renderMobileShell(){
   var me = currentUser();
-  var tab = ui.mobileTab || "today";
+  var tab = ui.mobileTab || "new";
   var quota = effectiveDailyQuota();
   var done = myCallsToday(me.id);
   var pct = quota ? Math.min(100, Math.round(done / quota * 100)) : 100;
   var body = "";
-  if (tab === "contacts"){
+  var newLeads = mobileNewLeads();
+  var uncontacted = newLeads.filter(leadUncontacted).length;
+  if (tab === "new"){
+    var shownNew = newLeads.slice(0, 40);
+    body = '<div class="m-section">Newest first' + (uncontacted ? (' · ' + uncontacted + ' not contacted yet') : '') + '</div>' +
+      (shownNew.length ? shownNew.map(function(l, i){
+        var ageMs = Date.now() - leadCreatedMs(l);
+        var fresh = leadUncontacted(l);
+        var parts = [];
+        if (l.source) parts.push(l.source);
+        if (l.loanType) parts.push(l.loanType);
+        if (l.loanAmount) parts.push(fmtUSD(l.loanAmount));
+        return renderMobileCard({
+          leadId: l.id,
+          label: (ageMs > 0 && ageMs < 172800000 ? (fmtDuration(ageMs) + " ago") : (l.createdAt ? fmtDate(l.createdAt) : "")),
+          reason: parts.join(" · "),
+          badge: fresh ? (i === 0 ? "🆕 NEWEST · not contacted yet" : "Not contacted yet") : (i === 0 ? "NEWEST" : ""),
+          badgeHot: fresh
+        }, { autoOpen: i === 0 });
+      }).join("") : '<div class="empty">No active leads assigned to you yet. New ones show up here the moment they arrive.</div>');
+  } else if (tab === "contacts"){
     body = '<div class="form-row" style="margin-top:12px"><input class="input" type="search" placeholder="Search name, phone or email" value="' + esc(ui.mobileQuery||"") + '" data-action="m-search" style="min-height:46px"></div>' +
       '<div id="m-search-results">' + mobileContactResults(ui.mobileQuery) + '</div>';
   } else {
@@ -7723,10 +7772,12 @@ function renderMobileShell(){
   return '<div class="m-shell">' +
     '<div class="m-head">' +
       '<div class="m-head-row"><div class="m-title">' + esc((me.name||"").split(" ")[0]) + ' · ' + done + ' / ' + quota + ' calls today</div>' +
-        '<div style="display:flex;gap:6px"><button type="button" class="m-btn" style="min-height:40px" data-action="open-modal" data-modal="addLead">＋ Lead</button>' +
+        '<div style="display:flex;gap:6px"><button type="button" class="m-btn" style="min-height:40px" data-action="m-refresh" aria-label="Refresh">↻</button>' +
+        '<button type="button" class="m-btn" style="min-height:40px" data-action="open-modal" data-modal="addLead">＋ Lead</button>' +
         '<button type="button" class="m-btn" style="min-height:40px" data-action="start-dialer">▶ Dialer</button></div></div>' +
       '<div class="m-progress"><span style="width:' + pct + '%"></span></div>' +
-      '<div class="m-tabs"><button type="button" class="m-tab' + (tab==="today" ? " on" : "") + '" data-action="m-tab" data-tab="today">Today</button>' +
+      '<div class="m-tabs"><button type="button" class="m-tab' + (tab==="new" ? " on" : "") + '" data-action="m-tab" data-tab="new">New' + (uncontacted ? (' (' + uncontacted + ')') : '') + '</button>' +
+        '<button type="button" class="m-tab' + (tab==="today" ? " on" : "") + '" data-action="m-tab" data-tab="today">Today</button>' +
         '<button type="button" class="m-tab' + (tab==="contacts" ? " on" : "") + '" data-action="m-tab" data-tab="contacts">Contacts</button></div>' +
     '</div>' + body +
     '<div class="m-foot"><button type="button" class="link-btn" data-action="m-desktop">Desktop site</button>' +
@@ -12804,8 +12855,15 @@ appEl.addEventListener("click", function(e){
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
   else if (action === "softphone-mute"){ toggleSoftphoneMute(); }
-  else if (action === "m-tab"){ ui.mobileTab = t.dataset.tab; ui.mobileOpen = null; render(); }
-  else if (action === "m-toggle"){ ui.mobileOpen = ui.mobileOpen === t.dataset.lead ? null : t.dataset.lead; render(); }
+  else if (action === "m-tab"){ ui.mobileTab = t.dataset.tab; ui.mobileOpen = (t.dataset.tab === "new" ? undefined : null); render(); }
+  else if (action === "m-refresh"){ refreshLeadsNow(); }
+  else if (action === "m-toggle"){
+    // The newest lead is open by default (mobileOpen undefined), so tapping it should close it.
+    var mCur = ui.mobileOpen;
+    if (mCur === undefined && (ui.mobileTab || "new") === "new") mCur = (mobileNewLeads()[0] || {}).id;
+    ui.mobileOpen = mCur === t.dataset.lead ? null : t.dataset.lead;
+    render();
+  }
   else if (action === "m-skip"){ skipQueueItem(t.dataset.lead); ui.mobileOpen = null; render(); }
   else if (action === "m-desktop"){ ui.forceDesktop = true; render(); }
   else if (action === "reveal-ssn"){ revealGuarantorSsn(t.dataset.lead); }
