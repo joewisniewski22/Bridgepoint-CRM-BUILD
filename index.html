@@ -213,6 +213,71 @@ button{font-family:inherit}
 .section,.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-card)}
 .section{padding:18px 20px}
 .panel-pad{padding:18px 20px}
+/* New Hire Training (owner-only) */
+.tr-wrap{display:grid;grid-template-columns:250px minmax(0,1fr);gap:22px;align-items:start}
+.tr-menu{position:sticky;top:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px;max-height:calc(100vh - 110px);overflow:auto}
+.tr-menu-ch{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;padding:12px 8px 4px}
+.tr-menu-ch:first-child{padding-top:4px}
+.tr-menu-item{display:flex;gap:8px;align-items:flex-start;width:100%;text-align:left;background:none;border:0;padding:6px 8px;border-radius:var(--radius-sm);font:inherit;font-size:12.5px;color:var(--ink-muted);cursor:pointer;line-height:1.35}
+.tr-menu-item:hover{background:var(--surface-2);color:var(--ink)}
+.tr-menu-item.active{background:var(--brand-tint);color:var(--brand);font-weight:600}
+.tr-menu-item.done .tr-menu-n{background:var(--c-forest-bg);color:var(--c-forest)}
+.tr-menu-n{flex:0 0 20px;height:20px;border-radius:50%;background:var(--surface-2);font-size:10.5px;display:flex;align-items:center;justify-content:center;font-weight:600}
+.tr-menu-item.active .tr-menu-n{background:var(--brand);color:var(--brand-ink)}
+.tr-main{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:26px 32px 22px;box-shadow:var(--shadow-card);min-width:0}
+.tr-progress{height:4px;background:var(--surface-2);border-radius:4px;overflow:hidden;margin-bottom:18px}
+.tr-progress-bar{height:100%;background:var(--brand);border-radius:4px;transition:width .25s}
+.tr-kicker{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
+.tr-title{font-family:var(--font-display);font-size:30px;line-height:1.15;margin:6px 0 16px;color:var(--ink);text-wrap:balance}
+.tr-body{font-size:15px;line-height:1.65;color:var(--ink);max-width:760px}
+.tr-body p{margin:0 0 12px}
+.tr-h3{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-muted);margin:22px 0 8px;font-weight:600}
+.tr-list{margin:0 0 12px;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.tr-small{font-size:12.5px;color:var(--ink-muted)}
+.tr-box{border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;margin:14px 0;background:var(--surface-2)}
+.tr-box .tr-list{margin-bottom:2px}
+.tr-box p:last-child{margin-bottom:0}
+.tr-box-h{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;margin-bottom:6px;color:var(--ink-muted)}
+.tr-plain{background:var(--brand-tint);border-color:transparent}
+.tr-plain .tr-box-h{color:var(--brand)}
+.tr-story{background:var(--c-gold-bg);border-color:transparent}
+.tr-story .tr-box-h{color:var(--c-gold)}
+.tr-watch{background:var(--c-rust-bg);border-color:transparent}
+.tr-watch .tr-box-h{color:var(--c-rust)}
+.tr-money{background:var(--c-forest-bg);border-color:transparent}
+.tr-money .tr-box-h{color:var(--c-forest)}
+.tr-terms{margin:0;display:grid;grid-template-columns:150px minmax(0,1fr);gap:0;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.tr-terms dt,.tr-terms dd{margin:0;padding:9px 12px;border-bottom:1px solid var(--border-soft);font-size:14px;line-height:1.5}
+.tr-terms dt{font-weight:600;background:var(--surface-2)}
+.tr-terms dt:last-of-type,.tr-terms dd:last-of-type{border-bottom:0}
+.tr-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+.tr-fact{border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;background:var(--surface)}
+.tr-fact-k{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-faint);font-weight:600}
+.tr-fact-v{font-size:15px;font-weight:600;margin-top:3px;color:var(--ink)}
+.tr-two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:8px 0}
+.tr-fam{border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px}
+.tr-fam-h{font-family:var(--font-display);font-size:17px;margin-bottom:6px}
+.tr-match{display:flex;flex-direction:column;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin:6px 0 14px}
+.tr-match-row{display:grid;grid-template-columns:minmax(0,1fr) 24px 200px;gap:10px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border-soft);font-size:14px}
+.tr-match-row:last-child{border-bottom:0}
+.tr-arrow{color:var(--ink-faint);text-align:center}
+.tr-loan{font-weight:600;color:var(--brand)}
+.tr-stages{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px;margin:8px 0 14px}
+.tr-stage{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);border-radius:var(--radius-sm);padding:9px 11px;font-size:13.5px;line-height:1.4}
+.tr-stage-n{flex:0 0 22px;height:22px;border-radius:50%;background:var(--brand);color:var(--brand-ink);font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:600}
+.tr-nav{display:flex;align-items:center;gap:12px;margin-top:26px;padding-top:16px;border-top:1px solid var(--border-soft)}
+.tr-nav-mid{flex:1;text-align:center;font-size:12px;color:var(--ink-faint)}
+.tr-done{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+@media (max-width:900px){
+  .tr-wrap{grid-template-columns:1fr}
+  .tr-menu{position:static;max-height:none;display:none}
+  .tr-main{padding:20px 18px}
+  .tr-two{grid-template-columns:1fr}
+  .tr-terms{grid-template-columns:1fr}
+  .tr-terms dt{border-bottom:0;padding-bottom:0;background:none}
+  .tr-match-row{grid-template-columns:1fr}
+  .tr-arrow{display:none}
+}
 .section-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:12px}
 .hint{font-size:12px;color:var(--ink-faint)}
 .empty{padding:28px;text-align:center;color:var(--ink-faint);font-size:13px}
@@ -7599,6 +7664,7 @@ function renderShell(){
         navItem("teamchat","💬","Team Chat", unreadTeamChatTotal(ui.viewAs)||null) +
         navItem("email","📧","Email") +
         (isOwner() || !isProcessor() ? navItem("coaching","🎯","Coaching") : "") +
+        (ui.viewAs === "owner" ? navItem("training","🎓","New Hire Training") : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
         navItem("ai-assistant","🤖","AI Assistant") +
@@ -7638,6 +7704,7 @@ function renderShell(){
   else if (ui.view === "teamchat") body = renderTeamChat();
   else if (ui.view === "email") body = renderEmailInbox();
   else if (ui.view === "coaching") body = renderCoaching();
+  else if (ui.view === "training") body = ui.viewAs === "owner" ? renderTraining() : renderToday();
   else body = renderToday();
 
   return sidebar + '<div class="main"' + accentStyle + '>' + (prefs.welcomeNote && ui.view==="today" ? ('<div class="panel panel-pad" style="margin:16px 16px 0;border-color:var(--brand)">✨ ' + esc(prefs.welcomeNote) + '</div>') : '') + body + '</div>';
@@ -8119,6 +8186,484 @@ function buildStandalonePricerOutputHTML(sp){
     (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
     '<div style="margin-top:14px"><button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button></div>';
 }
+/* ---------------------------------------------------------------------
+   New Hire Training Guide -- owner-only, click-through (Next / Back).
+   Joe's ask (2026-09-21): pointed at a brand-new loan officer who has
+   never dealt with a loan, explains each loan type and what it is for,
+   how they get paid, and how to use the system to their advantage.
+   Gated on ui.viewAs === "owner" (NOT isOwner(): Erika has full access
+   but this guide is Joe's only).
+--------------------------------------------------------------------- */
+function trP(t){ return '<p>' + t + '</p>'; }
+function trList(items){ return '<ul class="tr-list">' + items.map(function(i){ return '<li>' + i + '</li>'; }).join("") + '</ul>'; }
+function trBox(kind, label, html){
+  return '<div class="tr-box tr-' + kind + '"><div class="tr-box-h">' + label + '</div>' + html + '</div>';
+}
+function trTerms(pairs){
+  return '<dl class="tr-terms">' + pairs.map(function(p){ return '<dt>' + p[0] + '</dt><dd>' + p[1] + '</dd>'; }).join("") + '</dl>';
+}
+function trFacts(pairs){
+  return '<div class="tr-facts">' + pairs.map(function(p){
+    return '<div class="tr-fact"><div class="tr-fact-k">' + p[0] + '</div><div class="tr-fact-v">' + p[1] + '</div></div>';
+  }).join("") + '</div>';
+}
+function trLoan(o){
+  return trBox("plain", "In plain English", trP(o.plain)) +
+    trBox("story", "A real-life picture", trP(o.story)) +
+    '<h3 class="tr-h3">How it works</h3>' + trList(o.how) +
+    trFacts(o.facts) +
+    '<h3 class="tr-h3">Questions to ask the client</h3>' + trList(o.ask) +
+    trBox("watch", "Watch out for", trList(o.watch)) +
+    (o.money ? trBox("money", "How you get paid on it", trP(o.money)) : "");
+}
+
+function trainingSteps(){
+  var dscrPar = DSCR_BASE_PAR_RATE.toFixed(3) + "%";
+  var S = [];
+
+  S.push({ ch:"Start here", title:"Welcome to Bridgepoint", body:
+    trP("You do not need to know anything about loans to start here. This guide assumes you have never seen a mortgage document in your life &mdash; and by the end you will be able to explain every loan we offer to a client, price it, and know how you get paid on it.") +
+    trBox("plain", "How this guide works", trList([
+      "Click <b>Next</b> at the bottom to move forward and <b>Back</b> to re-read anything.",
+      "The list on the left lets you jump to any page. Your place is remembered while you are logged in.",
+      "Every loan page follows the same pattern: what it is, a real-life picture, how it works, what to ask, what to watch out for, how you get paid.",
+      "Nothing here is a test. Read it twice. The first week is for learning."
+    ])) +
+    '<h3 class="tr-h3">What you will be able to do by the end</h3>' +
+    trList([
+      "Explain what we do in one sentence to anyone.",
+      "Tell the six loan types apart and match the right one to a client.",
+      "Know how much of each loan you earn, and why.",
+      "Run your day: the daily call list, the dialer, texting, follow-ups.",
+      "Use the pricer, term sheets, and the AI tools to look sharper than the competition."
+    ])
+  });
+
+  S.push({ ch:"Loans 101", title:"What a loan actually is", body:
+    trP("A loan is simple: someone gives you money now, and you pay it back later <b>plus a fee for borrowing it</b>. That is all. Everything else in this business is just details about <i>how much</i>, <i>how long</i>, and <i>what happens if it is not paid back</i>.") +
+    trBox("story", "The lemonade-stand version", trP("Your friend wants to buy $100 of supplies for a lemonade stand but only has $20. You lend them $80 and say &ldquo;pay me back $88 in a month.&rdquo; You are the <b>lender</b>, they are the <b>borrower</b>, the $80 is the <b>loan amount</b>, and the extra $8 is <b>interest</b>. If they never pay you back, you get to keep the lemonade stand. The stand is the <b>collateral</b>. Real estate loans work exactly like this &mdash; the collateral is the building.")) +
+    '<h3 class="tr-h3">The words you will hear every single day</h3>' +
+    trTerms([
+      ["Borrower", "The person or company getting the money. Our clients."],
+      ["Lender", "Whoever puts up the money. That is either our in-house funding (Constructive Capital) or one of our outside lending partners."],
+      ["Collateral", "The property. If the borrower stops paying, the lender can take the property back. This is why lenders are comfortable lending."],
+      ["Interest rate", "The yearly price of borrowing, shown as a percent. A 10% rate on $100,000 costs $10,000 per year."],
+      ["Points", "A one-time fee charged up front, as a percent of the loan. <b>1 point = 1% of the loan.</b> On a $300,000 loan, 1 point is $3,000. This is the main way <i>we</i> get paid."],
+      ["Term", "How long the loan lasts &mdash; 12 months for a quick flip loan, 30 years for a long-term rental loan."],
+      ["LTV / LTC / ARV", "How much of the property&rsquo;s value or cost the lender will fund. <b>LTV</b> = loan &divide; value. <b>LTC</b> = loan &divide; total cost. <b>ARV</b> = &ldquo;after-repair value,&rdquo; what a fixed-up house will be worth. More on these in the loan pages."],
+      ["Down payment", "The part the borrower pays out of their own pocket. If the lender funds 80%, the borrower brings the other 20%."],
+      ["FICO score", "A credit score from 300 to 850. Higher means the borrower has a better history of paying people back, which means a better rate for them."],
+      ["Closing", "The day the deal is finished, the money moves, and the borrower gets the property. Also called &ldquo;funding.&rdquo;"],
+      ["Underwriting", "The lender&rsquo;s review of the deal to decide whether they will actually fund it. Erika, our processor, handles this with the lender."]
+    ])
+  });
+
+  S.push({ ch:"Loans 101", title:"Who we lend to (and who we do not)", body:
+    trP("Bridgepoint makes <b>business-purpose</b> real estate loans to <b>investors</b>. An investor is someone who buys property to <i>make money from it</i> &mdash; by renting it out, fixing it up and selling it, or building something new.") +
+    trBox("plain", "The one rule that matters most", trP("<b>We do not make loans on a home the borrower will live in.</b> Those are &ldquo;consumer&rdquo; mortgages with a whole separate set of laws. If someone tells you they are buying the house to live in, do not keep going down the path &mdash; be kind, tell them it is not what we do, and let Joe know.")) +
+    '<h3 class="tr-h3">Why investors come to us instead of a bank</h3>' +
+    trList([
+      "<b>Speed.</b> A bank often takes 45&ndash;60 days. Investors often have days to close or they lose the deal.",
+      "<b>Different approval rules.</b> Banks approve based on the borrower&rsquo;s paycheck and tax returns. Many of our loans are approved based on the <i>property</i> instead &mdash; so someone who owns ten rentals and shows little income on paper can still qualify.",
+      "<b>Short-term money.</b> A bank does not want to lend $200,000 on a house that is falling apart. We will, because we understand the plan is to fix it.",
+      "<b>They call us back.</b> A lot of investors have been ignored by big lenders. Being fast and human is a real advantage."
+    ]) +
+    '<h3 class="tr-h3">Where the money comes from</h3>' +
+    trP("Some loans are funded by our in-house lending arm, <b>Constructive Capital</b>. Others we place with <b>outside lending partners</b> when they are the better fit for that borrower. The client does not need to care which &mdash; they deal with you. You will see the lender choice on the loan file.") +
+    trBox("watch", "Say &ldquo;origination,&rdquo; never &ldquo;broker&rdquo;", trP("Our fee is an <b>origination fee</b> (also called origination points). In anything you write or say to a client, use &ldquo;origination.&rdquo; Do not call our fees &ldquo;broker fees.&rdquo;"))
+  });
+
+  S.push({ ch:"The six loans", title:"The six loans at a glance", body:
+    trP("We have six loan types. They fall into two families. If you understand the two families, you already understand most of it.") +
+    '<div class="tr-two">' +
+      '<div class="tr-fam"><div class="tr-fam-h">Family 1 &mdash; Long-term rental loans</div>' +
+        trP("For an investor who <b>keeps</b> the property and rents it out. Lasts up to 30 years. Lower interest rate. Paid back monthly from the rent.") +
+        trList(["<b>DSCR</b> &mdash; one rental property", "<b>Portfolio / Blanket</b> &mdash; many rentals in one loan"]) + '</div>' +
+      '<div class="tr-fam"><div class="tr-fam-h">Family 2 &mdash; Short-term project loans</div>' +
+        trP("For an investor who is <b>doing something</b> with the property &mdash; fixing it, building on it, or holding it briefly. Lasts about 12 months. Higher interest rate. Paid back in one lump when the project ends.") +
+        trList(["<b>Fix &amp; Flip</b> &mdash; buy, repair, sell", "<b>Ground Up Construction</b> &mdash; build new", "<b>Bridge</b> &mdash; a quick loan with no repairs"]) + '</div>' +
+    '</div>' +
+    trBox("plain", "And one odd one out", trP("<b>Mixed-Use</b> is a <i>type of building</i> (shop on the ground floor, apartments above) that can be financed with either family. We handle it a little differently &mdash; see its page.")) +
+    '<h3 class="tr-h3">Where rates sit today</h3>' +
+    trFacts([
+      ["Long-term rental (DSCR)", "Starts around " + dscrPar],
+      ["Short-term (flip / build / bridge)", "Roughly 10% &ndash; 13%"],
+      ["Typical DSCR term", "30 years"],
+      ["Typical short-term term", "12 months"]
+    ]) +
+    trP("<span class='tr-small'>Short-term rates are higher because the lender is taking more risk (a half-finished house is worth less to a lender than a finished rental) and earns interest for a much shorter time. Exact rates are always calculated per client in the Pricer &mdash; never quote from memory.</span>")
+  });
+
+  S.push({ ch:"The six loans", title:"DSCR &mdash; the rental property loan", body: trLoan({
+    plain: "A <b>DSCR</b> loan lets an investor buy or refinance a <b>rental property</b> using the <b>rent the property earns</b> to qualify &mdash; not their salary or tax returns. DSCR stands for &ldquo;Debt Service Coverage Ratio,&rdquo; which is just a fancy name for: <i>does the rent cover the mortgage payment?</i>",
+    story: "Maria owns a duplex she wants to refinance. It rents for $3,000 a month. Her total monthly cost (mortgage, property taxes, insurance) would be $2,400. That is $3,000 &divide; $2,400 = <b>1.25</b>. Anything at 1.0 or higher means the rent covers the payment, and the lender is happy. Nobody asks Maria what she makes at her day job.",
+    how: [
+      "<b>DSCR ratio</b> = monthly rent &divide; monthly payment (principal, interest, taxes, insurance, and HOA if any). We need at least <b>1.00</b> (1.20 for rural properties).",
+      "<b>Long term:</b> 30-year fixed, or a 10-year interest-only option. The borrower pays monthly, and the rent pays for it.",
+      "<b>Credit score sets the leverage.</b> With a 720+ score the lender funds up to 80% on a purchase or rate-and-term refinance and 75% on a cash-out refinance. At 660 that drops to 70%.",
+      "<b>Prepayment penalty:</b> a fee if the borrower pays off the loan early. A 5-year prepay gets the lowest rate; 3, 2 and 1-year cost a little more; &ldquo;none&rdquo; costs the most. Investors usually choose 5-year because they plan to keep the property.",
+      "<b>The rate is on a ladder.</b> The Pricer shows the lowest rate available and what each higher rate does to the price. A borrower can pick a lower payment or lower cost &mdash; you help them choose."
+    ],
+    facts: [
+      ["Starting rate", dscrPar + " and up"],
+      ["Min. credit score", "660"],
+      ["Max leverage", "Up to 80%"],
+      ["Lender fee", "$1,995&ndash;$3,995 by property"]
+    ],
+    ask: [
+      "Are you buying it or refinancing it? If refinancing &mdash; do you want cash out?",
+      "What is the address (or city and state), and the purchase price or current value?",
+      "What does it rent for, or what could it rent for? Is it rented now?",
+      "Rough credit score? (A range is fine: &ldquo;mid-700s.&rdquo;)",
+      "Is it in an LLC or in your own name?",
+      "How long do you plan to keep it?"
+    ],
+    watch: [
+      "<b>Not available in North Dakota, Nevada, or South Dakota.</b> The Pricer will block these.",
+      "A few states (AL, GA, KS, ME, MO, MS, NE, WI, WY) cost a bit more &mdash; the Pricer adds it for you.",
+      "Do not quote a rate until the Pricer has run it. Rate depends on credit score, leverage, property type, and prepay choice.",
+      "Owner-living-in-it = not our loan. It has to be a rental or investment."
+    ],
+    money: "You earn your share of the origination points <b>plus</b> half of any <b>yield spread premium (YSP)</b> &mdash; a bonus the lender pays us when the borrower picks a rate above the lowest one. DSCR is the loan type where YSP applies. See the &ldquo;How you get paid&rdquo; page."
+  })});
+
+  S.push({ ch:"The six loans", title:"Fix &amp; Flip &mdash; buy, repair, sell", body: trLoan({
+    plain: "A <b>Fix &amp; Flip</b> loan is a short-term loan for an investor who buys a rundown house, <b>repairs it</b>, and <b>sells it for a profit</b> (or keeps it). We fund part of the purchase <i>and</i> the repair costs.",
+    story: "Dave finds a house listed at $200,000 that needs $50,000 of work. Once fixed it will be worth $330,000 (that is the <b>ARV</b>, the after-repair value). A bank will not lend on a house with a broken kitchen and no roof. We will. Dave brings some cash, we fund the purchase and pay out the repair money in stages as the work gets done. Nine months later he sells at $330,000, pays us back, and keeps the profit.",
+    how: [
+      "<b>Short term:</b> 12 months to start; can be extended up to 18 months for a small extra fee.",
+      "<b>Interest-only:</b> the borrower only pays interest each month; the full amount is repaid when the house sells or is refinanced.",
+      "<b>Repair money comes in &ldquo;draws.&rdquo;</b> The borrower does some work, we verify it, we release the next chunk. This protects everybody.",
+      "<b>Leverage is measured three ways:</b> what we fund of the purchase price (initial LTC), of the total cost including repairs (LTC), and of the finished value (LTARV). A seasoned investor doing a light rehab can get up to about 90% of the purchase and 95% of total cost &mdash; but never more than 75% of the after-repair value. The Pricer does this math for you.",
+      "<b>Experience sets the price.</b> An investor with 11+ flips gets the best rate (from 9.99%). A first-timer pays more (up to 13.25%) and gets less leverage. This is because a first flip is riskier for the lender.",
+      "<b>Points trade off with rate.</b> Paying 1 point gets a lower rate; 0 points means a higher rate. The client picks."
+    ],
+    facts: [
+      ["Rate", "About 10% &ndash; 13%"],
+      ["Term", "12 months (up to 18)"],
+      ["Lender fee", "$1,995"],
+      ["Light vs. heavy rehab", "Repairs under half the purchase price = light"]
+    ],
+    ask: [
+      "What is the purchase price, and what are you planning to spend on repairs?",
+      "What do you think it will be worth after it is fixed up? How did you come up with that number?",
+      "How many houses have you flipped before? (The number matters &mdash; it sets their tier.)",
+      "Have you already got a contractor and a scope of work?",
+      "When is your closing date?",
+      "What is your exit &mdash; sell it, or hold and rent?"
+    ],
+    watch: [
+      "The <b>ARV</b> is the most important number and clients are always optimistic. Ask how they got it.",
+      "First-time flippers can qualify but with less leverage &mdash; set expectations early.",
+      "Never promise the repair funds will be released instantly. Draws take a few days to inspect.",
+      "Baltimore-area flips have an exclusion &mdash; the Pricer flags it."
+    ],
+    money: "You earn your share of the origination points. On a $300,000 loan at 1 point that is $3,000 of origination; at the standard 50% split, your share is $1,500. No YSP on this loan type."
+  })});
+
+  S.push({ ch:"The six loans", title:"Ground Up Construction &mdash; build something new", body: trLoan({
+    plain: "A <b>Ground Up</b> loan funds an investor who is <b>building a brand new property from an empty lot</b>. We lend on the land and then pay the builder&rsquo;s costs in stages while the building goes up.",
+    story: "Priya owns an empty lot and has plans for a new 3-bedroom house. Total cost to build is $400,000. A bank wants two years of tax returns and a finished set of drawings and still takes months. We look at Priya&rsquo;s experience and her plan and fund the build. As the foundation, framing and roof are finished, we release money. When it is done she sells it (or refinances into a long-term rental loan).",
+    how: [
+      "<b>Same short-term structure as a flip</b> &mdash; about 12 months, interest-only, paid out in draws &mdash; but it is riskier for the lender because there is no house yet, so it costs more (add about 0.75% to the rate).",
+      "<b>Experience is required.</b> We need the borrower to have at least a few completed projects (the 3&ndash;4 deal tier or better). Nobody builds their first house with us.",
+      "<b>Leverage:</b> at the 3&ndash;4 deal tier we fund up to 85% of total cost; at 5+ deals up to 90%, both capped at about 70% of the finished value.",
+      "<b>Longer than a flip:</b> the base is 12 months but builds often run longer, so the term can be extended in quarters (up to 18 months)."
+    ],
+    facts: [
+      ["Rate", "Flip rate + 0.75%"],
+      ["Term", "12 months (up to 18)"],
+      ["Lender fee", "$2,195 (1 unit) / $2,695 (2&ndash;4)"],
+      ["Experience needed", "3+ completed deals"]
+    ],
+    ask: [
+      "Do you own the land already, or are you buying it?",
+      "What are you building, and how many units?",
+      "What is the total budget, and what will it be worth when finished?",
+      "Do you have permits, plans, and a licensed builder?",
+      "How many projects like this have you completed?"
+    ],
+    watch: [
+      "No experience = not a fit yet. Do not string them along; be honest and offer a flip or bridge when appropriate.",
+      "Permits and plans are the delays. Ask early so nothing surprises the timeline.",
+      "It is the loan type with the most moving parts &mdash; loop in Erika right away."
+    ],
+    money: "You earn your share of the origination points, same as a flip. Ground-up loans are larger and points are on the whole loan amount, so they can be good paydays."
+  })});
+
+  S.push({ ch:"The six loans", title:"Bridge &mdash; the fast, no-repairs loan", body: trLoan({
+    plain: "A <b>Bridge</b> loan is a short-term loan with <b>no repair budget</b>. It &ldquo;bridges the gap&rdquo; between where the borrower is now and where they need to be &mdash; usually because they need to move faster than a normal lender allows.",
+    story: "Sam found an apartment building that is priced well below market, but the seller wants to close in 10 days. A long-term lender cannot move that fast. Sam takes a bridge loan, closes in a week, and then spends the next few months getting the building fully rented. Once it is stable, he refinances into a long-term DSCR loan and pays us off.",
+    how: [
+      "<b>Same rate table as a flip</b> &mdash; it is the same short-term risk. The Pricer treats it as a flip with no repair money.",
+      "<b>Lower leverage:</b> with no repairs adding value, we lend less &mdash; for example about 75% of the purchase price at the top experience tier.",
+      "<b>Common reasons to use it:</b> beating a fast deadline, buying a property that is vacant or needs to be leased up first, buying something a bank will not lend on yet, or paying off another loan that is about to come due.",
+      "<b>The exit is the important part:</b> a bridge loan is temporary. We always ask how the borrower plans to pay it off."
+    ],
+    facts: [
+      ["Rate", "About 10% &ndash; 13%"],
+      ["Term", "12 months"],
+      ["Lender fee", "$1,995"],
+      ["Typical leverage", "Up to about 75% of cost"]
+    ],
+    ask: [
+      "What is the property and what are you paying for it?",
+      "Why do you need to close fast, or why can&rsquo;t a bank do this?",
+      "What is the plan to pay us back? Sell it? Refinance it? When?",
+      "Is it vacant, or does it have tenants?"
+    ],
+    watch: [
+      "Always confirm the exit. A bridge loan with no exit is the riskiest loan we make.",
+      "If the client wants repair money too, it is a Fix &amp; Flip, not a Bridge."
+    ],
+    money: "You earn your share of the origination points on the loan amount, same as a flip."
+  })});
+
+  S.push({ ch:"The six loans", title:"Portfolio / Blanket &mdash; many rentals, one loan", body: trLoan({
+    plain: "A <b>Portfolio</b> (also called <b>Blanket</b>) loan is a DSCR loan that covers <b>several rental properties under a single loan</b>, instead of a separate loan for each one.",
+    story: "Carlos owns six single-family rentals. He has six different loans, six payments, six due dates, and six sets of paperwork. We wrap all six into one loan with one payment. It is simpler for him, and it can free up cash.",
+    how: [
+      "<b>Priced like a DSCR loan</b> &mdash; the combined rent has to cover the combined payment.",
+      "<b>Minimum size:</b> at least 3 properties <i>or</i> a total loan of $500,000+.",
+      "<b>&ldquo;Cross-collateralized&rdquo;</b> means all the properties back up the one loan. That is why it is easier for the borrower to get, and why it is one payment.",
+      "<b>Two main uses:</b> refinancing an existing group of rentals, or buying several properties in one purchase."
+    ],
+    facts: [
+      ["Min. size", "3 properties or $500k+"],
+      ["Priced like", "DSCR"],
+      ["Term", "30 years"],
+      ["Best for", "Investors with a growing portfolio"]
+    ],
+    ask: [
+      "How many properties, where are they, and what is each one worth?",
+      "What does each one rent for?",
+      "What are the current loans on each and are there prepayment penalties on them?",
+      "Do you want cash out?"
+    ],
+    watch: [
+      "Collecting and checking documents for many properties takes longer. Set expectations.",
+      "Existing loans may have prepayment penalties &mdash; ask before promising savings."
+    ],
+    money: "Same as DSCR: your share of origination points <b>plus</b> half of any YSP. These are usually big loans, so they are worth pursuing."
+  })});
+
+  S.push({ ch:"The six loans", title:"Mixed-Use &mdash; the one we handle by hand", body:
+    trBox("plain", "In plain English", trP("<b>Mixed-Use</b> describes the <i>building</i>, not the loan: a property with a business on the ground floor (a shop, a restaurant, an office) and apartments above. Think of the corner building with a laundromat downstairs and two apartments upstairs.")) +
+    trBox("story", "A real-life picture", trP("Nadia buys a small building with a bakery on the first floor and two apartments above. It earns rent from three tenants. She wants to hold it long term &mdash; that is a rental loan &mdash; or she needs to close fast and fix it up &mdash; that is a short-term loan. Either way, the building is mixed-use.")) +
+    '<h3 class="tr-h3">How we treat it</h3>' +
+    trList([
+      "Mixed-use is <b>not yet set up with its own automatic checklist and pricing</b> in the system the way the other five are. Right now it is <b>priced by hand</b>.",
+      "So when a mixed-use client comes in: log the lead, collect the basics (address, price, income from each unit, what the commercial tenant pays, the plan), then <b>ask Joe or Erika to help price it</b> before you tell the client anything.",
+      "Some outside lenders will not lend on mixed-use at all &mdash; which is exactly why our willingness to do it is valuable."
+    ]) +
+    trFacts([["Pricing", "By hand for now"], ["Who to ask", "Joe or Erika"], ["Rate", "Set when it is priced"]]) +
+    trBox("watch", "Watch out for", trList(["Do not quote a rate or a leverage number on a mixed-use deal until it has been priced.", "Ask what percentage of the building is commercial vs. residential &mdash; it changes the answer."])) +
+    trBox("money", "How you get paid on it", trP("Same rule as the loan type it ends up being: origination points (short term) or origination plus YSP (long-term rental)."))
+  });
+
+  S.push({ ch:"The six loans", title:"Which loan for which client?", body:
+    trP("When a client calls, work backwards from what they want to do. Listen for these phrases:") +
+    '<div class="tr-match">' +
+      [
+        ["&ldquo;I want to buy a rental / refinance my rental.&rdquo;", "DSCR"],
+        ["&ldquo;I own several rentals and want them all in one loan.&rdquo;", "Portfolio / Blanket"],
+        ["&ldquo;I am buying a rundown house to fix and sell.&rdquo;", "Fix &amp; Flip"],
+        ["&ldquo;I have a lot and I am going to build.&rdquo;", "Ground Up Construction"],
+        ["&ldquo;I need to close in 10 days / I need money until I can refinance.&rdquo;", "Bridge"],
+        ["&ldquo;It has a store downstairs and apartments above.&rdquo;", "Mixed-Use (ask Joe/Erika)"],
+        ["&ldquo;I am buying my own house to live in.&rdquo;", "Not our loan &mdash; tell Joe"]
+      ].map(function(r){ return '<div class="tr-match-row"><div class="tr-say">' + r[0] + '</div><div class="tr-arrow">&rarr;</div><div class="tr-loan">' + r[1] + '</div></div>'; }).join("") +
+    '</div>' +
+    trBox("plain", "The three questions that sort almost everyone", trList([
+      "<b>Are you keeping it or flipping/building it?</b> Keeping = long-term. Flipping/building = short-term.",
+      "<b>Is there repair or construction money involved?</b> Yes = Fix &amp; Flip or Ground Up. No = Bridge (short term) or DSCR (long term).",
+      "<b>One property or several?</b> Several rentals = Portfolio."
+    ]))
+  });
+
+  S.push({ ch:"Your money", title:"How you get paid", body:
+    trP("Here is the whole thing in one sentence: <b>we charge the client an origination fee on the loan, and you keep a share of it.</b> Nothing is paid until a loan actually closes.") +
+    '<h3 class="tr-h3">1. Origination points &mdash; your main pay</h3>' +
+    trP("The client pays us a percentage of the loan (usually 1 point = 1%) when the loan closes. The <b>standard split is 50%</b> to you and 50% to Bridgepoint; if you found the lead yourself (a referral of yours, your own contact) it goes up to <b>70%</b> to you. Your exact split is confirmed in your offer.") +
+    trBox("story", "Worked example", trList([
+      "$300,000 loan &times; 1 point = <b>$3,000</b> in origination.",
+      "Standard 50% split &rarr; you earn <b>$1,500</b>.",
+      "The same loan on a lead <b>you generated yourself</b> at 70% &rarr; you earn <b>$2,100</b>.",
+      "A bigger $600,000 loan at 1 point is $6,000 &rarr; $3,000 to you on a standard split."
+    ])) +
+    '<h3 class="tr-h3">2. Yield spread premium (YSP) &mdash; a bonus on rental loans</h3>' +
+    trP("On DSCR and Portfolio loans, if the borrower chooses a rate a little above the lowest available, the lender pays Bridgepoint a premium for it. We split that <b>50/50 with you, always</b> &mdash; no matter your origination split.") +
+    trBox("story", "Worked example", trP("Say a client takes a rate that earns a $2,000 premium from the lender. You receive <b>$1,000</b> of it, on top of your origination share. The Pricer shows the actual dollars for each rate option, so you can see the exact numbers for the deal you are working.")) +
+    trBox("watch", "When YSP does not apply", trList(["Short-term loans (flip, ground up, bridge) &mdash; no YSP.", "DSCR loans with <b>no prepayment penalty</b>.", "Multifamily buildings with 5+ units."])) +
+    '<h3 class="tr-h3">3. What is <i>not</i> yours</h3>' +
+    trP("The <b>processing fee</b> (usually $1,200) goes to the processor, Erika, who does the paperwork to get the loan closed. It is not part of your pay.") +
+    trBox("plain", "Where you see your numbers", trP("In <b>Payroll</b> and on each loan, the system shows exactly what you are owed on every deal, based on the real fees on the file. If a number looks wrong, ask Joe &mdash; do not guess."))
+  });
+
+  S.push({ ch:"Your day", title:"Your daily 20", body:
+    trP("Every morning the system builds your day for you. Open <b>Today</b> and you will see a list of people to call &mdash; <b>20 calls a day</b> (10 on Saturday, none on Sunday). You do not have to decide who to call. The list puts the right people in front of you in the right order.") +
+    trBox("plain", "What is on the list", trList([
+      "<b>New leads first</b> &mdash; someone who just asked about financing. These are the hottest.",
+      "<b>Follow-ups</b> &mdash; people you already talked to who are due for another touch.",
+      "<b>Requested call backs</b> &mdash; people who asked you to call on a specific day (they land on that exact day&rsquo;s list).",
+      "<b>Older leads</b> that are due for another try, according to the follow-up schedule."
+    ])) +
+    '<h3 class="tr-h3">How to work it</h3>' +
+    trList([
+      "Press the <b>Dialer</b> button (top left) and it will pull up the next person, call them, and show you their notes, so you are never dialing cold.",
+      "When you hang up, pick what happened: <b>Answered, No Answer, Voicemail, Wrong Number, Requested call back</b>, and so on. Add a quick note.",
+      "The dialer <b>moves to the next call by itself</b>. You will see a countdown of how many of your 20 are left.",
+      "If someone says &ldquo;call me in November,&rdquo; pick <b>Requested call back</b>, choose the date and time, and it will remind you by text and put them on that day&rsquo;s list."
+    ]) +
+    trBox("story", "The follow-up rhythm", trP("We try a person up to <b>5 times</b> over a set schedule before they are moved to a slower &ldquo;win-back&rdquo; list. Persistence wins in this business, because most of your competition stops after one or two tries.")) +
+    trBox("plain", "Automatic help", trP("When you log <b>No Answer</b> or <b>Voicemail</b>, the system automatically texts that person something like &ldquo;Hey, it&rsquo;s [your name] with Bridgepoint following up on your loan inquiry&hellip;&rdquo; &mdash; so you do not have to."))
+  });
+
+  S.push({ ch:"Your day", title:"Speed to lead: the 5-minute rule", body:
+    trP("This is the single most important habit in the job. When someone fills out a form or clicks an ad, they are usually talking to two or three lenders at the same time. <b>The first lender who reaches them usually wins.</b>") +
+    trFacts([["Goal", "Call within 5 minutes"], ["&ldquo;Hot&rdquo; lead", "Under 30 minutes old"], ["Best tool", "Phone app &mdash; New tab"]]) +
+    trList([
+      "<b>You will get a text alert</b> the moment a new lead is assigned to you, with a link that opens the lead.",
+      "<b>Open the phone app</b> (see the &ldquo;Your phone&rdquo; page). The <b>New</b> tab always shows your newest lead at the very top, flagged &ldquo;not contacted yet.&rdquo;",
+      "<b>Call first, text second.</b> If they do not answer, the system sends a text for you, but a real voice within five minutes is what wins the deal.",
+      "<b>Do not sit on a new lead</b> because you are busy with a different one. New first, always."
+    ]) +
+    trBox("story", "Why it matters in dollars", trP("How fast you respond is one of the biggest factors in whether a lead becomes a loan. One closed loan can be worth thousands of dollars to you in origination, so a two-minute call is some of the best-paid work you do all day."))
+  });
+
+  S.push({ ch:"Your day", title:"Your first call: what to say", body:
+    trP("You do not need to be a salesperson. You need to be <b>helpful and curious</b>. Your job on the first call is to figure out what the person is trying to do and whether we can help &mdash; not to pitch.") +
+    trBox("story", "A simple opening", trP("&ldquo;Hi <i>[name]</i>, it&rsquo;s <i>[you]</i> with Bridgepoint Lending. You reached out about financing a property &mdash; do you have two minutes?&rdquo;")) +
+    '<h3 class="tr-h3">Then ask, in this order</h3>' +
+    trList([
+      "&ldquo;Tell me about the property &mdash; what are you looking to do?&rdquo; (Listen. This tells you the loan type.)",
+      "&ldquo;Is this an investment, or will you live in it?&rdquo; (Business-purpose check.)",
+      "&ldquo;Where is it, and what are you paying?&rdquo;",
+      "&ldquo;Have you done deals like this before? About how many?&rdquo;",
+      "&ldquo;Roughly where is your credit?&rdquo;",
+      "&ldquo;When do you need to close?&rdquo;"
+    ]) +
+    trBox("plain", "Then end with a next step", trP("&ldquo;Based on that, here is what I would look at. I am going to run some numbers and text you a quick estimate in a few minutes. What is the best way to send it?&rdquo; Then run the Pricer and send it. <b>Always leave the call with a next step.</b>")) +
+    trBox("watch", "Never say", trList(["&ldquo;You are approved.&rdquo; Nobody is approved until underwriting says so.", "&ldquo;Your rate will be X.&rdquo; Say &ldquo;starting around X, and I will confirm once I run it.&rdquo;", "Anything about the loan being for their personal home."]))
+  });
+
+  S.push({ ch:"Using the system", title:"A loan from start to finish", body:
+    trP("Every loan moves through the same stages. You can see them on the <b>Pipeline</b> page as columns. The clients see a simpler version of it in their portal.") +
+    '<div class="tr-stages">' +
+      [
+        ["New Lead", "Someone just asked. Call them now."],
+        ["Attempting Contact", "You are trying to reach them."],
+        ["Contacted / Qualifying", "You talked. You are learning the deal and running numbers."],
+        ["Application Sent", "You sent them the application link."],
+        ["Application Completed", "They filled it out."],
+        ["Docs Collection", "We collect their documents. <b>Erika takes over here.</b>"],
+        ["Processing", "Erika orders title, appraisal, and prepares the file."],
+        ["Underwriting", "The lender is reviewing the deal."],
+        ["Conditional Approval", "Approved, pending a few last items."],
+        ["Clear to Close", "Everything is done. Closing is scheduled."],
+        ["Closed / Funded", "The money moves. You get paid."],
+        ["Post-Closing", "Follow up, ask for referrals, stay in touch."]
+      ].map(function(s, i){ return '<div class="tr-stage"><div class="tr-stage-n">' + (i+1) + '</div><div><b>' + s[0] + '</b><div class="tr-small">' + s[1] + '</div></div></div>'; }).join("") +
+    '</div>' +
+    trBox("plain", "Your job vs. Erika&rsquo;s", trP("<b>You</b> own the relationship: finding the deal, qualifying the client, pricing it, sending the application, and keeping the client calm and informed. <b>Erika</b> (Loan Processor) takes it from Docs Collection on: gathering documents, ordering title and appraisal, clearing conditions with underwriting. If a file stalls, Erika is your first stop &mdash; before Joe.")) +
+    trBox("story", "Rule of thumb", trP("Move the stage as you go. A pipeline that is not up to date hides money. If it says &ldquo;New Lead&rdquo; but you already talked to them, fix it."))
+  });
+
+  S.push({ ch:"Using the system", title:"Tools that make you look sharp", body:
+    trP("This is the part that separates a loan officer who struggles from one who wins. The system is built to do a lot of the work for you. Here is what to use, and why you care.") +
+    trTerms([
+      ["Pricer", "Type in the deal and it gives you the rate, fees, leverage, and monthly payment &mdash; and tells you right away if a state, credit score, or property type will not work. <b>Use it before you promise anything.</b>"],
+      ["Term sheets", "One click turns a priced deal into a professional, branded quote (with options like different points or prepay choices) that you text or email. A fast, clean quote makes you look like a pro."],
+      ["Send application", "Sends the client a link to apply online. You do not have to email PDFs."],
+      ["Calendar link", "Sends the client a link to book time with you. No back-and-forth."],
+      ["Documents", "Each loan lists exactly which documents it needs. The system tracks what has arrived and what is missing, and can request missing items from the client automatically."],
+      ["Coaching", "After calls and lost deals, the AI writes you a short note on what to do better. Before a conversation, hit <b>Get Tip</b> on a lead for advice."],
+      ["Retargeting / Win-back", "Old leads that went quiet are surfaced when it is time to try again. A lot of money is hiding here."],
+      ["Repeat Clients", "Clients whose loans are coming due or who could refinance. Investors come back &mdash; a happy client is your best lead source."],
+      ["Referral Partners", "Realtors, contractors, and accountants who send you deals. Track them here and keep them warm."],
+      ["AI Assistant", "Ask it in plain English &mdash; &ldquo;show me my stalled loans,&rdquo; &ldquo;add a note to Maria&rsquo;s file&rdquo; &mdash; and it can look things up and make updates for you."],
+      ["Team Chat &amp; Email", "Message the team from inside the system. Anything you send to a client from the lead page is logged on that lead."],
+      ["Borrower Portal Preview", "See exactly what your client sees. Clients get a portal to upload documents and follow progress."]
+    ])
+  });
+
+  S.push({ ch:"Using the system", title:"Your phone: calling and texting", body:
+    trP("The whole system runs on <b>one company phone number: (850) 279-8588</b>. Everyone calls and texts clients from it, and clients call it back.") +
+    trList([
+      "<b>Calls:</b> use the Dialer (or the Call button on any lead). It calls from your computer, and shows the lead&rsquo;s info and a live notes box while you talk.",
+      "<b>If a client calls the company number</b> and they are already a client, it rings the loan officer they work with. Otherwise they hear a short menu and get routed.",
+      "<b>Texts:</b> send from the lead page. Replies come back into the same conversation so you never lose track.",
+      "<b>Your phone:</b> open bridgepoint-crm-build.vercel.app on your phone and tap &ldquo;Add to Home Screen&rdquo; &mdash; it becomes an app. The <b>New</b> tab is your newest leads first; <b>Today</b> is your daily 20; <b>Contacts</b> is all your clients. Tap to call, text, email, send a calendar link, log the call, send an application or a term sheet."
+    ]) +
+    trBox("watch", "Texting rules", trList([
+      "<b>Never give a client your personal cell number.</b> Use the company number so the conversation stays in the system.",
+      "If a client texts <b>STOP</b>, the system honors it. Do not find another way to text them.",
+      "Do not text sensitive information (Social Security numbers, bank numbers). Use the secure portal.",
+      "Keep it human and short. One question per text."
+    ]))
+  });
+
+  S.push({ ch:"Staying safe", title:"Rules of the road", body:
+    trP("These are the lines you do not cross. They protect you, the client, and the company.") +
+    trList([
+      "<b>Business purpose only.</b> No loans on a home the borrower will live in.",
+      "<b>Nothing is guaranteed.</b> A term sheet or a quote is an estimate. Only underwriting approves a loan. Only a locked rate is a rate.",
+      "<b>No DSCR in North Dakota, Nevada, or South Dakota.</b>",
+      "<b>Foreign nationals and ITIN borrowers</b> have special rules and lower leverage, and some countries are not eligible. The Pricer checks this &mdash; run it before you promise anything.",
+      "<b>Do not make up numbers.</b> If you do not know an answer, say &ldquo;let me check and get right back to you,&rdquo; then ask Erika or Joe.",
+      "<b>Do not promise a closing date</b> until Erika has confirmed it.",
+      "<b>Say &ldquo;origination,&rdquo;</b> not &ldquo;broker fee.&rdquo;",
+      "<b>Keep everything in the system.</b> If it is not logged, it did not happen. Log your calls, notes, and stage changes."
+    ]) +
+    trBox("plain", "When in doubt", trP("Ask. A 30-second question to Erika or Joe in Team Chat will always be better than a wrong promise to a client."))
+  });
+
+  S.push({ ch:"Finish", title:"Your first week", body:
+    trP("Here is a simple plan. Tick these off mentally as you go.") +
+    '<h3 class="tr-h3">Day 1</h3>' +
+    trList(["Read this whole guide, then read it again.", "Log in, change your PIN, set your signature (buttons on the bottom left).", "Put the app on your phone.", "Click through every menu item once, just to see where things are.", "Open the Pricer and price three made-up deals: a DSCR rental, a flip, a bridge."]) +
+    '<h3 class="tr-h3">Days 2&ndash;3</h3>' +
+    trList(["Shadow a call with Joe or another loan officer if you can.", "Work your first Today list. Do not worry about closing &mdash; just make the calls and log them.", "Send a term sheet to a friend, just to see the whole flow."]) +
+    '<h3 class="tr-h3">By the end of week 1</h3>' +
+    trList(["Hit your 20 calls a day.", "Every new lead called inside 5 minutes.", "Every call logged with a note.", "Asked Erika at least three questions.", "Explained each loan type out loud to someone in your own words &mdash; that is how you know you have it."]) +
+    trBox("story", "The one habit that makes everything work", trP("<b>Speed, follow-up, honesty.</b> Call fast, keep following up when others quit, and never promise something you cannot deliver. Do that and the loans and the commissions take care of themselves.")) +
+    '<div class="tr-done"><button class="btn btn-primary" data-action="training-go" data-step="0">Start over from the beginning</button> <button class="btn btn-ghost" data-action="nav" data-view="today">Back to my day</button></div>'
+  });
+
+  return S;
+}
+
+function renderTraining(){
+  var steps = trainingSteps();
+  var i = Math.max(0, Math.min(steps.length - 1, ui.trainingStep || 0));
+  var s = steps[i];
+  var pct = Math.round(((i + 1) / steps.length) * 100);
+  var lastCh = "";
+  var menu = steps.map(function(st, idx){
+    var head = (st.ch !== lastCh) ? ('<div class="tr-menu-ch">' + st.ch + '</div>') : "";
+    lastCh = st.ch;
+    return head + '<button class="tr-menu-item' + (idx === i ? ' active' : '') + (idx < i ? ' done' : '') + '" data-action="training-go" data-step="' + idx + '">' +
+      '<span class="tr-menu-n">' + (idx + 1) + '</span><span>' + st.title + '</span></button>';
+  }).join("");
+  return topbar("New Hire Training", "A click-through guide for brand-new loan officers &mdash; owner only.") +
+    '<div class="content"><div class="tr-wrap">' +
+      '<aside class="tr-menu">' + menu + '</aside>' +
+      '<section class="tr-main">' +
+        '<div class="tr-progress"><div class="tr-progress-bar" style="width:' + pct + '%"></div></div>' +
+        '<div class="tr-kicker">' + s.ch + ' &middot; Page ' + (i + 1) + ' of ' + steps.length + '</div>' +
+        '<h2 class="tr-title">' + s.title + '</h2>' +
+        '<div class="tr-body">' + s.body + '</div>' +
+        '<div class="tr-nav">' +
+          '<button class="btn" data-action="training-go" data-step="' + (i - 1) + '"' + (i === 0 ? ' disabled' : '') + '>&larr; Back</button>' +
+          '<span class="tr-nav-mid">' + (i + 1) + ' / ' + steps.length + '</span>' +
+          (i < steps.length - 1
+            ? '<button class="btn btn-primary" data-action="training-go" data-step="' + (i + 1) + '">Next &rarr;</button>'
+            : '<button class="btn btn-primary" data-action="nav" data-view="today">Finish</button>') +
+        '</div>' +
+      '</section>' +
+    '</div></div>';
+}
+
 function renderCoaching(){
   var all = state.coachingNotes || [];
   var mine = isOwner() ? all : all.filter(function(n){ return n.staffId === ui.viewAs; });
@@ -13045,6 +13590,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "restart-tour"){ ui.view = "tour"; ui.tourStep = 0; render(); }
   else if (action === "reset-portal-customization"){ resetPortalCustomization(); }
   else if (action === "tour-next"){ ui.tourStep = (ui.tourStep||0)+1; render(); }
+  else if (action === "training-go"){ if (ui.viewAs === "owner"){ ui.trainingStep = Math.max(0, parseInt(t.dataset.step, 10) || 0); render(); var m = document.querySelector(".main"); if (m) m.scrollTop = 0; window.scrollTo(0, 0); } }
   else if (action === "tour-back"){ ui.tourStep = Math.max((ui.tourStep||0)-1,0); render(); }
   else if (action === "tour-skip" || action === "tour-finish"){ ui.view = "today"; render(); }
   else if (action === "set-today-scope"){ ui.todayScope = t.dataset.scope; render(); }
