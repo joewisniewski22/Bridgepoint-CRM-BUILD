@@ -5179,7 +5179,32 @@ function toE164Phone(raw){
 // Local US-style ringback (440+480 Hz, 2s on / 4s off). Carriers don't
 // always send their own ringback into a WebRTC leg, so without this the call
 // says "ringing" but the caller hears silence -- Joe's report 2026-09-21.
+// If the carrier IS sending its own ringback, ringbackWatch detects audio on
+// the remote stream and silences the local tone so it isn't doubled up
+// (Joe: "now i literally hear two rings").
 var ringbackCtx = null, ringbackTimer = null, ringbackOscs = [];
+var ringbackGain = null, ringbackWatch = null, ringbackAnalyser = null, ringbackAnalyserStream = null;
+function watchForRealRingback(){
+  if (ringbackWatch) return;
+  ringbackWatch = setInterval(function(){
+    var el = document.getElementById("telnyx-remote-audio");
+    var stream = el && el.srcObject;
+    if (!stream || !stream.getAudioTracks || !stream.getAudioTracks().length || !ringbackCtx) return;
+    try {
+      if (!ringbackAnalyser || ringbackAnalyserStream !== stream){
+        ringbackAnalyser = ringbackCtx.createAnalyser();
+        ringbackAnalyser.fftSize = 512;
+        ringbackCtx.createMediaStreamSource(stream).connect(ringbackAnalyser);
+        ringbackAnalyserStream = stream;
+      }
+      var buf = new Uint8Array(ringbackAnalyser.fftSize);
+      ringbackAnalyser.getByteTimeDomainData(buf);
+      var peak = 0;
+      for (var i = 0; i < buf.length; i++) peak = Math.max(peak, Math.abs(buf[i] - 128));
+      if (peak > 6 && ringbackGain) ringbackGain.gain.value = 0;
+    } catch(e){}
+  }, 150);
+}
 function primeRingback(){
   try {
     var AC = window.AudioContext || window.webkitAudioContext;
@@ -5192,19 +5217,23 @@ function startRingback(){
   if (ringbackTimer) return;
   primeRingback();
   if (!ringbackCtx) return;
+  ringbackGain = ringbackCtx.createGain();
+  ringbackGain.gain.value = 0.08;
+  ringbackGain.connect(ringbackCtx.destination);
   var burst = function(){
-    var ctx = ringbackCtx, g = ctx.createGain();
-    g.gain.value = 0.08; g.connect(ctx.destination);
+    var ctx = ringbackCtx;
     [440, 480].forEach(function(f){
       var o = ctx.createOscillator();
-      o.frequency.value = f; o.connect(g); o.start(); o.stop(ctx.currentTime + 2);
+      o.frequency.value = f; o.connect(ringbackGain); o.start(); o.stop(ctx.currentTime + 2);
       ringbackOscs.push(o);
     });
   };
   burst();
   ringbackTimer = setInterval(burst, 6000);
+  watchForRealRingback();
 }
 function stopRingback(){
+  if (ringbackWatch){ clearInterval(ringbackWatch); ringbackWatch = null; }
   if (ringbackTimer){ clearInterval(ringbackTimer); ringbackTimer = null; }
   ringbackOscs.forEach(function(o){ try { o.stop(); } catch(e){} });
   ringbackOscs = [];
