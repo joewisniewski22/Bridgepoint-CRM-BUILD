@@ -59,6 +59,11 @@ const TRANSFER_TIMEOUT_SECS = 25;
 const RING_ALL_TIMEOUT_SECS = 25;
 const SPANISH_LO_ID = "lo-fanis"; // Joe's explicit choice for the Spanish IVR branch
 const PROCESSING_STAFF_ID = "proc-erika";
+// Loan officers who are not taking calls: left out of ring-all, the directory
+// and team voicemail alerts. David -- Joe, 2026-09-21 (he is not calling anyone).
+// Remove the id from this list to put someone back in.
+const PHONE_TREE_EXCLUDED_IDS = ["lo-david"];
+const PHONE_TREE_EXCLUDED_FILTER = "(" + PHONE_TREE_EXCLUDED_IDS.join(",") + ")";
 
 type Stage =
   | "ringing_staff" | "connecting_lead"                       // outbound dialer (sequential mode, unused since the softphone)
@@ -182,7 +187,7 @@ async function notifyVoicemail(opts: { vmTarget: CallState["vmTarget"]; leadId?:
   if (vmTarget.kind === "staff" && vmTarget.staffId) staffIds = [vmTarget.staffId];
   else if (vmTarget.kind === "owner") staffIds = ["owner"];
   else if (vmTarget.kind === "all_los") {
-    const { data: los } = await sb.from("users").select("id").eq("role", "loan_officer");
+    const { data: los } = await sb.from("users").select("id").eq("role", "loan_officer").not("id", "in", PHONE_TREE_EXCLUDED_FILTER);
     staffIds = (los || []).map((u) => u.id as string).concat(["owner"]);
   }
 
@@ -278,7 +283,7 @@ async function sendMissedCallText(opts: { leadId: string; staffId: string | null
 // is the only way to coordinate that across separate, stateless webhook
 // invocations for each leg.
 async function startRingAllLoanOfficers(originalCallControlId: string) {
-  const { data: los } = await sb.from("users").select("id, name, phone").eq("role", "loan_officer").not("id", "like", "demo%");
+  const { data: los } = await sb.from("users").select("id, name, phone").eq("role", "loan_officer").not("id", "like", "demo%").not("id", "in", PHONE_TREE_EXCLUDED_FILTER);
   const withPhones = (los || []).filter((u) => u.phone);
   if (!withPhones.length) {
     await startVoicemail(originalCallControlId,
@@ -471,7 +476,7 @@ Deno.serve(async (req: Request) => {
           await speak(callControlId, "Please hold while we connect you to one of our loan officers.", "en");
           await startRingAllLoanOfficers(callControlId);
         } else if (digits === "2") {
-          const { data: los } = await sb.from("users").select("id, name, phone").eq("role", "loan_officer").not("phone", "is", null).not("id", "like", "demo%").order("name");
+          const { data: los } = await sb.from("users").select("id, name, phone").eq("role", "loan_officer").not("phone", "is", null).not("id", "like", "demo%").not("id", "in", PHONE_TREE_EXCLUDED_FILTER).order("name");
           const list = los || [];
           if (!list.length) {
             await startVoicemail(callControlId, "Please leave your name, number, and a brief message after the tone.", "en", { kind: "owner", label: "Company directory (empty)" }, null, state.callerNumber);
