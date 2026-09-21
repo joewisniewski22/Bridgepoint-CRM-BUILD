@@ -107,6 +107,14 @@ function encodeState(obj: CallState): string {
   return btoa(JSON.stringify(obj));
 }
 
+// Remembers what a transferred call was doing, keyed by call_session_id, for
+// the staff leg's hangup event (which arrives without client_state).
+async function saveTransferState(callSessionId: string, state: CallState) {
+  if (!callSessionId) return;
+  const { error } = await sb.from("voice_call_state").upsert({ call_session_id: callSessionId, state });
+  if (error) console.error("voice-webhook: saveTransferState failed", JSON.stringify(error));
+}
+
 async function telnyxAction(callControlId: string, action: string, body: Record<string, unknown>) {
   const res = await fetch(`https://api.telnyx.com/v2/calls/${callControlId}/actions/${action}`, {
     method: "POST",
@@ -270,7 +278,7 @@ async function sendMissedCallText(opts: { leadId: string; staffId: string | null
 // is the only way to coordinate that across separate, stateless webhook
 // invocations for each leg.
 async function startRingAllLoanOfficers(originalCallControlId: string) {
-  const { data: los } = await sb.from("users").select("id, name, phone").eq("role", "loan_officer");
+  const { data: los } = await sb.from("users").select("id, name, phone").eq("role", "loan_officer").not("id", "like", "demo%");
   const withPhones = (los || []).filter((u) => u.phone);
   if (!withPhones.length) {
     await startVoicemail(originalCallControlId,
@@ -379,6 +387,7 @@ Deno.serve(async (req: Request) => {
         });
       } else if (state.stage === "answering_inbound") {
         const nextState: CallState = { ...state, stage: "connecting_staff", originalCallControlId: callControlId };
+        await saveTransferState(payload.call_session_id as string, nextState);
         await telnyxAction(callControlId, "transfer", {
           to: state.staffPhone, from: TELNYX_FROM_NUMBER, timeout_secs: TRANSFER_TIMEOUT_SECS, client_state: encodeState(nextState),
         });
@@ -442,6 +451,7 @@ Deno.serve(async (req: Request) => {
               staffPhone: toE164(fanis.phone as string), callerNumber: state.callerNumber,
               vmTarget: { kind: "staff", staffId: fanis.id as string, label: fanis.name as string },
             };
+            await saveTransferState(payload.call_session_id as string, nextState);
             await telnyxAction(callControlId, "transfer", {
               to: nextState.staffPhone, from: TELNYX_FROM_NUMBER, timeout_secs: TRANSFER_TIMEOUT_SECS, client_state: encodeState(nextState),
             });
@@ -461,7 +471,7 @@ Deno.serve(async (req: Request) => {
           await speak(callControlId, "Please hold while we connect you to one of our loan officers.", "en");
           await startRingAllLoanOfficers(callControlId);
         } else if (digits === "2") {
-          const { data: los } = await sb.from("users").select("id, name").eq("role", "loan_officer").order("name");
+          const { data: los } = await sb.from("users").select("id, name, phone").eq("role", "loan_officer").not("phone", "is", null).not("id", "like", "demo%").order("name");
           const list = los || [];
           if (!list.length) {
             await startVoicemail(callControlId, "Please leave your name, number, and a brief message after the tone.", "en", { kind: "owner", label: "Company directory (empty)" }, null, state.callerNumber);
@@ -482,6 +492,7 @@ Deno.serve(async (req: Request) => {
               vmTarget: { kind: "staff", staffId: erika.id as string, label: "Processing" },
             };
             await speak(callControlId, "Please hold while we connect you to processing.", "en");
+            await saveTransferState(payload.call_session_id as string, nextState);
             await telnyxAction(callControlId, "transfer", {
               to: nextState.staffPhone, from: TELNYX_FROM_NUMBER, timeout_secs: TRANSFER_TIMEOUT_SECS, client_state: encodeState(nextState),
             });
@@ -502,6 +513,7 @@ Deno.serve(async (req: Request) => {
               staffPhone: toE164(lo.phone as string), callerNumber: state.callerNumber,
               vmTarget: { kind: "staff", staffId: lo.id as string, label: lo.name as string },
             };
+            await saveTransferState(payload.call_session_id as string, nextState);
             await telnyxAction(callControlId, "transfer", {
               to: nextState.staffPhone, from: TELNYX_FROM_NUMBER, timeout_secs: TRANSFER_TIMEOUT_SECS, client_state: encodeState(nextState),
             });
@@ -542,9 +554,25 @@ Deno.serve(async (req: Request) => {
     }
 
     if (eventType === "call.hangup") {
-      const state = decodeState(payload);
+      let state = decodeState(payload);
       const callControlId = payload.call_control_id as string;
+      // The hangup event for a transferred (staff) leg arrives WITHOUT the
+      // client_state we set on the transfer, so a staff phone that rang out
+      // was silently forgotten and the caller just dropped. Confirmed against
+      // a real timed-out transfer 2026-09-21. Recover the state saved for
+      // this call session -- but only for the staff leg's own hangup, never
+      // the caller's leg (that one hanging up isn't a no-answer).
+      let fromSavedState = false;
+      if (!state && payload.call_session_id) {
+        const { data: saved } = await sb.from("voice_call_state").select("state").eq("call_session_id", payload.call_session_id as string).maybeSingle();
+        const savedState = saved?.state as CallState | undefined;
+        if (savedState && savedState.originalCallControlId && savedState.originalCallControlId !== callControlId) {
+          state = savedState;
+          fromSavedState = true;
+        }
+      }
       if (!state) return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+      if (fromSavedState) await sb.from("voice_call_state").delete().eq("call_session_id", payload.call_session_id as string);
 
       const cause = ((payload.hangup_cause as string) || "").toLowerCase();
       const neverConnected = ["no_answer", "timeout", "call_rejected", "originator_cancel", "unspecified", "user_busy"].includes(cause);
