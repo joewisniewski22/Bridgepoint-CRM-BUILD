@@ -3419,8 +3419,25 @@ function setProcessingFee(leadId, fee){
   showToast("Processing fee set to " + fmtUSD(n));
   persist();
 }
+// A&D Mortgage's published wholesale fee schedule (admortgage.com fees page,
+// Non-QM -- which is what DSCR is): $1,595 underwriting, plus $80 tax-related
+// service, $6.95 flood certification and a $24.95 MERS fee (MERS is not
+// charged on NJ or VA properties). Joe's ask 2026-09-21: any term sheet on a
+// file being placed with A&D must use these instead of Constructive's table.
+var AD_LENDER = "A&D Mortgage";
+var AD_UW_FEE_NON_QM = 1595;
+var AD_TAX_SERVICE_FEE = 80;
+var AD_FLOOD_CERT_FEE = 6.95;
+var AD_MERS_FEE = 24.95;
+function adLenderExtras(lead){
+  if (lead.outsideLender !== AD_LENDER) return null;
+  var st = stateFromAddress(lead.propertyAddress);
+  var mers = (st === "NJ" || st === "VA") ? 0 : AD_MERS_FEE;
+  return { total: Math.round((AD_TAX_SERVICE_FEE + AD_FLOOD_CERT_FEE + mers) * 100) / 100, mers: mers };
+}
 function lenderFeeForLead(lead){
   if (lead.lenderFeeOverride != null) return lead.lenderFeeOverride;
+  if (lead.outsideLender === AD_LENDER) return AD_UW_FEE_NON_QM;
   try {
     var result = evaluatePricing(lead, {});
     if (result && !result.ineligible && result.fee != null) return result.fee;
@@ -3519,7 +3536,8 @@ function rehabHoldbackForLead(lead){
 // category as if it were zero. Refis don't have a "bring cash" equity
 // figure the same way, so those return fees-only instead of guessing.
 function estimatedCashToClose(lead){
-  var fees = pointsRevenue(lead) + lenderFeeForLead(lead) + processingFeeForLead(lead) + underwritingFeeForLead(lead) + commitmentFeeForLead(lead);
+  var adExtras = adLenderExtras(lead);
+  var fees = pointsRevenue(lead) + lenderFeeForLead(lead) + (adExtras ? adExtras.total : 0) + processingFeeForLead(lead) + underwritingFeeForLead(lead) + commitmentFeeForLead(lead);
   var txnType = lead.transactionType || "purchase";
   if (txnType !== "purchase") return { feesOnly:true, amount: fees };
   if (!lead.purchasePrice || !lead.loanAmount) return null;
@@ -3594,6 +3612,7 @@ function buildTermSheet(lead, langOverride){
     lines.push((isRehabType ? "Pago Mensual (solo interés): " : "Pago Mensual (capital e interés): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "Por determinar"));
     lines.push("Originación: " + commission);
     lines.push("Cargo del Prestamista: " + fmtUSD(lenderFeeForLead(lead)));
+    if (adLenderExtras(lead)) lines.push("Cargos del Prestamista (servicio de impuestos, certificación de inundación" + (adLenderExtras(lead).mers ? ", MERS" : "") + "): " + fmtUSD(adLenderExtras(lead).total));
     if (lead.underwritingFeeOverride != null) lines.push("Cargo de Suscripción: " + fmtUSD(underwritingFeeForLead(lead)));
     lines.push("Cargo de Procesamiento: " + fmtUSD(processingFeeForLead(lead)));
     if (lead.commitmentFeeOverride != null) lines.push("Depósito de Compromiso: " + fmtUSD(commitmentFeeForLead(lead)) + (lead.commitmentFeeRefundable ? " (reembolsable al cierre)" : ""));
@@ -3638,6 +3657,7 @@ function buildTermSheet(lead, langOverride){
     lines.push((isRehabType ? "Monthly Payment (interest only): " : "Monthly Payment (principal & interest): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "TBD"));
     lines.push("Origination: " + commission);
     lines.push("Lender Fee" + (lead.underwritingFeeOverride == null ? " (Underwriting)" : "") + ": " + fmtUSD(lenderFeeForLead(lead)));
+    if (adLenderExtras(lead)) lines.push("Lender Charges (tax service, flood certification" + (adLenderExtras(lead).mers ? ", MERS" : "") + "): " + fmtUSD(adLenderExtras(lead).total));
     if (lead.underwritingFeeOverride != null) lines.push("Underwriting Fee: " + fmtUSD(underwritingFeeForLead(lead)));
     lines.push("Processing Fee: " + fmtUSD(processingFeeForLead(lead)));
     if (lead.commitmentFeeOverride != null) lines.push("Commitment Fee: " + fmtUSD(commitmentFeeForLead(lead)) + (lead.commitmentFeeRefundable ? " (refunded to borrower at closing)" : ""));
@@ -8853,7 +8873,7 @@ function renderOutsideLenderFitBox(lead){
     '<div class="footnote" style="padding-top:8px">Estimate only, from each lender\'s published guidelines — not a submitted quote.</div>' +
   '</div>';
 }
-var OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN"];
+var OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN", "A&D Mortgage"];
 function canManageOutsideLender(){ return ui.viewAs==="owner" || ui.viewAs==="lo-fiore" || ui.viewAs==="proc-erika"; }
 function canViewOutsideLender(){ return canManageOutsideLender(); }
 function setOutsideLender(leadId, lender){

@@ -49,7 +49,7 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 const LOAN_TYPES = ["DSCR", "Fix & Flip", "Ground Up Construction", "Portfolio/Blanket", "Bridge", "Mixed-Use"];
 const SOURCES = ["Meta Ads", "Connected Investors", "Referral", "Repeat Client", "Website", "Self-Generated"];
-const OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN"];
+const OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN", "A&D Mortgage"];
 const CITIZENSHIP_STATUSES = ["US Citizen", "Permanent Resident", "Foreign National", "ITIN"];
 const PREPAY_TERMS = ["5yr", "3yr", "2yr", "1yr", "none"];
 
