@@ -222,48 +222,17 @@ Deno.serve(async (req: Request) => {
         }
       }
     } else if (staffMatch) {
-      // Joe's phone-system poll (2026-09-16): a bare "1" or "2" reply from
-      // a staff member is a vote, not a portal-chat message -- capture it
-      // and stop, before falling through to the portal-chat guess below.
-      // One-off for this specific poll, not a general poll feature.
-      const bareDigit = msg.text.trim();
-      if (bareDigit === "1" || bareDigit === "2") {
-        const vote = bareDigit === "1" ? "softphone_in_crm" : "ring_cell_first";
-        await sb.from("team_polls").upsert({
-          id: "poll-phone_system_2026_09_16-" + staffMatch.id,
-          poll_key: "phone_system_2026_09_16",
-          staff_id: staffMatch.id,
-          vote,
-          raw_text: msg.text,
-        }, { onConflict: "poll_key,staff_id" });
-        console.log("receive-text: captured poll vote", staffMatch.id, vote);
-        return new Response(JSON.stringify({ ok: true, pollVote: vote }), { headers: CORS_HEADERS });
-      }
-      // Not a borrower's own number -- staff member replying to a portal
-      // chat notification from their own phone. SMS has no thread
-      // ID, so route to whichever of this staff member's leads most
-      // recently has an unanswered borrower portal message (the last
-      // portal_chat entry is still "from: borrower"). Imperfect if a staff
-      // member has more than one open portal conversation at once, but it's
-      // the best signal available without per-lead phone numbers.
-      const { data: staffLeads } = await sb.from("leads").select("id, portal_chat").eq("assigned_to", staffMatch.id as string);
-      let target: Record<string, unknown> | null = null;
-      let targetTs = "";
-      for (const l of staffLeads || []) {
-        const chat = (l.portal_chat as Array<Record<string, unknown>>) || [];
-        const last = chat[chat.length - 1];
-        if (last && last.from === "borrower" && (last.ts as string) > targetTs) {
-          target = l;
-          targetTs = last.ts as string;
-        }
-      }
-      if (target) {
-        const chat = ((target.portal_chat as unknown[]) || []).slice();
-        chat.push({ from: "lo", text: msg.text, ts: new Date().toISOString(), authorName: staffMatch.name });
-        await sb.from("leads").update({ portal_chat: chat }).eq("id", target.id as string);
-        return new Response(JSON.stringify({ ok: true, routedToPortalChat: target.id }), { headers: CORS_HEADERS });
-      }
-      console.log("receive-text: staff sender matched but no open portal thread", staffMatch.id);
+      // A text from a staff member's own phone. It is NOT posted into any
+      // borrower's portal chat anymore: staff texts now arrive on the same
+      // company number as team announcements, so any reply ("sounds good",
+      // "got it") could be mistaken for a message to a client -- a simulated
+      // staff reply landed in a client's chat during testing on
+      // 2026-09-21. Staff answer portal chats inside the CRM instead. Every
+      // staff text is kept (one row each) so replies to a message Joe sends
+      // the team -- e.g. phone-test feedback -- can be read back.
+      const replyKey = "staff-reply-" + crypto.randomUUID().slice(0, 8);
+      await sb.from("team_polls").insert({ id: replyKey, poll_key: replyKey, staff_id: staffMatch.id, vote: "reply", raw_text: msg.text });
+      console.log("receive-text: logged staff reply", staffMatch.id);
     } else {
       console.log("receive-text: no lead or staff matched sender", msg.from);
     }
