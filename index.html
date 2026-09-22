@@ -4271,20 +4271,43 @@ function sendPortalMessage(leadId, text){
   if (lead.assignedTo) notifyUser(lead.assignedTo, lead.id, "portal-message", lead.name + " sent a portal message: " + msg.slice(0,80), { skipText:true });
   persist();
 }
+// Joe's ask (2026-09-15, expanded 2026-09-22): the application captures the
+// guarantor's real name/phone/email, but those are separate fields from the
+// lead's own contact info. The original fix only filled a GAP (an empty
+// lead.phone/email) -- Joe's follow-up ask is that a CHANGE on the
+// application (a client correcting a typo'd number, or updating to a new
+// one) should also update the client file automatically, not just get
+// silently captured in the guarantor fields while the file's actual
+// call/text/email target stays stale. Runs from both submitPublicApplication
+// (borrower self-submits) and submitPhoneApplication (staff takes it by
+// phone) -- same gap, same fix, one shared place to keep them in sync.
+function syncContactFromApplication(lead, patch){
+  var changes = [];
+  var newName = (patch.guarantorFirstName && patch.guarantorLastName)
+    ? (patch.guarantorFirstName + " " + patch.guarantorLastName) : null;
+  if (newName && newName !== lead.name){
+    changes.push('name from "' + lead.name + '" to "' + newName + '"');
+    lead.name = newName;
+  }
+  if (patch.guarantorPhone && patch.guarantorPhone !== lead.phone){
+    changes.push("phone" + (lead.phone ? (" from " + lead.phone) : "") + " to " + patch.guarantorPhone);
+    lead.phone = patch.guarantorPhone;
+  }
+  if (patch.guarantorEmail && patch.guarantorEmail !== lead.email){
+    changes.push("email" + (lead.email ? (" from " + lead.email) : "") + " to " + patch.guarantorEmail);
+    lead.email = patch.guarantorEmail;
+  }
+  if (changes.length){
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"system", text: "Contact info updated from application (" + changes.join(", ") + ")", author: "System" });
+  }
+}
 function submitPublicApplication(leadId, patch){
   var lead = leadById(leadId);
   if (!lead) return;
   var d = todayISO();
   Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
-  // Joe's ask (2026-09-15): the application captures the guarantor's real
-  // phone/email, but that's a separate field from the lead's own contact
-  // info -- if the lead record didn't already have one (e.g. it was
-  // created from a bare referral with no contact info yet), this was the
-  // only place that real number/address ever lived, so texts/emails sent
-  // "to the lead" silently had nowhere to go. Only fills a gap, never
-  // overwrites a contact value staff already has on file.
-  if (!lead.phone && patch.guarantorPhone) lead.phone = patch.guarantorPhone;
-  if (!lead.email && patch.guarantorEmail) lead.email = patch.guarantorEmail;
+  syncContactFromApplication(lead, patch);
   var ltvBasis = (patch.transactionType && patch.transactionType !== "purchase" && patch.currentValue) ? patch.currentValue : patch.purchasePrice;
   if (ltvBasis && patch.loanAmount){
     lead.ltv = Math.round((patch.loanAmount / ltvBasis) * 1000) / 10;
@@ -4949,11 +4972,10 @@ function submitPhoneApplication(leadId, patch){
   if (!lead) return;
   var d = todayISO();
   Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
-  // See submitPublicApplication's identical fix -- same gap exists when
-  // staff takes the application by phone instead of the borrower
-  // submitting it themselves.
-  if (!lead.phone && patch.guarantorPhone) lead.phone = patch.guarantorPhone;
-  if (!lead.email && patch.guarantorEmail) lead.email = patch.guarantorEmail;
+  // See syncContactFromApplication above -- same gap exists when staff
+  // takes the application by phone instead of the borrower submitting it
+  // themselves.
+  syncContactFromApplication(lead, patch);
   var ltvBasis = (patch.transactionType && patch.transactionType !== "purchase" && patch.currentValue) ? patch.currentValue : patch.purchasePrice;
   if (ltvBasis && patch.loanAmount){
     lead.ltv = Math.round((patch.loanAmount / ltvBasis) * 1000) / 10;
@@ -5894,6 +5916,30 @@ function hideGuarantorSsn(){
   if (ssnReveal && ssnReveal.timer) clearTimeout(ssnReveal.timer);
   ssnReveal = null;
   render();
+}
+// Joe's ask (2026-09-22): LOs need a real, visible way to fix a client's
+// name/email/phone themselves -- these were display-only everywhere on
+// Overview (a tel:/mailto: link, not an input) with no save path short of
+// editing the database directly. This is the file's PRIMARY contact info
+// (what the dialer, texting, and email actually use) -- distinct from the
+// separate Guarantor & Entity fields below it, which are the formal
+// loan-document identity and can legitimately differ.
+function updateLeadContactInfo(leadId, fd){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var newName = (fd.get("name")||"").trim();
+  var newEmail = (fd.get("email")||"").trim();
+  var newPhone = (fd.get("phone")||"").trim();
+  if (!newName){ showToast("Name is required"); return; }
+  var changes = [];
+  if (newName !== (lead.name||"")){ changes.push('name from "' + (lead.name||"—") + '" to "' + newName + '"'); lead.name = newName; }
+  if (newEmail !== (lead.email||"")){ changes.push("email"); lead.email = newEmail || null; }
+  if (newPhone !== (lead.phone||"")){ changes.push("phone"); lead.phone = newPhone || null; }
+  if (!changes.length){ showToast("No changes to save"); return; }
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text: "Contact info updated (" + changes.join(", ") + ") by " + currentUser().name, author: currentUser().name });
+  showToast("Contact info saved");
+  persist();
 }
 function quickEditGuarantor(leadId, fd){
   var lead = leadById(leadId);
@@ -9366,11 +9412,25 @@ function renderTabOverview(lead){
       '</div>')
     : "";
 
-  return renderLoanPlacementBanner(lead) + renderRelatedLoansBox(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + viewLenderSummaryBtn + renderTermSheetOptionsBox(lead) + '<div class="field-grid">' +
-    field("Borrower", esc(lead.name)) +
+  // Joe's ask (2026-09-22): LOs need a real way to fix a client's name,
+  // email, or phone number themselves -- these three were display-only
+  // everywhere on Overview (a mailto/tel link, not an input), so a typo at
+  // intake or a client giving an updated number had no in-app fix short of
+  // asking Joe to edit the database directly. Editable, with its own
+  // visible Save button so it's obvious this can be changed, not just the
+  // separate Guarantor & Entity section further down (which covers the
+  // formal loan-document identity, not this file's day-to-day contact info).
+  var contactInfoForm = '<div class="section-head" style="margin-top:0"><h2>Contact Info</h2>' +
+      '<span class="hint">Used everywhere this file is called, texted, or emailed</span></div>' +
+    '<form data-form="edit-contact-info" data-lead="' + lead.id + '" class="field-grid">' +
+      '<div class="field"><label>Borrower / File Name</label><input class="input" name="name" value="' + esc(lead.name||"") + '" required></div>' +
+      '<div class="field"><label>Email</label><input class="input" type="email" name="email" value="' + esc(lead.email||"") + '"></div>' +
+      '<div class="field"><label>Phone</label><input class="input" type="tel" name="phone" value="' + esc(lead.phone||"") + '"></div>' +
+      '<div class="field" style="align-self:end"><button class="btn btn-sm btn-primary" type="submit">Save</button></div>' +
+    '</form>';
+
+  return renderLoanPlacementBanner(lead) + renderRelatedLoansBox(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + viewLenderSummaryBtn + renderTermSheetOptionsBox(lead) + contactInfoForm + '<div class="field-grid" style="margin-top:16px">' +
     field("Entity Type", esc(lead.entityType||"—")) +
-    field("Email", lead.email ? ('<button type="button" class="link-btn" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline, as this file\'s loan officer">' + esc(lead.email) + '</button>') : "—") +
-    field("Phone", '<a href="tel:' + esc(lead.phone) + '">' + esc(lead.phone) + '</a>') +
     field("Guarantor Address", esc(lead.guarantorAddress || (lead.rtlApp && lead.rtlApp.homeAddress) || (lead.dscrApp && lead.dscrApp.homeAddress) || "—")) +
     field("Source", esc(lead.source)) +
     field("Loan Officer", esc(userName(lead.assignedTo))) +
@@ -14229,6 +14289,8 @@ appEl.addEventListener("submit", function(e){
     var tsoFileInput = form.querySelector('[name="file"]');
     var tsoFile = tsoFileInput && tsoFileInput.files && tsoFileInput.files[0];
     addTermSheetOption(form.dataset.lead, fd, tsoFile || null);
+  } else if (type === "edit-contact-info"){
+    updateLeadContactInfo(form.dataset.lead, fd);
   } else if (type === "quick-edit-guarantor"){
     quickEditGuarantor(form.dataset.lead, fd);
   } else if (type === "loan-details"){
