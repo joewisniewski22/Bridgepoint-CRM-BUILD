@@ -9711,9 +9711,17 @@ function renderSubmitForReview(lead){
 }
 function renderOutsideTermSheetUpload(lead){
   if (!canManageOutsideLender()) return '';
+  // Joe's rule (2026-09-22): the first term sheet uploaded to a file
+  // becomes its real terms; uploading another one to a file that already
+  // has real terms means presenting a second financing option, not
+  // replacing the first -- see processOutsideTermSheet's isAdditional
+  // check, which keys off this same guidelineOverrideApproved flag.
+  var uploadHint = lead.guidelineOverrideApproved
+    ? "This loan already has real terms on file — upload another quote here and it\'s added as a side-by-side option to present, without touching this loan\'s current terms."
+    : "Got a real quote back from RCN, Kiavi, or anyone else — or one Constructive approved above the standard guideline? Upload it here and AI applies it as this loan\'s real terms.";
   return '<div class="section-head" style="margin-top:20px"><h2>Upload Outside Term Sheet</h2></div>' +
     '<div class="panel panel-pad">' +
-      '<div class="footnote" style="padding:0 0 8px">Got a real quote back from RCN, Kiavi, or anyone else? Upload it here — AI reads the actual figures and updates this loan\'s terms automatically. Nothing else on the site changes.</div>' +
+      '<div class="footnote" style="padding:0 0 8px">' + esc(uploadHint) + '</div>' +
       '<form data-form="outside-term-sheet" data-lead="' + lead.id + '">' +
         '<div class="form-row"><label>Term Sheet (PDF or image)</label><input class="input" type="file" name="termSheetFile" accept="application/pdf,image/*" required></div>' +
         '<div class="form-row"><label>Notes for the AI (optional)</label><input class="input" name="termSheetNotes" placeholder="e.g. charge 2.5 points instead of what\'s shown"></div>' +
@@ -11168,31 +11176,52 @@ function formatTermSheetChange(label){
 function processOutsideTermSheet(leadId, file, notes){
   if (!sb || !file) return;
   var lead = leadById(leadId);
+  // Joe's rule (2026-09-22): uploading a term sheet means those ARE the
+  // terms being used. Uploading a SECOND one to a file that already has
+  // real terms applied means presenting multiple financing options to the
+  // borrower, not replacing the current terms -- guidelineOverrideApproved
+  // is set the first time a term sheet gets applied (see below), so its
+  // presence is what tells a later upload to add an option instead.
+  var isAdditional = !!(lead && lead.guidelineOverrideApproved);
   var resultBox = document.getElementById("term-sheet-result-" + leadId);
   if (resultBox) resultBox.innerHTML = '<div class="footnote">Reading term sheet…</div>';
   var reader = new FileReader();
   reader.onload = function(){
     var base64 = reader.result.split(",")[1];
-    var message = "Update loan file " + leadId + " (" + (lead ? lead.name : "") + ") with the real terms from this attached outside term sheet. Only use figures actually shown in the document -- never guess or invent a number. If it's from an outside lender, set outsideLender, set the loan amount/rate/term exactly as shown even if above our in-house guideline max, and set lenderFeeOverride to the lender's own fee shown on the document so our generated term sheet matches their real quote. " +
-      (notes ? ("Additional instructions from Joe: " + notes + ". ") : "") +
-      "After updating, tell me exactly what changed, and call out anything on the document you weren't able to apply.";
+    var message = isAdditional
+      ? ("This loan file " + leadId + " (" + (lead ? lead.name : "") + ") already has real terms applied. Add this attached term sheet as an ADDITIONAL term sheet OPTION using add_term_sheet_option -- do NOT change the loan file's own current terms. Extract the real lender name/label, loan amount, rate, term, LTV (or LTARV), cash to close, and put anything else worth noting (fees, LTC, ARV, points, prepay terms) into notes. Only use figures actually shown in the document -- never guess or invent a number. " +
+          (notes ? ("Additional instructions: " + notes + ". ") : "") +
+          "After adding it, tell me exactly what you captured, and call out anything on the document you weren't able to apply.")
+      : ("Update loan file " + leadId + " (" + (lead ? lead.name : "") + ") with the real terms from this attached term sheet -- this is the first term sheet applied to this file, so these ARE the terms being used: set markApprovedAboveGuideline to true. Only use figures actually shown in the document -- never guess or invent a number. If it's from an outside lender, also set outsideLender, and set lenderFeeOverride to the lender's own fee shown on the document so our generated term sheet matches their real quote. " +
+          (notes ? ("Additional instructions: " + notes + ". ") : "") +
+          "After updating, tell me exactly what changed, and call out anything on the document you weren't able to apply.");
     sb.functions.invoke("owner-ai-command", { body: { message: message, userId: currentUser().id, attachmentBase64: base64, attachmentMediaType: file.type } }).then(function(res){
       if (res.error || !res.data || !res.data.ok){
         if (resultBox) resultBox.innerHTML = '<div class="ts-result ts-result-warn"><div class="ts-result-h">⚠ Couldn\'t process the term sheet</div>Try again, or check the file is a readable PDF/image.</div>';
         showToast("Couldn't process the term sheet — try again");
         return;
       }
-      // Pull the real changedFields off the actual update_loan_file/
-      // create_loan_file tool result (not the AI's paraphrased reply) so
-      // the on-screen confirmation reflects exactly what was written to
-      // the loan file -- this is the real fix for "it changed terms" with
-      // no visibility into what changed: Fiore couldn't tell whether the
-      // upload actually mirrored the document he sent.
-      var actions = (res.data.actions || []).filter(function(a){ return (a.tool==="update_loan_file"||a.tool==="create_loan_file") && a.result && a.result.ok; });
+      // Pull the real result off the actual tool call (not the AI's
+      // paraphrased reply) so the on-screen confirmation reflects exactly
+      // what was written to the loan file -- this is the real fix for "it
+      // changed terms" with no visibility into what changed: Fiore
+      // couldn't tell whether the upload actually mirrored the document.
+      var updateActions = (res.data.actions || []).filter(function(a){ return (a.tool==="update_loan_file"||a.tool==="create_loan_file") && a.result && a.result.ok; });
+      var optionActions = (res.data.actions || []).filter(function(a){ return a.tool==="add_term_sheet_option" && a.result && a.result.ok; });
       if (resultBox){
-        if (actions.length){
+        if (optionActions.length){
+          resultBox.innerHTML = '<div class="ts-result ts-result-ok">' +
+            '<div class="ts-result-h">✅ Added as a new option — this loan\'s own terms were not changed</div>' +
+            '<ul class="ts-result-list">' + optionActions.map(function(a){
+              var r = a.result;
+              return '<li><b>' + esc(r.optionLabel||"Option") + '</b>' + (r.loanAmount ? (' — ' + fmtUSD(r.loanAmount)) : '') + (r.rate ? (' at ' + r.rate + '%') : '') + '</li>';
+            }).join("") + '</ul>' +
+            '<div class="footnote" style="padding-top:4px">See it under Term Sheet Options on Overview, alongside this loan\'s current terms.</div>' +
+            (res.data.reply ? ('<div class="ts-result-reply">' + esc(res.data.reply) + '</div>') : '') +
+          '</div>';
+        } else if (updateActions.length){
           var changed = [];
-          actions.forEach(function(a){ (a.result.changedFields||[]).forEach(function(f){ changed.push(f); }); });
+          updateActions.forEach(function(a){ (a.result.changedFields||[]).forEach(function(f){ changed.push(f); }); });
           resultBox.innerHTML = '<div class="ts-result ts-result-ok">' +
             '<div class="ts-result-h">✅ Term sheet applied — loan updated to match</div>' +
             (changed.length ? ('<ul class="ts-result-list">' + changed.map(function(c){ return '<li>' + formatTermSheetChange(c) + '</li>'; }).join("") + '</ul>') : '<div>No fields changed.</div>') +
@@ -11205,7 +11234,7 @@ function processOutsideTermSheet(leadId, file, notes){
           '</div>';
         }
       }
-      showToast(actions.length ? "Term sheet applied — see confirmation below" : "Term sheet processed, but nothing changed");
+      showToast((updateActions.length || optionActions.length) ? "Term sheet applied — see confirmation below" : "Term sheet processed, but nothing changed");
       hydrateFromSupabase();
     }).catch(function(){
       if (resultBox) resultBox.innerHTML = '<div class="ts-result ts-result-warn"><div class="ts-result-h">⚠ Couldn\'t process the term sheet</div>Try again, or check the file is a readable PDF/image.</div>';

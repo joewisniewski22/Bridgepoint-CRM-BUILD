@@ -67,7 +67,8 @@ async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string
     "\n\nCAPABILITIES:\n" +
     "1. Marketing content: create_content then publish_content to post recent-closing announcements or stories to the CRM's public showcase page. Never claim something is live unless publish_content reports success. Default to NOT naming the borrower and NOT including their exact street address (city/state only) unless Joe explicitly asks -- these are real clients' financial details. Write body as simple HTML (p, strong, br, a tags only).\n" +
     "2. Loan file creation from a term sheet: when Joe pastes term sheet text or attaches a term sheet document/image for a BRAND NEW loan (not already in the CRM), extract the real figures and call create_loan_file. Valid loanType values: " + LOAN_TYPES.join(", ") + ". Valid source values: " + SOURCES.join(", ") + " (use 'Referral' or the closest fit if unclear, never invent a new source). Valid outsideLender values: " + OUTSIDE_LENDERS.join(", ") + " or omit for in-house. NEVER guess a figure that isn't actually in the document -- omit any field you can't find rather than inventing a number, and tell Joe what's missing in your reply. If the assignee isn't stated, ASK rather than picking someone.\n" +
-    "3. Updating an EXISTING loan file: when Joe or an LO gets a new/real quote back (e.g. a lender's pricing terms sheet) for a loan already in the CRM, call update_loan_file with the leadId and only the fields that changed -- extract real figures the same way as create_loan_file, never guess. This updates BOTH the loan scenario/pricing AND, for DSCR loans, the loan product name on the actual application (via loanProduct) -- our generated term sheet, the borrower portal, and the application all read from these same fields, so one call keeps everything in sync. Our generated term sheet must MIRROR the real terms on the uploaded document, just rebranded onto our own template -- it never shows the outside lender's own document or name to the borrower, and never quietly substitutes a different number. For an OUTSIDE-LENDER document specifically: set outsideLender if it isn't already correct on the file, set loanAmount/rate/termMonths exactly as shown even if the amount is above our own in-house guideline max (that ceiling is only for in-house Constructive Capital loans and does not apply once outsideLender is set), and set lenderFeeOverride to the lender's own fee/underwriting-fee line exactly as printed on their document -- if you leave lenderFeeOverride blank the term sheet silently falls back to our own in-house guideline fee table instead of their real number, which is exactly the kind of mismatch to avoid. pointsCharged is different: it is Bridgepoint's own origination fee on top of the outside lender's quote, not a figure printed on their document, so only set it when Joe/the LO explicitly tells you what to charge (or the notes say so) -- otherwise omit it and leave whatever origination is already on the file untouched. If Joe doesn't give you the leadId, use search_leads with the borrower's name/phone/email first rather than asking him for it. Always write a one-sentence changeSummary describing what changed and why (e.g. citing a pricing/quote ID if the source document has one) -- it gets logged to the loan's activity history.\n" +
+    "3. Updating an EXISTING loan file: when Joe or an LO gets a new/real quote back (e.g. a lender's pricing terms sheet) for a loan already in the CRM, call update_loan_file with the leadId and only the fields that changed -- extract real figures the same way as create_loan_file, never guess. This updates BOTH the loan scenario/pricing AND, for DSCR loans, the loan product name on the actual application (via loanProduct) -- our generated term sheet, the borrower portal, and the application all read from these same fields, so one call keeps everything in sync. Our generated term sheet must MIRROR the real terms on the uploaded document, just rebranded onto our own template -- it never shows the outside lender's own document or name to the borrower, and never quietly substitutes a different number. For an OUTSIDE-LENDER document specifically: set outsideLender if it isn't already correct on the file, set loanAmount/rate/termMonths exactly as shown even if the amount is above our own in-house guideline max (that ceiling is only for in-house Constructive Capital loans and does not apply once outsideLender is set), and set lenderFeeOverride to the lender's own fee/underwriting-fee line exactly as printed on their document -- if you leave lenderFeeOverride blank the term sheet silently falls back to our own in-house guideline fee table instead of their real number, which is exactly the kind of mismatch to avoid. pointsCharged is different: it is Bridgepoint's own origination fee on top of the outside lender's quote, not a figure printed on their document, so only set it when Joe/the LO explicitly tells you what to charge (or the notes say so) -- otherwise omit it and leave whatever origination is already on the file untouched. Joe's rule (2026-09-22): uploading a term sheet means those ARE the terms being used -- if this is the FIRST real term sheet applied to this file, also set markApprovedAboveGuideline to true so the standard guideline matrix doesn't silently cap the loan amount back down. If Joe doesn't give you the leadId, use search_leads with the borrower's name/phone/email first rather than asking him for it. Always write a one-sentence changeSummary describing what changed and why (e.g. citing a pricing/quote ID if the source document has one) -- it gets logged to the loan's activity history.\n" +
+    "3b. Multiple term sheets on the same file: Joe's rule (2026-09-22) -- one term sheet uploaded to a file means those are the terms being used (tool 3, with markApprovedAboveGuideline). A SECOND (or third) term sheet uploaded to a file that already has real terms on it means presenting multiple financing options to the borrower side by side, NOT replacing the current terms -- call add_term_sheet_option instead of update_loan_file for that one, and leave the file's own current terms exactly as they are. You'll typically be told explicitly which case you're in by whoever triggered the upload; when it's ambiguous, treat a file that already has a loanAmount and rate on it as already having real terms, so a new upload defaults to add_term_sheet_option.\n" +
     "4. Sending documents: to send a Pre-Approval Letter or Term Sheet to a borrower on an existing loan file, call send_document with the leadId and kind -- this actually emails/texts them for real, so only call it when Joe clearly asks to send (not just when he asks you to create or update a file).\n" +
     "5. Looking up loans: list_closed_deals for recently funded loans, or search_leads / get_lead_details to find and inspect any loan file by name/phone/email or id.\n" +
     "6. Team communication: email_team and text_team send a REAL email/text to staff -- team-wide announcements, reminders, or a message to one specific person. Only call these when Joe clearly asks you to send/tell/email/text someone or the team, not as a side effect of something else.\n" +
@@ -186,10 +187,29 @@ const TOOLS = [
         loanProduct: { type: "string", description: "DSCR loans only -- the actual loan product/amortization named on the term sheet, e.g. '30 Year Fixed', '5/1 ARM', 'Interest Only'. Merged into the application, not just the pricing." },
         citizenshipStatus: { type: "string", enum: CITIZENSHIP_STATUSES },
         exitStrategy: { type: "string" },
+        markApprovedAboveGuideline: { type: "boolean", description: "Set true whenever you are applying the FIRST real term sheet uploaded to this file (see tool 3's instructions -- uploading a term sheet means these are the terms being used, so the standard guideline matrix should stop capping this file's loan amount back down to its own table). Never set this just because a number happens to look high -- only when you were explicitly told this is the first/only term sheet being applied." },
         changeSummary: { type: "string", description: "One short sentence for the activity log describing what changed and why (cite a pricing/quote ID from the source document if there is one)" },
         notifyAssignee: { type: "boolean", description: "Whether to text/email the assigned loan officer that terms changed (default true)" },
       },
       required: ["leadId"],
+    },
+  },
+  {
+    name: "add_term_sheet_option",
+    description: "Add an ADDITIONAL term sheet as a side-by-side OPTION on a loan file that ALREADY has real terms applied -- use this instead of update_loan_file when told a file already has terms on it and a further term sheet is being uploaded (uploading a second/third term sheet means presenting multiple financing options to the borrower, not replacing the current one). Does NOT change the loan file's own current terms.",
+    input_schema: {
+      type: "object",
+      properties: {
+        leadId: { type: "string", description: "The loan file id to add the option to" },
+        lender: { type: "string", description: "Label for this option -- the lender's name if shown on the document, otherwise a short descriptive label like 'Option B'" },
+        loanAmount: { type: "number" },
+        rate: { type: "number", description: "Interest rate as a percent" },
+        ltv: { type: "number", description: "LTV or LTARV as a percent, whichever the document shows" },
+        termMonths: { type: "integer" },
+        cashToClose: { type: "number" },
+        notes: { type: "string", description: "Anything else on the document worth capturing that doesn't have its own field -- fees, LTC, ARV, points, prepay terms, etc." },
+      },
+      required: ["leadId", "lender"],
     },
   },
   {
@@ -482,6 +502,16 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
       patch.dscr_app = dscrApp;
       changedLabels.push("loanProduct = " + loanProduct);
     }
+    // Joe's rule (2026-09-22): uploading a term sheet means those ARE the
+    // terms being used -- the standard guideline matrix (computeMaxLoanAmount
+    // client-side) should not silently cap the printed loan amount back
+    // down once real, applied terms are on file. Mirrors the manual
+    // "Mark Approved Above Guideline" control in the CRM (same field).
+    if (input.markApprovedAboveGuideline === true) {
+      patch.guideline_override_approved = true;
+      patch.guideline_override_note = (input.changeSummary as string) || "Approved -- terms applied from an uploaded term sheet.";
+      changedLabels.push("guidelineOverrideApproved = true");
+    }
     if (Object.keys(patch).length === 0) return { error: "no_fields_provided" };
 
     const merged = { ...existing, ...patch } as Record<string, unknown>;
@@ -522,6 +552,35 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
       }
     }
     return { ok: true, leadId, link, changedFields: changedLabels };
+  }
+  if (name === "add_term_sheet_option") {
+    const leadId = input.leadId as string;
+    if (!leadId) return { error: "missing_leadId" };
+    const lender = ((input.lender as string) || "").trim();
+    if (!lender) return { error: "missing_lender" };
+    const { data: existing, error: fetchErr } = await sb.from("leads").select("id,name,documents,activity,assigned_to").eq("id", leadId).single();
+    if (fetchErr || !existing) return { error: "lead_not_found" };
+    if (!caller.isOwner && existing.assigned_to !== caller.id) {
+      return { error: "not_authorized", detail: "That loan file isn't assigned to you." };
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const documents = Array.isArray(existing.documents) ? existing.documents as unknown[] : [];
+    // Same shape addTermSheetOption() writes client-side (index.html) --
+    // termSheetOptions()/renderTermSheetOptionsBox() read isTermSheetOption
+    // to show these as side-by-side alternatives, never touching the loan
+    // file's own current terms.
+    documents.push({
+      name: "Term Sheet Option: " + lender, isTermSheetOption: true, lender,
+      loanAmount: input.loanAmount ?? null, rate: input.rate ?? null, ltv: input.ltv ?? null,
+      termMonths: input.termMonths ?? null, cashToClose: input.cashToClose ?? null,
+      notes: input.notes ?? null, receivedAt: today, addedBy: "AI Assistant",
+    });
+    const activity = Array.isArray(existing.activity) ? existing.activity as unknown[] : [];
+    activity.push({ date: today, type: "note", text: "Added term sheet option: " + lender + " (uploaded term sheet -- presenting as an additional option, current terms unchanged)", author: "AI Assistant" });
+    const { error: updErr } = await sb.from("leads").update({ documents, activity }).eq("id", leadId);
+    if (updErr) return { error: updErr.message };
+    const link = "https://bridgepoint-crm-build.vercel.app/?lead=" + leadId;
+    return { ok: true, leadId, link, optionLabel: lender, loanAmount: input.loanAmount ?? null, rate: input.rate ?? null };
   }
   if (name === "search_leads") {
     const query = ((input.query as string) || "").trim();
