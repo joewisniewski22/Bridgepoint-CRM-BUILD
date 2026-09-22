@@ -10291,6 +10291,46 @@ function renderRail(lead){
         '</form>' +
         (lead.processingFeeOverride!=null ? ('<div class="footnote" style="padding-top:4px">Manually set — <button class="btn btn-ghost btn-sm" type="button" data-action="reset-processing-fee" data-lead="' + lead.id + '" style="padding:0;text-decoration:underline">reset to ' + fmtUSD(PROCESSING_FEE_DEFAULT) + ' default</button></div>') : ('<div class="footnote" style="padding-top:4px">Defaults to ' + fmtUSD(PROCESSING_FEE_DEFAULT) + ' — only set a value here to override it for this loan.</div>')) +
       '</div>') +
+      // Joe's ask (2026-09-22): the lender fee (and, more rarely,
+      // underwriting/commitment fee) had NO manual edit control anywhere
+      // in the UI at all -- lenderFeeOverride etc. could only be set by
+      // the AI during a term-sheet upload. If Joe or the LO needed to
+      // correct or adjust one afterward -- on a file that came from an
+      // uploaded term sheet or not -- there was no way to do it short of
+      // re-uploading a whole document. buildTermSheet() already reads
+      // these fields live (lenderFeeForLead() etc.), so any change here
+      // shows up on the term sheet the next time it's viewed or sent --
+      // this just adds the missing control to actually make the change.
+      (isProcessor() ? '' :
+      '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft)">' +
+        '<div class="rail-title" style="margin-bottom:6px">Lender Fee</div>' +
+        ((lead.outsideLender && !canManageOutsideLender()) ?
+          ('<div>' + fmtUSD(lenderFeeForLead(lead)) + '</div><div class="footnote">Locked — priced through an outside lender.</div>') :
+          ('<form data-form="set-lender-fee" data-lead="' + lead.id + '" class="points-input-row">' +
+            '<span>$</span>' +
+            '<input class="input" type="number" step="1" min="0" name="fee" placeholder="' + fmtUSD(lenderFeeForLead(lead)) + '" value="' + (lead.lenderFeeOverride!=null?lead.lenderFeeOverride:"") + '">' +
+            '<button class="btn btn-sm" type="submit">Save</button>' +
+          '</form>' +
+          (lead.lenderFeeOverride!=null
+            ? ('<div class="footnote" style="padding-top:4px">Manually set — <button class="btn btn-ghost btn-sm" type="button" data-action="reset-lender-fee" data-lead="' + lead.id + '" style="padding:0;text-decoration:underline">reset to the standard guideline fee</button></div>')
+            : ('<div class="footnote" style="padding-top:4px">Defaults to the standard guideline fee for this loan type — set a value to match a real term sheet or lender quote.</div>'))
+        ) +
+      '</div>')) +
+      (isProcessor() || !canManageOutsideLender() ? '' :
+      '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-soft)">' +
+        '<div class="rail-title" style="margin-bottom:6px">Other Fees <span class="hint">(only if a real document breaks these out separately)</span></div>' +
+        '<form data-form="set-underwriting-fee" data-lead="' + lead.id + '" class="points-input-row">' +
+          '<span>Underwriting $</span>' +
+          '<input class="input" type="number" step="1" min="0" name="fee" placeholder="0" value="' + (lead.underwritingFeeOverride!=null?lead.underwritingFeeOverride:"") + '">' +
+          '<button class="btn btn-sm" type="submit">Save</button>' +
+        '</form>' +
+        '<form data-form="set-commitment-fee" data-lead="' + lead.id + '" class="points-input-row" style="margin-top:8px;flex-wrap:wrap">' +
+          '<span>Commitment $</span>' +
+          '<input class="input" type="number" step="1" min="0" name="fee" placeholder="0" value="' + (lead.commitmentFeeOverride!=null?lead.commitmentFeeOverride:"") + '">' +
+          '<button class="btn btn-sm" type="submit">Save</button>' +
+          '<label class="footnote" style="display:flex;align-items:center;gap:4px;width:100%;margin-top:4px"><input type="checkbox" name="refundable"' + (lead.commitmentFeeRefundable?" checked":"") + '> Refundable at closing</label>' +
+        '</form>' +
+      '</div>') +
     '</div>' +
     (isProcessor() ? '' :
     '<div class="rail-block">' +
@@ -13837,6 +13877,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "set-today-scope"){ ui.todayScope = t.dataset.scope; render(); }
   else if (action === "skip-call"){ skipQueueItem(t.dataset.lead); }
   else if (action === "reset-processing-fee"){ setProcessingFee(t.dataset.lead, ""); }
+  else if (action === "reset-lender-fee"){ setLenderFee(t.dataset.lead, ""); }
   else if (action === "clear-lead-filters"){ ui.leadFilter = { q:"", stage:"", loanType:"", assignedTo:"", status:"active", source:"", dateFrom:"", dateTo:"", amountMin:"", amountMax:"", sort:"newest" }; render(); }
   else if (action === "extend-daily-quota"){ ui.dailyQuotaExtra = (ui.dailyQuotaExtra||0) + 20; render(); }
   else if (action === "start-dialer"){ startDialer(); }
@@ -14440,6 +14481,12 @@ appEl.addEventListener("submit", function(e){
     setPointsCharged(form.dataset.lead, fd.get("points"));
   } else if (type === "set-processing-fee"){
     setProcessingFee(form.dataset.lead, fd.get("fee"));
+  } else if (type === "set-lender-fee"){
+    setLenderFee(form.dataset.lead, fd.get("fee"));
+  } else if (type === "set-underwriting-fee"){
+    setUnderwritingFee(form.dataset.lead, fd.get("fee"));
+  } else if (type === "set-commitment-fee"){
+    setCommitmentFee(form.dataset.lead, fd.get("fee"), fd.get("refundable") === "on");
   } else if (type === "dialer-log"){
     var cbx = callbackFromForm(fd); if (cbx && cbx.error){ showToast(cbx.error); return; } logCall(form.dataset.lead, fd.get("outcome"), fd.get("notes"), cbx);
     dialerAdvance();
