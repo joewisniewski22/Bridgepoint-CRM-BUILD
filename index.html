@@ -3631,15 +3631,22 @@ function buildTermSheet(lead, langOverride){
   // Reuses the exact same cap the Pricer tab already computes, so the two
   // can never show different numbers.
   // computeMaxLoanAmount() only ever encodes BRIDGEPOINT/Constructive
-  // Capital's own in-house guideline tables -- it knows nothing about an
-  // outside lender's (Kiavi/RELIP/RCN/A&D) own leverage rules. Applying it
-  // to an outside-lender file silently truncated the loan amount (and
-  // recomputed LTV) whenever their real committed terms sat above our
-  // in-house ceiling -- found 2026-09-22 after Fiore uploaded a real
-  // outside term sheet and the generated sheet didn't match it. Skip the
-  // cap entirely once outsideLender is set; that file's real ceiling is
-  // whatever the outside lender's own term sheet says, not ours.
-  var termSheetMaxLoanInfo = lead.outsideLender ? null : computeMaxLoanAmount(lead);
+  // Capital's own STANDARD in-house guideline tables -- it knows nothing
+  // about an outside lender's (Kiavi/RELIP/RCN/A&D) own leverage rules, and
+  // nothing about a real, already-approved exception on a specific in-house
+  // file. Applying it unconditionally silently truncated the loan amount
+  // (and recomputed LTV) whenever the real committed terms sat above this
+  // standard ceiling -- found 2026-09-22 twice: once for an outside-lender
+  // file (fixed via the outsideLender check below), and again the same day
+  // on Gnana Bolisetti's in-house file, where Fiore's real, negotiated
+  // $222,500 kept getting capped back down to the standard $213,750 on the
+  // generated term sheet even though nothing was wrong with his number --
+  // Constructive had approved this specific deal above the standard
+  // matrix. Skip the cap when EITHER is true: outsideLender is set (their
+  // own guidelines apply, not ours), or guidelineOverrideApproved is set
+  // (a trusted staff member -- see canManageOutsideLender() -- has marked
+  // this specific file's above-guideline number as real and approved).
+  var termSheetMaxLoanInfo = (lead.outsideLender || lead.guidelineOverrideApproved) ? null : computeMaxLoanAmount(lead);
   // hitFlatCeiling means the $2M number is just this pricer's rough
   // quoting backstop, not a real LTV/LTC violation -- don't truncate a
   // genuinely large, already-priced loan (Bridge/Portfolio deals above
@@ -4102,6 +4109,7 @@ function leadToRow(l){
     underwriting_fee_override: l.underwritingFeeOverride!=null ? l.underwritingFeeOverride : null,
     commitment_fee_override: l.commitmentFeeOverride!=null ? l.commitmentFeeOverride : null,
     commitment_fee_refundable: !!l.commitmentFeeRefundable,
+    guideline_override_approved: !!l.guidelineOverrideApproved, guideline_override_note: l.guidelineOverrideNote || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -4154,7 +4162,8 @@ function rowToLead(r){
     lenderFeeOverride: r.lender_fee_override!=null ? r.lender_fee_override : null,
     underwritingFeeOverride: r.underwriting_fee_override!=null ? r.underwriting_fee_override : null,
     commitmentFeeOverride: r.commitment_fee_override!=null ? r.commitment_fee_override : null,
-    commitmentFeeRefundable: !!r.commitment_fee_refundable
+    commitmentFeeRefundable: !!r.commitment_fee_refundable,
+    guidelineOverrideApproved: !!r.guideline_override_approved, guidelineOverrideNote: r.guideline_override_note || null
   };
 }
 function notifToRow(n){
@@ -6113,6 +6122,26 @@ function submitForReview(leadId, note){
   var details = "Pricing review requested on " + lead.name + " (" + (lead.loanType||"Loan") + " " + fmtUSD(lead.loanAmount) + ") by " + currentUser().name + (lead.pricingReviewNote ? (" — " + lead.pricingReviewNote) : "");
   notifyUser("owner", leadId, "review-request", details);
   showToast("Sent to Joe for review");
+  persist();
+}
+function setGuidelineOverride(leadId, note){
+  var lead = leadById(leadId);
+  if (!lead || !canManageOutsideLender()) return;
+  lead.guidelineOverrideApproved = true;
+  lead.guidelineOverrideNote = (note||"").trim() || null;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text: "Marked approved above standard guideline" + (lead.guidelineOverrideNote ? (" — " + lead.guidelineOverrideNote) : "") + " by " + currentUser().name, author: currentUser().name });
+  showToast("Marked approved — the term sheet will show the real numbers on file");
+  persist();
+}
+function clearGuidelineOverride(leadId){
+  var lead = leadById(leadId);
+  if (!lead || !canManageOutsideLender()) return;
+  lead.guidelineOverrideApproved = false;
+  lead.guidelineOverrideNote = null;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text: "Removed guideline override by " + currentUser().name + " — term sheet will cap to the standard guideline max again", author: currentUser().name });
+  showToast("Override removed");
   persist();
 }
 function resolveReview(leadId){
@@ -9475,7 +9504,7 @@ function renderGuidelineCheck(lead){
   }
   var badge = gc.status === "pass"
     ? '<span class="badge badge-forest">Pass</span>'
-    : '<span class="badge badge-rust">Needs Review</span>';
+    : (lead.guidelineOverrideApproved ? '<span class="badge badge-forest">Approved Above Guideline</span>' : '<span class="badge badge-rust">Needs Review</span>');
   var rows = gc.checks.map(function(c){
     var icon = c.pass ? '<span class="badge badge-forest">Pass</span>' : '<span class="badge badge-rust">Review</span>';
     return '<div class="doc-row"><div><div>' + esc(c.label) + '</div><div class="cell-sub">' + esc(c.detail) + '</div></div>' + icon + '</div>';
@@ -9484,6 +9513,14 @@ function renderGuidelineCheck(lead){
     ? ('<div style="margin-top:10px"><button class="btn btn-sm" type="button" data-action="ai-explain-guideline" data-lead="' + lead.id + '">✨ Explain to LO</button>' +
        '<div id="guideline-explain-box" class="footnote" style="padding-top:8px;white-space:pre-wrap"></div></div>')
     : '';
+  // Joe's ask (2026-09-22), from a real case (Gnana Bolisetti): a
+  // "Needs Review" file sometimes has a real, already-approved number
+  // above the standard matrix (Constructive approved a specific exception,
+  // or an outside lender's own committed terms) -- without a way to mark
+  // that, buildTermSheet() silently keeps re-capping the printed loan
+  // amount back down to the standard guideline max. Same trusted group as
+  // outside-lender management (owner, Fiore, Erika).
+  var overrideSection = (gc.status === "review" && canManageOutsideLender()) ? renderGuidelineOverrideBox(lead) : '';
   // Erika's real feedback (2026-09-09): a passing in-house file showed
   // NO placement info anywhere -- this box only rendered when the
   // guideline check needed manual outside placement, so a normal
@@ -9495,8 +9532,22 @@ function renderGuidelineCheck(lead){
   var rcnFitSection = gc.status === "review" ? renderOutsideLenderFitBox(lead) : '';
   return header +
     '<div style="margin-bottom:10px">' + badge + ' <span class="hint">as of ' + fmtDate(gc.evaluatedAt) + '</span></div>' +
-    rows + explainSection + outsideLenderSection + rcnFitSection +
+    rows + explainSection + overrideSection + outsideLenderSection + rcnFitSection +
     '<div class="footnote" style="padding-top:8px">Preliminary check against BPL/Constructive Loans matrices — not a substitute for full underwriting. Internal use only, never shown to the borrower.</div>';
+}
+function renderGuidelineOverrideBox(lead){
+  if (lead.guidelineOverrideApproved){
+    return '<div class="panel panel-pad" style="margin-top:10px;background:var(--c-forest-bg)">' +
+      '<div style="font-weight:600">✓ Approved above guideline — the term sheet will show the real numbers on file, not the standard-matrix cap.</div>' +
+      (lead.guidelineOverrideNote ? ('<div class="footnote" style="padding-top:4px">' + esc(lead.guidelineOverrideNote) + '</div>') : '') +
+      '<button class="btn btn-sm btn-ghost" style="margin-top:8px" type="button" data-action="clear-guideline-override" data-lead="' + lead.id + '">Undo — go back to the standard guideline cap</button>' +
+    '</div>';
+  }
+  return '<form data-form="guideline-override" data-lead="' + lead.id + '" style="margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:var(--radius);display:flex;flex-direction:column;gap:8px">' +
+    '<div class="footnote" style="padding:0">Have a real, approved number above the standard matrix (Constructive approved a specific exception, or these are an outside lender\'s own committed terms)? Mark it approved so the term sheet stops capping the loan amount back down to the standard max.</div>' +
+    '<input class="input" name="note" placeholder="e.g. Approved by Constructive AE 9/22 — see real quote on file">' +
+    '<button class="btn btn-sm btn-primary" type="submit" style="align-self:flex-start">✓ Mark Approved Above Guideline</button>' +
+  '</form>';
 }
 function renderOutsideLenderFitBox(lead){
   // Was owner-only; Joe's explicit ask (2026-09-14): he AND Erika (and
@@ -13576,6 +13627,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
   else if (action === "delete-lead"){ deleteLead(t.dataset.lead, t.dataset.name); }
   else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
+  else if (action === "clear-guideline-override"){ clearGuidelineOverride(t.dataset.lead); }
   else if (action === "dialer-call"){ startDialerCall(t.dataset.lead); }
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
@@ -14291,6 +14343,8 @@ appEl.addEventListener("submit", function(e){
     addTermSheetOption(form.dataset.lead, fd, tsoFile || null);
   } else if (type === "edit-contact-info"){
     updateLeadContactInfo(form.dataset.lead, fd);
+  } else if (type === "guideline-override"){
+    setGuidelineOverride(form.dataset.lead, fd.get("note"));
   } else if (type === "quick-edit-guarantor"){
     quickEditGuarantor(form.dataset.lead, fd);
   } else if (type === "loan-details"){
