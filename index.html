@@ -3719,8 +3719,8 @@ function buildTermSheet(lead, langOverride){
     var cxEs = estimatedCashToClose(lead);
     if (cxEs){
       lines.push(cxEs.feesOnly
-        ? ("Cargos Estimados al Cierre: " + fmtUSD(cxEs.amount) + " (no incluye cargos de terceros ni el saldo de cualquier préstamo existente a liquidar)")
-        : ("Efectivo Estimado Necesario al Cierre: " + fmtUSD(cxEs.amount) + " (basado en las cifras actuales del archivo; no incluye cargos de terceros — su oficial de préstamos confirmará la cifra final)"));
+        ? ("Cargos Estimados al Cierre: " + fmtUSD(cxEs.amount) + " (estas cifras son un estimado)")
+        : ("Efectivo Estimado Necesario al Cierre: " + fmtUSD(cxEs.amount) + " (estas cifras son un estimado)"));
       lines.push("");
     }
     lines.push("Esta hoja de términos es solo para fines de discusión, no constituye un compromiso de préstamo, y está sujeta a la aprobación de suscripción, avalúo, título y documentación satisfactoria. Las tarifas, costos de terceros y términos finales se detallarán en su divulgación de cierre.");
@@ -3764,8 +3764,8 @@ function buildTermSheet(lead, langOverride){
     var cx = estimatedCashToClose(lead);
     if (cx){
       lines.push(cx.feesOnly
-        ? ("Estimated Fees Due at Closing: " + fmtUSD(cx.amount) + " (does not include third-party costs or any existing loan payoff)")
-        : ("Estimated Cash Needed to Close: " + fmtUSD(cx.amount) + " (based on the figures currently on file; does not include third-party costs — your loan officer will confirm the final number)"));
+        ? ("Estimated Fees Due at Closing: " + fmtUSD(cx.amount) + " (these figures are an estimate)")
+        : ("Estimated Cash Needed to Close: " + fmtUSD(cx.amount) + " (these figures are an estimate)"));
       lines.push("");
     }
     lines.push("This term sheet is for discussion purposes only, is not a commitment to lend, and is subject to underwriting approval, appraisal, title, and satisfactory documentation. Fees, third-party costs, and final terms will be detailed in your closing disclosure.");

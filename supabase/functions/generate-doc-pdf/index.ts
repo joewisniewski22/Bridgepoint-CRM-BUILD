@@ -293,25 +293,36 @@ Deno.serve(async (req: Request) => {
         continue;
       }
       if (block.type === "table") {
+        // A value that didn't fit the column at one line was wrapped by
+        // wrapText() into multiple lines, but only valLines[0] was ever
+        // drawn -- the rest silently vanished mid-sentence with no
+        // ellipsis or wrap, e.g. "...does not" with the actual disclosure
+        // that followed just gone. Found 2026-09-22 on the Estimated Cash
+        // Needed to Close row. Now draws every wrapped line and grows the
+        // row to fit them, instead of assuming every value is one line.
         const rowH = 22;
         const labelColW = 190;
+        const lineH = 13;
         ensureRoom(rowH + 10);
         y -= 4;
         const tableTop = y;
         let rowY = y;
         block.rows.forEach(function (r, idx) {
-          if (rowY - rowH < MARGIN + 40) {
+          const valLines = wrapText(r.value, bold, 10.5, CONTENT_W - labelColW - 10);
+          const thisRowH = Math.max(rowH, valLines.length * lineH + 9);
+          if (rowY - thisRowH < MARGIN + 40) {
             page.drawLine({ start: { x: MARGIN, y: rowY }, end: { x: PAGE_W - MARGIN, y: rowY }, thickness: 0.75, color: LINE_GRAY });
             newPage();
             rowY = y;
           }
           if (idx % 2 === 1) {
-            page.drawRectangle({ x: MARGIN, y: rowY - rowH, width: CONTENT_W, height: rowH, color: ROW_TINT });
+            page.drawRectangle({ x: MARGIN, y: rowY - thisRowH, width: CONTENT_W, height: thisRowH, color: ROW_TINT });
           }
           page.drawText(r.label, { x: MARGIN + 10, y: rowY - rowH / 2 - 4, size: 9.5, font: font, color: NAVY_SOFT });
-          const valLines = wrapText(r.value, bold, 10.5, CONTENT_W - labelColW - 10);
-          page.drawText(valLines[0], { x: MARGIN + labelColW, y: rowY - rowH / 2 - 4, size: 10.5, font: bold, color: INK });
-          rowY -= rowH;
+          valLines.forEach(function (vl, li) {
+            page.drawText(vl, { x: MARGIN + labelColW, y: rowY - rowH / 2 - 4 - li * lineH, size: 10.5, font: bold, color: INK });
+          });
+          rowY -= thisRowH;
         });
         page.drawLine({ start: { x: MARGIN, y: rowY }, end: { x: PAGE_W - MARGIN, y: rowY }, thickness: 0.75, color: LINE_GRAY });
         page.drawRectangle({ x: MARGIN, y: rowY, width: CONTENT_W, height: tableTop - rowY, borderColor: LINE_GRAY, borderWidth: 0.75, color: undefined, opacity: 0 });
