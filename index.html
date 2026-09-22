@@ -7239,14 +7239,41 @@ function render(){
     app.insertAdjacentHTML("beforeend", toastHTML0);
     return;
   }
-  if (ui.view === "onboardSignature"){
-    app.innerHTML = renderOnboardingSignature();
-  } else if (ui.view === "tour"){
-    app.innerHTML = renderTour();
-  } else if (ui.view === "portal"){
-    app.innerHTML = renderPortal();
-  } else {
-    app.innerHTML = isMobileMode() ? renderMobileShell() : renderShell();
+  // Joe's report (2026-09-22): navigating into a lead's file while on a
+  // live Power Dialer call sometimes made the whole call box disappear,
+  // with no way left to hang up but closing the browser. Root cause: a
+  // JS error while building ONE view (e.g. bad/missing data on a specific
+  // lead's detail page) throws out of this whole function -- the
+  // app.innerHTML assignment below never runs, so the modal/live-call-
+  // panel/toast lines after it never run either, and the on-screen call
+  // controls silently vanish even though ui.softphoneCall and the real
+  // Telnyx call are both still very much alive. Wrap just the
+  // view-specific build in try/catch so a broken view can never take the
+  // shared call controls down with it -- fall back to Today instead, and
+  // still always reach the modal/live-panel/toast lines below.
+  try {
+    if (ui.view === "onboardSignature"){
+      app.innerHTML = renderOnboardingSignature();
+    } else if (ui.view === "tour"){
+      app.innerHTML = renderTour();
+    } else if (ui.view === "portal"){
+      app.innerHTML = renderPortal();
+    } else {
+      app.innerHTML = isMobileMode() ? renderMobileShell() : renderShell();
+    }
+  } catch(viewErr){
+    console.error("render(): view failed to build, falling back to Today", viewErr);
+    ui.view = "today";
+    ui.selectedLeadId = null;
+    try {
+      app.innerHTML = renderShell();
+    } catch(viewErr2){
+      // Even the fallback failed (shouldn't happen) -- still leave enough
+      // of #app intact that the modal/live-call-panel/toast appends below
+      // have somewhere to land, so an active call stays reachable.
+      app.innerHTML = '<div class="content"><div class="empty">Something went wrong loading that page. If you\'re on a call, use the box in the corner to hang up, then refresh.</div></div>';
+    }
+    ui.toast = "Couldn't open that page — returned to Today"; ui.toastType = "error";
   }
   var modalHost = document.getElementById("modal-host");
   if (modalHost) modalHost.outerHTML = renderModal();
