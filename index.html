@@ -3394,6 +3394,22 @@ function addDaysISO(dateStr, days){
 function docLoanOfficer(lead){
   return userById(lead.assignedTo) || currentUser();
 }
+// Same rehab-type ARV correction buildTermSheet() already applies to its
+// own printed ratio -- raw lead.ltv (loan / purchase price) is meaningless
+// on a rehab/GUC deal with a token purchase/lot basis (e.g. Roscoe Davis:
+// a $176,000 loan on a $20,000 lot showed as "880% LTV" in the "Which term
+// sheet?" picker and the Term Sheet Options box before this fix, even
+// though the actual generated term sheet correctly shows ~50% loan-to-ARV).
+// Shared here so every place that displays this loan's ratio outside the
+// term sheet body itself stays consistent with it.
+function displayLtvForLead(lead){
+  var isRehabType = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
+  if (isRehabType){
+    var v = (lead.arv && lead.loanAmount) ? (Math.round((lead.loanAmount/lead.arv)*1000)/10) : null;
+    return { value: v, label: "LTARV" };
+  }
+  return { value: lead.ltv, label: "LTV" };
+}
 var OFFICE_PHONE = "(850) 279-8588";
 var GOOGLE_REVIEW_LINK = "https://g.page/r/CbJVKQumLqOQEAE/review";
 function loContactLines(lo, lang){
@@ -3776,6 +3792,81 @@ function buildTermSheet(lead, langOverride){
   lines = lines.concat(loContactLines(lo, lang));
   return lines.join("\n");
 }
+// Generates a real Bridgepoint-branded term sheet from a stored Term Sheet
+// Option's own structured fields -- for sending an alternate option that
+// was added WITHOUT an attached file (the manual "Add Option" form's file
+// upload is optional, and options added via add_term_sheet_option from an
+// uploaded document never have one either). Found 2026-09-22: clicking an
+// option with no storagePath in the "Which term sheet?" picker silently
+// did nothing (sendStoredTermSheetOption requires a real file to exist) --
+// this is the fallback so every option can actually be sent, not just
+// ones an LO happened to attach a file to. Same principle as everywhere
+// else in this app: never forward a raw outside document to the borrower
+// (or fail silently) when we can generate our own from the real numbers.
+function buildTermSheetFromOption(lead, option, langOverride){
+  var lang = langOverride || lead.preferredLanguage || "en";
+  var today = todayISO();
+  var expires = addDaysISO(today, 15);
+  var lo = docLoanOfficer(lead);
+  var lines = [];
+  if (lang === "es"){
+    lines.push("BRIDGEPOINT LENDING — HOJA DE TÉRMINOS");
+    lines.push("Soluciones de Financiamiento Inmobiliario");
+    lines.push("");
+    lines.push("Preparado para: " + (lead.name || "Cliente"));
+    lines.push("Fecha: " + fmtDate(today));
+    lines.push("Vence: " + fmtDate(expires));
+    lines.push("");
+    lines.push("TÉRMINOS DEL PRÉSTAMO");
+    lines.push("Tipo de Préstamo: " + (tr(lead.loanType, "es") || "Por determinar"));
+    lines.push("Monto del Préstamo: " + (option.loanAmount!=null ? fmtUSD(option.loanAmount) : "Por determinar"));
+    lines.push("Tasa: " + (option.rate!=null ? fmtPct(option.rate) : "Por determinar"));
+    lines.push("Plazo: " + (option.termMonths!=null ? (option.termMonths + " meses") : "Por determinar"));
+    if (option.ltv != null) lines.push("Relación Préstamo-Valor: " + option.ltv + "%");
+    lines.push("");
+    lines.push("PROPIEDAD");
+    lines.push("Dirección: " + (lead.propertyAddress || "Por determinar"));
+    lines.push("Tipo de Propiedad: " + (tr(lead.propertyType, "es") || "Por determinar"));
+    lines.push("");
+    if (option.cashToClose != null){
+      lines.push("Efectivo Estimado Necesario al Cierre: " + fmtUSD(option.cashToClose) + " (estas cifras son un estimado)");
+      lines.push("");
+    }
+    lines.push("Esta hoja de términos es solo para fines de discusión, no constituye un compromiso de préstamo, y está sujeta a la aprobación de suscripción, avalúo, título y documentación satisfactoria. Las tarifas, costos de terceros y términos finales se detallarán en su divulgación de cierre.");
+    lines.push("");
+    lines.push("Preparado por,");
+    lines.push("");
+  } else {
+    lines.push("BRIDGEPOINT LENDING — TERM SHEET");
+    lines.push("Real Estate Financing Solutions");
+    lines.push("");
+    lines.push("Prepared for: " + (lead.name || "Borrower"));
+    lines.push("Date: " + fmtDate(today));
+    lines.push("Expires: " + fmtDate(expires));
+    lines.push("");
+    lines.push("LOAN TERMS");
+    lines.push("Loan Type: " + (lead.loanType || "TBD"));
+    lines.push("Loan Amount: " + (option.loanAmount!=null ? fmtUSD(option.loanAmount) : "TBD"));
+    lines.push("Rate: " + (option.rate!=null ? fmtPct(option.rate) : "TBD — subject to rate lock"));
+    lines.push("Term: " + (option.termMonths!=null ? (option.termMonths + " months") : "TBD"));
+    if (option.ltv != null) lines.push("Loan-to-Value: " + option.ltv + "%");
+    lines.push("");
+    lines.push("PROPERTY");
+    lines.push("Address: " + (lead.propertyAddress || "TBD"));
+    lines.push("Property Type: " + (lead.propertyType || "TBD"));
+    lines.push("");
+    if (option.cashToClose != null){
+      lines.push("Estimated Cash Needed to Close: " + fmtUSD(option.cashToClose) + " (these figures are an estimate)");
+      lines.push("");
+    }
+    lines.push("This term sheet is for discussion purposes only, is not a commitment to lend, and is subject to underwriting approval, appraisal, title, and satisfactory documentation. Fees, third-party costs, and final terms will be detailed in your closing disclosure.");
+    lines.push("");
+    lines.push("Prepared by,");
+    lines.push("");
+  }
+  lines = lines.concat(loContactLines(lo, lang));
+  return lines.join("\n");
+}
 // Joe's ask (2026-09-16): a wholesale-submission document going the OTHER
 // direction from a term sheet -- this one goes TO a lender (Constructive
 // or an outside lender), not to the borrower, so it's the borrower's real
@@ -3982,9 +4073,10 @@ function modalPickTermSheet(leadId){
       (sub ? ('<div class="hint">' + esc(sub) + '</div>') : '') +
     '</button>';
   };
+  var primaryLtv = displayLtvForLead(lead);
   var rows = optBtn(
     "Our Terms (Bridgepoint)",
-    (lead.loanAmount ? fmtUSD(lead.loanAmount) : "") + (lead.rate ? (" at " + fmtPct(lead.rate)) : "") + (lead.ltv ? (" — " + lead.ltv + "% LTV") : ""),
+    (lead.loanAmount ? fmtUSD(lead.loanAmount) : "") + (lead.rate ? (" at " + fmtPct(lead.rate)) : "") + (primaryLtv.value ? (" — " + primaryLtv.value + "% " + primaryLtv.label) : ""),
     'data-action="pick-term-sheet-primary" data-lead="' + lead.id + '"'
   ) + opts.map(function(o){
     var realIdx = (lead.documents||[]).indexOf(o);
@@ -4009,50 +4101,67 @@ function modalPickTermSheet(leadId){
 function sendStoredTermSheetOption(leadId, idx){
   var lead = leadById(leadId);
   var doc = lead && lead.documents && lead.documents[idx];
-  if (!lead || !doc || !doc.storagePath || !sb) return;
+  if (!lead || !doc || !sb) return;
   if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
   var optionLabel = (doc.name || "Alternate option").replace(/^Term Sheet Option:\s*/,"");
   ui.modal = null;
   render();
   showToast("Sending term sheet…");
-  sb.storage.from("lead-documents").download(doc.storagePath).then(function(res){
-    if (res.error || !res.data){ showToast("Couldn't load that term sheet — try again"); return; }
-    var reader = new FileReader();
-    reader.onload = function(){
-      var pdfBase64 = String(reader.result).split(",")[1];
-      var lo = docLoanOfficer(lead);
-      var filename = doc.fileName || docPdfFilename(lead, "Term Sheet");
-      var isEs = (lead.preferredLanguage||"en") === "es";
-      var firstName = (lead.name||"").split(" ")[0];
-      var subject = "Bridgepoint Lending — Your Term Sheet";
-      var smsMsg = isEs
-        ? ("Hola " + firstName + ", es " + (lo.name||"") + " de Bridgepoint Lending — le acabo de enviar por correo electrónico su hoja de términos con todos los detalles. Revise su bandeja de entrada (" + (lead.email||"su correo") + ") y avíseme si tiene preguntas.")
-        : ("Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your term sheet with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!");
-      var calls = [];
-      if (lead.email){
-        calls.push(sb.functions.invoke("send-email", {
-          body: { leadId: lead.id, to: lead.email, subject: subject, text: "Please see the attached term sheet.", fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null,
-            attachmentBase64: pdfBase64, attachmentName: filename }
-        }).then(function(r){ return { channel:"email", ok: !(r.error || !r.data || !r.data.ok) }; }).catch(function(){ return { channel:"email", ok:false }; }));
-      }
-      if (lead.phone){
-        calls.push(sb.functions.invoke("send-text", {
-          body: { leadId: lead.id, to: lead.phone, text: smsMsg, fromName: lo.name }
-        }).then(function(r){ return { channel:"text", ok: !(r.error || !r.data || !r.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
-      }
-      Promise.all(calls).then(function(results){
-        var sentVia = results.filter(function(r){ return r.ok; }).map(function(r){ return r.channel; });
-        if (!sentVia.length){ showToast("Couldn't send term sheet — try again"); return; }
-        var d = todayISO();
-        lead.termsheetSentAt = d;
-        lead.activity = lead.activity || [];
-        lead.activity.push({ date:d, type:"application", text: "Term Sheet (" + optionLabel + ") sent to " + lead.name + " via " + sentVia.join(" + "), author: lo.name || currentUser().name });
-        showToast("Term sheet sent to " + lead.name + " via " + sentVia.join(" + ") + (sentVia.length < results.length ? " (one channel failed)" : ""));
-        persist();
-      });
-    };
-    reader.readAsDataURL(res.data);
-  }).catch(function(){ showToast("Couldn't load that term sheet — try again"); });
+  var lo = docLoanOfficer(lead);
+  var isEs = (lead.preferredLanguage||"en") === "es";
+  var firstName = (lead.name||"").split(" ")[0];
+  var subject = "Bridgepoint Lending — Your Term Sheet";
+  var smsMsg = isEs
+    ? ("Hola " + firstName + ", es " + (lo.name||"") + " de Bridgepoint Lending — le acabo de enviar por correo electrónico su hoja de términos con todos los detalles. Revise su bandeja de entrada (" + (lead.email||"su correo") + ") y avíseme si tiene preguntas.")
+    : ("Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your term sheet with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!");
+  function finishSend(pdfBase64, filename, emailBodyText){
+    var calls = [];
+    if (lead.email){
+      calls.push(sb.functions.invoke("send-email", {
+        body: { leadId: lead.id, to: lead.email, subject: subject, text: emailBodyText, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null,
+          attachmentBase64: pdfBase64, attachmentName: pdfBase64 ? filename : null }
+      }).then(function(r){ return { channel:"email", ok: !(r.error || !r.data || !r.data.ok) }; }).catch(function(){ return { channel:"email", ok:false }; }));
+    }
+    if (lead.phone){
+      calls.push(sb.functions.invoke("send-text", {
+        body: { leadId: lead.id, to: lead.phone, text: smsMsg, fromName: lo.name }
+      }).then(function(r){ return { channel:"text", ok: !(r.error || !r.data || !r.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
+    }
+    Promise.all(calls).then(function(results){
+      var sentVia = results.filter(function(r){ return r.ok; }).map(function(r){ return r.channel; });
+      if (!sentVia.length){ showToast("Couldn't send term sheet — try again"); return; }
+      var d = todayISO();
+      lead.termsheetSentAt = d;
+      lead.activity = lead.activity || [];
+      lead.activity.push({ date:d, type:"application", text: "Term Sheet (" + optionLabel + ") sent to " + lead.name + " via " + sentVia.join(" + "), author: lo.name || currentUser().name });
+      showToast("Term sheet sent to " + lead.name + " via " + sentVia.join(" + ") + (sentVia.length < results.length ? " (one channel failed)" : ""));
+      persist();
+    });
+  }
+  if (doc.storagePath){
+    sb.storage.from("lead-documents").download(doc.storagePath).then(function(res){
+      if (res.error || !res.data){ showToast("Couldn't load that term sheet — try again"); return; }
+      var reader = new FileReader();
+      reader.onload = function(){
+        var pdfBase64 = String(reader.result).split(",")[1];
+        finishSend(pdfBase64, doc.fileName || docPdfFilename(lead, "Term Sheet"), "Please see the attached term sheet.");
+      };
+      reader.readAsDataURL(res.data);
+    }).catch(function(){ showToast("Couldn't load that term sheet — try again"); });
+  } else {
+    // No file was attached to this option (the "Add Option" form's upload
+    // is optional, and options captured from an uploaded document via the
+    // AI never have one either) -- clicking this in the "Which term
+    // sheet?" picker used to just silently do nothing. Generate our own
+    // Bridgepoint-branded document from the option's real numbers instead
+    // of failing -- same principle as everywhere else: never forward a
+    // raw outside document to the borrower, always our own template.
+    var body = buildTermSheetFromOption(lead, doc);
+    sb.functions.invoke("generate-doc-pdf", { body: { text: body, label: "Term Sheet" } }).then(function(pdfRes){
+      var pdfBase64 = (pdfRes && pdfRes.data && pdfRes.data.ok) ? pdfRes.data.pdfBase64 : null;
+      finishSend(pdfBase64, docPdfFilename(lead, "Term Sheet"), body);
+    }).catch(function(){ showToast("Couldn't generate that term sheet — try again"); });
+  }
 }
 /* ---------------------------------------------------------------------
    Actions (mutate state, then persist)
@@ -9277,8 +9386,9 @@ function termSheetOptions(lead){
 // borrower qualifies for, then rate/amount) right on the card.
 function termSheetKeyDifferences(lead, o){
   var diffs = [];
-  if (o.ltv != null && lead.ltv != null && Math.round(o.ltv*10)/10 !== Math.round(lead.ltv*10)/10){
-    diffs.push(o.ltv + "% LTV vs. our " + lead.ltv + "%");
+  var ourLtv = displayLtvForLead(lead);
+  if (o.ltv != null && ourLtv.value != null && Math.round(o.ltv*10)/10 !== Math.round(ourLtv.value*10)/10){
+    diffs.push(o.ltv + "% LTV vs. our " + ourLtv.value + "% " + ourLtv.label);
   }
   if (o.rate != null && lead.rate != null && Math.abs(o.rate - lead.rate) > 0.001){
     diffs.push(fmtPct(o.rate) + " rate vs. our " + fmtPct(lead.rate));
@@ -9290,6 +9400,7 @@ function termSheetKeyDifferences(lead, o){
 }
 function renderTermSheetOptionsBox(lead){
   var opts = termSheetOptions(lead);
+  var ourLtv = displayLtvForLead(lead);
   var ourCard = (lead.loanAmount || lead.rate) ? (
     '<div class="panel panel-pad" style="margin-bottom:8px;border-color:var(--brand)">' +
       '<div style="display:flex;justify-content:space-between;align-items:center">' +
@@ -9299,7 +9410,7 @@ function renderTermSheetOptionsBox(lead){
       '<div class="field-grid" style="margin-top:8px">' +
         (lead.loanAmount ? ('<div class="field"><label>Loan Amount</label><div class="val">' + fmtUSD(lead.loanAmount) + '</div></div>') : '') +
         (lead.rate ? ('<div class="field"><label>Rate</label><div class="val">' + fmtPct(lead.rate) + '</div></div>') : '') +
-        (lead.ltv ? ('<div class="field"><label>LTV</label><div class="val">' + lead.ltv + '%</div></div>') : '') +
+        (ourLtv.value ? ('<div class="field"><label>' + ourLtv.label + '</label><div class="val">' + ourLtv.value + '%</div></div>') : '') +
         (lead.termMonths ? ('<div class="field"><label>Term</label><div class="val">' + lead.termMonths + ' months</div></div>') : '') +
       '</div>' +
     '</div>'
