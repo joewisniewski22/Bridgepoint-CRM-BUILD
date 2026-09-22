@@ -7275,14 +7275,22 @@ function render(){
     }
     ui.toast = "Couldn't open that page — returned to Today"; ui.toastType = "error";
   }
-  var modalHost = document.getElementById("modal-host");
-  if (modalHost) modalHost.outerHTML = renderModal();
-  else {
-    var mm = renderModal();
-    if (mm) app.insertAdjacentHTML("beforeend", mm);
-  }
-  var livePanel = renderLiveCallPanel();
-  if (livePanel) app.insertAdjacentHTML("beforeend", livePanel);
+  // Same reasoning as above, applied to the two pieces that most need to
+  // never go missing: the modal (post-call disposition form lives here)
+  // and the live call float (Mute/Hang Up). Each gets its own try/catch so
+  // a bug in one can't take the other down with it either.
+  try {
+    var modalHost = document.getElementById("modal-host");
+    if (modalHost) modalHost.outerHTML = renderModal();
+    else {
+      var mm = renderModal();
+      if (mm) app.insertAdjacentHTML("beforeend", mm);
+    }
+  } catch(modalErr){ console.error("render(): modal failed to build", modalErr); }
+  try {
+    var livePanel = renderLiveCallPanel();
+    if (livePanel) app.insertAdjacentHTML("beforeend", livePanel);
+  } catch(panelErr){ console.error("render(): live call panel failed to build", panelErr); }
   var toastHost = document.getElementById("toast-host");
   var toastHTML = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
   app.insertAdjacentHTML("beforeend", toastHTML);
