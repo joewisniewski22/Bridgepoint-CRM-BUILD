@@ -67,7 +67,7 @@ async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string
     "\n\nCAPABILITIES:\n" +
     "1. Marketing content: create_content then publish_content to post recent-closing announcements or stories to the CRM's public showcase page. Never claim something is live unless publish_content reports success. Default to NOT naming the borrower and NOT including their exact street address (city/state only) unless Joe explicitly asks -- these are real clients' financial details. Write body as simple HTML (p, strong, br, a tags only).\n" +
     "2. Loan file creation from a term sheet: when Joe pastes term sheet text or attaches a term sheet document/image for a BRAND NEW loan (not already in the CRM), extract the real figures and call create_loan_file. Valid loanType values: " + LOAN_TYPES.join(", ") + ". Valid source values: " + SOURCES.join(", ") + " (use 'Referral' or the closest fit if unclear, never invent a new source). Valid outsideLender values: " + OUTSIDE_LENDERS.join(", ") + " or omit for in-house. NEVER guess a figure that isn't actually in the document -- omit any field you can't find rather than inventing a number, and tell Joe what's missing in your reply. If the assignee isn't stated, ASK rather than picking someone.\n" +
-    "3. Updating an EXISTING loan file: when Joe gets a new/real quote back (e.g. a lender's pricing terms sheet) for a loan already in the CRM, call update_loan_file with the leadId and only the fields that changed -- extract real figures the same way as create_loan_file, never guess. This updates BOTH the loan scenario/pricing AND, for DSCR loans, the loan product name on the actual application (via loanProduct) -- our generated term sheet, the borrower portal, and the application all read from these same fields, so one call keeps everything in sync. If Joe doesn't give you the leadId, use search_leads with the borrower's name/phone/email first rather than asking him for it. Always write a one-sentence changeSummary describing what changed and why (e.g. citing a pricing/quote ID if the source document has one) -- it gets logged to the loan's activity history.\n" +
+    "3. Updating an EXISTING loan file: when Joe or an LO gets a new/real quote back (e.g. a lender's pricing terms sheet) for a loan already in the CRM, call update_loan_file with the leadId and only the fields that changed -- extract real figures the same way as create_loan_file, never guess. This updates BOTH the loan scenario/pricing AND, for DSCR loans, the loan product name on the actual application (via loanProduct) -- our generated term sheet, the borrower portal, and the application all read from these same fields, so one call keeps everything in sync. Our generated term sheet must MIRROR the real terms on the uploaded document, just rebranded onto our own template -- it never shows the outside lender's own document or name to the borrower, and never quietly substitutes a different number. For an OUTSIDE-LENDER document specifically: set outsideLender if it isn't already correct on the file, set loanAmount/rate/termMonths exactly as shown even if the amount is above our own in-house guideline max (that ceiling is only for in-house Constructive Capital loans and does not apply once outsideLender is set), and set lenderFeeOverride to the lender's own fee/underwriting-fee line exactly as printed on their document -- if you leave lenderFeeOverride blank the term sheet silently falls back to our own in-house guideline fee table instead of their real number, which is exactly the kind of mismatch to avoid. pointsCharged is different: it is Bridgepoint's own origination fee on top of the outside lender's quote, not a figure printed on their document, so only set it when Joe/the LO explicitly tells you what to charge (or the notes say so) -- otherwise omit it and leave whatever origination is already on the file untouched. If Joe doesn't give you the leadId, use search_leads with the borrower's name/phone/email first rather than asking him for it. Always write a one-sentence changeSummary describing what changed and why (e.g. citing a pricing/quote ID if the source document has one) -- it gets logged to the loan's activity history.\n" +
     "4. Sending documents: to send a Pre-Approval Letter or Term Sheet to a borrower on an existing loan file, call send_document with the leadId and kind -- this actually emails/texts them for real, so only call it when Joe clearly asks to send (not just when he asks you to create or update a file).\n" +
     "5. Looking up loans: list_closed_deals for recently funded loans, or search_leads / get_lead_details to find and inspect any loan file by name/phone/email or id.\n" +
     "6. Team communication: email_team and text_team send a REAL email/text to staff -- team-wide announcements, reminders, or a message to one specific person. Only call these when Joe clearly asks you to send/tell/email/text someone or the team, not as a side effect of something else.\n" +
@@ -145,7 +145,8 @@ const TOOLS = [
         loanAmount: { type: "number" },
         rate: { type: "number", description: "Interest rate as a percent, e.g. 10.99" },
         termMonths: { type: "integer" },
-        pointsCharged: { type: "number", description: "Total points as a percent, e.g. 4.44" },
+        pointsCharged: { type: "number", description: "Total ORIGINATION points Bridgepoint itself is charging, as a percent -- Bridgepoint's own fee, not an outside lender's own origination/broker fee line. Only set if stated or Joe/the LO tells you what to charge." },
+        lenderFeeOverride: { type: "number", description: "For an outside-lender file, the lender's own fee (underwriting/admin fee) exactly as shown on their document -- set this so the generated term sheet matches their real quote instead of falling back to our in-house guideline fee table." },
         creditScore: { type: "integer" },
         entityLegalName: { type: "string" },
         exitStrategy: { type: "string" },
@@ -161,6 +162,7 @@ const TOOLS = [
       type: "object",
       properties: {
         leadId: { type: "string", description: "The loan file id to update -- ask Joe for this if he hasn't given it" },
+        outsideLender: { type: "string", enum: OUTSIDE_LENDERS, description: "Set/correct this when the uploaded document is a real quote from an outside lender (Kiavi/RELIP/RCN/A&D Mortgage). Omit for in-house (Constructive Capital) or if it's already correct on the file." },
         propertyAddress: { type: "string" },
         propertyType: { type: "string" },
         transactionType: { type: "string", enum: ["purchase", "ratetermrefi", "cashout"] },
@@ -172,10 +174,13 @@ const TOOLS = [
         monthlyTaxes: { type: "number" },
         monthlyInsurance: { type: "number" },
         monthlyHoa: { type: "number" },
-        loanAmount: { type: "number" },
+        loanAmount: { type: "number", description: "The real loan amount committed on the document. For an outside-lender quote, use exactly what the document says even if it's above our own in-house guideline max -- that ceiling doesn't apply to their file." },
         rate: { type: "number", description: "Interest rate as a percent, e.g. 6.975" },
         termMonths: { type: "integer" },
-        pointsCharged: { type: "number", description: "Total points Bridgepoint is actually charging, as a percent -- use what Joe tells you to charge, not necessarily whatever number is printed on an outside quote" },
+        pointsCharged: { type: "number", description: "Total ORIGINATION points Bridgepoint itself is charging the borrower, as a percent -- this is Bridgepoint's own fee on top of an outside lender's quote, not necessarily printed on their document. Only set this if Joe/the LO tells you what to charge, or if the document is explicitly Bridgepoint's own pricing (in-house loan) -- never copy an outside lender's own origination/broker fee line into this field, and never invent a number. Leave it out to keep whatever is already on the file." },
+        lenderFeeOverride: { type: "number", description: "The LENDER's own fee (underwriting/admin/origination fee charged BY the lender, not by Bridgepoint) as shown on the actual document. For an outside-lender deal, always set this from the real number on their term sheet -- if left blank the file falls back to Bridgepoint's own in-house guideline fee table, which will not match their document." },
+        underwritingFeeOverride: { type: "number", description: "A separate underwriting fee line, only if the document breaks one out distinctly from the main lender fee above." },
+        commitmentFeeOverride: { type: "number", description: "A refundable-at-closing commitment deposit, only if the document shows one." },
         creditScore: { type: "integer" },
         prepayTerm: { type: "string", enum: PREPAY_TERMS },
         loanProduct: { type: "string", description: "DSCR loans only -- the actual loan product/amortization named on the term sheet, e.g. '30 Year Fixed', '5/1 ARM', 'Interest Only'. Merged into the application, not just the pricing." },
@@ -417,6 +422,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
       rate: input.rate || null, term_months: input.termMonths || null, points_charged: input.pointsCharged || null,
       exit_strategy: input.exitStrategy || null, entity_legal_name: input.entityLegalName || null,
       outside_lender: input.outsideLender || null,
+      lender_fee_override: input.lenderFeeOverride != null ? input.lenderFeeOverride : null,
       application_token: crypto.randomUUID(),
       activity: [{ date: today, type: "note", text: "Loan file created by AI from a term sheet", author: "AI Assistant" }],
     };
@@ -450,12 +456,15 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     }
 
     const fieldMap: Record<string, string> = {
+      outsideLender: "outside_lender",
       propertyAddress: "property_address", propertyType: "property_type", transactionType: "transaction_type",
       purchasePrice: "purchase_price", currentValue: "current_value", arv: "arv", rehabBudget: "rehab_budget",
       rentEstimate: "rent_estimate", monthlyTaxes: "monthly_taxes", monthlyInsurance: "monthly_insurance",
       monthlyHoa: "monthly_hoa", loanAmount: "loan_amount", rate: "rate", termMonths: "term_months",
       pointsCharged: "points_charged", creditScore: "credit_score", prepayTerm: "prepay_term",
       citizenshipStatus: "citizenship_status", exitStrategy: "exit_strategy",
+      lenderFeeOverride: "lender_fee_override", underwritingFeeOverride: "underwriting_fee_override",
+      commitmentFeeOverride: "commitment_fee_override",
     };
     const patch: Record<string, unknown> = {};
     const changedLabels: string[] = [];

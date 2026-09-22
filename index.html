@@ -340,6 +340,13 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .badge-slate{background:var(--c-slate-bg);color:var(--c-slate)}
 .badge-neutral{background:var(--c-neutral-bg);color:var(--c-neutral)}
 .badge-hot{background:var(--c-rust-bg);color:var(--c-rust);animation:pulse-hot 1.8s ease-in-out infinite}
+.ts-result{border-radius:var(--radius);padding:11px 14px;font-size:13px;line-height:1.5}
+.ts-result-ok{background:var(--c-forest-bg);color:var(--c-forest);border:1px solid transparent}
+.ts-result-warn{background:var(--c-rust-bg);color:var(--c-rust);border:1px solid transparent}
+.ts-result-h{font-weight:700;margin-bottom:4px}
+.ts-result-list{margin:4px 0 0;padding-left:18px}
+.ts-result-list li{margin:2px 0}
+.ts-result-reply{color:var(--ink-muted);margin-top:6px;white-space:pre-wrap}
 @keyframes pulse-hot{0%,100%{opacity:1}50%{opacity:.55}}
 @media (prefers-reduced-motion: reduce){.badge-hot{animation:none}}
 .queue-card.type-hot{border-color:var(--c-rust)}
@@ -3623,7 +3630,16 @@ function buildTermSheet(lead, langOverride){
   // that goes to the borrower should always reflect the real ceiling.
   // Reuses the exact same cap the Pricer tab already computes, so the two
   // can never show different numbers.
-  var termSheetMaxLoanInfo = computeMaxLoanAmount(lead);
+  // computeMaxLoanAmount() only ever encodes BRIDGEPOINT/Constructive
+  // Capital's own in-house guideline tables -- it knows nothing about an
+  // outside lender's (Kiavi/RELIP/RCN/A&D) own leverage rules. Applying it
+  // to an outside-lender file silently truncated the loan amount (and
+  // recomputed LTV) whenever their real committed terms sat above our
+  // in-house ceiling -- found 2026-09-22 after Fiore uploaded a real
+  // outside term sheet and the generated sheet didn't match it. Skip the
+  // cap entirely once outsideLender is set; that file's real ceiling is
+  // whatever the outside lender's own term sheet says, not ours.
+  var termSheetMaxLoanInfo = lead.outsideLender ? null : computeMaxLoanAmount(lead);
   // hitFlatCeiling means the $2M number is just this pricer's rough
   // quoting backstop, not a real LTV/LTC violation -- don't truncate a
   // genuinely large, already-priced loan (Bridge/Portfolio deals above
@@ -9557,7 +9573,7 @@ function renderOutsideTermSheetUpload(lead){
         '<div class="form-row"><label>Notes for the AI (optional)</label><input class="input" name="termSheetNotes" placeholder="e.g. charge 2.5 points instead of what\'s shown"></div>' +
         '<button class="btn btn-sm btn-primary" type="submit">Process Term Sheet</button>' +
       '</form>' +
-      '<div id="term-sheet-result-' + lead.id + '" class="footnote" style="padding-top:8px;white-space:pre-wrap"></div>' +
+      '<div id="term-sheet-result-' + lead.id + '" style="padding-top:8px"></div>' +
     '</div>';
 }
 
@@ -10976,28 +10992,77 @@ function sendAiCommand(message, attachment){
     doSend(null, null);
   }
 }
+// Field-key -> display label / value formatting for the on-screen
+// confirmation below. Keeps the confirmation readable ("Loan Amount:
+// $410,000") instead of dumping the raw "loanAmount = 410000" the server
+// logs to the activity history.
+var TERM_SHEET_FIELD_LABELS = {
+  outsideLender:"Outside Lender", propertyAddress:"Property Address", propertyType:"Property Type",
+  transactionType:"Transaction Type", purchasePrice:"Purchase Price", currentValue:"Current Value",
+  arv:"After-Repair Value", rehabBudget:"Rehab Budget", rentEstimate:"Monthly Rent Estimate",
+  monthlyTaxes:"Monthly Taxes", monthlyInsurance:"Monthly Insurance", monthlyHoa:"Monthly HOA",
+  loanAmount:"Loan Amount", rate:"Rate", termMonths:"Term", pointsCharged:"Origination Points",
+  creditScore:"Credit Score", prepayTerm:"Prepay Term", loanProduct:"Loan Product",
+  citizenshipStatus:"Citizenship Status", exitStrategy:"Exit Strategy",
+  lenderFeeOverride:"Lender Fee", underwritingFeeOverride:"Underwriting Fee", commitmentFeeOverride:"Commitment Fee"
+};
+var TERM_SHEET_MONEY_FIELDS = { purchasePrice:1, currentValue:1, arv:1, rehabBudget:1, rentEstimate:1, monthlyTaxes:1, monthlyInsurance:1, monthlyHoa:1, loanAmount:1, lenderFeeOverride:1, underwritingFeeOverride:1, commitmentFeeOverride:1 };
+function formatTermSheetChange(label){
+  var i = label.indexOf(" = ");
+  if (i === -1) return esc(label);
+  var key = label.slice(0, i), val = label.slice(i + 3);
+  var niceKey = TERM_SHEET_FIELD_LABELS[key] || key;
+  var niceVal = val;
+  if (TERM_SHEET_MONEY_FIELDS[key] && !isNaN(Number(val))) niceVal = fmtUSD(Number(val));
+  else if (key === "rate" && !isNaN(Number(val))) niceVal = Number(val) + "%";
+  else if (key === "pointsCharged" && !isNaN(Number(val))) niceVal = Number(val) + " pts";
+  else if (key === "termMonths") niceVal = val + " months";
+  return "<b>" + esc(niceKey) + "</b>: " + esc(niceVal);
+}
 function processOutsideTermSheet(leadId, file, notes){
   if (!sb || !file) return;
   var lead = leadById(leadId);
   var resultBox = document.getElementById("term-sheet-result-" + leadId);
-  if (resultBox) resultBox.textContent = "Reading term sheet…";
+  if (resultBox) resultBox.innerHTML = '<div class="footnote">Reading term sheet…</div>';
   var reader = new FileReader();
   reader.onload = function(){
     var base64 = reader.result.split(",")[1];
-    var message = "Update loan file " + leadId + " (" + (lead ? lead.name : "") + ") with the real terms from this attached outside term sheet. Only use figures actually shown in the document -- never guess or invent a number. " +
+    var message = "Update loan file " + leadId + " (" + (lead ? lead.name : "") + ") with the real terms from this attached outside term sheet. Only use figures actually shown in the document -- never guess or invent a number. If it's from an outside lender, set outsideLender, set the loan amount/rate/term exactly as shown even if above our in-house guideline max, and set lenderFeeOverride to the lender's own fee shown on the document so our generated term sheet matches their real quote. " +
       (notes ? ("Additional instructions from Joe: " + notes + ". ") : "") +
       "After updating, tell me exactly what changed, and call out anything on the document you weren't able to apply.";
     sb.functions.invoke("owner-ai-command", { body: { message: message, userId: currentUser().id, attachmentBase64: base64, attachmentMediaType: file.type } }).then(function(res){
       if (res.error || !res.data || !res.data.ok){
-        if (resultBox) resultBox.textContent = "Couldn't process the term sheet — try again.";
+        if (resultBox) resultBox.innerHTML = '<div class="ts-result ts-result-warn"><div class="ts-result-h">⚠ Couldn\'t process the term sheet</div>Try again, or check the file is a readable PDF/image.</div>';
         showToast("Couldn't process the term sheet — try again");
         return;
       }
-      if (resultBox) resultBox.textContent = res.data.reply || "Done.";
-      showToast("Term sheet processed");
+      // Pull the real changedFields off the actual update_loan_file/
+      // create_loan_file tool result (not the AI's paraphrased reply) so
+      // the on-screen confirmation reflects exactly what was written to
+      // the loan file -- this is the real fix for "it changed terms" with
+      // no visibility into what changed: Fiore couldn't tell whether the
+      // upload actually mirrored the document he sent.
+      var actions = (res.data.actions || []).filter(function(a){ return (a.tool==="update_loan_file"||a.tool==="create_loan_file") && a.result && a.result.ok; });
+      if (resultBox){
+        if (actions.length){
+          var changed = [];
+          actions.forEach(function(a){ (a.result.changedFields||[]).forEach(function(f){ changed.push(f); }); });
+          resultBox.innerHTML = '<div class="ts-result ts-result-ok">' +
+            '<div class="ts-result-h">✅ Term sheet applied — loan updated to match</div>' +
+            (changed.length ? ('<ul class="ts-result-list">' + changed.map(function(c){ return '<li>' + formatTermSheetChange(c) + '</li>'; }).join("") + '</ul>') : '<div>No fields changed.</div>') +
+            (res.data.reply ? ('<div class="ts-result-reply">' + esc(res.data.reply) + '</div>') : '') +
+          '</div>';
+        } else {
+          resultBox.innerHTML = '<div class="ts-result ts-result-warn"><div class="ts-result-h">⚠ Nothing was applied to the loan file</div>' +
+            'The AI didn\'t update this loan\'s terms — read its reply below and try again, or enter the figures manually.' +
+            (res.data.reply ? ('<div class="ts-result-reply">' + esc(res.data.reply) + '</div>') : '') +
+          '</div>';
+        }
+      }
+      showToast(actions.length ? "Term sheet applied — see confirmation below" : "Term sheet processed, but nothing changed");
       hydrateFromSupabase();
     }).catch(function(){
-      if (resultBox) resultBox.textContent = "Couldn't process the term sheet — try again.";
+      if (resultBox) resultBox.innerHTML = '<div class="ts-result ts-result-warn"><div class="ts-result-h">⚠ Couldn\'t process the term sheet</div>Try again, or check the file is a readable PDF/image.</div>';
       showToast("Couldn't process the term sheet — try again");
     });
   };
