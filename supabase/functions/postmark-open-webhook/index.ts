@@ -11,12 +11,13 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-async function textOwner(text: string) {
-  const { data: owner } = await sb.from("users").select("phone").eq("id", "owner").single();
-  if (!owner?.phone) return;
+async function textUser(userId: string | null, text: string) {
+  if (!userId) return;
+  const { data: user } = await sb.from("users").select("phone").eq("id", userId).maybeSingle();
+  if (!user?.phone) return;
   await fetch(SUPABASE_URL + "/functions/v1/send-text", {
     method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-    body: JSON.stringify({ to: owner.phone, text, fromName: "Bridgepoint CRM" }),
+    body: JSON.stringify({ to: user.phone, text, fromName: "Bridgepoint CRM" }),
   }).catch(() => {});
 }
 
@@ -31,7 +32,7 @@ Deno.serve(async (req: Request) => {
     if (!messageId) return new Response(JSON.stringify({ ok: true, skipped: "no_message_id" }));
 
     const { data: emailRow } = await sb.from("emails")
-      .select("id,subject,to_address,opened_at,open_count,delivery_status")
+      .select("id,subject,to_address,opened_at,open_count,delivery_status,sent_by")
       .eq("postmark_message_id", messageId).single();
     if (!emailRow) return new Response(JSON.stringify({ ok: true, skipped: "unknown_message" }));
 
@@ -54,10 +55,10 @@ Deno.serve(async (req: Request) => {
       // text, not just first-time, since each bounce is its own new failure.
       const alertText = "⚠ Email bounced -- \"" + emailRow.subject + "\" to " + emailRow.to_address + " (" + (body.Description || body.Type || "bounced") + ")";
       await sb.from("notifications").insert({
-        id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: "owner", lead_id: null,
+        id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: emailRow.sent_by || "owner", lead_id: null,
         kind: "email-bounced", text: alertText, date: new Date().toISOString().slice(0, 10), read: false,
       });
-      await textOwner(alertText);
+      await textUser(emailRow.sent_by, alertText);
       return new Response(JSON.stringify({ ok: true, recordType }));
     }
 
@@ -75,10 +76,10 @@ Deno.serve(async (req: Request) => {
       const who = recipientUser?.name || recipient || emailRow.to_address;
       const alertText = "📖 " + who + " opened your email: \"" + emailRow.subject + "\"";
       await sb.from("notifications").insert({
-        id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: "owner", lead_id: null,
+        id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: emailRow.sent_by || "owner", lead_id: null,
         kind: "email-opened", text: alertText, date: new Date().toISOString().slice(0, 10), read: false,
       });
-      await textOwner(alertText);
+      await textUser(emailRow.sent_by, alertText);
     }
 
     return new Response(JSON.stringify({ ok: true, recordType, firstOpen: isFirst }));
