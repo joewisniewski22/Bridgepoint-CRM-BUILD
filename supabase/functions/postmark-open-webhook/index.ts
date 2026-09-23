@@ -63,24 +63,16 @@ Deno.serve(async (req: Request) => {
     }
 
     // Open (default/fallback for accounts that omit RecordType on this event)
-    const recipient: string | null = body.Recipient || null;
+    // Still recorded on the email row (open_count/opened_at, visible if
+    // someone looks at that email directly) but no longer alerted on --
+    // Joe's ask (2026-09-23): nobody needs to know an email was opened
+    // unless they go look for it themselves.
     const firstOpen: boolean = body.FirstOpen === true;
     const isFirst = firstOpen || !emailRow.opened_at;
     await sb.from("emails").update({
       open_count: (emailRow.open_count || 0) + 1,
       opened_at: emailRow.opened_at || new Date().toISOString(),
     }).eq("id", emailRow.id);
-
-    if (isFirst) {
-      const { data: recipientUser } = await sb.from("users").select("name").eq("email", recipient || emailRow.to_address).maybeSingle();
-      const who = recipientUser?.name || recipient || emailRow.to_address;
-      const alertText = "📖 " + who + " opened your email: \"" + emailRow.subject + "\"";
-      await sb.from("notifications").insert({
-        id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: emailRow.sent_by || "owner", lead_id: null,
-        kind: "email-opened", text: alertText, date: new Date().toISOString().slice(0, 10), read: false,
-      });
-      await textUser(emailRow.sent_by, alertText);
-    }
 
     return new Response(JSON.stringify({ ok: true, recordType, firstOpen: isFirst }));
   } catch (err) {
