@@ -7577,30 +7577,38 @@ function buildBorrowerPortalHTML(lead, opts){
     stepper +
     (opts.justSubmitted ? ('<div class="hint" style="color:var(--c-forest);margin:6px 0 0">' + L("Thanks — we've got your application! Here's where things stand.") + '</div>') : '');
 
-  // Real bug (Fiore's client, 2026-09-09): hasCompletedIntake only ever
-  // becomes true via the formal application flow (borrower's own online
-  // submission, or "Take Application by Phone"). A file that's been
-  // manually moved along -- an LO collecting details conversationally
-  // and advancing the stage themselves, never running either formal
-  // flow -- left the borrower stuck on the full "let's get started"
-  // intake form with no upload option in sight, even once the file had
-  // already reached Docs Collection and staff were actively requesting
-  // documents. isInProcessing only covered "processing" stage onward,
-  // missing that entire gap.
   var isInProcessing = stageIndex(lead.stage) >= stageIndex("processing");
-  var skipIntakeForm = isInProcessing || stageIndex(lead.stage) >= stageIndex("docs");
 
-  if (!hasCompletedIntake && !skipIntakeForm){
-    return header +
-      '<div class="portal-cta">' +
-        '<b>' + L("Let's get your application started") + '</b>' +
-        '<div class="footnote" style="padding:4px 0 0">' + L("Takes about 10 minutes — fill in what you can, sign at the end.") + '</div>' +
-      '</div>' +
-      '<form data-form="public-application" data-lead="' + lead.id + '" style="margin-top:10px">' +
+  // Joe's ask (2026-09-23): the application has to stay open for BOTH the
+  // client and the LO to edit right up until the file actually moves to
+  // Processing -- the same threshold canEditApplication() already uses
+  // staff-side. This used to be an exclusive either/or: hasCompletedIntake
+  // (set the first time the borrower submits, or staff run "Take
+  // Application by Phone") permanently swapped the editable form out for
+  // the portal-only view, no matter how early the stage still was -- so a
+  // borrower who'd already submitted once had no way back into their own
+  // application before processing, and staff sending "the application
+  // link" vs. "the borrower portal link" (both literally build the same
+  // URL -- see applicationLink() / reallySendBorrowerPortalInvite()) saw
+  // what looked like the wrong page depending on that flag alone, not on
+  // what was actually sent. The editable form (pre-filled once they've
+  // submitted before) now sits alongside the rest of the portal for the
+  // whole pre-processing life of the loan instead of hiding it -- this
+  // also matches this function's own original design intent (see the
+  // comment above it): one page, reachable the moment they're first sent a
+  // link, for the whole life of the loan.
+  var applicationCard = isInProcessing ? "" : (
+    '<div class="portal-section">' +
+      (hasCompletedIntake
+        ? ('<div class="rail-title">' + L("Your Application") + '</div><div class="footnote" style="padding:2px 0 10px">' + L("You can still make changes below anytime before your file moves to processing.") + '</div>')
+        : ('<div class="rail-title">' + L("Let's get your application started") + '</div><div class="footnote" style="padding:2px 0 10px">' + L("Takes about 10 minutes — fill in what you can, sign at the end.") + '</div>')
+      ) +
+      '<form data-form="public-application" data-lead="' + lead.id + '">' +
         buildApplicationFieldsHTML(lead, lang) +
-        '<button class="btn btn-primary" style="width:100%;margin-top:14px" type="submit">' + L("Submit Application") + '</button>' +
-      '</form>';
-  }
+        '<button class="btn btn-primary" style="width:100%;margin-top:14px" type="submit">' + L(hasCompletedIntake ? "Save Changes" : "Submit Application") + '</button>' +
+      '</form>' +
+    '</div>'
+  );
 
   var termsCard = (lead.loanAmount || lead.rate) ? (
     '<div class="portal-section">' +
@@ -7727,7 +7735,7 @@ function buildBorrowerPortalHTML(lead, opts){
     '<div class="footnote" style="padding-top:6px">' + L("Your loan officer gets this as a text and can reply right from their phone.") + '</div>' +
   '</div>';
 
-  return header + termsCard + dealAnalysisCard + loCard + uwConditionsCard + docsCard + thirdPartiesCard + chatCard;
+  return header + applicationCard + termsCard + dealAnalysisCard + loCard + uwConditionsCard + docsCard + thirdPartiesCard + chatCard;
 }
 function renderLogin(){
   var brandBlock = '<div class="login-brand" style="justify-content:center"><img src="' + LOGO_URL + '" alt="Bridgepoint Lending" style="max-width:260px;width:100%;height:auto"></div>';
