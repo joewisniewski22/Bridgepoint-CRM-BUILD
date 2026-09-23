@@ -7904,6 +7904,7 @@ function renderShell(){
         ((isOwner() || !isProcessor()) && navVisible("referrals") ? navItem("referrals","🤝","Referral Partners") : "") +
         ((isOwner() || !isProcessor()) && navVisible("repeat") ? navItem("repeat","👥","Repeat Clients") : "") +
         (navVisible("notifications") ? navItem("notifications","🔔","Notifications", notifCount||null) : "") +
+        navItem("messages","📱","Messages", unreadTextMessagesTotal()||null) +
         navItem("teamchat","💬","Team Chat", unreadTeamChatTotal(ui.viewAs)||null) +
         navItem("email","📧","Email") +
         (isOwner() || !isProcessor() ? navItem("coaching","🎯","Coaching") : "") +
@@ -7944,6 +7945,7 @@ function renderShell(){
   else if (ui.view === "referrals") body = renderReferralPartners();
   else if (ui.view === "repeat") body = renderRepeatClients();
   else if (ui.view === "notifications") body = renderNotifications();
+  else if (ui.view === "messages") body = renderTextMessages();
   else if (ui.view === "teamchat") body = renderTeamChat();
   else if (ui.view === "email") body = renderEmailInbox();
   else if (ui.view === "coaching") body = renderCoaching();
@@ -8093,6 +8095,37 @@ function renderMobileShell(){
   } else if (tab === "contacts"){
     body = '<div class="form-row" style="margin-top:12px"><input class="input" type="search" placeholder="Search name, phone or email" value="' + esc(ui.mobileQuery||"") + '" data-action="m-search" style="min-height:46px"></div>' +
       '<div id="m-search-results">' + mobileContactResults(ui.mobileQuery) + '</div>';
+  } else if (tab === "messages"){
+    // Joe's ask (2026-09-23): a real messenger on mobile too, not just the
+    // "Text" button's send-and-forget modal -- a real conversation list
+    // and thread, same data as the desktop Messages nav item.
+    var mConvos = textMessageLeads();
+    var mActive = ui.mobileMessagesLeadId ? mConvos.filter(function(c){ return c.lead.id === ui.mobileMessagesLeadId; })[0] : null;
+    if (mActive){
+      var mBubbles = mActive.msgs.map(function(a){ return textBubbleHTML(a, mActive.lead.name); }).join("");
+      body = '<button type="button" class="link-btn" style="margin:12px 0 4px" data-action="m-messages-back">‹ All Messages</button>' +
+        '<div class="m-card" style="margin-bottom:10px">' +
+          '<div class="m-name">' + esc(mActive.lead.name) + '</div>' +
+          '<div class="m-sub">' + esc(mActive.lead.loanType||"") + (mActive.lead.propertyAddress ? (' · ' + esc(mActive.lead.propertyAddress)) : '') + '</div>' +
+        '</div>' +
+        '<div style="padding:2px 2px 12px">' + (mBubbles || '<div class="empty">No messages yet.</div>') + '</div>' +
+        '<form data-form="text-message-send" data-lead="' + mActive.lead.id + '" style="display:flex;gap:8px;position:sticky;bottom:calc(8px + env(safe-area-inset-bottom));background:var(--bg);padding:8px 0">' +
+          '<input class="input" name="body" placeholder="Message…" autocomplete="off" style="flex:1;min-height:46px" required>' +
+          '<button class="btn btn-primary" type="submit" style="min-height:46px">Send</button>' +
+        '</form>';
+    } else {
+      var mUnread = unreadTextMessagesTotal();
+      body = '<div class="m-section">Messages' + (mUnread ? (' · ' + mUnread + ' unread') : '') + '</div>' +
+        (mConvos.length ? mConvos.map(function(c){
+          var preview = c.last.text.replace(/^(Received|Texted) \(via (Quo|Telnyx)[^)]*\):\s*/, "");
+          return '<div class="m-card" style="cursor:pointer" data-action="m-messages-open" data-lead="' + c.lead.id + '">' +
+            (c.unread ? ('<div class="m-badge hot">' + c.unread + ' new</div>') : '') +
+            '<div class="m-name">' + esc(c.lead.name) + '</div>' +
+            '<div class="m-sub">' + fmtDate(c.last.date) + '</div>' +
+            '<div class="m-reason">' + esc(preview.slice(0,80)) + '</div>' +
+          '</div>';
+        }).join("") : '<div class="empty">No text conversations yet — texts you send or receive show up here.</div>');
+    }
   } else {
     var mq = mobileQueue();
     body = '<div class="m-section">Today\'s calls (' + mq.newBusiness.length + ')</div>' +
@@ -8108,7 +8141,8 @@ function renderMobileShell(){
       '<div class="m-progress"><span style="width:' + pct + '%"></span></div>' +
       '<div class="m-tabs"><button type="button" class="m-tab' + (tab==="new" ? " on" : "") + '" data-action="m-tab" data-tab="new">New' + (uncontacted ? (' (' + uncontacted + ')') : '') + '</button>' +
         '<button type="button" class="m-tab' + (tab==="today" ? " on" : "") + '" data-action="m-tab" data-tab="today">Today</button>' +
-        '<button type="button" class="m-tab' + (tab==="contacts" ? " on" : "") + '" data-action="m-tab" data-tab="contacts">Contacts</button></div>' +
+        '<button type="button" class="m-tab' + (tab==="contacts" ? " on" : "") + '" data-action="m-tab" data-tab="contacts">Contacts</button>' +
+        '<button type="button" class="m-tab' + (tab==="messages" ? " on" : "") + '" data-action="m-tab" data-tab="messages">Msgs' + (unreadTextMessagesTotal() ? (' (' + unreadTextMessagesTotal() + ')') : '') + '</button></div>' +
     '</div>' + body +
     '<div class="m-foot"><button type="button" class="link-btn" data-action="m-desktop">Desktop site</button>' +
       '<button type="button" class="link-btn" data-action="open-modal" data-modal="changePin">Change PIN</button>' +
@@ -10257,21 +10291,14 @@ function renderConversationThread(lead){
   });
   if (!msgs.length) return "";
   var expanded = ui.expandedConversationLead === lead.id;
-  var bubbles = msgs.map(function(a){
-    var inbound = /^Received \(via (Quo|Telnyx)[^)]*\):/.test(a.text);
-    var body = a.text.replace(/^(Received|Texted) \(via (Quo|Telnyx)[^)]*\):\s*/, "");
-    var failedBadge = a.deliveryStatus === "failed" ? ' <span style="color:var(--c-rust)">⚠ not delivered</span>' : "";
-    return '<div style="display:flex;' + (inbound ? '' : 'justify-content:flex-end') + ';margin-bottom:8px">' +
-      '<div style="max-width:75%;padding:8px 12px;border-radius:10px;background:' + (inbound ? 'var(--surface-2,var(--border-soft))' : 'var(--brand)') + ';color:' + (inbound ? 'inherit' : 'var(--brand-ink)') + '">' +
-        '<div style="white-space:pre-wrap">' + esc(body) + '</div>' +
-        '<div class="footnote" style="padding-top:2px;opacity:.8">' + (inbound ? esc(lead.name) : esc(a.author||"Us")) + ' · ' + fmtDate(a.date) + failedBadge + '</div>' +
-      '</div>' +
-    '</div>';
-  }).join("");
+  var bubbles = msgs.map(function(a){ return textBubbleHTML(a, lead.name); }).join("");
   return '<div class="panel panel-pad" style="margin-bottom:14px">' +
-    '<div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer" data-action="toggle-conversation" data-lead="' + lead.id + '">' +
-      '<div class="rail-title">💬 Text Conversation (' + msgs.length + ' message' + (msgs.length>1?'s':'') + ')</div>' +
-      '<span class="hint">' + (expanded ? '▲ Hide' : '▼ View') + '</span>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center">' +
+      '<div style="display:flex;align-items:center;gap:10px;cursor:pointer" data-action="toggle-conversation" data-lead="' + lead.id + '">' +
+        '<div class="rail-title">💬 Text Conversation (' + msgs.length + ' message' + (msgs.length>1?'s':'') + ')</div>' +
+        '<span class="hint">' + (expanded ? '▲ Hide' : '▼ View') + '</span>' +
+      '</div>' +
+      '<button class="btn btn-sm btn-ghost" type="button" data-action="open-text-messages" data-lead="' + lead.id + '" title="Reply from the full Messages inbox">Open in Messages</button>' +
     '</div>' +
     (expanded ? ('<div style="margin-top:10px">' + bubbles + '</div>') : '') +
   '</div>';
@@ -11698,6 +11725,96 @@ function sendTeamChatMessage(toUserId, body){
     createdAt: new Date().toISOString(), read: false
   });
   persist();
+}
+/* ---------------------------------------------------------------------
+   Text Messages — Joe's ask (2026-09-23): a real messenger for client
+   texts instead of digging into a lead's Activity & Calls tab (which
+   mixes texts in with calls, stage changes, documents, everything).
+   Same list-plus-thread layout as Team Chat, just for borrower texts
+   instead of staff DMs -- reuses sendTextMessage() (the same send path
+   the Text modal already calls) so nothing about how a text actually
+   goes out changes, this just gives it a proper home. Already gets live
+   updates for free: ensureGlobalPolling() already refreshes leads and
+   notifications every 25s for any view other than "detail".
+--------------------------------------------------------------------- */
+function textBubbleHTML(a, leadName){
+  var inbound = /^Received \(via (Quo|Telnyx)[^)]*\):/.test(a.text);
+  var body = a.text.replace(/^(Received|Texted) \(via (Quo|Telnyx)[^)]*\):\s*/, "");
+  var failedBadge = a.deliveryStatus === "failed" ? ' <span style="color:var(--c-rust)">⚠ not delivered</span>' : "";
+  return '<div style="display:flex;' + (inbound ? '' : 'justify-content:flex-end') + ';margin-bottom:8px">' +
+    '<div style="max-width:75%;padding:8px 12px;border-radius:10px;background:' + (inbound ? 'var(--surface-2,var(--border-soft))' : 'var(--brand)') + ';color:' + (inbound ? 'inherit' : 'var(--brand-ink)') + '">' +
+      '<div style="white-space:pre-wrap">' + esc(body) + '</div>' +
+      '<div class="footnote" style="padding-top:2px;opacity:.8">' + (inbound ? esc(leadName) : esc(a.author||"Us")) + ' · ' + fmtDate(a.date) + failedBadge + '</div>' +
+    '</div>' +
+  '</div>';
+}
+// Same "own leads only" scoping Communications already uses for owner
+// (Joe, 2026-09-09: "I only need to see communications ... from my
+// clients") -- everyone else already gets that via scopedLeads().
+function textMessageLeads(){
+  var leads = isOwner() ? state.leads.filter(function(l){ return l.assignedTo === currentUser().id; }) : scopedLeads();
+  var withMsgs = leads.map(function(l){
+    var msgs = (l.activity||[]).filter(function(a){
+      return a.type === "text" && typeof a.text === "string" && /^(Received|Texted) \(via (Quo|Telnyx)[^)]*\):/.test(a.text);
+    });
+    if (!msgs.length) return null;
+    var last = msgs[msgs.length - 1];
+    var unread = (state.notifications||[]).filter(function(n){ return n.leadId === l.id && n.kind === "text" && n.toUserId === ui.viewAs && !n.read; }).length;
+    return { lead: l, msgs: msgs, last: last, unread: unread };
+  }).filter(function(x){ return !!x; });
+  withMsgs.sort(function(a,b){
+    if (a.last.date !== b.last.date) return b.last.date.localeCompare(a.last.date);
+    return b.unread - a.unread;
+  });
+  return withMsgs;
+}
+function unreadTextMessagesTotal(){
+  return textMessageLeads().reduce(function(sum, c){ return sum + c.unread; }, 0);
+}
+function markTextThreadRead(leadId){
+  var changed = false;
+  (state.notifications||[]).forEach(function(n){
+    if (n.leadId === leadId && n.kind === "text" && n.toUserId === ui.viewAs && !n.read){ n.read = true; changed = true; }
+  });
+  if (changed) persist();
+}
+function renderTextMessages(){
+  var convos = textMessageLeads();
+  if (!ui.textMessagesWith || !convos.some(function(c){ return c.lead.id === ui.textMessagesWith; })){
+    ui.textMessagesWith = convos[0] ? convos[0].lead.id : null;
+  }
+  var list = convos.map(function(c){
+    var active = c.lead.id === ui.textMessagesWith;
+    var preview = c.last.text.replace(/^(Received|Texted) \(via (Quo|Telnyx)[^)]*\):\s*/, "");
+    return '<div class="doc-row" style="cursor:pointer;align-items:flex-start;' + (active ? 'background:var(--brand-tint)' : '') + '" data-action="open-text-messages" data-lead="' + c.lead.id + '">' +
+      '<div style="min-width:0;flex:1">' +
+        '<div style="display:flex;justify-content:space-between;gap:6px"><b>' + esc(c.lead.name) + '</b><span class="hint" style="white-space:nowrap">' + fmtDate(c.last.date) + '</span></div>' +
+        '<div class="cell-sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(preview.slice(0,60)) + '</div>' +
+      '</div>' +
+      (c.unread ? ('<span class="badge badge-hot">' + c.unread + '</span>') : '') +
+    '</div>';
+  }).join("");
+
+  var activeConvo = convos.filter(function(c){ return c.lead.id === ui.textMessagesWith; })[0];
+  var bubbles = activeConvo ? activeConvo.msgs.map(function(a){ return textBubbleHTML(a, activeConvo.lead.name); }).join("") : "";
+  var chatPane = activeConvo
+    ? ('<div style="display:flex;flex-direction:column;height:100%">' +
+        '<div class="section-head"><h2 style="cursor:pointer" data-action="select-lead" data-lead="' + activeConvo.lead.id + '" title="Open this loan file">' + esc(activeConvo.lead.name) + '</h2>' +
+          '<span class="hint">' + esc(activeConvo.lead.loanType||"") + (activeConvo.lead.propertyAddress ? (' · ' + esc(activeConvo.lead.propertyAddress)) : '') + '</span>' +
+        '</div>' +
+        '<div style="flex:1;overflow-y:auto;padding:4px 4px 12px">' + (bubbles || '<div class="empty">No messages yet.</div>') + '</div>' +
+        '<form data-form="text-message-send" data-lead="' + activeConvo.lead.id + '" style="display:flex;gap:8px">' +
+          '<input class="input" name="body" placeholder="Message ' + esc(activeConvo.lead.name) + '…" autocomplete="off" style="flex:1" required>' +
+          '<button class="btn btn-primary" type="submit">Send</button>' +
+        '</form>' +
+      '</div>')
+    : '<div class="empty">No text conversations yet — texts you send or receive from your leads will show up here.</div>';
+
+  return topbar("Messages", "Every text conversation with your clients, in one place — click a lead to reply right here.", "") +
+    '<div class="content" style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start">' +
+      '<div class="panel panel-pad">' + (list || '<div class="empty">No text conversations yet.</div>') + '</div>' +
+      '<div class="panel panel-pad" style="height:65vh">' + chatPane + '</div>' +
+    '</div>';
 }
 function renderTeamChat(){
   ensureTeamChatPolling();
@@ -13821,6 +13938,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
   else if (action === "softphone-mute"){ toggleSoftphoneMute(); }
   else if (action === "m-tab"){ ui.mobileTab = t.dataset.tab; ui.mobileOpen = (t.dataset.tab === "new" ? undefined : null); render(); }
+  else if (action === "m-messages-open"){ ui.mobileMessagesLeadId = t.dataset.lead; markTextThreadRead(t.dataset.lead); render(); }
+  else if (action === "m-messages-back"){ ui.mobileMessagesLeadId = null; render(); }
   else if (action === "m-refresh"){ refreshLeadsNow(); }
   else if (action === "m-toggle"){
     // The newest lead is open by default (mobileOpen undefined), so tapping it should close it.
@@ -13836,6 +13955,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
   else if (action === "toggle-email"){ ui.expandedEmailId = ui.expandedEmailId===t.dataset.id ? null : t.dataset.id; render(); }
   else if (action === "toggle-conversation"){ ui.expandedConversationLead = ui.expandedConversationLead===t.dataset.lead ? null : t.dataset.lead; render(); }
+  else if (action === "open-text-messages"){ ui.view = "messages"; ui.textMessagesWith = t.dataset.lead; markTextThreadRead(t.dataset.lead); render(); }
   else if (action === "confirm-team-message"){ sendTeamMessage(); }
   else if (action === "confirm-campaign"){ sendCampaign(); }
   else if (action === "request-coaching-tip"){ requestCoachingTip(t.dataset.lead); }
@@ -14506,6 +14626,9 @@ appEl.addEventListener("submit", function(e){
     render();
   } else if (type === "team-chat-send"){
     sendTeamChatMessage(form.dataset.to, fd.get("body"));
+    form.reset();
+  } else if (type === "text-message-send"){
+    sendTextMessage(form.dataset.lead, fd.get("body"));
     form.reset();
   } else if (type === "submit-for-review"){
     submitForReview(form.dataset.lead, fd.get("reviewNote"));
