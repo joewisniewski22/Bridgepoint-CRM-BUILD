@@ -5109,6 +5109,26 @@ function submitPhoneApplication(leadId, patch){
   showToast("Application saved for " + lead.name);
   runGuidelineCheck(leadId);
 }
+// Same field patch as submitPhoneApplication, but for editing an
+// already-on-file application from the View Application modal -- doesn't
+// touch applicationTakenByPhone or force the stage forward, since this
+// isn't the phone-intake call flow, just a correction to what's there.
+function saveApplicationEdit(leadId, patch){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var d = todayISO();
+  Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  syncContactFromApplication(lead, patch);
+  var ltvBasis = (patch.transactionType && patch.transactionType !== "purchase" && patch.currentValue) ? patch.currentValue : patch.purchasePrice;
+  if (ltvBasis && patch.loanAmount){
+    lead.ltv = Math.round((patch.loanAmount / ltvBasis) * 1000) / 10;
+  }
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"application", text:"Application updated", author: currentUser().name });
+  ui.modal = null;
+  showToast("Application saved for " + lead.name);
+  runGuidelineCheck(leadId);
+}
 function docPdfFilename(lead, label){
   return label.replace(/\s+/g,"_") + "_" + (lead.name||"Borrower").replace(/[^a-zA-Z0-9]+/g,"_") + ".pdf";
 }
@@ -13544,24 +13564,24 @@ function modalTakeApplication(leadId){
       '</form>' +
     '</div></div>';
 }
-// Read-only view of the same fields -- so anyone with access to the file
-// (a processor, or the LO once the file's moved past a stage where they
-// can still edit it) has a clear way to just SEE what was submitted,
-// without needing edit rights or reopening the phone-intake flow. A
-// <fieldset disabled> around the exact same field-building function
-// disables every nested input for free, no separate read-only rendering
-// to keep in sync.
+// Editable view of the same fields -- available to everyone regardless
+// of role or stage (unlike "Take Application by Phone", which stays
+// gated behind canEditApplication). Joe's ask (2026-09-23): anyone who
+// can open "View Application" should also be able to fix a typo or
+// update a field right there, not just look at it.
 function modalViewApplication(leadId){
   var lead = leadById(leadId);
   if (!lead) return "";
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
     '<div class="modal" data-stop="1" style="max-width:600px">' +
       '<div class="modal-head"><h3>Application — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="edit-application" data-lead="' + lead.id + '">' +
       '<div class="modal-body">' +
-        '<div class="footnote" style="padding:0">View only — everything below is what\'s currently on file.</div>' +
-        '<fieldset disabled style="border:0;padding:0;margin:0">' + buildApplicationFieldsHTML(lead) + '</fieldset>' +
+        '<div class="footnote" style="padding:0">Everything below is what\'s currently on file — edit and save as needed.</div>' +
+        buildApplicationFieldsHTML(lead) +
       '</div>' +
-      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Close</button></div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save Application</button></div>' +
+      '</form>' +
     '</div></div>';
 }
 function modalScopeOfWork(leadId){
@@ -14511,6 +14531,64 @@ appEl.addEventListener("submit", function(e){
     uploadAnyDeclarationFiles(form, form.dataset.lead);
     var sowPatch = extractScopeOfWorkFromForm(fd);
     if (sowPatch) saveScopeOfWork(form.dataset.lead, sowPatch.items, sowPatch.notes);
+    render();
+  } else if (type === "edit-application"){
+    var numOrNullEdit = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
+    var editAppSsn = (fd.get("guarantorSsn") || "").trim();
+    if (editAppSsn) saveGuarantorSsn(form.dataset.lead, editAppSsn);
+    saveApplicationEdit(form.dataset.lead, {
+      entityType: fd.get("entityType"),
+      creditScore: numOrNullEdit("creditScore"),
+      experienceDeals: numOrNullEdit("experienceDeals"),
+      liquidity: numOrNullEdit("liquidity"),
+      propertyAddress: fd.get("propertyAddress"),
+      propertyType: fd.get("propertyType"),
+      exitStrategy: fd.get("exitStrategy"),
+      purchasePrice: numOrNullEdit("purchasePrice"),
+      currentValue: numOrNullEdit("currentValue"),
+      arv: numOrNullEdit("arv"),
+      rehabBudget: numOrNullEdit("rehabBudget"),
+      rentEstimate: numOrNullEdit("rentEstimate"),
+      monthlyTaxes: numOrNullEdit("monthlyTaxes"),
+      monthlyInsurance: numOrNullEdit("monthlyInsurance"),
+      monthlyHoa: numOrNullEdit("monthlyHoa"),
+      loanAmount: numOrNullEdit("loanAmount"),
+      termMonths: numOrNullEdit("termMonths"),
+      propertyCount: numOrNullEdit("propertyCount"),
+      guarantorFirstName: fd.get("guarantorFirstName"),
+      guarantorMiddleName: fd.get("guarantorMiddleName"),
+      guarantorLastName: fd.get("guarantorLastName"),
+      guarantorPhone: fd.get("guarantorPhone"),
+      guarantorEmail: fd.get("guarantorEmail"),
+      birthday: fd.get("birthday"),
+      guarantorOwnershipPct: numOrNullEdit("guarantorOwnershipPct"),
+      entityLegalName: fd.get("entityLegalName"),
+      citizenshipStatus: fd.get("citizenshipStatus"),
+      countryOfDomicile: fd.get("countryOfDomicile"),
+      maritalStatus: fd.get("maritalStatus"),
+      builtYear: fd.get("builtYear") ? Number(fd.get("builtYear")) : null,
+      currentLenderName: fd.get("currentLenderName"),
+      unitsReadyForRent: fd.get("unitsReadyForRent"),
+      propertyOccupied: fd.get("propertyOccupied"),
+      taxesCurrent: fd.get("taxesCurrent"),
+      propertyLeaseStatus: fd.get("propertyLeaseStatus"),
+      delayedPurchase: fd.get("delayedPurchase"),
+      nyCemaLoan: fd.get("nyCemaLoan"),
+      nyClosingAttorney: fd.get("nyClosingAttorney"),
+      numUnits: fd.get("numUnits") ? Number(fd.get("numUnits")) : null,
+      leaseDetail: extractLeaseDetailFromForm(fd),
+      transactionType: fd.get("transactionType"),
+      prepayTerm: fd.get("prepayTerm"),
+      trackRecord: extractTrackRecordFromForm(fd)
+    });
+    var eaLead = leadById(form.dataset.lead);
+    var eaAchData = extractAchFromForm(fd, signaturePadDataUrl("sig-ach-" + form.dataset.lead), eaLead && eaLead.achForm);
+    var eaRtlData = extractRtlApplicationFromForm(fd, signaturePadDataUrl("sig-rtlapp-" + form.dataset.lead), eaLead && eaLead.rtlApp);
+    var eaDscrData = extractDscrApplicationFromForm(fd, signaturePadDataUrl("sig-dscrapp-" + form.dataset.lead), eaLead && eaLead.dscrApp);
+    applyAchAndRtlAppPatch(form.dataset.lead, eaAchData, eaRtlData, eaDscrData);
+    uploadAnyDeclarationFiles(form, form.dataset.lead);
+    var eaSowPatch = extractScopeOfWorkFromForm(fd);
+    if (eaSowPatch) saveScopeOfWork(form.dataset.lead, eaSowPatch.items, eaSowPatch.notes);
     render();
   } else if (type === "public-application"){
     var numOrNullPub = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
