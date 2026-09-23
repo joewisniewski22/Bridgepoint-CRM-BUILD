@@ -7691,15 +7691,13 @@ function buildBorrowerPortalHTML(lead, opts){
     '</div>'
   ) : "";
 
-  if (isInProcessing){
-    return header + termsCard + loCard + uwConditionsCard +
-      '<div class="portal-section">' +
-        '<div class="rail-title">' + L("Your File Is In Processing") + '</div>' +
-        '<div class="footnote" style="padding:2px 0 0">' + L("Your loan officer and our processing team are handling everything from here. If you need to send a document or have a question, please contact your loan officer directly.") + '</div>' +
-      '</div>';
-  }
-
-  var visibleDocs = (lead.documents||[]).map(function(d,i){ return {d:d, i:i}; }).filter(function(x){ return !x.d.staffOnly && x.d.status!=="waived" && x.d.status!=="suggested"; });
+  // Includes "suggested" docs too (the checklist's initial state, before
+  // staff clicks Request) -- Joe's ask (2026-09-23): a borrower like Gnana,
+  // still in Application Started, needs to be able to upload proactively
+  // from day one instead of waiting on staff to formally request each item.
+  // Borrowers only ever get an Upload / + Add Another File button here --
+  // there's no delete/remove action exposed to them at any stage.
+  var visibleDocs = (lead.documents||[]).map(function(d,i){ return {d:d, i:i}; }).filter(function(x){ return !x.d.staffOnly && x.d.status!=="waived"; });
   var docs = visibleDocs.map(function(x){
     var d = x.d, i = x.i;
     var received = d.status==="received";
@@ -7715,6 +7713,16 @@ function buildBorrowerPortalHTML(lead, opts){
     '<div class="rail-title">' + L("Document Checklist") + '</div>' +
     (docs || '<div class="empty">' + L("No documents requested yet.") + '</div>') +
   '</div>';
+
+  // Joe's ask (2026-09-23): Gnana couldn't upload documents once his file
+  // hit Processing -- this branch used to drop the Document Checklist
+  // entirely and tell the borrower to just contact their LO instead.
+  // Processing/underwriting is exactly when documents keep getting
+  // requested, so the checklist (and its upload buttons) now stays up
+  // for the life of the loan, same as underwriting conditions already did.
+  if (isInProcessing){
+    return header + termsCard + loCard + uwConditionsCard + docsCard;
+  }
 
   var tpRows = (lead.thirdParties||[]).map(function(tp){
     return '<div class="doc-row"><div><div><b>' + esc(tp.name) + '</b></div>' +
