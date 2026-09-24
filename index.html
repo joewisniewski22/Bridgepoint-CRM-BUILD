@@ -957,7 +957,12 @@ var REQUIRED_DOCS_BY_TYPE = {
     "Builder's Risk Insurance Binder",
     "Schedule of Real Estate Owned (Track Record)",
     RTL_APPLICATION_DOC_NAME
-  ])
+  ]),
+  // No Mixed-Use-specific items yet (Joe deferred those until a real deal
+  // sets the real requirements) -- but leaving this out of the map
+  // entirely meant Mixed-Use got ZERO required docs, not even the
+  // universal baseline every other loan type gets. Fixed 2026-09-24.
+  "Mixed-Use": UNIVERSAL_DOCS
 };
 
 var SOW_CATEGORIES = [
@@ -3412,11 +3417,6 @@ function displayLtvForLead(lead){
   return { value: lead.ltv, label: "LTV" };
 }
 var OFFICE_PHONE = "(850) 279-8588";
-var COMPANY_NAME = "Bridgepoint Lending";
-var COMPANY_ADDRESS = "1898 Merchants Row Blvd, Tallahassee, FL 32311";
-// Company-level NMLS/license ID for the LoanOriginationCompany party on a
-// MISMO 3.4 export -- blank until someone fills in the real number.
-var COMPANY_NMLS = "";
 var GOOGLE_REVIEW_LINK = "https://g.page/r/CbJVKQumLqOQEAE/review";
 function loContactLines(lo, lang){
   if (lo.emailSignature) return lo.emailSignature.split("\n");
@@ -3639,299 +3639,6 @@ function estimatedCashToClose(lead){
   var fundedAtClosing = hb ? hb.initialAdvance : lead.loanAmount;
   var equityNeeded = lead.purchasePrice - fundedAtClosing;
   return { feesOnly:false, amount: equityNeeded + fees, equityNeeded: equityNeeded, fees: fees };
-}
-// MISMO 3.4 loan-file export -- Joe's ask (2026-09-24): a lot of lenders
-// (warehouse/correspondent investors, wholesale bridge shops) accept a
-// straight MISMO 3.4 XML import instead of manual re-entry into their own
-// portal. The CRM already holds everything this needs; this just typesets
-// it into the same DEAL/COLLATERAL/LOAN/PARTY shape LendingWise and other
-// LOS platforms export, so a lender's own importer reads it the same way.
-// Kept intentionally close to the sample export's own structure (empty
-// tags where a value is genuinely unknown, not omitted) rather than a
-// from-scratch schema read, since that's what real-world importers expect.
-function escXml(s){
-  return String(s==null ? "" : s)
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;").replace(/'/g,"&apos;");
-}
-function mismoCitizenshipType(status){
-  if (status === "Permanent Resident") return "PermanentResidentAlien";
-  if (status === "Foreign National" || status === "ITIN") return "NonPermanentResidentAlien";
-  return "USCitizen";
-}
-function mismoLoanPurposeType(transactionType){
-  return (transactionType && transactionType !== "purchase") ? "Refinance" : "Purchase";
-}
-function buildMismoExportXml(lead, ssnFull){
-  var lo = docLoanOfficer(lead);
-  var isPurchase = (lead.transactionType || "purchase") === "purchase";
-  var isIO = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
-  var addrParts = (lead.propertyAddress || "").split(",");
-  var streetLine = (addrParts[0] || "").trim();
-  var cityPart = (addrParts[1] || "").trim();
-  var stateZip = (addrParts[2] || "").trim().split(" ").filter(Boolean);
-  var statePart = stateZip[0] || "";
-  var zipPart = stateZip[1] || "";
-  var firstName = lead.guarantorFirstName || (lead.name||"").split(" ")[0] || "";
-  var lastName = lead.guarantorLastName || (lead.name||"").split(" ").slice(1).join(" ") || "";
-  var ssnDigits = ssnFull ? String(ssnFull).replace(/\D/g,"") : "";
-  var valuationAmt = lead.arv || lead.currentValue || lead.purchasePrice || "";
-  var loanIdent = "L" + lead.id;
-  return '<?xml version="1.0" encoding="UTF-8"?>\n' +
-'<MESSAGE xmlns="http://www.mismo.org/residential/2009/schemas"\n' +
-'         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\n' +
-'         xmlns:ULAD="http://www.datamodelextension.org/Schema/ULAD"\n' +
-'         MISMOReferenceModelIdentifier="3.4.032420160128" xmlns:xlink="http://www.w3.org/1999/xlink"\n' +
-'         xsi:schemaLocation="http://www.mismo.org/residential/2009/schemas DU_Wrapper_3.4.0_B324.xsd">\n' +
-'    <ABOUT_VERSIONS>\n' +
-'        <ABOUT_VERSION>\n' +
-'            <CreatedDatetime>' + new Date().toISOString() + '</CreatedDatetime>\n' +
-'            <AboutVersionIdentifier>Bridgepoint CRM Export 1.0</AboutVersionIdentifier>\n' +
-'        </ABOUT_VERSION>\n' +
-'    </ABOUT_VERSIONS>\n' +
-'    <DEAL_SETS>\n' +
-'        <DEAL_SET>\n' +
-'            <DEALS>\n' +
-'                <DEAL>\n' +
-'                    <COLLATERALS>\n' +
-'                        <COLLATERAL>\n' +
-'                            <SUBJECT_PROPERTY>\n' +
-'                                <ADDRESS>\n' +
-'                                    <AddressLineText>' + escXml(streetLine) + '</AddressLineText>\n' +
-'                                    <CityName>' + escXml(cityPart) + '</CityName>\n' +
-'                                    <PostalCode>' + escXml(zipPart) + '</PostalCode>\n' +
-'                                    <StateCode>' + escXml(statePart) + '</StateCode>\n' +
-'                                </ADDRESS>\n' +
-'                                <PROPERTY_DETAIL>\n' +
-'                                    <FinancedUnitCount>' + (lead.numUnits || 1) + '</FinancedUnitCount>\n' +
-'                                    <PropertyStructureBuiltYear>' + (lead.builtYear || "") + '</PropertyStructureBuiltYear>\n' +
-'                                    <PropertyUsageType>Investment</PropertyUsageType>\n' +
-'                                </PROPERTY_DETAIL>\n' +
-'                                <PROPERTY_VALUATIONS>\n' +
-'                                    <PROPERTY_VALUATION>\n' +
-'                                        <PROPERTY_VALUATION_DETAIL>\n' +
-'                                            <PropertyValuationAmount>' + (valuationAmt||"") + '</PropertyValuationAmount>\n' +
-'                                        </PROPERTY_VALUATION_DETAIL>\n' +
-'                                    </PROPERTY_VALUATION>\n' +
-'                                </PROPERTY_VALUATIONS>\n' +
-(isPurchase ? (
-'                                <SALES_CONTRACTS>\n' +
-'                                    <SALES_CONTRACT>\n' +
-'                                        <SALES_CONTRACT_DETAIL>\n' +
-'                                            <SalesContractAmount>' + (lead.purchasePrice||"") + '</SalesContractAmount>\n' +
-'                                        </SALES_CONTRACT_DETAIL>\n' +
-'                                    </SALES_CONTRACT>\n' +
-'                                </SALES_CONTRACTS>\n'
-) : "") +
-'                            </SUBJECT_PROPERTY>\n' +
-'                        </COLLATERAL>\n' +
-'                    </COLLATERALS>\n' +
-'                    <LOANS>\n' +
-'                        <LOAN LoanRoleType="SubjectLoan" xlink:label="LOAN_1">\n' +
-'                            <AMORTIZATION>\n' +
-'                                <AMORTIZATION_RULE>\n' +
-'                                    <AmortizationType>Fixed</AmortizationType>\n' +
-'                                    <LoanAmortizationPeriodCount>' + (lead.termMonths||"") + '</LoanAmortizationPeriodCount>\n' +
-'                                    <LoanAmortizationPeriodType>Month</LoanAmortizationPeriodType>\n' +
-'                                </AMORTIZATION_RULE>\n' +
-'                            </AMORTIZATION>\n' +
-'                            <LOAN_DETAIL>\n' +
-'                                <ApplicationReceivedDate>' + (lead.applicationSentAt || lead.applicationTakenAt || "") + '</ApplicationReceivedDate>\n' +
-'                                <BalloonIndicator>false</BalloonIndicator>\n' +
-'                                <BorrowerCount>1</BorrowerCount>\n' +
-'                                <ConstructionLoanIndicator>' + (lead.loanType === "Ground Up Construction" ? "true" : "false") + '</ConstructionLoanIndicator>\n' +
-'                                <InterestOnlyIndicator>' + (isIO ? "true" : "false") + '</InterestOnlyIndicator>\n' +
-'                                <NegativeAmortizationIndicator>false</NegativeAmortizationIndicator>\n' +
-'                                <PrepaymentPenaltyIndicator>' + (lead.prepayTerm && lead.prepayTerm !== "none" ? "true" : "false") + '</PrepaymentPenaltyIndicator>\n' +
-'                            </LOAN_DETAIL>\n' +
-'                            <LOAN_IDENTIFIERS>\n' +
-'                                <LOAN_IDENTIFIER>\n' +
-'                                    <LoanIdentifier>' + escXml(loanIdent) + '</LoanIdentifier>\n' +
-'                                    <LoanIdentifierType>LenderLoan</LoanIdentifierType>\n' +
-'                                </LOAN_IDENTIFIER>\n' +
-'                            </LOAN_IDENTIFIERS>\n' +
-'                            <ORIGINATION_SYSTEMS>\n' +
-'                                <ORIGINATION_SYSTEM>\n' +
-'                                    <LoanOriginationSystemName>Bridgepoint Lending Desk</LoanOriginationSystemName>\n' +
-'                                </ORIGINATION_SYSTEM>\n' +
-'                            </ORIGINATION_SYSTEMS>\n' +
-'                            <TERMS_OF_LOAN>\n' +
-'                                <BaseLoanAmount>' + (lead.loanAmount||"") + '</BaseLoanAmount>\n' +
-'                                <LienPriorityType>FirstLien</LienPriorityType>\n' +
-'                                <LoanPurposeType>' + mismoLoanPurposeType(lead.transactionType) + '</LoanPurposeType>\n' +
-'                                <MortgageType>Other</MortgageType>\n' +
-'                                <NoteRatePercent>' + (lead.rate||"") + '</NoteRatePercent>\n' +
-'                            </TERMS_OF_LOAN>\n' +
-'                        </LOAN>\n' +
-'                    </LOANS>\n' +
-'                    <PARTIES>\n' +
-'                        <PARTY>\n' +
-'                            <INDIVIDUAL>\n' +
-'                                <CONTACT_POINTS>\n' +
-'                                    <CONTACT_POINT>\n' +
-'                                        <CONTACT_POINT_EMAIL>\n' +
-'                                            <ContactPointEmailValue>' + escXml(lead.guarantorEmail || lead.email || "") + '</ContactPointEmailValue>\n' +
-'                                        </CONTACT_POINT_EMAIL>\n' +
-'                                    </CONTACT_POINT>\n' +
-'                                    <CONTACT_POINT>\n' +
-'                                        <CONTACT_POINT_TELEPHONE>\n' +
-'                                            <ContactPointTelephoneValue>' + escXml(lead.guarantorPhone || lead.phone || "") + '</ContactPointTelephoneValue>\n' +
-'                                        </CONTACT_POINT_TELEPHONE>\n' +
-'                                        <CONTACT_POINT_DETAIL>\n' +
-'                                            <ContactPointRoleType>Mobile</ContactPointRoleType>\n' +
-'                                        </CONTACT_POINT_DETAIL>\n' +
-'                                    </CONTACT_POINT>\n' +
-'                                </CONTACT_POINTS>\n' +
-'                                <NAME>\n' +
-'                                    <FirstName>' + escXml(firstName) + '</FirstName>\n' +
-'                                    <LastName>' + escXml(lastName) + '</LastName>\n' +
-'                                </NAME>\n' +
-'                            </INDIVIDUAL>\n' +
-(lead.guarantorAddress ? (
-'                            <ADDRESSES>\n' +
-'                                <ADDRESS>\n' +
-'                                    <AddressLineText>' + escXml(lead.guarantorAddress) + '</AddressLineText>\n' +
-'                                    <AddressType>Mailing</AddressType>\n' +
-'                                    <CountryCode>US</CountryCode>\n' +
-'                                </ADDRESS>\n' +
-'                            </ADDRESSES>\n'
-) : "") +
-'                            <ROLES>\n' +
-'                                <ROLE SequenceNumber="1" xlink:label="BORROWER_1">\n' +
-'                                    <BORROWER>\n' +
-'                                        <BORROWER_DETAIL>\n' +
-'                                            <BorrowerBirthDate>' + (lead.birthday||"") + '</BorrowerBirthDate>\n' +
-'                                            <MaritalStatusType>' + escXml(lead.maritalStatus||"") + '</MaritalStatusType>\n' +
-'                                        </BORROWER_DETAIL>\n' +
-'                                        <DECLARATION>\n' +
-'                                            <DECLARATION_DETAIL>\n' +
-'                                                <CitizenshipResidencyType>' + mismoCitizenshipType(lead.citizenshipStatus) + '</CitizenshipResidencyType>\n' +
-'                                                <IntentToOccupyType>No</IntentToOccupyType>\n' +
-'                                            </DECLARATION_DETAIL>\n' +
-'                                        </DECLARATION>\n' +
-(lead.entityType === "LLC" && lead.entityLegalName ? (
-'                                        <EXTENSION>\n' +
-'                                            <OTHER>\n' +
-'                                                <BridgepointVestingEntityName>' + escXml(lead.entityLegalName) + '</BridgepointVestingEntityName>\n' +
-'                                            </OTHER>\n' +
-'                                        </EXTENSION>\n'
-) : "") +
-'                                    </BORROWER>\n' +
-'                                    <ROLE_DETAIL>\n' +
-'                                        <PartyRoleType>Borrower</PartyRoleType>\n' +
-'                                    </ROLE_DETAIL>\n' +
-'                                </ROLE>\n' +
-'                            </ROLES>\n' +
-(ssnDigits ? (
-'                            <TAXPAYER_IDENTIFIERS>\n' +
-'                                <TAXPAYER_IDENTIFIER>\n' +
-'                                    <TaxpayerIdentifierType>SocialSecurityNumber</TaxpayerIdentifierType>\n' +
-'                                    <TaxpayerIdentifierValue>' + escXml(ssnDigits) + '</TaxpayerIdentifierValue>\n' +
-'                                </TAXPAYER_IDENTIFIER>\n' +
-'                            </TAXPAYER_IDENTIFIERS>\n'
-) : "") +
-'                        </PARTY>\n' +
-'                        <PARTY>\n' +
-'                            <LEGAL_ENTITY>\n' +
-'                                <LEGAL_ENTITY_DETAIL>\n' +
-'                                    <FullName>' + escXml(COMPANY_NAME) + '</FullName>\n' +
-'                                </LEGAL_ENTITY_DETAIL>\n' +
-'                            </LEGAL_ENTITY>\n' +
-'                            <ADDRESSES>\n' +
-'                                <ADDRESS>\n' +
-'                                    <AddressLineText>' + escXml(COMPANY_ADDRESS) + '</AddressLineText>\n' +
-'                                </ADDRESS>\n' +
-'                            </ADDRESSES>\n' +
-'                            <ROLES>\n' +
-'                                <ROLE SequenceNumber="1" xlink:label="LOAN_ORIGINATION_COMPANY_1">\n' +
-'                                    <LICENSES>\n' +
-'                                        <LICENSE>\n' +
-'                                            <LICENSE_DETAIL>\n' +
-'                                                <LicenseIdentifier>' + escXml(COMPANY_NMLS) + '</LicenseIdentifier>\n' +
-'                                            </LICENSE_DETAIL>\n' +
-'                                        </LICENSE>\n' +
-'                                    </LICENSES>\n' +
-'                                    <ROLE_DETAIL>\n' +
-'                                        <PartyRoleType>LoanOriginationCompany</PartyRoleType>\n' +
-'                                    </ROLE_DETAIL>\n' +
-'                                </ROLE>\n' +
-'                            </ROLES>\n' +
-'                        </PARTY>\n' +
-'                        <PARTY>\n' +
-'                            <INDIVIDUAL>\n' +
-'                                <CONTACT_POINTS>\n' +
-'                                    <CONTACT_POINT>\n' +
-'                                        <CONTACT_POINT_EMAIL>\n' +
-'                                            <ContactPointEmailValue>' + escXml(lo.email||"") + '</ContactPointEmailValue>\n' +
-'                                        </CONTACT_POINT_EMAIL>\n' +
-'                                    </CONTACT_POINT>\n' +
-'                                    <CONTACT_POINT>\n' +
-'                                        <CONTACT_POINT_TELEPHONE>\n' +
-'                                            <ContactPointTelephoneValue>' + escXml(lo.phone||"") + '</ContactPointTelephoneValue>\n' +
-'                                        </CONTACT_POINT_TELEPHONE>\n' +
-'                                    </CONTACT_POINT>\n' +
-'                                </CONTACT_POINTS>\n' +
-'                                <NAME>\n' +
-'                                    <FirstName>' + escXml((lo.name||"").split(" ")[0]||"") + '</FirstName>\n' +
-'                                    <LastName>' + escXml((lo.name||"").split(" ").slice(1).join(" ")||"") + '</LastName>\n' +
-'                                </NAME>\n' +
-'                            </INDIVIDUAL>\n' +
-'                            <ROLES>\n' +
-'                                <ROLE SequenceNumber="1" xlink:label="LOAN_ORIGINATOR_1">\n' +
-'                                    <LICENSES>\n' +
-'                                        <LICENSE>\n' +
-'                                            <LICENSE_DETAIL>\n' +
-'                                                <LicenseIdentifier>' + escXml(lo.nmls||"") + '</LicenseIdentifier>\n' +
-'                                            </LICENSE_DETAIL>\n' +
-'                                        </LICENSE>\n' +
-'                                    </LICENSES>\n' +
-'                                    <ROLE_DETAIL>\n' +
-'                                        <PartyRoleType>LoanOriginator</PartyRoleType>\n' +
-'                                    </ROLE_DETAIL>\n' +
-'                                </ROLE>\n' +
-'                            </ROLES>\n' +
-'                        </PARTY>\n' +
-'                    </PARTIES>\n' +
-'                </DEAL>\n' +
-'            </DEALS>\n' +
-'        </DEAL_SET>\n' +
-'    </DEAL_SETS>\n' +
-'</MESSAGE>\n';
-}
-function mismoExportFilename(lead){
-  return "MISMO34_" + (lead.name||"Borrower").replace(/[^a-zA-Z0-9]+/g,"_") + "_" + lead.id + ".xml";
-}
-function exportLeadMismo(leadId){
-  var lead = leadById(leadId);
-  if (!lead) return;
-  var missing = [];
-  if (!lead.phone && !lead.guarantorPhone) missing.push("borrower phone");
-  if (!lead.guarantorAddress) missing.push("borrower mailing address");
-  if (!lead.birthday) missing.push("borrower date of birth");
-  if (!lead.guarantorSsnLast4) missing.push("borrower SSN");
-  var lo = docLoanOfficer(lead);
-  if (!lo.nmls) missing.push(lo.name + "'s NMLS # (set it under Email & Text Signature)");
-  if (!COMPANY_NMLS) missing.push("company NMLS # (COMPANY_NMLS constant)");
-  var proceed = function(ssnFull){
-    var xml = buildMismoExportXml(lead, ssnFull);
-    var blob = new Blob([xml], { type: "application/xml" });
-    var url = URL.createObjectURL(blob);
-    var link = document.createElement("a");
-    link.href = url; link.download = mismoExportFilename(lead);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
-    lead.activity = lead.activity || [];
-    lead.activity.push({ date: todayISO(), type:"note", text:"Exported MISMO 3.4 loan file" + (missing.length ? " (missing: " + missing.join(", ") + ")" : ""), author: currentUser().name });
-    showToast(missing.length ? "Exported — but missing: " + missing.join(", ") : "MISMO 3.4 file exported");
-    persist();
-  };
-  if (lead.guarantorSsnLast4 && sb){
-    sb.rpc("get_guarantor_ssn_full", { p_lead_id: leadId }).then(function(res){
-      proceed(res && !res.error ? res.data : null);
-    }).catch(function(){ proceed(null); });
-  } else {
-    proceed(null);
-  }
 }
 function buildTermSheet(lead, langOverride){
   var lo = docLoanOfficer(lead);
@@ -5590,7 +5297,11 @@ function downloadMismoExport(leadId){
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    showToast("MISMO file downloaded");
+    var missing = res.data.missing || [];
+    showToast(missing.length ? "Exported — but missing: " + missing.join(", ") : "MISMO file downloaded");
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"note", text:"Exported MISMO 3.4 loan file" + (missing.length ? " (missing: " + missing.join(", ") + ")" : ""), author: currentUser().name });
+    persist();
   }).catch(function(){ showToast("Couldn't generate MISMO file"); });
 }
 function downloadDocumentPdf(leadId, kind){
@@ -10478,14 +10189,24 @@ function renderTabDocuments(lead){
   // regardless of a file's document state -- Joe couldn't find it when it
   // was conditionally hidden. Clicking with nothing uploaded yet still
   // works, just shows a plain "nothing to export yet" toast.
-  var exportBar = '<div style="margin-bottom:10px"><button class="btn btn-sm btn-ghost" type="button" data-action="export-all-documents" data-lead="' + lead.id + '" title="Downloads every uploaded document on this file as one ZIP, to save internally">⬇ Export All Documents (ZIP)' + (receivedCount ? (' — ' + receivedCount) : '') + '</button></div>';
+  // MISMO export used to be bundled under canAiReview (isProcessor()||isOwner()),
+  // which meant the assigned LO -- the person who'd actually be shopping
+  // their own deal to an outside lender -- couldn't use it at all. Pulled
+  // out into its own bar with its own permission (owner, processor, or the
+  // assigned LO), matching the same rule the SSN-inclusion check already
+  // uses server-side. Found 2026-09-24 alongside a duplicate, less secure
+  // client-side MISMO export that briefly existed on the Overview tab.
+  var canExportMismo = isOwner() || isProcessor() || currentUser().id === lead.assignedTo;
+  var exportBar = '<div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap">' +
+    '<button class="btn btn-sm btn-ghost" type="button" data-action="export-all-documents" data-lead="' + lead.id + '" title="Downloads every uploaded document on this file as one ZIP, to save internally">⬇ Export All Documents (ZIP)' + (receivedCount ? (' — ' + receivedCount) : '') + '</button>' +
+    (canExportMismo ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="download-mismo-export" data-lead="' + lead.id + '" title="Exports the loan file as a MISMO 3.4 XML document for investors, title, or outside lenders">⬇ Export MISMO 3.4</button>') : '') +
+  '</div>';
 
   var scanBar = "";
   if (canAiReview){
     scanBar = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
         '<button class="btn btn-sm btn-primary" type="button" data-action="scan-all-documents" data-lead="' + lead.id + '">🔎 Scan All Documents</button>' +
-        '<button class="btn btn-sm btn-ghost" type="button" data-action="download-mismo-export" data-lead="' + lead.id + '" title="Exports the loan file as a MISMO 3.4 XML document for investors, title, or outside lenders">⬇ Download MISMO File</button>' +
       '</div>' +
       (receivedCount ? ('<div class="hint" style="margin:0">' + reviewedCount + ' of ' + receivedCount + ' received document(s) AI-reviewed' +
         (flaggedCount ? (' — <b style="color:var(--c-rust)">' + flaggedCount + ' flagged</b>') : (reviewedCount ? ' — all clear' : '')) + '.</div>') : '') +
@@ -10728,7 +10449,6 @@ function renderRail(lead){
         // edit action disappears entirely for processors and for the LO
         // once the file's past a stage they can still edit.
         '<button class="btn btn-sm" data-action="open-modal" data-modal="viewApplication" data-lead="' + lead.id + '">View Application</button>' +
-        '<button class="btn btn-sm btn-ghost" type="button" data-action="export-mismo" data-lead="' + lead.id + '" title="Downloads a MISMO 3.4 XML file of this loan -- ready to import into any lender or investor system that accepts one">⇩ Export MISMO 3.4</button>' +
         (isProcessor() ? '' :
           (canEditApplication(lead) ? (
             '<button class="btn btn-sm" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">Send Application' + (lead.applicationSentAt ? ' ✓' : '') + '</button>' +
@@ -14435,7 +14155,6 @@ appEl.addEventListener("click", function(e){
   else if (action === "select-booking-slot"){ ui.publicBooking.selectedSlot = { start:t.dataset.start, end:t.dataset.end }; render(); }
   else if (action === "booking-back-to-slots"){ ui.publicBooking.selectedSlot = null; render(); }
   else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
-  else if (action === "export-mismo"){ exportLeadMismo(t.dataset.lead); }
   else if (action === "send-borrower-portal"){ sendBorrowerPortalInvite(t.dataset.lead); }
   else if (action === "send-scheduling-link"){ sendSchedulingLink(t.dataset.lead); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
