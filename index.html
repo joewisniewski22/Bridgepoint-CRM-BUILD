@@ -3425,11 +3425,11 @@ function displayLtvForLead(lead){
 }
 var OFFICE_PHONE = "(850) 279-8588";
 // Constructive Capital's Account Executive -- who "Confirm with A/E" sends
-// the pricing/property/borrower summary to. Blank until someone fills in
-// the real contact; the button stays disabled until then rather than
-// silently failing to send. Joe's ask (2026-09-25).
-var AE_NAME = "";
-var AE_EMAIL = "";
+// the pricing/property/borrower summary to. Julia Lanier, Director of
+// Business Development - Wholesale, Constructive Loans, LLC (per Joe,
+// 2026-09-25).
+var AE_NAME = "Julia Lanier";
+var AE_EMAIL = "jlanier@cmwholesale.com";
 var GOOGLE_REVIEW_LINK = "https://g.page/r/CbJVKQumLqOQEAE/review";
 function loContactLines(lo, lang){
   if (lo.emailSignature) return lo.emailSignature.split("\n");
@@ -4022,7 +4022,8 @@ function confirmPricingWithAE(leadId){
   if (!lead) return;
   var readiness = lenderSummaryReadiness(lead);
   if (!readiness.ready){ showToast("Missing: " + readiness.missing.join(", ")); return; }
-  sendGeneratedDocumentTo(leadId, "lenderSummary", AE_EMAIL, "Can you confirm the pricing on this file is accurate before we move forward?");
+  var aeFirstName = AE_NAME ? AE_NAME.split(" ")[0] : "";
+  sendGeneratedDocumentTo(leadId, "lenderSummary", AE_EMAIL, "Hi" + (aeFirstName ? (" " + aeFirstName) : "") + ", can you confirm the pricing on this file is accurate before we move forward?");
 }
 // Joe's ask (2026-09-16): "any document that is generated" needs an option
 // to email it to an arbitrary address (a lender, not the borrower) after
