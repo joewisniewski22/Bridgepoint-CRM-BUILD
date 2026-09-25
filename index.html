@@ -3424,6 +3424,12 @@ function displayLtvForLead(lead){
   return { value: lead.ltv, label: "LTV" };
 }
 var OFFICE_PHONE = "(850) 279-8588";
+// Constructive Capital's Account Executive -- who "Confirm with A/E" sends
+// the pricing/property/borrower summary to. Blank until someone fills in
+// the real contact; the button stays disabled until then rather than
+// silently failing to send. Joe's ask (2026-09-25).
+var AE_NAME = "";
+var AE_EMAIL = "";
 var GOOGLE_REVIEW_LINK = "https://g.page/r/CbJVKQumLqOQEAE/review";
 function loContactLines(lo, lang){
   if (lo.emailSignature) return lo.emailSignature.split("\n");
@@ -4004,6 +4010,20 @@ function viewLenderSummary(leadId){
     setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
   }).catch(function(){ showToast("Couldn't generate lender summary"); });
 }
+// One-click version of the existing "Email to Lender" flow, pre-addressed
+// to Constructive Capital's Account Executive instead of typing an email
+// in every time -- Joe's ask (2026-09-25): a fast way for him, Fiore, or
+// Erika to have the AE sanity-check a file's pricing against the current
+// guidelines, using the same pricing/property/borrower summary already
+// built for outside-lender submissions.
+function confirmPricingWithAE(leadId){
+  if (!AE_EMAIL){ showToast("No Account Executive email on file yet — set AE_EMAIL"); return; }
+  var lead = leadById(leadId);
+  if (!lead) return;
+  var readiness = lenderSummaryReadiness(lead);
+  if (!readiness.ready){ showToast("Missing: " + readiness.missing.join(", ")); return; }
+  sendGeneratedDocumentTo(leadId, "lenderSummary", AE_EMAIL, "Can you confirm the pricing on this file is accurate before we move forward?");
+}
 // Joe's ask (2026-09-16): "any document that is generated" needs an option
 // to email it to an arbitrary address (a lender, not the borrower) after
 // checking it first -- the existing send flows (sendDocumentBoth /
@@ -4461,6 +4481,74 @@ function submitPublicApplication(leadId, patch){
   runGuidelineCheck(leadId);
   sendBorrowerPortalFollowUp(lead);
 }
+// Shared with the "public-application"/"take-application"/"edit-application"
+// submit handlers' own inline field lists (kept separate from those to
+// avoid touching working submit paths in the same change) -- just the base
+// text/number/select fields, not SSN, ACH/RTL/DSCR signatures, or file
+// uploads, which stay submit-only rather than re-processed on every
+// keystroke.
+function extractApplicationBaseFieldsFromForm(fd){
+  var numOrNull = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
+  return {
+    entityType: fd.get("entityType"),
+    creditScore: numOrNull("creditScore"),
+    experienceDeals: numOrNull("experienceDeals"),
+    liquidity: numOrNull("liquidity"),
+    propertyAddress: fd.get("propertyAddress"),
+    propertyType: fd.get("propertyType"),
+    exitStrategy: fd.get("exitStrategy"),
+    purchasePrice: numOrNull("purchasePrice"),
+    currentValue: numOrNull("currentValue"),
+    arv: numOrNull("arv"),
+    rehabBudget: numOrNull("rehabBudget"),
+    rentEstimate: numOrNull("rentEstimate"),
+    monthlyTaxes: numOrNull("monthlyTaxes"),
+    monthlyInsurance: numOrNull("monthlyInsurance"),
+    monthlyHoa: numOrNull("monthlyHoa"),
+    loanAmount: numOrNull("loanAmount"),
+    termMonths: numOrNull("termMonths"),
+    propertyCount: numOrNull("propertyCount"),
+    guarantorFirstName: fd.get("guarantorFirstName"),
+    guarantorMiddleName: fd.get("guarantorMiddleName"),
+    guarantorLastName: fd.get("guarantorLastName"),
+    guarantorPhone: fd.get("guarantorPhone"),
+    guarantorEmail: fd.get("guarantorEmail"),
+    birthday: fd.get("birthday"),
+    guarantorOwnershipPct: numOrNull("guarantorOwnershipPct"),
+    entityLegalName: fd.get("entityLegalName"),
+    citizenshipStatus: fd.get("citizenshipStatus"),
+    countryOfDomicile: fd.get("countryOfDomicile"),
+    maritalStatus: fd.get("maritalStatus"),
+    builtYear: fd.get("builtYear") ? Number(fd.get("builtYear")) : null,
+    currentLenderName: fd.get("currentLenderName"),
+    unitsReadyForRent: fd.get("unitsReadyForRent"),
+    propertyOccupied: fd.get("propertyOccupied"),
+    taxesCurrent: fd.get("taxesCurrent"),
+    propertyLeaseStatus: fd.get("propertyLeaseStatus"),
+    delayedPurchase: fd.get("delayedPurchase"),
+    nyCemaLoan: fd.get("nyCemaLoan"),
+    nyClosingAttorney: fd.get("nyClosingAttorney"),
+    numUnits: fd.get("numUnits") ? Number(fd.get("numUnits")) : null,
+    leaseDetail: extractLeaseDetailFromForm(fd),
+    transactionType: fd.get("transactionType"),
+    prepayTerm: fd.get("prepayTerm"),
+    trackRecord: extractTrackRecordFromForm(fd)
+  };
+}
+var applicationAutoSaveTimer = null;
+function scheduleApplicationAutoSave(form){
+  if (applicationAutoSaveTimer) clearTimeout(applicationAutoSaveTimer);
+  applicationAutoSaveTimer = setTimeout(function(){ autoSaveApplicationDraft(form); }, 1500);
+}
+function autoSaveApplicationDraft(form){
+  var leadId = form.dataset.lead;
+  var lead = leadById(leadId);
+  if (!lead || !sb) return;
+  var fd = new FormData(form);
+  var patch = extractApplicationBaseFieldsFromForm(fd);
+  Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  scheduleSync();
+}
 // Joe's ask (2026-09-15): a new English-language Facebook campaign, with
 // leads routed straight into the CRM instead of a native Meta Instant
 // Form -- the ad account's token only has ads_management/ads_read (Joe
@@ -4639,6 +4727,10 @@ function hydrateFromSupabase(){
     if (res.error){ console.error("referral partners fetch error", res.error); return; }
     if (res.data){ state.referralPartners = res.data.map(rowToReferralPartner); render(); }
   });
+  sb.from("third_party_contacts").select("*").order("name").then(function(res){
+    if (res.error){ console.error("contacts fetch error", res.error); return; }
+    if (res.data){ state.contacts = res.data.map(rowToContact); render(); }
+  });
   sb.from("availability_rules").select("*").then(function(res){
     if (res.error){ console.error("availability rules fetch error", res.error); return; }
     if (res.data){ state.availabilityRules = res.data.map(rowToAvailabilityRule); render(); }
@@ -4705,6 +4797,20 @@ function referralPartnerToRow(p){
     id: p.id, name: p.name, company: p.company || null, role: p.role || null,
     phone: p.phone || null, email: p.email || null, notes: p.notes || null,
     created_by: p.createdBy || null
+  };
+}
+function rowToContact(r){
+  return {
+    id: r.id, role: r.role || "Other", name: r.name, company: r.company || "",
+    phone: r.phone || "", email: r.email || "", notes: r.notes || "",
+    createdAt: r.created_at, createdBy: r.created_by || null
+  };
+}
+function contactToRow(c){
+  return {
+    id: c.id, role: c.role || null, name: c.name, company: c.company || null,
+    phone: c.phone || null, email: c.email || null, notes: c.notes || null,
+    created_by: c.createdBy || null
   };
 }
 function rowToAvailabilityRule(r){
@@ -7952,6 +8058,7 @@ function renderShell(){
         navItem("messages","📱","Messages", unreadTextMessagesTotal()||null) +
         navItem("teamchat","💬","Team Chat", unreadTeamChatTotal(ui.viewAs)||null) +
         navItem("email","📧","Email") +
+        navItem("contacts","📇","Contacts") +
         (isOwner() || !isProcessor() ? navItem("coaching","🎯","Coaching") : "") +
         (ui.viewAs === "owner" ? navItem("training","🎓","New Hire Training") : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
@@ -7988,6 +8095,7 @@ function renderShell(){
   else if (ui.view === "performance") body = renderPerformance();
   else if (ui.view === "retargeting") body = renderRetargeting();
   else if (ui.view === "referrals") body = renderReferralPartners();
+  else if (ui.view === "contacts") body = renderContactsDirectory();
   else if (ui.view === "repeat") body = renderRepeatClients();
   else if (ui.view === "notifications") body = renderNotifications();
   else if (ui.view === "messages") body = renderTextMessages();
@@ -9636,6 +9744,7 @@ function renderTabOverview(lead){
     ? ('<div style="margin-bottom:14px;display:flex;gap:8px">' +
         '<button class="btn btn-sm" type="button" data-action="view-lender-summary" data-lead="' + lead.id + '">🏦 Lender Summary</button>' +
         (canManageOutsideLender() ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="lenderSummary" title="Check it, then email it to a lender">✉️ Email to Lender</button>') : '') +
+        (canManageOutsideLender() ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="confirm-with-ae" data-lead="' + lead.id + '" title="Sends the pricing/property/borrower summary to Constructive Capital\'s AE to confirm the pricing is accurate">📋 Confirm with A/E</button>') : '') +
       '</div>')
     : "";
 
@@ -10378,12 +10487,27 @@ function renderTabThirdParties(lead){
       '</div></div>';
   }).join("");
   var roleOptions = TP_ROLES.map(function(r){ return '<option value="' + r + '">' + r + '</option>'; }).join("");
+  // Pick straight from the shared Contacts directory instead of retyping
+  // a title company/insurance agent you already have on file elsewhere.
+  // Joe's ask (2026-09-25).
+  var directoryContacts = (state.contacts||[]).slice().sort(function(a,b){ return (a.role||"").localeCompare(b.role||"") || (a.name||"").localeCompare(b.name||""); });
+  var directoryPicker = directoryContacts.length ? (
+    '<form data-lead="' + lead.id + '" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px" onsubmit="return false">' +
+      '<select class="select" name="contactId" style="min-width:220px">' +
+        '<option value="">Choose from your Contacts…</option>' +
+        directoryContacts.map(function(c){ return '<option value="' + c.id + '">' + esc(c.role) + ' — ' + esc(c.name) + (c.company ? (' (' + esc(c.company) + ')') : '') + '</option>'; }).join("") +
+      '</select>' +
+      '<button class="btn btn-sm" type="button" data-action="add-third-party-from-directory" data-lead="' + lead.id + '">Add to This Loan</button>' +
+    '</form>'
+  ) : '<div class="footnote" style="padding:0 0 10px">No saved contacts yet — <a href="#" data-action="go-to-contacts">manage your Contacts directory</a> to add title companies, insurance agents, etc. once and reuse them on every loan.</div>';
   return (rows || '<div class="empty">No third parties linked yet.</div>') +
-    '<form data-form="add-third-party" data-lead="' + lead.id + '" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">' +
+    '<div style="margin-top:14px">' + directoryPicker + '</div>' +
+    '<form data-form="add-third-party" data-lead="' + lead.id + '" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
       '<select class="select" name="role">' + roleOptions + '</select>' +
       '<input class="input" name="name" placeholder="Name" required>' +
       '<input class="input" name="phone" placeholder="Phone">' +
       '<input class="input" name="email" placeholder="Email">' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:.82rem"><input type="checkbox" name="saveToDirectory"> Save to Contacts too</label>' +
       '<button class="btn btn-sm" type="submit">Add</button>' +
     '</form>';
 }
@@ -10910,6 +11034,67 @@ function thankReferralPartner(lead){
   lead.activity.push({ date: todayISO(), type:"system", text: "Thank-you email sent to referral partner " + partner.name, author: "System" });
 }
 
+function contactById(id){ return (state.contacts||[]).filter(function(c){ return c.id===id; })[0] || null; }
+function renderContactsDirectory(){
+  var contacts = (state.contacts||[]).slice().sort(function(a,b){ return (a.role||"").localeCompare(b.role||"") || (a.name||"").localeCompare(b.name||""); });
+  var rows = contacts.map(function(c){
+    return '<tr>' +
+      '<td>' + esc(c.role||"Other") + '</td>' +
+      '<td><strong>' + esc(c.name) + '</strong>' + (c.company ? '<div class="footnote">' + esc(c.company) + '</div>' : '') + '</td>' +
+      '<td>' + (c.phone ? '<div>' + esc(c.phone) + '</div>' : '') + (c.email ? '<div class="footnote">' + esc(c.email) + '</div>' : '') + '</td>' +
+      '<td>' + esc(c.notes||"") + '</td>' +
+      '<td><button class="btn btn-sm btn-ghost" type="button" style="color:var(--c-rust)" data-action="delete-contact" data-id="' + c.id + '">Delete</button></td>' +
+    '</tr>';
+  }).join("");
+  var table = contacts.length ? (
+    '<div class="table-wrap"><table><thead><tr><th>Type</th><th>Contact</th><th>Phone / Email</th><th>Notes</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+  ) : '<div class="empty">No saved contacts yet — add the title companies, insurance agents, and other vendors you work with regularly so they\'re one click away on any loan file.</div>';
+
+  var roleOptions = TP_ROLES.map(function(r){ return '<option value="' + r + '">' + r + '</option>'; }).join("");
+  var addForm = '<div class="panel panel-pad" style="margin-bottom:20px;max-width:560px">' +
+    '<div class="rail-title" style="margin-bottom:8px">Add Contact</div>' +
+    '<form data-form="add-contact">' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Type</label><select class="select" name="role">' + roleOptions + '</select></div>' +
+        '<div class="form-row"><label>Name</label><input class="input" name="name" required></div>' +
+      '</div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Company</label><input class="input" name="company"></div>' +
+        '<div class="form-row"><label>Phone</label><input class="input" name="phone"></div>' +
+      '</div>' +
+      '<div class="form-row"><label>Email</label><input class="input" type="email" name="email"></div>' +
+      '<div class="form-row"><label>Notes</label><input class="input" name="notes" placeholder="Coverage area, specialty, anything worth remembering"></div>' +
+      '<button class="btn btn-sm btn-primary" type="submit" style="margin-top:6px">Add Contact</button>' +
+    '</form>' +
+  '</div>';
+
+  return topbar("Contacts", "Title companies, insurance agents, escrow officers, attorneys, and appraisers you work with — pick any of these straight into a loan's Third Parties tab instead of retyping them.", "") +
+    '<div class="content">' + addForm + table + '</div>';
+}
+function addContact(fd){
+  if (!sb) return;
+  var id = "ct-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
+  var contact = {
+    id:id, role: fd.get("role")||"Other", name: fd.get("name"), company: fd.get("company")||"",
+    phone: fd.get("phone")||"", email: fd.get("email")||"", notes: fd.get("notes")||"", createdBy: currentUser().id
+  };
+  sb.from("third_party_contacts").insert(contactToRow(contact)).then(function(res){
+    if (res.error){ showToast("Couldn't save — try again"); return; }
+    state.contacts = state.contacts || [];
+    state.contacts.push(contact);
+    showToast("Contact added");
+    render();
+  });
+}
+function deleteContact(id){
+  if (!sb || !window.confirm("Remove this contact from your directory? Loans that already used it keep their own copy of the info.")) return;
+  sb.from("third_party_contacts").delete().eq("id", id).then(function(res){
+    if (res.error){ showToast("Couldn't remove — try again"); return; }
+    state.contacts = (state.contacts||[]).filter(function(c){ return c.id!==id; });
+    showToast("Contact removed");
+    render();
+  });
+}
 function generateAvailableSlots(userId, days){
   days = days || 21;
   var rules = (state.availabilityRules||[]).filter(function(r){ return r.userId===userId; });
@@ -14006,6 +14191,7 @@ appEl.addEventListener("click", function(e){
     render();
   }
   else if (action === "select-lead"){ ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); }
+  else if (action === "go-to-contacts"){ ui.view="contacts"; ui.selectedLeadId=null; render(); }
   else if (action === "filter-lo-jump"){ ui.view="leads"; ui.leadFilter.assignedTo=t.dataset.lo; ui.leadFilter.status=""; render(); }
   else if (action === "set-tab"){
     ui.activeTab = t.dataset.tab;
@@ -14151,6 +14337,9 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "open-email-document"){
     openEmailDocumentModal(t.dataset.lead, t.dataset.kind);
+  }
+  else if (action === "confirm-with-ae"){
+    confirmPricingWithAE(t.dataset.lead);
   }
   else if (action === "preview-generated-document"){
     var pgdLead = leadById(t.dataset.lead);
@@ -14311,6 +14500,8 @@ appEl.addEventListener("click", function(e){
 appEl.addEventListener("change", function(e){
   var t = e.target;
   if (!t.dataset) return;
+  var autoSaveChangeForm = t.closest && t.closest('form[data-form="public-application"]');
+  if (autoSaveChangeForm) scheduleApplicationAutoSave(autoSaveChangeForm);
   var action = t.dataset.action;
   if (action === "filter"){
     ui.leadFilter[t.dataset.key] = t.value; render();
@@ -14330,6 +14521,13 @@ appEl.addEventListener("change", function(e){
     setCommLanguage(t.dataset.lead, t.value);
   } else if (action === "toggle-notify"){
     toggleNotify(t.dataset.lead, parseInt(t.dataset.idx,10));
+  } else if (action === "delete-contact"){
+    deleteContact(t.dataset.id);
+  } else if (action === "add-third-party-from-directory"){
+    var dirSelect = t.closest("form") ? t.closest("form").querySelector('[name="contactId"]') : null;
+    var pickedContact = dirSelect && dirSelect.value ? contactById(dirSelect.value) : null;
+    if (!pickedContact){ showToast("Choose a contact first"); }
+    else { addThirdParty(t.dataset.lead, { role: pickedContact.role, name: pickedContact.name, phone: pickedContact.phone, email: pickedContact.email, notify: true }); }
   } else if (action === "portal-select"){
     ui.portalLeadId = t.value; render();
   } else if (action === "upload-doc"){
@@ -14456,6 +14654,18 @@ var addressLookupTimer = null;
 appEl.addEventListener("input", function(e){
   var t = e.target;
   if (!t.dataset) return;
+  // Auto-save the public application as the borrower types -- Joe's ask
+  // (2026-09-25): clients kept filling out the whole form, then losing it
+  // by navigating away or timing out before clicking Submit, and Bridgepoint
+  // never received it. Doesn't return early -- other live-update behaviors
+  // below (address-lookup, track-record row count, etc.) still need to run
+  // for fields inside this same form. Deliberately does NOT run the real
+  // submitPublicApplication() side effects (stage advance, LO notification/
+  // email, "submitted" activity log, flipping the borrower's screen to
+  // "thanks") on every keystroke -- only the actual Submit/Save Changes
+  // button does that; this just makes sure nothing typed is ever lost.
+  var autoSaveForm = t.closest && t.closest('form[data-form="public-application"]');
+  if (autoSaveForm) scheduleApplicationAutoSave(autoSaveForm);
   if (t.dataset.action === "loan-details-live"){
     var liveLead = leadById(t.dataset.lead);
     var liveBox = document.getElementById("earnings-live-" + t.dataset.lead);
@@ -14761,6 +14971,9 @@ appEl.addEventListener("submit", function(e){
     ui.modal = null; render();
   } else if (type === "add-third-party"){
     addThirdParty(form.dataset.lead, { role:fd.get("role"), name:fd.get("name"), phone:fd.get("phone"), email:fd.get("email"), notify:true });
+    if (fd.get("saveToDirectory")){
+      addContact({ get: function(k){ return { role: fd.get("role"), name: fd.get("name"), company: "", phone: fd.get("phone"), email: fd.get("email"), notes: "" }[k]; } });
+    }
   } else if (type === "add-note"){
     addNote(form.dataset.lead, fd.get("note"));
     form.reset();
@@ -14838,6 +15051,9 @@ appEl.addEventListener("submit", function(e){
     form.reset();
   } else if (type === "add-referral-partner"){
     addReferralPartner(fd);
+    form.reset();
+  } else if (type === "add-contact"){
+    addContact(fd);
     form.reset();
   } else if (type === "bulk-set-availability"){
     bulkSetAvailability(fd);
