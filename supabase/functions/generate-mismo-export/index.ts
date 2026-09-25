@@ -21,16 +21,16 @@
 // get_guarantor_ssn_full already enforces, just re-checked here because
 // this function runs under the service-role key, where auth.uid() is
 // null and that RPC's own check would always fail.
+//
+// 2026-09-25: company name/address/NMLS moved out of hardcoded constants
+// into the company_settings table (same one the CRM's Settings page
+// edits), so Joe can update these himself without needing source code
+// changes redeployed.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-const COMPANY_NAME = "Bridgepoint Lending";
-const COMPANY_ADDRESS = "1898 Merchants Row Blvd, Tallahassee, FL 32311";
-// Blank until someone sets the real number -- same placeholder convention
-// as index.html's own COMPANY_NMLS constant.
-const COMPANY_NMLS = Deno.env.get("COMPANY_NMLS") || "";
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -75,8 +75,9 @@ const PROPERTY_TYPE_MAP: Record<string, string> = {
 };
 
 type LoanOfficer = { name: string | null; email: string | null; phone: string | null; nmls: string | null } | null;
+type CompanyInfo = { name: string; address: string; nmls: string };
 
-function buildMismoXml(lead: Record<string, unknown>, lo: LoanOfficer, ssnFull: string | null): string {
+function buildMismoXml(lead: Record<string, unknown>, lo: LoanOfficer, ssnFull: string | null, company: CompanyInfo): string {
   const addr = parseAddress(lead.property_address as string);
   const [firstName, ...restName] = ((lead.guarantor_first_name as string) ? [lead.guarantor_first_name, lead.guarantor_last_name] : String(lead.name || "").split(" "));
   const lastName = (lead.guarantor_last_name as string) || restName.join(" ");
@@ -113,16 +114,16 @@ function buildMismoXml(lead: Record<string, unknown>, lo: LoanOfficer, ssnFull: 
   const originationCompanyParty =
     "            <PARTY SequenceNumber=\"2\">\n" +
     "              <LEGAL_ENTITY>\n" +
-    '                <LEGAL_ENTITY_DETAIL FullName="' + xesc(COMPANY_NAME) + '"/>\n' +
+    '                <LEGAL_ENTITY_DETAIL FullName="' + xesc(company.name) + '"/>\n' +
     "              </LEGAL_ENTITY>\n" +
     "              <ADDRESSES>\n" +
-    '                <ADDRESS SequenceNumber="1" AddressLineText="' + xesc(COMPANY_ADDRESS) + '"/>\n' +
+    '                <ADDRESS SequenceNumber="1" AddressLineText="' + xesc(company.address) + '"/>\n' +
     "              </ADDRESSES>\n" +
     "              <ROLES>\n" +
     "                <ROLE>\n" +
     "                  <LICENSES>\n" +
     '                    <LICENSE SequenceNumber="1">\n' +
-    '                      <LICENSE_DETAIL LicenseIdentifier="' + xesc(COMPANY_NMLS) + '"/>\n' +
+    '                      <LICENSE_DETAIL LicenseIdentifier="' + xesc(company.nmls) + '"/>\n' +
     "                    </LICENSE>\n" +
     "                  </LICENSES>\n" +
     "                  <ROLE_DETAIL PartyRoleType=\"LoanOriginationCompany\"/>\n" +
@@ -274,19 +275,26 @@ Deno.serve(async (req: Request) => {
       if (loRow) lo = { name: loRow.name, email: loRow.email, phone: loRow.phone, nmls: loRow.nmls_number };
     }
 
+    const { data: settingsRow } = await sb.from("company_settings").select("*").eq("id", "default").maybeSingle();
+    const company: CompanyInfo = {
+      name: settingsRow?.company_name || "Bridgepoint Lending",
+      address: settingsRow?.company_address || "",
+      nmls: settingsRow?.company_nmls || "",
+    };
+
     let ssnFull: string | null = null;
     if (lead.guarantor_ssn_encrypted && (await callerCanSeeSsn(req, lead.assigned_to))) {
       const { data: ssnData } = await sb.rpc("get_guarantor_ssn_full_unchecked", { p_lead_id: leadId });
       ssnFull = (ssnData as string) || null;
     }
 
-    const xml = buildMismoXml(lead, lo, ssnFull);
+    const xml = buildMismoXml(lead, lo, ssnFull, company);
     const missing: string[] = [];
     if (!lead.phone && !lead.guarantor_phone) missing.push("borrower phone");
     if (!lead.guarantor_address) missing.push("borrower mailing address");
     if (lead.guarantor_ssn_encrypted && !ssnFull) missing.push("SSN (not authorized to view, or not yet on file)");
     if (!lo?.nmls) missing.push((lo?.name || "assigned LO") + "'s NMLS #");
-    if (!COMPANY_NMLS) missing.push("company NMLS #");
+    if (!company.nmls) missing.push("company NMLS # (set it under Settings)");
 
     return new Response(JSON.stringify({ ok: true, xml, missing }), { headers: CORS_HEADERS });
   } catch (err) {

@@ -3424,12 +3424,16 @@ function displayLtvForLead(lead){
   return { value: lead.ltv, label: "LTV" };
 }
 var OFFICE_PHONE = "(850) 279-8588";
-// Constructive Capital's Account Executive -- who "Confirm with A/E" sends
-// the pricing/property/borrower summary to. Julia Lanier, Director of
-// Business Development - Wholesale, Constructive Loans, LLC (per Joe,
-// 2026-09-25).
-var AE_NAME = "Julia Lanier";
-var AE_EMAIL = "jlanier@cmwholesale.com";
+// Fallback defaults only -- the real, editable values live in the
+// company_settings table (see the Settings page, owner-only). Used until
+// that loads, or if it's ever empty. Joe's ask (2026-09-25): this kind of
+// config shouldn't only be changeable by editing source code.
+function companySetting(key, fallback){
+  var s = state.companySettings || {};
+  return (s[key]!=null && s[key]!=="") ? s[key] : fallback;
+}
+function aeName(){ return companySetting("aeName", "Julia Lanier"); }
+function aeEmail(){ return companySetting("aeEmail", "jlanier@cmwholesale.com"); }
 var GOOGLE_REVIEW_LINK = "https://g.page/r/CbJVKQumLqOQEAE/review";
 function loContactLines(lo, lang){
   if (lo.emailSignature) return lo.emailSignature.split("\n");
@@ -4017,13 +4021,14 @@ function viewLenderSummary(leadId){
 // guidelines, using the same pricing/property/borrower summary already
 // built for outside-lender submissions.
 function confirmPricingWithAE(leadId){
-  if (!AE_EMAIL){ showToast("No Account Executive email on file yet — set AE_EMAIL"); return; }
+  var aeEmailVal = aeEmail();
+  if (!aeEmailVal){ showToast("No Account Executive email on file yet — set it under Settings"); return; }
   var lead = leadById(leadId);
   if (!lead) return;
   var readiness = lenderSummaryReadiness(lead);
   if (!readiness.ready){ showToast("Missing: " + readiness.missing.join(", ")); return; }
-  var aeFirstName = AE_NAME ? AE_NAME.split(" ")[0] : "";
-  sendGeneratedDocumentTo(leadId, "lenderSummary", AE_EMAIL, "Hi" + (aeFirstName ? (" " + aeFirstName) : "") + ", can you confirm the pricing on this file is accurate before we move forward?");
+  var aeFirstName = aeName() ? aeName().split(" ")[0] : "";
+  sendGeneratedDocumentTo(leadId, "lenderSummary", aeEmailVal, "Hi" + (aeFirstName ? (" " + aeFirstName) : "") + ", can you confirm the pricing on this file is accurate before we move forward?");
 }
 // Joe's ask (2026-09-16): "any document that is generated" needs an option
 // to email it to an arbitrary address (a lender, not the borrower) after
@@ -4732,6 +4737,10 @@ function hydrateFromSupabase(){
     if (res.error){ console.error("contacts fetch error", res.error); return; }
     if (res.data){ state.contacts = res.data.map(rowToContact); render(); }
   });
+  sb.from("company_settings").select("*").eq("id","default").maybeSingle().then(function(res){
+    if (res.error){ console.error("company settings fetch error", res.error); return; }
+    if (res.data){ state.companySettings = rowToCompanySettings(res.data); render(); }
+  });
   sb.from("availability_rules").select("*").then(function(res){
     if (res.error){ console.error("availability rules fetch error", res.error); return; }
     if (res.data){ state.availabilityRules = res.data.map(rowToAvailabilityRule); render(); }
@@ -4812,6 +4821,19 @@ function contactToRow(c){
     id: c.id, role: c.role || null, name: c.name, company: c.company || null,
     phone: c.phone || null, email: c.email || null, notes: c.notes || null,
     created_by: c.createdBy || null
+  };
+}
+function rowToCompanySettings(r){
+  return {
+    companyName: r.company_name || "", companyAddress: r.company_address || "",
+    companyNmls: r.company_nmls || "", aeName: r.ae_name || "", aeEmail: r.ae_email || ""
+  };
+}
+function companySettingsToRow(s){
+  return {
+    id: "default", company_name: s.companyName||null, company_address: s.companyAddress||null,
+    company_nmls: s.companyNmls||null, ae_name: s.aeName||null, ae_email: s.aeEmail||null,
+    updated_by: currentUser().id
   };
 }
 function rowToAvailabilityRule(r){
@@ -8072,6 +8094,7 @@ function renderShell(){
         (ui.viewAs === "owner" ? navItem("training","🎓","New Hire Training") : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
+        (isOwner() ? navItem("settings","⚙","Settings") : "") +
         navItem("ai-assistant","🤖","AI Assistant") +
         (navVisible("portal") ? navItem("portal","⌂","Borrower Portal Preview") : "") +
       '</nav>' +
@@ -8105,6 +8128,7 @@ function renderShell(){
   else if (ui.view === "retargeting") body = renderRetargeting();
   else if (ui.view === "referrals") body = renderReferralPartners();
   else if (ui.view === "contacts") body = renderContactsDirectory();
+  else if (ui.view === "settings") body = isOwner() ? renderCompanySettings() : renderToday();
   else if (ui.view === "repeat") body = renderRepeatClients();
   else if (ui.view === "notifications") body = renderNotifications();
   else if (ui.view === "messages") body = renderTextMessages();
@@ -11101,6 +11125,47 @@ function deleteContact(id){
     if (res.error){ showToast("Couldn't remove — try again"); return; }
     state.contacts = (state.contacts||[]).filter(function(c){ return c.id!==id; });
     showToast("Contact removed");
+    render();
+  });
+}
+// Owner-only page for company-level config that used to only be
+// changeable by editing source code -- Joe's ask (2026-09-25): "what if
+// Claude goes away" -- the Account Executive contact and company NMLS
+// number need to be something Joe himself can update, not something
+// baked into the codebase.
+function renderCompanySettings(){
+  var s = state.companySettings || {};
+  return topbar("Settings", "Company-level configuration — the Account Executive contact, company NMLS number, and other details used across the CRM.", "") +
+    '<div class="content">' +
+      '<div class="panel panel-pad" style="max-width:560px">' +
+        '<div class="rail-title" style="margin-bottom:8px">Account Executive (Confirm with A/E)</div>' +
+        '<div class="footnote" style="padding:0 0 10px">Who the "Confirm with A/E" button on a loan file sends the pricing/property/borrower summary to.</div>' +
+        '<form data-form="save-company-settings">' +
+          '<div class="form-two">' +
+            '<div class="form-row"><label>A/E Name</label><input class="input" name="aeName" value="' + esc(s.aeName||"") + '"></div>' +
+            '<div class="form-row"><label>A/E Email</label><input class="input" type="email" name="aeEmail" value="' + esc(s.aeEmail||"") + '"></div>' +
+          '</div>' +
+          '<div class="rail-title" style="margin:18px 0 8px">Company Info (used on MISMO 3.4 exports)</div>' +
+          '<div class="form-row"><label>Company Name</label><input class="input" name="companyName" value="' + esc(s.companyName||"") + '"></div>' +
+          '<div class="form-row"><label>Company Address</label><input class="input" name="companyAddress" value="' + esc(s.companyAddress||"") + '"></div>' +
+          '<div class="form-row"><label>Company NMLS #</label><input class="input" name="companyNmls" value="' + esc(s.companyNmls||"") + '" placeholder="e.g. 1234567"></div>' +
+          '<button class="btn btn-primary" type="submit" style="margin-top:14px">Save</button>' +
+        '</form>' +
+      '</div>' +
+      '<div class="footnote" style="max-width:560px;margin-top:10px">Each loan officer\'s own NMLS # is set individually under Email &amp; Text Signature, not here.</div>' +
+    '</div>';
+}
+function saveCompanySettings(fd){
+  if (!sb) return;
+  var s = {
+    aeName: fd.get("aeName")||"", aeEmail: fd.get("aeEmail")||"",
+    companyName: fd.get("companyName")||"", companyAddress: fd.get("companyAddress")||"",
+    companyNmls: fd.get("companyNmls")||""
+  };
+  sb.from("company_settings").update(companySettingsToRow(s)).eq("id","default").then(function(res){
+    if (res.error){ showToast("Couldn't save — try again"); return; }
+    state.companySettings = s;
+    showToast("Settings saved");
     render();
   });
 }
@@ -15064,6 +15129,8 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "add-contact"){
     addContact(fd);
     form.reset();
+  } else if (type === "save-company-settings"){
+    saveCompanySettings(fd);
   } else if (type === "bulk-set-availability"){
     bulkSetAvailability(fd);
   } else if (type === "submit-booking"){
