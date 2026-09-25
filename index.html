@@ -11148,11 +11148,15 @@ function renderCompanySettings(){
           '<div class="rail-title" style="margin:18px 0 8px">Company Info (used on MISMO 3.4 exports)</div>' +
           '<div class="form-row"><label>Company Name</label><input class="input" name="companyName" value="' + esc(s.companyName||"") + '"></div>' +
           '<div class="form-row"><label>Company Address</label><input class="input" name="companyAddress" value="' + esc(s.companyAddress||"") + '"></div>' +
-          '<div class="form-row"><label>Company NMLS #</label><input class="input" name="companyNmls" value="' + esc(s.companyNmls||"") + '" placeholder="e.g. 1234567"></div>' +
           '<button class="btn btn-primary" type="submit" style="margin-top:14px">Save</button>' +
         '</form>' +
       '</div>' +
-      '<div class="footnote" style="max-width:560px;margin-top:10px">Each loan officer\'s own NMLS # is set individually under Email &amp; Text Signature, not here.</div>' +
+      // NMLS doesn't apply to Bridgepoint at all -- business-purpose
+      // lending isn't subject to individual SAFE Act/NMLS licensing, and
+      // there's no company NMLS either. That only applies to Anchor, the
+      // separate future consumer-lending entity, not this system. Per
+      // Joe, 2026-09-25 -- removed from both this page and the per-LO
+      // signature screen rather than leave a field that'll never apply.
     '</div>';
 }
 function saveCompanySettings(fd){
@@ -11160,7 +11164,7 @@ function saveCompanySettings(fd){
   var s = {
     aeName: fd.get("aeName")||"", aeEmail: fd.get("aeEmail")||"",
     companyName: fd.get("companyName")||"", companyAddress: fd.get("companyAddress")||"",
-    companyNmls: fd.get("companyNmls")||""
+    companyNmls: ""
   };
   sb.from("company_settings").update(companySettingsToRow(s)).eq("id","default").then(function(res){
     if (res.error){ showToast("Couldn't save — try again"); return; }
@@ -12619,8 +12623,6 @@ function modalEditSignature(){
         '<div class="form-row"><label>Photo in your signature (optional)</label><input class="input" type="file" name="photo" accept="image/*">' +
           (u.photoUrl ? '<img src="' + esc(u.photoUrl) + '" style="width:48px;height:48px;border-radius:50%;object-fit:cover;margin-top:6px">' : '') +
         '</div>' +
-        '<div class="form-row"><label>Your NMLS / License #</label><input class="input" name="nmls" value="' + esc(u.nmls||"") + '" placeholder="e.g. 1234567"></div>' +
-        '<div class="footnote" style="padding:0">Used on any MISMO 3.4 loan file export as the loan originator\'s license number.</div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div>' +
       '</form>' +
@@ -15139,7 +15141,7 @@ appEl.addEventListener("submit", function(e){
     var photoInput = form.querySelector('[name="photo"]');
     var photoFile = photoInput && photoInput.files && photoInput.files[0];
     var finishSaveSig = function(photoUrl){
-      saveSignature(fd.get("emailSignature"), fd.get("textSignoff"), photoUrl, fd.get("nmls"));
+      saveSignature(fd.get("emailSignature"), fd.get("textSignoff"), photoUrl);
     };
     if (photoFile){
       var photoReader = new FileReader();

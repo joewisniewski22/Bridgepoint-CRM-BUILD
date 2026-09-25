@@ -293,8 +293,11 @@ Deno.serve(async (req: Request) => {
     if (!lead.phone && !lead.guarantor_phone) missing.push("borrower phone");
     if (!lead.guarantor_address) missing.push("borrower mailing address");
     if (lead.guarantor_ssn_encrypted && !ssnFull) missing.push("SSN (not authorized to view, or not yet on file)");
-    if (!lo?.nmls) missing.push((lo?.name || "assigned LO") + "'s NMLS #");
-    if (!company.nmls) missing.push("company NMLS # (set it under Settings)");
+    // NMLS doesn't apply to Bridgepoint at all -- business-purpose lending
+    // isn't subject to individual SAFE Act/NMLS licensing, and Bridgepoint
+    // itself carries no company NMLS either (that only applies to Anchor,
+    // the separate future consumer-lending entity, which isn't this
+    // system). Per Joe, 2026-09-25 -- not flagged as missing.
 
     return new Response(JSON.stringify({ ok: true, xml, missing }), { headers: CORS_HEADERS });
   } catch (err) {
