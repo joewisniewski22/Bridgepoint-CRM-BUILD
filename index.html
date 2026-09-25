@@ -4047,6 +4047,19 @@ function openEmailDocumentModal(leadId, kind){
   ui.modal = { type:"emailDocument", leadId: leadId, kind: kind };
   render();
 }
+// Datalist of everyone with a real email on file -- Contacts directory,
+// the Account Executive, and referral partners -- so typing a name into
+// "Send to" (e.g. "julia") suggests the real address instead of the LO
+// having to remember or go look it up. Joe's report (2026-09-25): typed
+// "julia" into this exact field and got no suggestions at all.
+function emailContactOptionsHTML(){
+  var opts = [];
+  (state.contacts||[]).forEach(function(c){ if (c.email) opts.push({ email: c.email, label: c.name + " — " + c.role + (c.company ? (" (" + c.company + ")") : "") }); });
+  var ae = state.companySettings || {};
+  if (ae.aeEmail) opts.push({ email: ae.aeEmail, label: (ae.aeName||"Account Executive") + " — Account Executive" });
+  (state.referralPartners||[]).forEach(function(p){ if (p.email) opts.push({ email: p.email, label: p.name + " — " + (p.role||"Referral Partner") + (p.company ? (" (" + p.company + ")") : "") }); });
+  return opts.map(function(o){ return '<option value="' + esc(o.email) + '">' + esc(o.label) + '</option>'; }).join("");
+}
 function modalEmailDocument(leadId, kind){
   var lead = leadById(leadId);
   var meta = lead ? docKindMeta(lead, kind) : null;
@@ -4058,7 +4071,9 @@ function modalEmailDocument(leadId, kind){
         '<div class="footnote" style="padding:0 0 10px">Check it first, then send it to whoever you\'re shopping this deal to — a lender, not the borrower.</div>' +
         '<div class="form-row"><button class="btn btn-sm" type="button" data-action="preview-generated-document" data-lead="' + lead.id + '" data-kind="' + kind + '">👁️ Preview PDF</button></div>' +
         '<form data-form="email-generated-document" data-lead="' + lead.id + '" data-kind="' + kind + '">' +
-          '<div class="form-row"><label>Send to</label><input class="input" type="email" name="toEmail" placeholder="lender@example.com" required autofocus></div>' +
+          '<div class="form-row"><label>Send to</label><input class="input" type="email" name="toEmail" placeholder="lender@example.com" list="email-contact-suggest" required autofocus>' +
+            '<datalist id="email-contact-suggest">' + emailContactOptionsHTML() + '</datalist>' +
+          '</div>' +
           '<div class="form-row"><label>Note (optional, goes above the document in the email)</label><textarea class="textarea" name="note" rows="3" placeholder="Hey, wanted to get your read on this one..."></textarea></div>' +
           '<div class="modal-foot" style="padding:14px 0 0"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Send</button></div>' +
         '</form>' +
