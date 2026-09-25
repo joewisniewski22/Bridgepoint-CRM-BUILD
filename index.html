@@ -10249,8 +10249,15 @@ function renderTabDocuments(lead){
     // Once a doc is received, a second file input stays available (relabeled)
     // so a checklist item that needs several files -- e.g. multiple lease
     // agreements, or a full set of entity docs -- can keep collecting them.
+    var aiRecheckBtn = "";
     if (d.status==="received"){
       if (d.storagePath) viewBtn = '<button class="btn btn-sm" data-action="view-lead-document" data-lead="' + lead.id + '" data-idx="' + i + '">View File</button>';
+      // runAiDocReview(leadId, idx) already existed and was wired to this
+      // exact action -- but nothing in the UI ever rendered a
+      // data-action="ai-review-doc" element, so re-checking one document
+      // (e.g. after re-uploading it) was only reachable by re-scanning
+      // every received document on the file. Found 2026-09-24.
+      if (canAiReview && d.storagePath) aiRecheckBtn = '<button class="btn btn-sm btn-ghost" type="button" data-action="ai-review-doc" data-lead="' + lead.id + '" data-idx="' + i + '" title="Re-runs AI review on just this document">🔎 Re-check</button>';
       if (canManage) deleteBtn = '<button class="btn btn-sm btn-ghost" style="color:var(--c-rust)" data-action="delete-document" data-lead="' + lead.id + '" data-idx="' + i + '">Delete</button>';
       uploadBtn = '<label class="btn btn-sm btn-ghost" style="cursor:pointer">+ Add Another File<input type="file" style="display:none" data-action="upload-doc-staff" data-lead="' + lead.id + '" data-idx="' + i + '"></label>';
     } else if (d.status==="waived"){
@@ -10279,7 +10286,7 @@ function renderTabDocuments(lead){
       extraFiles +
       aiNote +
       '</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + refBtn + viewBtn + requestBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + refBtn + viewBtn + aiRecheckBtn + requestBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
   }).join("");
   var uwRows = (lead.uwConditions||[]).map(function(c){
     var statusBadge = c.status==="received" ? '<span class="badge badge-forest">Response Received</span>' : '<span class="badge badge-slate">Open</span>';
