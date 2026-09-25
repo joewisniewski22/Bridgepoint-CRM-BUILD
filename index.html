@@ -7022,8 +7022,60 @@ function requestAiDocReview(lead, doc){
       var flagTarget = lead.assignedProcessor || lead.assignedTo;
       if (flagTarget) notifyUser(flagTarget, lead.id, "ai-flag", lead.name + " — " + doc.name + " flagged by AI: " + res.data.note);
     }
+    if (res.data.contacts && res.data.contacts.length) applyScannedContacts(lead, res.data.contacts, doc);
     persist();
   }).catch(function(){});
+}
+function normContactPhone(p){ return (p||"").replace(/\D/g,""); }
+function normContactEmail(e){ return (e||"").trim().toLowerCase(); }
+// Joe's ask (2026-09-25): every document that comes in should get scanned
+// for third-party contacts (title, escrow, insurance, attorney, appraiser,
+// realtor) so the file's own Third Parties tab AND the cross-loan Referral
+// Partners list both build up automatically -- not just a one-time lookup.
+// Matched against both lists by phone/email so re-uploading the same
+// purchase contract, or seeing the same title company on a dozen different
+// files, never creates duplicates. New third parties default to
+// notify:false -- an AI-found contact hasn't been vetted by staff yet, so
+// it shouldn't silently start getting stage-change/review-request texts
+// and emails until someone consciously flips that on.
+var TP_ROLE_TO_REFERRAL_ROLE = { "Realtor":"Realtor", "Title Company":"Title/Escrow", "Escrow Officer":"Title/Escrow", "Attorney":"Attorney", "Insurance Agent":"Other", "Appraiser":"Other", "Lender Contact":"Other Lender" };
+function applyScannedContacts(lead, contacts, doc){
+  lead.thirdParties = lead.thirdParties || [];
+  var addedLabels = [];
+  contacts.forEach(function(c){
+    if (!c || !c.name || (!c.phone && !c.email)) return;
+    var email = normContactEmail(c.email), phone = normContactPhone(c.phone);
+    var onLead = lead.thirdParties.some(function(tp){
+      return (email && normContactEmail(tp.email) === email) || (phone && normContactPhone(tp.phone) === phone);
+    });
+    if (!onLead){
+      lead.thirdParties.push({ role: c.role, name: c.name, company: c.company||null, phone: c.phone||null, email: c.email||null, notify:false, source:"ai-scan" });
+      addedLabels.push(c.name + " (" + c.role + ")");
+    }
+    addScannedReferralPartner(c);
+  });
+  if (addedLabels.length){
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"note", text: "AI scan of " + (doc.name||"document") + " found " + (addedLabels.length===1?"a contact":"contacts") + ": " + addedLabels.join(", ") + " — added to Third Parties (notifications off until reviewed).", author:"AI Assistant" });
+  }
+}
+function addScannedReferralPartner(c){
+  if (!sb || !c || !c.name) return;
+  var email = normContactEmail(c.email), phone = normContactPhone(c.phone);
+  var existing = (state.referralPartners||[]).some(function(p){
+    return (email && normContactEmail(p.email) === email) || (phone && normContactPhone(p.phone) === phone);
+  });
+  if (existing) return;
+  var partner = {
+    id: "rp-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random())),
+    name: c.name, company: c.company||"", role: TP_ROLE_TO_REFERRAL_ROLE[c.role] || "Other",
+    phone: c.phone||"", email: c.email||"", notes: "Auto-added from a document scan (" + (c.role||"contact") + ")", createdBy: "AI Assistant"
+  };
+  state.referralPartners = state.referralPartners || [];
+  state.referralPartners.push(partner);
+  sb.from("referral_partners").insert(referralPartnerToRow(partner)).then(function(res){
+    if (res.error) state.referralPartners = state.referralPartners.filter(function(p){ return p.id !== partner.id; });
+  });
 }
 
 function saveScopeOfWork(leadId, items, notes){

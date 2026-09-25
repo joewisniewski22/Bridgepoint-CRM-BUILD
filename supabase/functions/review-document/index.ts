@@ -3,6 +3,14 @@
 // actually look at it -- not the old deterministic mock in index.html's
 // AI_DOC_FINDINGS. Runs automatically right after every upload (borrower
 // portal or staff) so nothing sits unreviewed waiting on a manual click.
+//
+// Joe's ask (2026-09-25): every incoming document should also be scanned
+// for third-party contact info (title company, escrow officer, insurance
+// agent, attorney, appraiser, realtor, other lender contact) so the file's
+// Third Parties tab and the cross-loan Referral Partners list build up
+// automatically instead of relying on staff to notice and type it in.
+// Piggybacks on this same Claude call (same document is already in front
+// of the model) rather than a second document-review round trip.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -33,6 +41,8 @@ const DOC_GUIDANCE: Record<string, string> = {
   "Entity Ownership Schedule (Foreign National)": "Check the ownership schedule accounts for every owner/guarantor and their percentage. Flag if more than 2 Foreign Nationals are guarantors or hold 20%+ ownership, if any owner is itself an entity (not a natural person), or if ownership percentages don't add up to 100%.",
 };
 const DEFAULT_GUIDANCE = "Check the document looks complete, legible, and consistent with the loan details given below. Flag any illegible sections, missing pages, or obvious inconsistencies.";
+
+const TP_ROLES = ["Realtor", "Title Company", "Escrow Officer", "Insurance Agent", "Attorney", "Appraiser", "Lender Contact"];
 
 function corsJson(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: CORS_HEADERS });
@@ -98,8 +108,9 @@ Deno.serve(async (req: Request) => {
       "- Loan amount: " + (context.loanAmount || "unknown") + "\n" +
       "- Property address: " + (context.propertyAddress || "unknown") + "\n" +
       (context.ltv ? ("- LTV: " + context.ltv + "%\n") : "") +
-      "\nLook at the actual document above and respond with ONLY a JSON object (no markdown fences, no commentary) with exactly these keys:\n" +
-      '{"status": "clear" or "flag", "note": "one or two specific sentences explaining what you found"}\n' +
+      "\nSEPARATELY, also scan the document for contact information belonging to any THIRD PARTY working this deal -- e.g. a real estate agent/realtor, title company, escrow officer, insurance agent, attorney, or appraiser named or shown on the document (letterhead, signature block, stamp, declarations page, etc). Do NOT include the borrower/guarantor themselves, and do NOT include Bridgepoint Lending's own staff. Only include a contact if you actually found a name AND at least a phone number or email on the document -- never guess or fabricate one. Each contact's \"role\" must be exactly one of: " + TP_ROLES.join(", ") + " (pick the closest fit for a contact type that doesn't cleanly match, such as another lender/broker, use \"Lender Contact\"). If no such contacts are found, use an empty array.\n\n" +
+      "Look at the actual document above and respond with ONLY a JSON object (no markdown fences, no commentary) with exactly these keys:\n" +
+      '{"status": "clear" or "flag", "note": "one or two specific sentences explaining what you found", "contacts": [{"role": "...", "name": "...", "company": "... or null", "phone": "... or null", "email": "... or null"}]}\n' +
       "Use \"flag\" if anything above needs a human's attention before this file can move forward; use \"clear\" only if the document genuinely looks complete and consistent.";
 
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -111,7 +122,7 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 300,
+        max_tokens: 600,
         system: "You are a precise loan-document review assistant. Output ONLY valid JSON matching exactly what's requested -- no markdown code fences, no commentary, no preamble.",
         messages: [{ role: "user", content: [contentBlock, { type: "text", text: promptText }] }],
       }),
@@ -123,7 +134,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const raw = (aiData.content && aiData.content[0] && aiData.content[0].text) || "";
-    let parsed: { status?: string; note?: string } = {};
+    let parsed: { status?: string; note?: string; contacts?: unknown } = {};
     try {
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
@@ -132,7 +143,20 @@ Deno.serve(async (req: Request) => {
     }
     const status = parsed.status === "clear" ? "clear" : "flag";
     const note = (parsed.note || "Reviewed — no further detail returned.").toString().slice(0, 500);
-    return corsJson({ ok: true, status, note });
+
+    const rawContacts = Array.isArray(parsed.contacts) ? parsed.contacts : [];
+    const contacts = rawContacts
+      .filter((c: any) => c && typeof c === "object" && TP_ROLES.includes(c.role) && typeof c.name === "string" && c.name.trim() && (c.phone || c.email))
+      .map((c: any) => ({
+        role: c.role,
+        name: c.name.toString().trim().slice(0, 120),
+        company: c.company ? c.company.toString().trim().slice(0, 120) : null,
+        phone: c.phone ? c.phone.toString().trim().slice(0, 40) : null,
+        email: c.email ? c.email.toString().trim().slice(0, 200) : null,
+      }))
+      .slice(0, 10);
+
+    return corsJson({ ok: true, status, note, contacts });
   } catch (err) {
     console.log("review-document: server_error", String(err));
     return corsJson({ ok: true, status: "flag", note: "Automatic review hit an error — please check this document manually." });
