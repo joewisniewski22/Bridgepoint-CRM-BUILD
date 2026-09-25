@@ -5609,12 +5609,29 @@ function setLoanType(leadId, newType){
 // documents, activity) so the new file starts clean. The two files link
 // via previousLeadId/nextLeadId; computeRepeatClients() already groups them
 // together automatically since it matches on phone/email, not by this link.
+// Carried over onto a repeat client's new loan file automatically -- these
+// don't change deal to deal (the person's identity, the entity itself),
+// unlike everything else in the checklist (bank statements, purchase
+// contract, etc.) which is genuinely specific to this transaction and
+// could easily be stale if reused. Joe's ask (2026-09-25).
+var CARRY_OVER_DOC_NAMES = [
+  "Government-Issued Photo ID",
+  "Entity Formation Docs & Operating Agreement (if closing in an entity)",
+  "EIN Letter (if closing in an entity)",
+  "Certificate of Good Standing (if closing in an entity)"
+];
+function carryOverPersistentDocs(oldLead){
+  return (oldLead.documents||[])
+    .filter(function(d){ return d.status==="received" && CARRY_OVER_DOC_NAMES.indexOf(d.name) !== -1; })
+    .map(function(d){ return Object.assign({}, d, { carriedOverFrom: oldLead.id }); });
+}
 function startNewLoanForClient(leadId){
   var lead = leadById(leadId);
   if (!lead) return;
-  if (!window.confirm('Start a new loan file for ' + lead.name + '? Carries over contact, guarantor/entity, and property info; loan amount, rate, documents, and activity all start fresh.')) return;
+  if (!window.confirm('Start a new loan file for ' + lead.name + '? Carries over contact, guarantor/entity, property info, and identity/entity documents already on file (ID, LLC formation docs, EIN letter, good standing); loan amount, rate, and everything else deal-specific starts fresh.')) return;
   var id = nextLeadId();
   var d = todayISO();
+  var carriedDocs = carryOverPersistentDocs(lead);
   var newLead = {
     id:id, name:lead.name, email:lead.email||null, phone:lead.phone, source:"Repeat Client",
     loanType: lead.loanType, stage:"new", status:"active", assignedTo:lead.assignedTo,
@@ -5630,9 +5647,10 @@ function startNewLoanForClient(leadId){
     monthlyTaxes:null, monthlyInsurance:null, monthlyHoa:null,
     loanAmount:null, ltv:null, rate:null, termMonths:null, pointsCharged:null, transactionType:null, prepayTerm:null,
     exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null,
-    callAttempts:[], documents:[], thirdParties:(lead.thirdParties||[]).map(function(tp){ return Object.assign({}, tp); }),
+    callAttempts:[], documents:carriedDocs, thirdParties:(lead.thirdParties||[]).map(function(tp){ return Object.assign({}, tp); }),
     applicationToken: randomToken(), previousLeadId: lead.id,
-    activity:[{ date:d, type:"note", text:"New loan file started for a repeat client -- linked to previous file " + lead.id + " (" + (lead.loanType||"loan") + ", " + stageLabel(lead.stage) + ")", author: currentUser().name }]
+    activity:[{ date:d, type:"note", text:"New loan file started for a repeat client -- linked to previous file " + lead.id + " (" + (lead.loanType||"loan") + ", " + stageLabel(lead.stage) + ")" +
+      (carriedDocs.length ? (". Carried over from the prior file: " + carriedDocs.map(function(d){ return d.name; }).join(", ")) : ""), author: currentUser().name }]
   };
   state.leads.unshift(newLead);
   lead.nextLeadId = id;
