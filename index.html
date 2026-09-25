@@ -7631,6 +7631,14 @@ function render(){
   // the oldest message instead of staying on the newest one.
   var chatLog = document.getElementById("ai-chat-log");
   if (chatLog) chatLog.scrollTop = chatLog.scrollHeight;
+  // Same reset-to-0-on-every-render problem, for the Messages (direct
+  // text) thread -- Joe's report (2026-09-25): sending a text visibly
+  // yanked the thread back up to the oldest message instead of staying on
+  // the one just sent. Mobile has no separate inner scroll container (the
+  // whole page scrolls), so that case scrolls the page itself instead.
+  var textThreadScroll = document.getElementById("text-thread-scroll");
+  if (textThreadScroll) textThreadScroll.scrollTop = textThreadScroll.scrollHeight;
+  if (ui.mobileTab === "messages" && ui.mobileMessagesLeadId) window.scrollTo(0, document.body.scrollHeight);
   if (keepNotesFocus){
     var notesEl = document.getElementById("call-live-notes");
     if (notesEl){ notesEl.focus(); try { notesEl.setSelectionRange(notesSel[0], notesSel[1]); } catch(e){} }
@@ -12081,7 +12089,7 @@ function renderTextMessages(){
         '<div class="section-head"><h2 style="cursor:pointer" data-action="select-lead" data-lead="' + activeConvo.lead.id + '" title="Open this loan file">' + esc(activeConvo.lead.name) + '</h2>' +
           '<span class="hint">' + esc(activeConvo.lead.loanType||"") + (activeConvo.lead.propertyAddress ? (' · ' + esc(activeConvo.lead.propertyAddress)) : '') + '</span>' +
         '</div>' +
-        '<div style="flex:1;overflow-y:auto;padding:4px 4px 12px">' + (bubbles || '<div class="empty">No messages yet.</div>') + '</div>' +
+        '<div id="text-thread-scroll" style="flex:1;overflow-y:auto;padding:4px 4px 12px">' + (bubbles || '<div class="empty">No messages yet.</div>') + '</div>' +
         '<form data-form="text-message-send" data-lead="' + activeConvo.lead.id + '" style="display:flex;gap:8px">' +
           '<input class="input" name="body" placeholder="Message ' + esc(activeConvo.lead.name) + '…" autocomplete="off" style="flex:1" required>' +
           '<button class="btn btn-primary" type="submit">Send</button>' +
