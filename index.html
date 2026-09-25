@@ -6540,13 +6540,19 @@ function sendReviewRequests(lead){
   var isEs = lang === "es";
   var first = (lead.name||"").split(" ")[0];
 
+  // Joe's ask (2026-09-25): every closed loan should ask the borrower for
+  // a referral, not just a review -- specifically, whether they know
+  // anyone else looking for financing, not a generic "send people our
+  // way." Third-party (referral partner) messages below stay review-only
+  // -- a title company/escrow officer isn't the one referring new
+  // borrowers the way a past client is.
   var borrowerSubject = isEs ? "¡Felicidades por su cierre! ¿Nos compartiría su experiencia?" : "Congrats on your closing! Would you share your experience?";
   var borrowerEmail = isEs
-    ? ("Hola " + first + ",\n\n¡Felicidades por el cierre de su préstamo para " + (lead.propertyAddress||"su propiedad") + "! Fue un placer trabajar con usted.\n\nSi tiene un momento, nos encantaría que compartiera su experiencia con una reseña en Google — realmente nos ayuda:\n\n" + GOOGLE_REVIEW_LINK + "\n\n¡Gracias de nuevo, y esperamos trabajar con usted en su próximo proyecto!")
-    : ("Hi " + first + ",\n\nCongrats on closing your loan for " + (lead.propertyAddress||"your property") + "! It was a pleasure working with you.\n\nIf you have a minute, we'd really appreciate a quick Google review sharing your experience — it genuinely helps us out:\n\n" + GOOGLE_REVIEW_LINK + "\n\nThanks again, and we look forward to working with you on the next one!");
+    ? ("Hola " + first + ",\n\n¡Felicidades por el cierre de su préstamo para " + (lead.propertyAddress||"su propiedad") + "! Fue un placer trabajar con usted.\n\nSi tiene un momento, nos encantaría que compartiera su experiencia con una reseña en Google — realmente nos ayuda:\n\n" + GOOGLE_REVIEW_LINK + "\n\nY si conoce a alguien más -- un socio, familiar, o cualquier persona -- que esté buscando financiamiento para inversión inmobiliaria, nos encantaría ayudarle también. Solo respóndanos con su información de contacto.\n\n¡Gracias de nuevo, y esperamos trabajar con usted en su próximo proyecto!")
+    : ("Hi " + first + ",\n\nCongrats on closing your loan for " + (lead.propertyAddress||"your property") + "! It was a pleasure working with you.\n\nIf you have a minute, we'd really appreciate a quick Google review sharing your experience — it genuinely helps us out:\n\n" + GOOGLE_REVIEW_LINK + "\n\nAnd if you know anyone else -- a partner, family member, or anyone else -- looking for financing on an investment property, we'd love the introduction. Just reply with their contact info.\n\nThanks again, and we look forward to working with you on the next one!");
   var borrowerText = isEs
-    ? ("Hola " + first + ", ¡felicidades por su cierre! Si tiene un minuto, agradecemos mucho una reseña en Google: " + GOOGLE_REVIEW_LINK + " — Gracias, " + (lo.name||"") + " de Bridgepoint Lending")
-    : ("Hi " + first + ", congrats on closing! If you have a minute, we'd really appreciate a quick Google review: " + GOOGLE_REVIEW_LINK + " — Thanks, " + (lo.name||"") + " at Bridgepoint Lending");
+    ? ("Hola " + first + ", ¡felicidades por su cierre! Si tiene un minuto, agradecemos mucho una reseña en Google: " + GOOGLE_REVIEW_LINK + " — y si conoce a alguien buscando financiamiento de inversión, ¡nos encantaría ayudarle! — Gracias, " + (lo.name||"") + " de Bridgepoint Lending")
+    : ("Hi " + first + ", congrats on closing! If you have a minute, we'd really appreciate a quick Google review: " + GOOGLE_REVIEW_LINK + " — and if you know anyone else looking for investment property financing, we'd love an introduction! — Thanks, " + (lo.name||"") + " at Bridgepoint Lending");
 
   var recipients = [];
   if (lead.email) recipients.push({ email: lead.email, phone: lead.phone, subject: borrowerSubject, emailBody: borrowerEmail, textBody: borrowerText, label: lead.name });
