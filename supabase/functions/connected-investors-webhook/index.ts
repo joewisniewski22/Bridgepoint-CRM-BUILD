@@ -128,10 +128,18 @@ Deno.serve(async (req: Request) => {
     const purchasePrice = toNumber(firstOf(body, "Purchase Price / Est. Value") || findByKeyword(body, ["purchase price", "estimated value", "est. value"]));
     let loanAmount = toNumber(firstOf(body, "Requested Loan Amount", "Requested Amount", "requested_amount") || findByKeyword(body, ["loan amount", "amount needed", "amount requested"]));
     let creditScore = toNumber(firstOf(body, "Estimated FICO Score", "Credit Score", "credit_score") || findByKeyword(body, ["credit score", "fico"]));
-    let experienceDeals: number | null = toNumber(firstOf(body, "Experience", "deals_done") || findByKeyword(body, ["experience", "deals completed", "properties flipped"]));
+    const experienceRaw = firstOf(body, "Experience", "deals_done") || findByKeyword(body, ["experience", "deals completed", "properties flipped"]);
+    let experienceDeals: number | null = toNumber(experienceRaw);
     if (loanAmount == null) loanAmount = rangeMidpoint(findByKeyword(body, ["loan amount", "amount needed"]));
     if (creditScore == null) creditScore = rangeMidpoint(findByKeyword(body, ["credit score", "fico"]));
-    if (experienceDeals != null && /primero|first|none|0/i.test(String(experienceDeals))) experienceDeals = 0;
+    // Word-based "no experience" phrasing (toNumber() already handles a
+    // literal "0"/numeric string fine) -- this used to run AFTER toNumber()
+    // against the already-coerced number, so the bare `0` alternation in
+    // the regex substring-matched any number containing that digit (10,
+    // 20, 100...), incorrectly zeroing out real experience counts. Runs
+    // against the raw field value now, and only as a fallback when
+    // toNumber() couldn't parse anything. Found 2026-09-24.
+    if (experienceDeals == null && experienceRaw && /primero|first|none/i.test(String(experienceRaw))) experienceDeals = 0;
 
     let loanType = normalizeLoanType(firstOf(body, "Loan Type Needed") || findByKeyword(body, ["loan type", "loan program"]));
     if (!loanType) {

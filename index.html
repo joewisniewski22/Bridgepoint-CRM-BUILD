@@ -10334,6 +10334,7 @@ function renderTabActivity(lead){
 }
 function renderConversationThread(lead){
   var msgs = (lead.activity||[]).filter(function(a){
+    if (a.type === "system" && typeof a.text === "string" && TEXT_FAILURE_RE.test(a.text)) return true;
     return a.type === "text" && typeof a.text === "string" &&
       /^(Received|Texted) \(via (Quo|Telnyx)[^)]*\):/.test(a.text);
   });
@@ -11057,7 +11058,21 @@ function submitBooking(fd){
     startAt: pb.selectedSlot.start, endAt: pb.selectedSlot.end, status:"scheduled"
   };
   sb.from("appointments").insert(appointmentToRow(appt)).then(function(res){
-    if (res.error){ showToast("Couldn't book — try again"); return; }
+    if (res.error){
+      // 23505 = unique_violation -- someone else grabbed this exact slot
+      // in the gap between the prospect loading the page and clicking
+      // Confirm (or a double-click submitted twice). No DB-level guard
+      // against this existed before -- found 2026-09-24. Send them back
+      // to pick a different time instead of silently double-booking the LO.
+      if (res.error.code === "23505"){
+        pb.selectedSlot = null;
+        showToast("That time was just booked by someone else — please pick another");
+      } else {
+        showToast("Couldn't book — try again");
+      }
+      render();
+      return;
+    }
     state.appointments = state.appointments || [];
     state.appointments.push(appt);
     var when = new Date(appt.startAt).toLocaleString([], {weekday:"long", month:"long", day:"numeric", hour:"numeric", minute:"2-digit"});
@@ -11789,14 +11804,21 @@ function sendTeamChatMessage(toUserId, body){
    updates for free: ensureGlobalPolling() already refreshes leads and
    notifications every 25s for any view other than "detail".
 --------------------------------------------------------------------- */
+// Matches receive-text's own "Text to X was NOT delivered..." note, logged
+// as type:"system" (not "text") when Telnyx's message.finalized webhook
+// reports a carrier-side failure -- see below for why this needs its own
+// check rather than a per-bubble deliveryStatus flag.
+var TEXT_FAILURE_RE = /^Text to .* was NOT delivered/;
 function textBubbleHTML(a, leadName){
+  if (a.type === "system" && TEXT_FAILURE_RE.test(a.text)){
+    return '<div style="text-align:center;margin:6px 0"><span class="footnote" style="color:var(--c-rust)">⚠ ' + esc(a.text) + ' · ' + fmtDate(a.date) + '</span></div>';
+  }
   var inbound = /^Received \(via (Quo|Telnyx)[^)]*\):/.test(a.text);
   var body = a.text.replace(/^(Received|Texted) \(via (Quo|Telnyx)[^)]*\):\s*/, "");
-  var failedBadge = a.deliveryStatus === "failed" ? ' <span style="color:var(--c-rust)">⚠ not delivered</span>' : "";
   return '<div style="display:flex;' + (inbound ? '' : 'justify-content:flex-end') + ';margin-bottom:8px">' +
     '<div style="max-width:75%;padding:8px 12px;border-radius:10px;background:' + (inbound ? 'var(--surface-2,var(--border-soft))' : 'var(--brand)') + ';color:' + (inbound ? 'inherit' : 'var(--brand-ink)') + '">' +
       '<div style="white-space:pre-wrap">' + esc(body) + '</div>' +
-      '<div class="footnote" style="padding-top:2px;opacity:.8">' + (inbound ? esc(leadName) : esc(a.author||"Us")) + ' · ' + fmtDate(a.date) + failedBadge + '</div>' +
+      '<div class="footnote" style="padding-top:2px;opacity:.8">' + (inbound ? esc(leadName) : esc(a.author||"Us")) + ' · ' + fmtDate(a.date) + '</div>' +
     '</div>' +
   '</div>';
 }
@@ -11806,7 +11828,12 @@ function textBubbleHTML(a, leadName){
 function textMessageLeads(){
   var leads = isOwner() ? state.leads.filter(function(l){ return l.assignedTo === currentUser().id; }) : scopedLeads();
   var withMsgs = leads.map(function(l){
+    // Delivery-failure notes are logged as type:"system", not "text" (see
+    // receive-text's message.finalized handling) -- excluding them here
+    // meant a failed send just sat in the thread looking sent, with the
+    // only trace buried in the lead's general Activity tab. Found 2026-09-24.
     var msgs = (l.activity||[]).filter(function(a){
+      if (a.type === "system" && typeof a.text === "string" && TEXT_FAILURE_RE.test(a.text)) return true;
       return a.type === "text" && typeof a.text === "string" && /^(Received|Texted) \(via (Quo|Telnyx)[^)]*\):/.test(a.text);
     });
     if (!msgs.length) return null;

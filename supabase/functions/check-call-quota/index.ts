@@ -85,9 +85,19 @@ Deno.serve(async () => {
   const callsByUser: Record<string, number> = {};
   (leads || []).forEach((l) => {
     const assignedTo = l.assigned_to as string | null;
-    if (!assignedTo || !isNewBusinessLead(l)) return;
+    if (!assignedTo) return;
     const attempts = Array.isArray(l.call_attempts) ? (l.call_attempts as Array<Record<string, unknown>>) : [];
-    const todays = attempts.filter((a) => a.date === todayUtc).length;
+    // Matches index.html's own callsMadeToday(): excludes quick-text
+    // "attempts" (outcome:"texted" isn't a real call), and uses the
+    // new-business flag stamped on the attempt when it was logged rather
+    // than the lead's current stage/status -- otherwise a call made this
+    // morning stops counting the moment the lead advances past cadence
+    // stages later the same day, silently diverging from what the LO sees
+    // in their own dashboard. Found 2026-09-24.
+    const todays = attempts.filter((a) => {
+      if (a.date !== todayUtc || a.outcome === "texted") return false;
+      return a.newBusiness === undefined ? isNewBusinessLead(l) : !!a.newBusiness;
+    }).length;
     if (todays) callsByUser[assignedTo] = (callsByUser[assignedTo] || 0) + todays;
   });
 
