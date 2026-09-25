@@ -3365,10 +3365,17 @@ function defaultOutreachMessage(lead){
   if (lead.status === "cold" || lead.status === "lost") return suggestedWinbackMessage(lead);
   var first = (lead.name||"").split(" ")[0];
   var lo = userName(lead.assignedTo);
+  // A lead can genuinely have no loanType yet (e.g. created before that
+  // step, or via a webhook that didn't map one) -- string concatenation
+  // then dropped the literal word "null" straight into a text a client
+  // actually received ("following up on your null inquiry"). Found
+  // 2026-09-25 from Joe spotting it in a sent message.
+  var loanTypeEs = lead.loanType ? tr(lead.loanType,"es") : "financiamiento";
+  var loanTypeEn = lead.loanType || "financing";
   if ((lead.preferredLanguage||"en") === "es"){
-    return "Hola " + first + ", soy " + lo + " de Bridgepoint Lending, dándole seguimiento a su consulta de " + tr(lead.loanType,"es") + (lead.propertyAddress ? (" para " + lead.propertyAddress) : "") + ". Avíseme cuándo sería un buen momento para hablar." + signoffFor(lead.assignedTo);
+    return "Hola " + first + ", soy " + lo + " de Bridgepoint Lending, dándole seguimiento a su consulta de " + loanTypeEs + (lead.propertyAddress ? (" para " + lead.propertyAddress) : "") + ". Avíseme cuándo sería un buen momento para hablar." + signoffFor(lead.assignedTo);
   }
-  return "Hi " + first + ", it's " + lo + " with Bridgepoint Lending, following up on your " + lead.loanType + " inquiry" + (lead.propertyAddress ? (" for " + lead.propertyAddress) : "") + ". Let me know a good time to connect." + signoffFor(lead.assignedTo);
+  return "Hi " + first + ", it's " + lo + " with Bridgepoint Lending, following up on your " + loanTypeEn + " inquiry" + (lead.propertyAddress ? (" for " + lead.propertyAddress) : "") + ". Let me know a good time to connect." + signoffFor(lead.assignedTo);
 }
 function suggestedWinbackMessage(lead){
   var first = (lead.name||"").split(" ")[0];
