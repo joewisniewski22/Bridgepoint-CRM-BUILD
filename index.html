@@ -4323,6 +4323,7 @@ function leadToRow(l){
     commitment_fee_override: l.commitmentFeeOverride!=null ? l.commitmentFeeOverride : null,
     commitment_fee_refundable: !!l.commitmentFeeRefundable,
     guideline_override_approved: !!l.guidelineOverrideApproved, guideline_override_note: l.guidelineOverrideNote || null,
+    pending_decision: l.pendingDecision || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -4376,7 +4377,8 @@ function rowToLead(r){
     underwritingFeeOverride: r.underwriting_fee_override!=null ? r.underwriting_fee_override : null,
     commitmentFeeOverride: r.commitment_fee_override!=null ? r.commitment_fee_override : null,
     commitmentFeeRefundable: !!r.commitment_fee_refundable,
-    guidelineOverrideApproved: !!r.guideline_override_approved, guidelineOverrideNote: r.guideline_override_note || null
+    guidelineOverrideApproved: !!r.guideline_override_approved, guidelineOverrideNote: r.guideline_override_note || null,
+    pendingDecision: r.pending_decision || null
   };
 }
 function notifToRow(n){
@@ -6469,6 +6471,34 @@ function toggleNotify(leadId, idx){
    In-app notifications (stands in for real email/SMS delivery, which
    this hosted page cannot send on its own)
 --------------------------------------------------------------------- */
+// Joe's ask (2026-09-26): let an LO choose between two real, already-priced
+// options (e.g. Constructive in-house vs. a real outside term sheet) by
+// replying to an email or text -- "if she responds in email or text auto
+// apply what she choses". Each option carries its own pre-computed field
+// patch (never recomputed from the reply itself) so a matched keyword just
+// applies known-good numbers -- see receive-email/receive-text, which do
+// the actual keyword matching once the reply comes back in.
+// options[].patch keys must be raw DB column names (snake_case, e.g.
+// "outside_lender", "loan_amount") -- receive-email/receive-text apply the
+// patch with a direct row update, no camelCase mapping available server-side.
+function requestLenderDecision(leadId, question, options){
+  var lead = leadById(leadId);
+  if (!lead || !sb) return;
+  lead.pendingDecision = { askedAt: todayISO(), askedBy: currentUser().id, question: question, options: options };
+  var optionLines = options.map(function(o){ return "• " + o.label + " — reply \"" + o.match[0].toUpperCase() + "\"" + (o.summary ? (": " + o.summary) : ""); }).join("\n");
+  var body = question + "\n\n" + optionLines + "\n\nJust reply to this email or text with one word (" + options.map(function(o){ return o.match[0].toUpperCase(); }).join(" or ") + ") and it'll be applied to the file automatically.";
+  var lo = userById(lead.assignedTo);
+  if (lo && lo.email){
+    sb.functions.invoke("send-email", { body: { leadId: leadId, to: lo.email, subject: "Choose lender for " + lead.name, text: body, fromName: currentUser().name } }).catch(function(){});
+  }
+  if (lo && lo.phone){
+    sb.functions.invoke("send-text", { body: { to: lo.phone, text: "Bridgepoint CRM — " + lead.name + ": " + question + " Reply " + options.map(function(o){ return o.match[0].toUpperCase(); }).join(" or ") + ".", fromName: currentUser().name } }).catch(function(){});
+  }
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text: "Asked " + (lo?lo.name:"LO") + " to choose: " + question + " (" + options.map(function(o){return o.label;}).join(" vs. ") + ")", author: currentUser().name });
+  showToast("Sent to " + (lo?lo.name:"LO"));
+  persist();
+}
 function notifyUser(userId, leadId, kind, text, opts){
   state.notifications = state.notifications || [];
   state.notifications.unshift({

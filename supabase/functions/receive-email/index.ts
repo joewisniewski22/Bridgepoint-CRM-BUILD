@@ -14,6 +14,16 @@ interface ThirdParty {
   role?: string;
   email?: string;
 }
+interface DecisionOption {
+  key: string;
+  match: string[];
+  label: string;
+  patch: Record<string, unknown>;
+}
+interface PendingDecision {
+  question: string;
+  options: DecisionOption[];
+}
 interface DocEntry {
   name: string;
   status: string;
@@ -90,7 +100,7 @@ Deno.serve(async (req: Request) => {
 
     if (leadId) {
       const { data: leadRow } = await sb.from("leads")
-        .select("activity, assigned_to, name, third_parties, documents")
+        .select("activity, assigned_to, name, third_parties, documents, pending_decision")
         .eq("id", leadId).single();
 
       if (leadRow) {
@@ -99,6 +109,30 @@ Deno.serve(async (req: Request) => {
         const thirdParties: ThirdParty[] = leadRow.third_parties || [];
         const matchedTp = thirdParties.find((tp) => (tp.email || "").toLowerCase() === fromAddress.toLowerCase());
         const docLabel = matchedTp ? docLabelForRole(matchedTp.role) : null;
+
+        // Joe's ask (2026-09-26): a reply to a "choose between these options"
+        // email should auto-apply whichever pre-computed option it matches --
+        // see requestLenderDecision() in index.html, which is what sets
+        // pending_decision in the first place. Matched by simple keyword
+        // (not AI) on purpose -- this is a real financial-terms change, and
+        // a exact, predictable match beats a fuzzy guess.
+        const pending = leadRow.pending_decision as PendingDecision | null;
+        let decisionApplied: string | null = null;
+        if (pending && Array.isArray(pending.options)) {
+          const normalized = text.trim().toLowerCase();
+          const matchedOption = pending.options.find((o) =>
+            Array.isArray(o.match) && o.match.some((m) => normalized.includes(String(m).toLowerCase()))
+          );
+          if (matchedOption) {
+            await sb.from("leads").update({ ...matchedOption.patch, pending_decision: null }).eq("id", leadId);
+            activity.push({
+              date: new Date().toISOString().slice(0, 10), type: "system",
+              text: fromAddress + " chose \"" + matchedOption.label + "\" via email reply to \"" + pending.question + "\" — terms applied automatically.",
+              author: "System",
+            });
+            decisionApplied = matchedOption.label;
+          }
+        }
 
         const filedNames: string[] = [];
         for (const att of attachments) {
@@ -126,22 +160,38 @@ Deno.serve(async (req: Request) => {
           else documents.push(docEntry);
         }
 
-        activity.push({
-          date: new Date().toISOString().slice(0, 10),
-          type: filedNames.length ? "document" : "email-in",
-          text: filedNames.length
-            ? filedNames.join(", ") + " received via email from " + fromAddress
-            : "Reply received from " + fromAddress + ": " + subject,
-          author: leadRow.name || "Borrower",
-        });
+        if (!decisionApplied) {
+          activity.push({
+            date: new Date().toISOString().slice(0, 10),
+            type: filedNames.length ? "document" : "email-in",
+            text: filedNames.length
+              ? filedNames.join(", ") + " received via email from " + fromAddress
+              : "Reply received from " + fromAddress + ": " + subject,
+            author: leadRow.name || "Borrower",
+          });
+        }
 
         await sb.from("leads").update({ activity: activity, documents: documents }).eq("id", leadId);
+
+        if (decisionApplied) {
+          // Joe explicitly asked to "let me know" once a choice comes back.
+          await sb.from("notifications").insert({
+            id: "notif-" + crypto.randomUUID(), to_user_id: "owner", lead_id: leadId, kind: "email",
+            text: (leadRow.name || "A file") + ": chose \"" + decisionApplied + "\" — applied automatically",
+            date: new Date().toISOString().slice(0, 10), read: false,
+          });
+          await textStaff("owner", "✅ " + (leadRow.name || "A file") + " — chose \"" + decisionApplied + "\" by email reply, applied automatically");
+        }
 
         const notifyText = filedNames.length
           ? filedNames.join(", ") + " received from " + (matchedTp ? matchedTp.role : fromAddress)
           : "New email reply from " + (leadRow.name || fromAddress);
 
-        if (docLabel) {
+        if (decisionApplied) {
+          // Already notified the owner above -- skip the generic
+          // "new reply" alert so the assigned LO doesn't get pinged about
+          // their own reply.
+        } else if (docLabel) {
           // Title/insurance is coordinated entirely through processing --
           // Erika (or whoever's processing) gets this, not the assigned LO.
           // Revisit if that routing turns out to be the wrong call.

@@ -222,17 +222,65 @@ Deno.serve(async (req: Request) => {
         }
       }
     } else if (staffMatch) {
-      // A text from a staff member's own phone. It is NOT posted into any
-      // borrower's portal chat anymore: staff texts now arrive on the same
-      // company number as team announcements, so any reply ("sounds good",
-      // "got it") could be mistaken for a message to a client -- a simulated
-      // staff reply landed in a client's chat during testing on
-      // 2026-09-21. Staff answer portal chats inside the CRM instead. Every
-      // staff text is kept (one row each) so replies to a message Joe sends
-      // the team -- e.g. phone-test feedback -- can be read back.
-      const replyKey = "staff-reply-" + crypto.randomUUID().slice(0, 8);
-      await sb.from("team_polls").insert({ id: replyKey, poll_key: replyKey, staff_id: staffMatch.id, vote: "reply", raw_text: msg.text });
-      console.log("receive-text: logged staff reply", staffMatch.id);
+      // Joe's ask (2026-09-26): a staff reply might be answering a "choose
+      // between these options" text -- see requestLenderDecision() in
+      // index.html. Unlike email (routed to the exact lead via the +tag
+      // reply-to), a text reply carries no lead context at all, so this
+      // only auto-applies when EXACTLY ONE of this staff member's leads has
+      // a pending_decision -- ambiguous (0 or 2+) falls through to the
+      // normal staff-reply logging below rather than guessing which file.
+      const { data: pendingLeads } = await sb.from("leads")
+        .select("id, name, pending_decision")
+        .eq("assigned_to", staffMatch.id)
+        .not("pending_decision", "is", null);
+      let decisionApplied: { leadId: string; leadName: string; label: string } | null = null;
+      if (pendingLeads && pendingLeads.length === 1) {
+        const plLead = pendingLeads[0] as { id: string; name: string; pending_decision: { question: string; options: Array<{ match: string[]; label: string; patch: Record<string, unknown> }> } };
+        const pending = plLead.pending_decision;
+        const normalized = msg.text.trim().toLowerCase();
+        const matchedOption = pending && Array.isArray(pending.options)
+          ? pending.options.find((o) => Array.isArray(o.match) && o.match.some((m) => normalized.includes(String(m).toLowerCase())))
+          : null;
+        if (matchedOption) {
+          const { data: leadForActivity } = await sb.from("leads").select("activity").eq("id", plLead.id).single();
+          const activity = (leadForActivity && leadForActivity.activity) || [];
+          activity.push({
+            date: new Date().toISOString().slice(0, 10), type: "system",
+            text: (staffMatch.name as string) + " chose \"" + matchedOption.label + "\" via text reply to \"" + pending.question + "\" — terms applied automatically.",
+            author: "System",
+          });
+          await sb.from("leads").update({ ...matchedOption.patch, pending_decision: null, activity }).eq("id", plLead.id);
+          decisionApplied = { leadId: plLead.id, leadName: plLead.name, label: matchedOption.label };
+        }
+      }
+
+      if (decisionApplied) {
+        await sb.from("notifications").insert({
+          id: "notif-" + crypto.randomUUID(), to_user_id: "owner", lead_id: decisionApplied.leadId, kind: "text",
+          text: decisionApplied.leadName + ": chose \"" + decisionApplied.label + "\" — applied automatically",
+          date: new Date().toISOString().slice(0, 10), read: false,
+        });
+        const { data: owner } = await sb.from("users").select("phone").eq("id", "owner").single();
+        if (owner?.phone) {
+          fetch(SUPABASE_URL + "/functions/v1/send-text", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+            body: JSON.stringify({ to: owner.phone, text: "✅ " + decisionApplied.leadName + " — " + (staffMatch.name as string) + " chose \"" + decisionApplied.label + "\" by text, applied automatically", fromName: "Bridgepoint CRM" }),
+          }).catch(() => {});
+        }
+      } else {
+        // A text from a staff member's own phone. It is NOT posted into any
+        // borrower's portal chat anymore: staff texts now arrive on the same
+        // company number as team announcements, so any reply ("sounds good",
+        // "got it") could be mistaken for a message to a client -- a simulated
+        // staff reply landed in a client's chat during testing on
+        // 2026-09-21. Staff answer portal chats inside the CRM instead. Every
+        // staff text is kept (one row each) so replies to a message Joe sends
+        // the team -- e.g. phone-test feedback -- can be read back.
+        const replyKey = "staff-reply-" + crypto.randomUUID().slice(0, 8);
+        await sb.from("team_polls").insert({ id: replyKey, poll_key: replyKey, staff_id: staffMatch.id, vote: "reply", raw_text: msg.text });
+        console.log("receive-text: logged staff reply", staffMatch.id);
+      }
     } else {
       console.log("receive-text: no lead or staff matched sender", msg.from);
     }
