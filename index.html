@@ -4531,6 +4531,7 @@ function submitPublicApplication(leadId, patch){
     }
   }
   ui.publicApply.status = "submitted";
+  applyGuidelineLoanAmount(lead);
   runGuidelineCheck(leadId);
   sendBorrowerPortalFollowUp(lead);
 }
@@ -4558,7 +4559,10 @@ function extractApplicationBaseFieldsFromForm(fd){
     monthlyTaxes: numOrNull("monthlyTaxes"),
     monthlyInsurance: numOrNull("monthlyInsurance"),
     monthlyHoa: numOrNull("monthlyHoa"),
-    loanAmount: numOrNull("loanAmount"),
+    // No loanAmount -- exclusively used for the public portal's autosave
+    // draft, and that field doesn't exist on the public form (see
+    // buildApplicationFieldsHTML), so there's nothing to read; must never
+    // null out whatever applyGuidelineLoanAmount() has already set.
     termMonths: numOrNull("termMonths"),
     propertyCount: numOrNull("propertyCount"),
     guarantorFirstName: fd.get("guarantorFirstName"),
@@ -4600,6 +4604,7 @@ function autoSaveApplicationDraft(form){
   var fd = new FormData(form);
   var patch = extractApplicationBaseFieldsFromForm(fd);
   Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  applyGuidelineLoanAmount(lead);
   scheduleSync();
 }
 // Joe's ask (2026-09-15): a new English-language Facebook campaign, with
@@ -5296,6 +5301,7 @@ function submitPhoneApplication(leadId, patch){
   lead.activity.push({ date:d, type:"application", text:"Application taken by phone with " + lead.name, author: currentUser().name });
   ui.modal = null;
   showToast("Application saved for " + lead.name);
+  applyGuidelineLoanAmount(lead);
   runGuidelineCheck(leadId);
 }
 // Same field patch as submitPhoneApplication, but for editing an
@@ -5316,6 +5322,7 @@ function saveApplicationEdit(leadId, patch){
   lead.activity.push({ date:d, type:"application", text:"Application updated", author: currentUser().name });
   ui.modal = null;
   showToast("Application saved for " + lead.name);
+  applyGuidelineLoanAmount(lead);
   runGuidelineCheck(leadId);
 }
 function docPdfFilename(lead, label){
@@ -13107,6 +13114,34 @@ function buildScenarioFieldsHTML(lead, lang){
       '<div class="form-row"><label>' + L("Monthly Rent Estimate") + '</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
     '</div>';
 }
+// Joe's ask (2026-09-26): loan amount should never be a free-typed
+// "desired" number -- for a loan staying in-house (no real outside term
+// sheet on file, no manually-approved above-guideline exception), it
+// should just BE the guideline max, automatically, every time the
+// underlying scenario (purchase price/rehab/ARV/credit/experience/etc.)
+// changes -- not a hint staff has to notice and click. Skips the same
+// two flags buildTermSheet()'s own cap already skips for: outsideLender
+// (their guidelines apply, not ours) and guidelineOverrideApproved (a
+// trusted staff member marked a real above-guideline number as approved).
+function applyGuidelineLoanAmount(lead){
+  if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return;
+  if (lead.outsideLender || lead.guidelineOverrideApproved) return;
+  var info = computeMaxLoanAmount(lead);
+  if (!info || info.amount == null || info.hitFlatCeiling) return;
+  var max = Math.floor(info.amount);
+  if (lead.loanAmount === max) return;
+  var prev = lead.loanAmount;
+  lead.loanAmount = max;
+  var ltvBasis = (lead.transactionType && lead.transactionType !== "purchase" && lead.currentValue) ? lead.currentValue : lead.purchasePrice;
+  if (ltvBasis) lead.ltv = Math.round((max/ltvBasis)*1000)/10;
+  lead.activity = lead.activity || [];
+  lead.activity.push({
+    date: todayISO(), type:"system",
+    text: (prev!=null ? ("Loan amount set to " + fmtUSD(max) + " (from " + fmtUSD(prev) + ")") : ("Loan amount set to " + fmtUSD(max))) +
+      " — guideline max for this scenario. Upload a real outside term sheet, or mark approved above guideline, to override.",
+    author: "System"
+  });
+}
 function renderLoanGuidelineHint(lead){
   if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
   var info = computeMaxLoanAmount(lead);
@@ -13221,12 +13256,20 @@ function buildApplicationFieldsHTML(lead, lang, opts){
       '<div class="form-row"><label>' + L("NY Closing Attorney") + ' <span class="hint">(' + L("NY loans only") + ')</span></label><input class="input" name="nyClosingAttorney" value="' + esc(lead.nyClosingAttorney||"") + '"></div>' +
     '</div>' +
     buildScenarioFieldsHTML(lead, lang) +
-    '<div class="form-two">' +
-      '<div class="form-row"><label>' + L("Loan Amount Requested") + '</label><input class="input" type="number" name="loanAmount" value="' + v(loanAmountDefault) + '">' +
-        '<div id="loan-guideline-hint-' + lead.id + '">' + renderLoanGuidelineHint(Object.assign({}, lead, { loanAmount: loanAmountDefault })) + '</div>' +
-      '</div>' +
-      '<div class="form-row"><label>' + L("Term (months)") + '</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
-    '</div>' +
+    // Joe's ask (2026-09-26): loan amount is for staff, not the borrower --
+    // they just enter their deal info; the loan officer (or the automatic
+    // guideline-max rule above) decides the actual loan amount. Hidden
+    // entirely from the public portal rather than shown read-only, so
+    // there's nothing here for the borrower's own submission to send back.
+    (ui.publicApply
+      ? ('<div class="form-row"><label>' + L("Term (months)") + '</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>')
+      : ('<div class="form-two">' +
+          '<div class="form-row"><label>' + L("Loan Amount Requested") + '</label><input class="input" type="number" name="loanAmount" value="' + v(loanAmountDefault) + '">' +
+            '<div id="loan-guideline-hint-' + lead.id + '">' + renderLoanGuidelineHint(Object.assign({}, lead, { loanAmount: loanAmountDefault })) + '</div>' +
+          '</div>' +
+          '<div class="form-row"><label>' + L("Term (months)") + '</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
+        '</div>')
+    ) +
     buildTrackRecordSectionHTML(lead, lang) +
     buildLeaseDetailSectionHTML(lead, lang) +
     buildScopeOfWorkFieldsHTML(lead, lang) +
@@ -15163,7 +15206,10 @@ appEl.addEventListener("submit", function(e){
       monthlyTaxes: numOrNullPub("monthlyTaxes"),
       monthlyInsurance: numOrNullPub("monthlyInsurance"),
       monthlyHoa: numOrNullPub("monthlyHoa"),
-      loanAmount: numOrNullPub("loanAmount"),
+      // No loanAmount here -- that field doesn't exist on the public form
+      // (see buildApplicationFieldsHTML) so there's nothing to read; the
+      // borrower's own submission must never null out whatever
+      // applyGuidelineLoanAmount() has already set.
       termMonths: numOrNullPub("termMonths"),
       propertyCount: numOrNullPub("propertyCount"),
       guarantorFirstName: fd.get("guarantorFirstName"),
