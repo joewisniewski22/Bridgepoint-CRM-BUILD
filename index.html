@@ -7141,6 +7141,23 @@ function saveScopeOfWork(leadId, items, notes){
   };
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"document", text:"Scope of work saved — " + fmtUSD(total) + " across " + cleanItems.length + " line item(s)", author: authorName });
+  // Real bug found 2026-09-26 (Onorina Tapia): the top-level "Rehab /
+  // Construction Budget" field -- what the guideline check and every
+  // pricing calc actually reads -- was a one-time rough number from the
+  // application, and never got updated once a real, itemized Scope of
+  // Work came in with a different (usually more accurate) total. The two
+  // silently drifted apart, so the Pricer and the file's own guideline
+  // math disagreed on the same scenario. The itemized breakdown is the
+  // more trustworthy number once it exists, so it's now the one that
+  // wins -- and the loan amount recomputes immediately against it rather
+  // than sitting on a stale figure until someone happens to notice.
+  if (total > 0 && total !== lead.rehabBudget){
+    var oldBudget = lead.rehabBudget;
+    lead.rehabBudget = total;
+    lead.activity.push({ date: todayISO(), type:"system", text:"Rehab/Construction Budget updated to " + fmtUSD(total) + (oldBudget!=null ? (" (was " + fmtUSD(oldBudget) + ")") : "") + " to match the itemized Scope of Work", author:"System" });
+    applyGuidelineLoanAmount(lead);
+    runGuidelineCheck(leadId);
+  }
   if (!ui.publicApply){ showToast("Scope of work saved"); ui.modal = null; }
   persist();
 }
