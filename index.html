@@ -13071,9 +13071,9 @@ function buildScenarioFieldsHTML(lead, lang){
     '</div>';
   if (isDSCR){
     return '<div class="form-two">' +
-        '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
-        '<div class="form-row"><label>' + L("Current Value") + ' <span class="hint">(' + L("refi LTV basis") + ')</span></label><input class="input" type="number" name="currentValue" value="' + v(lead.currentValue) + '"></div>' +
-        '<div class="form-row"><label>' + L("Monthly Rent Estimate") + '</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
+        '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" data-guideline-live="1" data-lead="' + lead.id + '" value="' + v(lead.purchasePrice) + '"></div>' +
+        '<div class="form-row"><label>' + L("Current Value") + ' <span class="hint">(' + L("refi LTV basis") + ')</span></label><input class="input" type="number" name="currentValue" data-guideline-live="1" data-lead="' + lead.id + '" value="' + v(lead.currentValue) + '"></div>' +
+        '<div class="form-row"><label>' + L("Monthly Rent Estimate") + '</label><input class="input" type="number" name="rentEstimate" data-guideline-live="1" data-lead="' + lead.id + '" value="' + v(lead.rentEstimate) + '"></div>' +
       '</div>' +
       '<div class="form-two">' +
         '<div class="form-row"><label>' + L("Monthly Property Tax") + '</label><input class="input" type="number" name="monthlyTaxes" value="' + v(lead.monthlyTaxes) + '"></div>' +
@@ -13083,10 +13083,10 @@ function buildScenarioFieldsHTML(lead, lang){
       dscrPricingInputs;
   } else if (isRehabType){
     return '<div class="form-two">' +
-        '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" value="' + v(lead.purchasePrice) + '"></div>' +
-        '<div class="form-row"><label>' + L("After-Repair Value (ARV)") + '</label><input class="input" type="number" name="arv" value="' + v(lead.arv) + '"></div>' +
+        '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" name="purchasePrice" data-guideline-live="1" data-lead="' + lead.id + '" value="' + v(lead.purchasePrice) + '"></div>' +
+        '<div class="form-row"><label>' + L("After-Repair Value (ARV)") + '</label><input class="input" type="number" name="arv" data-guideline-live="1" data-lead="' + lead.id + '" value="' + v(lead.arv) + '"></div>' +
       '</div>' +
-      '<div class="form-row"><label>' + rehabLabel + '</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>';
+      '<div class="form-row"><label>' + rehabLabel + '</label><input class="input" type="number" name="rehabBudget" data-guideline-live="1" data-lead="' + lead.id + '" value="' + v(lead.rehabBudget) + '"></div>';
   } else if (loanType === "Portfolio/Blanket"){
     return '<div class="form-two">' +
         '<div class="form-row"><label>' + L("Number of Properties") + '</label><input class="input" type="number" min="1" name="propertyCount" value="' + v(lead.propertyCount) + '"></div>' +
@@ -13106,6 +13106,21 @@ function buildScenarioFieldsHTML(lead, lang){
       '<div class="form-row"><label>' + L("Rehab / Construction Budget") + '</label><input class="input" type="number" name="rehabBudget" value="' + v(lead.rehabBudget) + '"></div>' +
       '<div class="form-row"><label>' + L("Monthly Rent Estimate") + '</label><input class="input" type="number" name="rentEstimate" value="' + v(lead.rentEstimate) + '"></div>' +
     '</div>';
+}
+function renderLoanGuidelineHint(lead){
+  if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
+  var info = computeMaxLoanAmount(lead);
+  var isDscrType = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
+  if (!info || info.amount == null){
+    return '<div class="footnote" style="padding:4px 0 0">Enter ' + (isDscrType ? "purchase price/current value and credit score" : "purchase price and rehab budget") + ' above to see the guideline max.</div>';
+  }
+  if (info.hitFlatCeiling){
+    return '<div class="footnote" style="padding:4px 0 0">This scenario qualifies for more than $2,000,000 by the LTV/LTC math above — get it priced directly rather than relying on this estimate.</div>';
+  }
+  var max = Math.floor(info.amount);
+  return '<div class="footnote" style="padding:4px 0 0">Guideline max based on the numbers above: <b>' + fmtUSD(max) + '</b>' +
+    (lead.loanAmount !== max ? (' &nbsp;<a href="#" data-action="apply-loan-guideline-max" data-lead="' + lead.id + '" data-amount="' + max + '">Use this</a>') : '') +
+  '</div>';
 }
 function buildSsnRevealHTML(lead){
   if (ui.publicApply || !lead.guarantorSsnLast4) return "";
@@ -13132,6 +13147,17 @@ function buildApplicationFieldsHTML(lead, lang, opts){
   var nameParts = (lead.guarantorFirstName || lead.guarantorLastName) ? null : (lead.name||"").split(" ");
   var defFirst = lead.guarantorFirstName || (nameParts ? nameParts[0] : "") || "";
   var defLast = lead.guarantorLastName || (nameParts && nameParts.length>1 ? nameParts[nameParts.length-1] : "") || "";
+  // Joe's ask (2026-09-26): loan amount shouldn't just be a "desired"
+  // number someone types in and hopes fits -- when nothing's on file yet
+  // for this field, default it to what the guideline math actually
+  // supports (same computeMaxLoanAmount used to cap the term sheet), so
+  // the starting point is already guideline-driven instead of arbitrary.
+  // Still fully editable for a real approved-above-guideline case.
+  var loanAmountDefault = lead.loanAmount;
+  if (loanAmountDefault == null){
+    var defaultMaxInfo = computeMaxLoanAmount(lead);
+    if (defaultMaxInfo && defaultMaxInfo.amount != null && !defaultMaxInfo.hitFlatCeiling) loanAmountDefault = Math.floor(defaultMaxInfo.amount);
+  }
   return '<div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
       '<div><label>' + L("Guarantor First Name") + '</label><input class="input" name="guarantorFirstName" value="' + esc(defFirst) + '"></div>' +
       '<div><label>' + L("Middle Name") + '</label><input class="input" name="guarantorMiddleName" value="' + esc(lead.guarantorMiddleName||"") + '"></div>' +
@@ -13151,13 +13177,13 @@ function buildApplicationFieldsHTML(lead, lang, opts){
     '<div class="form-row"><label>' + L("Entity Legal Name (if closing in an entity)") + '</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Entity Type") + '</label><select class="select" name="entityType">' + entityOptions + '</select></div>' +
-      '<div class="form-row"><label>' + L("Credit Score") + '</label><input class="input" type="number" name="creditScore" min="300" max="850" value="' + v(lead.creditScore) + '"></div>' +
+      '<div class="form-row"><label>' + L("Credit Score") + '</label><input class="input" type="number" name="creditScore" min="300" max="850" data-guideline-live="1" data-lead="' + lead.id + '" value="' + v(lead.creditScore) + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Citizenship Status") + '</label><select class="select" name="citizenshipStatus">' +
         CITIZENSHIP_STATUSES.map(function(t){ return '<option value="' + t + '"' + (lead.citizenshipStatus===t?" selected":"") + '>' + L(t) + '</option>'; }).join("") +
       '</select></div>' +
-      '<div class="form-row"><label>' + L("Investing Experience (deals completed)") + '</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '" data-action="update-track-record-count" data-lang="' + lang + '"></div>' +
+      '<div class="form-row"><label>' + L("Investing Experience (deals completed)") + '</label><input class="input" type="number" min="0" name="experienceDeals" value="' + v(lead.experienceDeals) + '" data-action="update-track-record-count" data-lang="' + lang + '" data-guideline-live="1" data-lead="' + lead.id + '"></div>' +
     '</div>' +
     (lead.loanType === "Mixed-Use" ? ('<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="maritalStatus">' +
       '<option value=""' + (lead.maritalStatus!=="Married" && lead.maritalStatus!=="Unmarried" ? " selected" : "") + '>' + L("— Select —") + '</option>' +
@@ -13196,7 +13222,9 @@ function buildApplicationFieldsHTML(lead, lang, opts){
     '</div>' +
     buildScenarioFieldsHTML(lead, lang) +
     '<div class="form-two">' +
-      '<div class="form-row"><label>' + L("Loan Amount Requested") + '</label><input class="input" type="number" name="loanAmount" value="' + v(lead.loanAmount) + '"></div>' +
+      '<div class="form-row"><label>' + L("Loan Amount Requested") + '</label><input class="input" type="number" name="loanAmount" value="' + v(loanAmountDefault) + '">' +
+        '<div id="loan-guideline-hint-' + lead.id + '">' + renderLoanGuidelineHint(Object.assign({}, lead, { loanAmount: loanAmountDefault })) + '</div>' +
+      '</div>' +
       '<div class="form-row"><label>' + L("Term (months)") + '</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
     '</div>' +
     buildTrackRecordSectionHTML(lead, lang) +
@@ -14402,6 +14430,16 @@ appEl.addEventListener("click", function(e){
   else if (action === "go-to-contacts"){ ui.view="contacts"; ui.selectedLeadId=null; render(); }
   else if (action === "reveal-ssn"){ revealGuarantorSsn(t.dataset.lead); }
   else if (action === "hide-ssn"){ hideGuarantorSsn(t.dataset.lead); }
+  else if (action === "apply-loan-guideline-max"){
+    var lgForm = t.closest("form");
+    var lgInput = lgForm && lgForm.querySelector('[name="loanAmount"]');
+    if (lgInput){
+      lgInput.value = t.dataset.amount;
+      var lgHintBox = document.getElementById("loan-guideline-hint-" + t.dataset.lead);
+      var lgLead = leadById(t.dataset.lead);
+      if (lgHintBox && lgLead) lgHintBox.innerHTML = renderLoanGuidelineHint(Object.assign({}, lgLead, { loanAmount: Number(t.dataset.amount) }));
+    }
+  }
   else if (action === "filter-lo-jump"){ ui.view="leads"; ui.leadFilter.assignedTo=t.dataset.lo; ui.leadFilter.status=""; render(); }
   else if (action === "set-tab"){
     ui.activeTab = t.dataset.tab;
@@ -14876,6 +14914,22 @@ appEl.addEventListener("input", function(e){
   // button does that; this just makes sure nothing typed is ever lost.
   var autoSaveForm = t.closest && t.closest('form[data-form="public-application"]');
   if (autoSaveForm) scheduleApplicationAutoSave(autoSaveForm);
+  if (t.dataset.guidelineLive){
+    var glLead = leadById(t.dataset.lead);
+    var glHintBox = document.getElementById("loan-guideline-hint-" + t.dataset.lead);
+    var glForm = t.closest("form");
+    if (glLead && glHintBox && glForm){
+      var glNum = function(name){ var el = glForm.querySelector('[name="' + name + '"]'); return (el && el.value !== "") ? Number(el.value) : null; };
+      var glTemp = Object.assign({}, glLead, {
+        purchasePrice: glNum("purchasePrice"), arv: glNum("arv"), rehabBudget: glNum("rehabBudget"),
+        currentValue: glNum("currentValue"), rentEstimate: glNum("rentEstimate"),
+        creditScore: glNum("creditScore"), experienceDeals: glNum("experienceDeals")
+      });
+      var glAmtEl = glForm.querySelector('[name="loanAmount"]');
+      if (glAmtEl && glAmtEl.value !== "") glTemp.loanAmount = Number(glAmtEl.value);
+      glHintBox.innerHTML = renderLoanGuidelineHint(glTemp);
+    }
+  }
   if (t.dataset.action === "loan-details-live"){
     var liveLead = leadById(t.dataset.lead);
     var liveBox = document.getElementById("earnings-live-" + t.dataset.lead);
