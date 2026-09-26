@@ -1939,7 +1939,25 @@ function evaluateAngelOakFit(lead){
   notes.push("No Angel Oak rate sheet on file yet — this shows eligibility and max LTV only, not an actual rate/price. Get their current rate sheet from the AE to quote for real.");
   return { lender:"Angel Oak", program:"Angel Oak Investor Cash Flow (DSCR)", eligible: reasons.length===0, reasons:reasons, notes:notes, estMaxLoan:estMaxLoan, maxLtvPct:maxLtvPct };
 }
-var OUTSIDE_LENDER_FIT_EVALUATORS = { RCN: evaluateRcnFit, "Angel Oak": evaluateAngelOakFit, Kiavi: null, RELIP: null };
+// Joe's ask (2026-09-26), from the Onorina Tapia case (her $117,300 loan
+// is below this floor): all he's given us on NextRes so far is their Fix
+// & Flip minimum loan amount, now that he's a table funder with them.
+// Scoped to exactly that one fact -- no rate sheet, LTV grid, or other
+// eligibility rules modeled yet, unlike RCN/Angel Oak above.
+var NEXTRES_FNF_MIN_LOAN = 150000;
+function evaluateNextresFit(lead){
+  if (lead.loanType !== "Fix & Flip") return null;
+  var reasons = [];
+  if (lead.loanAmount && lead.loanAmount < NEXTRES_FNF_MIN_LOAN){
+    reasons.push("Below NextRes's " + fmtUSD(NEXTRES_FNF_MIN_LOAN) + " minimum loan amount on Fix & Flip");
+  }
+  return {
+    lender:"NextRes", program:"NextRes Fix & Flip", eligible: reasons.length===0, reasons:reasons,
+    notes: ["No NextRes rate sheet on file yet — this only checks their Fix & Flip loan-size floor. Price manually and upload the real term sheet."],
+    estMaxLoan: null, maxLtvPct: null
+  };
+}
+var OUTSIDE_LENDER_FIT_EVALUATORS = { RCN: evaluateRcnFit, "Angel Oak": evaluateAngelOakFit, NextRes: evaluateNextresFit, Kiavi: null, RELIP: null };
 function rcnRecommendation(lead, fit){
   if (!fit) return null;
   if (!fit.eligible){
