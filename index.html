@@ -10129,7 +10129,10 @@ function renderOutsideLenderFitBox(lead){
     '<div class="footnote" style="padding-top:8px">Estimate only, from each lender\'s published guidelines — not a submitted quote.</div>' +
   '</div>';
 }
-var OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN", "A&D Mortgage"];
+// NextRes added 2026-09-26 -- Joe is now a table funder with them and will
+// upload their real term sheets via the existing Upload Outside Term Sheet
+// flow (no dedicated rate sheet/pricer built in yet, unlike Constructive).
+var OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN", "A&D Mortgage", "NextRes"];
 function canManageOutsideLender(){ return ui.viewAs==="owner" || ui.viewAs==="lo-fiore" || ui.viewAs==="proc-erika"; }
 function canViewOutsideLender(){ return canManageOutsideLender(); }
 function setOutsideLender(leadId, lender){
