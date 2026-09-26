@@ -5630,6 +5630,15 @@ function setLoanType(leadId, newType){
   lead.loanType = newType;
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"system", text:"Loan type changed from " + oldType + " to " + newType, author: currentUser().name });
+  // Joe's ask (2026-09-26): a term that made sense for the old loan type
+  // (e.g. 360 months on a DSCR) doesn't for the new one (there's no
+  // 30-year fix & flip) -- only touches it if it's actually out of range
+  // for the new type, so a perfectly fine existing term survives the switch.
+  var clampedTerm = clampTermToLoanType(newType, lead.termMonths);
+  if (clampedTerm !== lead.termMonths){
+    lead.activity.push({ date: todayISO(), type:"system", text:"Term reset from " + lead.termMonths + " to " + clampedTerm + " months — not valid for " + newType, author:"System" });
+    lead.termMonths = clampedTerm;
+  }
   var addedDocs = applyRequiredDocs(leadId, { silent:true }) || [];
   if (addedDocs.length){
     lead.activity.push({ date: todayISO(), type:"document", text:"Added " + addedDocs.length + " checklist item(s) for " + newType, author:"System" });
@@ -7914,7 +7923,11 @@ function buildBorrowerPortalHTML(lead, opts){
     '</div>'
   );
 
-  var termsCard = (lead.loanAmount || lead.rate) ? (
+  // Joe's ask (2026-09-26): don't reveal computed/preliminary terms to the
+  // borrower the moment they finish the raw intake info -- wait until the
+  // file has actually moved to underwriting, so what they see has had a
+  // real review behind it, not just the guideline formula's first pass.
+  var termsCard = (stageIndex(lead.stage) >= stageIndex("underwriting") && (lead.loanAmount || lead.rate)) ? (
     '<div class="portal-section">' +
       '<div class="rail-title">' + L("Your Loan Details") + '</div>' +
       '<div class="footnote" style="padding:2px 0 8px">' + L("Preliminary — subject to change") + '</div>' +
@@ -8712,7 +8725,9 @@ function renderStandalonePricer(){
     '</div>' +
     (isDSCR ? ('<div class="form-row"><label>Current Value <span class="hint">(refi LTV basis)</span></label><input class="input" type="number" name="currentValue" data-action="standalone-pricer-field" value="' + v(sp.currentValue) + '"></div>') : '') +
     ((isDSCR || isRTL) ? ('<div class="form-row"><label>Current Loan Balance <span class="hint">(if refinancing — existing lender payoff)</span></label><input class="input" type="number" name="currentLoanBalance" data-action="standalone-pricer-field" value="' + v(sp.currentLoanBalance) + '"></div>') : '') +
-    '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" data-action="standalone-pricer-field" value="' + v(sp.termMonths) + '"></div>' +
+    '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths"' +
+      (LOAN_TYPE_TERM_RANGE[sp.loanType] ? (' min="' + LOAN_TYPE_TERM_RANGE[sp.loanType].min + '" max="' + LOAN_TYPE_TERM_RANGE[sp.loanType].max + '"') : '') +
+      ' data-action="standalone-pricer-field" value="' + v(sp.termMonths) + '"></div>' +
     (isDSCR ? ('<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" data-action="standalone-pricer-field" value="' + v(sp.rentEstimate) + '"></div>') : '') +
     (isRTL ? ('<div class="form-two">' +
         '<div class="form-row"><label>Investing Experience (deals)</label><input class="input" type="number" min="0" name="experienceDeals" data-action="standalone-pricer-field" value="' + v(sp.experienceDeals) + '"></div>' +
@@ -8777,7 +8792,54 @@ function buildStandalonePricerOutputHTML(sp){
     (maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.needsManualCheck ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">NY property — county-specific leverage reduction applies (-15% for the five boroughs, -5% Suffolk/Nassau). Verify manually, not applied here.</div>' : '') +
     (maxLoanInfo.hitFlatCeiling ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">This scenario qualifies for more than $2,000,000 by the LTV/LTC math above — that\'s past what this quick pricer models with confidence. Get loans this size priced directly rather than trusting this number.</div>' : '') +
     (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
-    '<div style="margin-top:14px"><button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button></div>';
+    '<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">' +
+      '<button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button>' +
+      '<button class="btn btn-sm" type="button" data-action="generate-standalone-term-sheet">📄 Generate Term Sheet</button>' +
+    '</div>';
+}
+// Joe's ask (2026-09-26): the standalone Pricer could only spin off a
+// full lead ("Create Lead From This Scenario") -- no way to just hand
+// someone a term sheet for a scenario before there's a real borrower/file
+// attached. Reuses the exact same buildTermSheet() every real lead's term
+// sheet goes through (never a hand-written duplicate), fed a throwaway
+// lead-shaped object built from the pricer's own inputs/result so the fee
+// math (lender fee, processing fee, etc.) is identical to a real file's.
+function generateStandalonePricerTermSheet(){
+  if (!sb) return;
+  var sp = ui.standalonePricer || defaultStandalonePricer();
+  var maxLoanInfo = computeMaxLoanAmount(sp);
+  var effectiveLoanAmount = maxLoanInfo ? Math.floor(maxLoanInfo.amount) : null;
+  var result = effectiveLoanAmount ? evaluatePricing(Object.assign({}, sp, { loanAmount: effectiveLoanAmount }), sp) : null;
+  if (!result || result.ineligible){ showToast("Fill in the scenario before generating a term sheet"); return; }
+  var fakeLead = {
+    id: "PRICER-SCRATCH", name: "Prospective Borrower", loanType: sp.loanType, propertyType: sp.propertyType,
+    propertyAddress: sp.propertyAddress || null, purchasePrice: sp.purchasePrice, currentValue: sp.currentValue,
+    currentLoanBalance: sp.currentLoanBalance, arv: sp.arv, rehabBudget: sp.rehabBudget, rentEstimate: sp.rentEstimate,
+    propertyCount: sp.propertyCount, creditScore: sp.creditScore, experienceDeals: sp.experienceDeals,
+    citizenshipStatus: sp.citizenshipStatus, countryOfDomicile: sp.countryOfDomicile || null,
+    transactionType: sp.transactionType, prepayTerm: sp.prepayTerm, ruralStatus: sp.ruralStatus,
+    termMonths: sp.termMonths, exitStrategy: null, assignedTo: currentUser().id,
+    loanAmount: effectiveLoanAmount, rate: result.rate, pointsCharged: Number(sp.points) || 0,
+    lenderFeeOverride: null, processingFeeOverride: null, underwritingFeeOverride: null,
+    commitmentFeeOverride: null, commitmentFeeRefundable: false, preferredLanguage: "en"
+  };
+  var ltvBasis = (fakeLead.transactionType && fakeLead.transactionType !== "purchase" && fakeLead.currentValue) ? fakeLead.currentValue : fakeLead.purchasePrice;
+  if (ltvBasis) fakeLead.ltv = Math.round((effectiveLoanAmount/ltvBasis)*1000)/10;
+  var body = buildTermSheet(fakeLead) + "\n\n(Preliminary quote generated from the Pricer -- no borrower or loan file attached yet. Not a commitment to lend.)";
+  showToast("Generating term sheet…");
+  sb.functions.invoke("generate-doc-pdf", { body: { text: body, label: "Term Sheet (Preliminary Quote)" } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){ showToast("Couldn't generate the PDF — try again"); return; }
+    var byteChars = atob(res.data.pdfBase64);
+    var bytes = new Uint8Array(byteChars.length);
+    for (var i=0; i<byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+    var blob = new Blob([bytes], { type:"application/pdf" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "Term_Sheet_Preliminary_Quote.pdf";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 30000);
+    showToast("Term sheet downloaded");
+  }).catch(function(){ showToast("Couldn't generate the PDF — try again"); });
 }
 /* ---------------------------------------------------------------------
    New Hire Training Guide -- owner-only, click-through (Next / Back).
@@ -10081,6 +10143,26 @@ function renderOutsideLenderBox(lead, guidelineStatus){
   '</div>';
 }
 var GUIDELINE_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction","Portfolio/Blanket"];
+// Joe's ask (2026-09-26), from a real case: a scenario started on DSCR
+// (360-month default) then switched to Fix & Flip kept the 360-month term
+// -- there's no such thing as a 30-year fix & flip. These are rough,
+// round bounds (Bridge/GUC/DSCR/Portfolio aren't independently sourced
+// from a specific Constructive rate sheet term menu the way the LTC/LTV
+// tables above are) meant to catch an obviously-wrong term left over from
+// a loan-type switch, not to be the exact last word on every edge case.
+var LOAN_TYPE_TERM_RANGE = {
+  "Fix & Flip": { min:6, max:24, "default":12 },
+  "Bridge": { min:6, max:36, "default":12 },
+  "Ground Up Construction": { min:12, max:24, "default":18 },
+  "DSCR": { min:120, max:480, "default":360 },
+  "Portfolio/Blanket": { min:120, max:480, "default":360 }
+};
+function clampTermToLoanType(loanType, termMonths){
+  var r = LOAN_TYPE_TERM_RANGE[loanType];
+  if (!r) return termMonths;
+  if (termMonths == null || termMonths < r.min || termMonths > r.max) return r["default"];
+  return termMonths;
+}
 function renderLoanDetailsEditor(lead){
   if (lead.outsideLender && !canManageOutsideLender()){
     return '<div class="section-head" style="margin-top:20px"><h2>Loan Details</h2></div>' +
@@ -10096,7 +10178,9 @@ function renderLoanDetailsEditor(lead){
     '<form data-form="loan-details" data-lead="' + lead.id + '" class="form-two" style="align-items:flex-end">' +
       '<div class="form-row"><label>Loan Amount</label><input class="input" type="number" name="loanAmount" data-action="loan-details-live" data-lead="' + lead.id + '" value="' + (lead.loanAmount!=null?lead.loanAmount:"") + '"></div>' +
       '<div class="form-row"><label>Rate (%)</label><input class="input" type="number" step="0.001" name="rate" data-action="loan-details-live" data-lead="' + lead.id + '" value="' + (lead.rate!=null?lead.rate:"") + '"></div>' +
-      '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths" value="' + (lead.termMonths!=null?lead.termMonths:"") + '"></div>' +
+      '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths"' +
+        (LOAN_TYPE_TERM_RANGE[lead.loanType] ? (' min="' + LOAN_TYPE_TERM_RANGE[lead.loanType].min + '" max="' + LOAN_TYPE_TERM_RANGE[lead.loanType].max + '"') : '') +
+        ' value="' + (lead.termMonths!=null?lead.termMonths:"") + '"></div>' +
       '<div class="form-row"><button class="btn btn-sm btn-primary" type="submit">Save Terms</button></div>' +
     '</form>';
 }
@@ -13262,12 +13346,16 @@ function buildApplicationFieldsHTML(lead, lang, opts){
     // entirely from the public portal rather than shown read-only, so
     // there's nothing here for the borrower's own submission to send back.
     (ui.publicApply
-      ? ('<div class="form-row"><label>' + L("Term (months)") + '</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>')
+      ? ('<div class="form-row"><label>' + L("Term (months)") + '</label><input class="input" type="number" name="termMonths"' +
+            (LOAN_TYPE_TERM_RANGE[lead.loanType] ? (' min="' + LOAN_TYPE_TERM_RANGE[lead.loanType].min + '" max="' + LOAN_TYPE_TERM_RANGE[lead.loanType].max + '"') : '') +
+            ' value="' + v(lead.termMonths) + '"></div>')
       : ('<div class="form-two">' +
           '<div class="form-row"><label>' + L("Loan Amount Requested") + '</label><input class="input" type="number" name="loanAmount" value="' + v(loanAmountDefault) + '">' +
             '<div id="loan-guideline-hint-' + lead.id + '">' + renderLoanGuidelineHint(Object.assign({}, lead, { loanAmount: loanAmountDefault })) + '</div>' +
           '</div>' +
-          '<div class="form-row"><label>' + L("Term (months)") + '</label><input class="input" type="number" name="termMonths" value="' + v(lead.termMonths) + '"></div>' +
+          '<div class="form-row"><label>' + L("Term (months)") + '</label><input class="input" type="number" name="termMonths"' +
+            (LOAN_TYPE_TERM_RANGE[lead.loanType] ? (' min="' + LOAN_TYPE_TERM_RANGE[lead.loanType].min + '" max="' + LOAN_TYPE_TERM_RANGE[lead.loanType].max + '"') : '') +
+            ' value="' + v(lead.termMonths) + '"></div>' +
         '</div>')
     ) +
     buildTrackRecordSectionHTML(lead, lang) +
@@ -14681,6 +14769,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }
+  else if (action === "generate-standalone-term-sheet"){ generateStandalonePricerTermSheet(); }
   else if (action === "logout"){ logout(); }
   else if (action === "restart-tour"){ ui.view = "tour"; ui.tourStep = 0; render(); }
   else if (action === "reset-portal-customization"){ resetPortalCustomization(); }
@@ -14898,7 +14987,10 @@ appEl.addEventListener("change", function(e){
     ui.standalonePricer[spKey] = (STANDALONE_PRICER_NUMERIC_KEYS.indexOf(spKey) !== -1)
       ? (spVal === "" ? null : Number(spVal))
       : (spVal || null);
-    if (spKey === "loanType") ui.standalonePricer.rateOverride = null;
+    if (spKey === "loanType"){
+      ui.standalonePricer.rateOverride = null;
+      ui.standalonePricer.termMonths = clampTermToLoanType(ui.standalonePricer.loanType, ui.standalonePricer.termMonths);
+    }
     render();
   } else if (action === "address-lookup" && t.dataset.lead === "standalone"){
     ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
