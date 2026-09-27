@@ -1848,6 +1848,23 @@ function evaluateRcnFit(lead){
         maxLtvPct = cell.aiLtv;
       }
     }
+    // Rough rate estimate, pulled live from RCN's own broker pricing tool
+    // 9/27/26 (a handful of real test quotes, not their documented rate
+    // sheet -- RCN doesn't publish one the way Constructive does). Rate
+    // moved with credit score but NOT with experience tier across every
+    // combination tested (leverage is what experience actually changes,
+    // via the matrix above) -- 720+ and 650 were the two clean data
+    // points; the real cutoff between them wasn't isolated, so 680 is a
+    // reasonable placeholder, not a confirmed breakpoint. Always confirm
+    // on the real portal before quoting a client.
+    var rcnBridgeRateTier = (lead.creditScore||0) >= 680
+      ? { rate:9.99, lenderPoints:1.00 }
+      : { rate:10.24, lenderPoints:1.19 };
+    var estRate = (lead.creditScore||0) >= 650 ? rcnBridgeRateTier.rate : null;
+    var estLenderPoints = estRate != null ? rcnBridgeRateTier.lenderPoints : null;
+    if (estRate != null){
+      notes.push("Est. rate ~" + estRate + "% (9-month term; 12/18mo price higher) + ~" + estLenderPoints + "% lender points, on top of whatever broker points you set — rough estimate from real portal quotes, not RCN's full rate sheet. Confirm before quoting a client.");
+    }
   } else if (type === "Ground Up Construction"){
     program = "RCN Ground Up Construction";
     if ((lead.creditScore||0) < 650) reasons.push("Below RCN's 650 minimum FICO for Ground Up");
@@ -1859,7 +1876,7 @@ function evaluateRcnFit(lead){
     else estMaxLoan = estByArv!=null ? estByArv : estByLtc;
   }
 
-  return { lender:"RCN", program:program, eligible: reasons.length===0, reasons:reasons, notes:notes, estMaxLoan:estMaxLoan, maxLtvPct:maxLtvPct };
+  return { lender:"RCN", program:program, eligible: reasons.length===0, reasons:reasons, notes:notes, estMaxLoan:estMaxLoan, maxLtvPct:maxLtvPct, estRate: (typeof estRate!=="undefined"?estRate:null), estLenderPoints: (typeof estLenderPoints!=="undefined"?estLenderPoints:null) };
 }
 // Angel Oak Investor Cash Flow (ICF Matrix 7.14.26 + Underwriting
 // Guidelines 8.3.26, both from Joe 2026-09-15) -- eligibility/LTV only,
@@ -10186,6 +10203,49 @@ function setOutsideLender(leadId, lender){
   showToast(lender ? ("Routed to " + lender) : "Set back to in-house / needs manual placement");
   persist();
 }
+// Joe's ask (2026-09-27): when it lands on him, Erika, or Fiore, the file
+// should just say which lender to use -- defaulting to whichever nets
+// Bridgepoint the most. Deliberately does NOT fabricate a revenue number
+// out of an assumed points value -- uses whatever's actually set as Points
+// Charged on the file (the same assumed points on both sides, since that's
+// the real plan already on record), and simply doesn't rank by revenue at
+// all until that's set, rather than guessing at a "typical" split.
+function computeLenderRecommendation(lead){
+  if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return null;
+  var pts = lead.pointsCharged;
+  var options = [];
+  var inHouseMax = computeMaxLoanAmount(lead);
+  if (inHouseMax && inHouseMax.amount != null && !inHouseMax.hitFlatCeiling){
+    var inHouseLoan = Math.floor(inHouseMax.amount);
+    var inHouseResult = evaluatePricing(Object.assign({}, lead, { loanAmount: inHouseLoan }), { points:"0.00", transactionType: lead.transactionType||"purchase", prepayTerm: lead.prepayTerm||"5yr", propertyType: lead.propertyType||"SFR" });
+    if (inHouseResult && !inHouseResult.ineligible){
+      options.push({ lender:"Constructive Capital (in-house)", rate: inHouseResult.rate, loanAmount: inHouseLoan, isEstimate:false,
+        netRevenue: pts!=null ? Math.round(inHouseLoan * pts/100) : null });
+    }
+  }
+  var rcn = evaluateRcnFit(lead);
+  if (rcn && rcn.eligible && rcn.estRate != null && rcn.estMaxLoan != null){
+    options.push({ lender:"RCN", rate: rcn.estRate, loanAmount: rcn.estMaxLoan, isEstimate:true,
+      netRevenue: pts!=null ? Math.round(rcn.estMaxLoan * pts/100) : null });
+  }
+  if (options.length < 2) return null;
+  var hasRevenue = pts != null;
+  if (hasRevenue) options.sort(function(a,b){ return (b.netRevenue||0) - (a.netRevenue||0); });
+  return { options: options, hasRevenue: hasRevenue };
+}
+function renderLenderRecommendation(lead){
+  var rec = computeLenderRecommendation(lead);
+  if (!rec) return '';
+  var rows = rec.options.map(function(o, i){
+    return '<div class="doc-row"><div><div>' + (i===0 && rec.hasRevenue ? '⭐ ' : '') + esc(o.lender) + (o.isEstimate ? ' <span class="hint">(rough estimate)</span>' : '') + '</div>' +
+      '<div class="cell-sub">' + fmtPct(o.rate) + ' · ' + fmtUSD(o.loanAmount) + (o.netRevenue!=null ? (' · nets you ~' + fmtUSD(o.netRevenue)) : '') + '</div></div></div>';
+  }).join("");
+  return '<div class="panel panel-pad" style="margin-top:10px">' +
+    '<div class="rail-title" style="margin-bottom:4px">Lender Comparison' + (rec.hasRevenue ? (' — Recommended: ' + esc(rec.options[0].lender)) : '') + '</div>' +
+    rows +
+    (rec.hasRevenue ? '<div class="footnote" style="padding-top:6px">Ranked by what Points Charged on this file would net you at each lender — not a client-facing recommendation on its own, factor in rate/service too.</div>' : '<div class="footnote" style="padding-top:6px">Set Points Charged on this file to rank these by what each nets you.</div>') +
+  '</div>';
+}
 function renderOutsideLenderBox(lead, guidelineStatus){
   var current = lead.outsideLender || "";
   // Joe's explicit rule (2026-09-09): default to Constructive Capital
@@ -10204,6 +10264,7 @@ function renderOutsideLenderBox(lead, guidelineStatus){
     '<div class="rail-title" style="margin-bottom:4px">Where This Is Being Placed</div>' +
     '<div class="footnote" style="padding-bottom:6px">Only you, Fiore, and Erika can set this. Every other LO just sees the current placement, read-only.</div>' +
     '<select class="select" data-action="set-outside-lender" data-lead="' + lead.id + '">' + options + '</select>' +
+    renderLenderRecommendation(lead) +
   '</div>';
 }
 var GUIDELINE_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction","Portfolio/Blanket"];
