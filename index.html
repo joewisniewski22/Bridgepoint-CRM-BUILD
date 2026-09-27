@@ -3502,8 +3502,10 @@ function buildPreApprovalLetter(lead, langOverride){
   var today = todayISO();
   var expires = addDaysISO(today, 30);
   var lang = langOverride || lead.preferredLanguage || "en";
-  var isRehabType = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
-  var ltvRatio = (isRehabType && lead.arv && lead.loanAmount) ? (Math.round((lead.loanAmount/lead.arv)*1000)/10) : (isRehabType ? null : lead.ltv);
+  // Joe's ask (2026-09-27), system-wide: a pre-approval confirms the
+  // borrower can proceed, it doesn't quote loan amount/rate/term/LTV --
+  // those aren't final yet and belong on the term sheet (which already
+  // carries its own "not a commitment to lend" language), not here.
   var lines = [];
   if (lang === "es"){
     lines.push("BRIDGEPOINT LENDING");
@@ -3515,13 +3517,9 @@ function buildPreApprovalLetter(lead, langOverride){
     lines.push("");
     lines.push("Estimado(a) " + (lead.name || "Cliente") + ",");
     lines.push("");
-    lines.push("Con base en la información proporcionada, Bridgepoint Lending se complace en emitir esta preaprobación para el préstamo detallado a continuación, sujeta a la suscripción final, avalúo, título y documentación satisfactoria.");
+    lines.push("Con base en la información proporcionada, Bridgepoint Lending se complace en emitir esta preaprobación para proceder con su solicitud de préstamo, sujeta a la suscripción final, avalúo, título y documentación satisfactoria.");
     lines.push("");
     lines.push("Tipo de Préstamo: " + (tr(lead.loanType, "es") || "Por determinar"));
-    lines.push("Monto del Préstamo: " + fmtUSD(lead.loanAmount));
-    lines.push("Tasa Estimada: " + (lead.rate ? fmtPct(lead.rate) : "Por determinar — sujeta a bloqueo de tasa"));
-    lines.push("Plazo: " + (lead.termMonths ? (lead.termMonths + " meses") : "Por determinar"));
-    lines.push((isRehabType ? "Préstamo sobre Valor Después de Reparación: " : "Relación Préstamo-Valor: ") + (ltvRatio ? (ltvRatio + "%") : "Por determinar"));
     lines.push("Propiedad en Cuestión: " + (lead.propertyAddress || "Por determinar"));
     lines.push("Estrategia de Salida: " + (tr(lead.exitStrategy, "es") || "Por determinar"));
     lines.push("");
@@ -3541,13 +3539,9 @@ function buildPreApprovalLetter(lead, langOverride){
     lines.push("");
     lines.push("Dear " + (lead.name || "Borrower") + ",");
     lines.push("");
-    lines.push("Based on the information provided, Bridgepoint Lending is pleased to issue this pre-approval for the loan outlined below, subject to final underwriting, appraisal, title, and satisfactory documentation.");
+    lines.push("Based on the information provided, Bridgepoint Lending is pleased to issue this pre-approval to proceed with your loan application, subject to final underwriting, appraisal, title, and satisfactory documentation.");
     lines.push("");
     lines.push("Loan Type: " + (lead.loanType || "TBD"));
-    lines.push("Loan Amount: " + fmtUSD(lead.loanAmount));
-    lines.push("Estimated Rate: " + (lead.rate ? fmtPct(lead.rate) : "TBD — subject to rate lock"));
-    lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
-    lines.push((isRehabType ? "Loan to After-Repair Value: " : "Loan-to-Value: ") + (ltvRatio ? (ltvRatio + "%") : "TBD"));
     lines.push("Subject Property: " + (lead.propertyAddress || "TBD"));
     lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
     lines.push("");
