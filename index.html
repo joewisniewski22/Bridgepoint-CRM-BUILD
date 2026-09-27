@@ -3502,10 +3502,10 @@ function buildPreApprovalLetter(lead, langOverride){
   var today = todayISO();
   var expires = addDaysISO(today, 30);
   var lang = langOverride || lead.preferredLanguage || "en";
-  // Joe's ask (2026-09-27), system-wide: a pre-approval confirms the
-  // borrower can proceed, it doesn't quote loan amount/rate/term/LTV --
-  // those aren't final yet and belong on the term sheet (which already
-  // carries its own "not a commitment to lend" language), not here.
+  // Joe's ask (2026-09-27), system-wide: a pre-approval can state the loan
+  // amount, but never a rate (or term/LTV, which are downstream of rate) --
+  // those aren't locked until underwriting and belong on the term sheet
+  // (which already carries its own "not a commitment to lend" language).
   var lines = [];
   if (lang === "es"){
     lines.push("BRIDGEPOINT LENDING");
@@ -3520,6 +3520,7 @@ function buildPreApprovalLetter(lead, langOverride){
     lines.push("Con base en la información proporcionada, Bridgepoint Lending se complace en emitir esta preaprobación para proceder con su solicitud de préstamo, sujeta a la suscripción final, avalúo, título y documentación satisfactoria.");
     lines.push("");
     lines.push("Tipo de Préstamo: " + (tr(lead.loanType, "es") || "Por determinar"));
+    lines.push("Monto del Préstamo: " + fmtUSD(lead.loanAmount));
     lines.push("Propiedad en Cuestión: " + (lead.propertyAddress || "Por determinar"));
     lines.push("Estrategia de Salida: " + (tr(lead.exitStrategy, "es") || "Por determinar"));
     lines.push("");
@@ -3542,6 +3543,7 @@ function buildPreApprovalLetter(lead, langOverride){
     lines.push("Based on the information provided, Bridgepoint Lending is pleased to issue this pre-approval to proceed with your loan application, subject to final underwriting, appraisal, title, and satisfactory documentation.");
     lines.push("");
     lines.push("Loan Type: " + (lead.loanType || "TBD"));
+    lines.push("Loan Amount: " + fmtUSD(lead.loanAmount));
     lines.push("Subject Property: " + (lead.propertyAddress || "TBD"));
     lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
     lines.push("");
