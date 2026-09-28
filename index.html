@@ -8593,6 +8593,9 @@ function renderShell(){
         '<div class="role-box">' +
           '<b>' + esc(currentUser().name) + '</b><br>' +
           (currentUser().role==="owner" ? "Owner" : currentUser().role==="processor" ? "Processor" : "Loan Officer") +
+          (isDemo() ? '' : ('<button type="button" data-action="open-modal" data-modal="todaysSchedule" style="display:block;width:100%;margin-top:10px;padding:10px;border-radius:8px;border:none;background:var(--brand);color:#fff;font-weight:700;text-align:left;cursor:pointer">' +
+            '📅 Today\'s Schedule' + (myScheduleItems(currentUser().id, {todayOnly:true}).length ? (' <span style="background:rgba(255,255,255,0.25);border-radius:10px;padding:1px 8px;margin-left:4px">' + myScheduleItems(currentUser().id, {todayOnly:true}).length + '</span>') : '') +
+          '</button>')) +
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">' +
             (isDemo() ? '<button class="btn btn-sm btn-primary" style="flex:1" data-action="restart-tour">▶ Replay Tour</button>' : '<button class="btn btn-sm" style="flex:1" data-action="open-modal" data-modal="changePin">Change PIN</button>') +
             (isDemo() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="editSignature">Signature</button>') +
@@ -9688,15 +9691,45 @@ function renderCoaching(){
   return topbar("Coaching", isOwner() ? "AI coaching notes across the team — real calls, lost deals, and next-conversation tips." : "Your AI coaching notes — real calls, lost deals, and tips for your next conversation with each client.", "") +
     '<div class="content">' + (rows || '<div class="empty">No coaching notes yet — they show up after calls, when a deal is marked lost, or when you click Get Tip on a lead.</div>') + '</div>';
 }
+// Combines the two separate sources of "something on my calendar" -- real
+// booked appointments (appointments table) and client-requested callbacks
+// (leads.next_follow_up_at, set from the Log Call "Requested call back"
+// flow) -- into one sorted list. Before this, the calendar widget only read
+// appointments, so a callback (like Mike Bodhaine's) was invisible on the
+// home page even though it was a real, scheduled commitment (Joe's report,
+// 2026-09-28: "my appointment with mike was nowhere to be found").
+function myScheduleItems(uid, opts){
+  opts = opts || {};
+  var nowTsVal = Date.now();
+  var items = [];
+  (state.appointments||[]).forEach(function(a){
+    if (a.userId !== uid || a.status === "canceled") return;
+    var t = new Date(a.startAt).getTime();
+    if (opts.todayOnly ? !isToday(a.startAt) : t < nowTsVal) return;
+    items.push({ kind:"appointment", at:a.startAt, label:a.name, sub:a.notes||"", leadId:a.leadId||null });
+  });
+  state.leads.forEach(function(l){
+    if (l.assignedTo !== uid || l.status !== "active" || !l.nextFollowUpAt) return;
+    var t = new Date(l.nextFollowUpAt).getTime();
+    if (opts.todayOnly ? !isToday(l.nextFollowUpAt) : t < nowTsVal) return;
+    items.push({ kind:"callback", at:l.nextFollowUpAt, label:l.name, sub:(l.nextFollowUpNote||"").replace(/^Call back requested:?\s*/,""), leadId:l.id });
+  });
+  items.sort(function(a,b){ return new Date(a.at) - new Date(b.at); });
+  return items;
+}
+function isToday(iso){
+  var d = new Date(iso), n = new Date();
+  return d.getFullYear()===n.getFullYear() && d.getMonth()===n.getMonth() && d.getDate()===n.getDate();
+}
 function renderMyCalendarWidget(){
   if (isDemo()) return "";
   var uid = currentUser().id;
   var link = bookingLinkFor(uid);
-  var nowTsVal = Date.now();
-  var upcoming = (state.appointments||[]).filter(function(a){ return a.userId===uid && a.status!=="canceled" && new Date(a.startAt).getTime() >= nowTsVal; }).sort(function(a,b){ return new Date(a.startAt)-new Date(b.startAt); });
-  var next3 = upcoming.slice(0,3).map(function(a){
+  var upcoming = myScheduleItems(uid);
+  var next3 = upcoming.slice(0,3).map(function(item){
+    var icon = item.kind === "callback" ? "☎" : "📅";
     return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-soft)">' +
-      '<span><b>' + esc(a.name) + '</b> — ' + new Date(a.startAt).toLocaleString([], {weekday:"short", month:"short", day:"numeric", hour:"numeric", minute:"2-digit"}) + '</span>' +
+      '<span>' + icon + ' <b>' + esc(item.label) + '</b> — ' + new Date(item.at).toLocaleString([], {weekday:"short", month:"short", day:"numeric", hour:"numeric", minute:"2-digit"}) + (item.sub ? (' <span class="hint">— ' + esc(item.sub.slice(0,40)) + '</span>') : '') + '</span>' +
     '</div>';
   }).join("");
   return '<div class="panel panel-pad" style="margin-bottom:16px;border-color:var(--brand)">' +
@@ -9709,6 +9742,24 @@ function renderMyCalendarWidget(){
     '</div>' +
     (next3 || '<div class="hint" style="padding-top:4px">Nothing booked yet — share your link above so clients can grab a time.</div>') +
   '</div>';
+}
+function modalTodaysSchedule(){
+  var uid = currentUser().id;
+  var items = myScheduleItems(uid, { todayOnly:true });
+  var rows = items.length ? items.map(function(item){
+    var icon = item.kind === "callback" ? "☎ Call back" : "📅 Appointment";
+    return '<div class="form-row" style="cursor:pointer" data-action="select-lead-from-modal" data-lead="' + (item.leadId||"") + '">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center">' +
+        '<div><b>' + new Date(item.at).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}) + '</b> — ' + icon + ': ' + esc(item.label) + (item.sub ? ('<div class="hint">' + esc(item.sub) + '</div>') : '') + '</div>' +
+      '</div>' +
+    '</div>';
+  }).join("") : '<div class="empty">Nothing on your calendar today.</div>';
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Today\'s Schedule</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' + rows + '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Close</button></div>' +
+    '</div></div>';
 }
 function renderQueueCard(item, opts){
   var lead = leadById(item.leadId);
@@ -13188,6 +13239,7 @@ function renderModal(){
   if (ui.modal.type === "scopeOfWork") return modalScopeOfWork(ui.modal.leadId);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   if (ui.modal.type === "mySchedule") return modalMySchedule();
+  if (ui.modal.type === "todaysSchedule") return modalTodaysSchedule();
   if (ui.modal.type === "myAch") return modalMyAch();
   if (ui.modal.type === "confirmMarkPayrollPaid") return modalMarkPayrollPaid();
   if (ui.modal.type === "sendPreview") return modalSendPreview(ui.modal.leadId, ui.modal.kind);
@@ -15126,6 +15178,7 @@ appEl.addEventListener("click", function(e){
     render();
   }
   else if (action === "select-lead"){ ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); }
+  else if (action === "select-lead-from-modal"){ if (t.dataset.lead){ ui.modal=null; ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); } }
   else if (action === "go-to-contacts"){ ui.view="contacts"; ui.selectedLeadId=null; render(); }
   else if (action === "reveal-ssn"){ revealGuarantorSsn(t.dataset.lead); }
   else if (action === "hide-ssn"){ hideGuarantorSsn(t.dataset.lead); }
