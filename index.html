@@ -2929,9 +2929,15 @@ function computeQueueForLeads(leads, userId, today){
     if (lead.status==="active" && CADENCE_STAGES.indexOf(lead.stage) !== -1){
       var attempts = lead.callAttempts || [];
       var connected = attempts.some(function(a){ return a.outcome==="connected" || a.outcome==="callback"; });
-      // A client who asked to be called back on a future date isn't chased
-      // in the meantime (Belinda on deployment until November).
-      var callbackLater = !!(lead.nextFollowUp && dateOnly(new Date(lead.nextFollowUp+"T00:00:00")) > today);
+      // A client who asked to be called back later isn't chased in the
+      // meantime -- whether that's a future date (Belinda on deployment
+      // until November) or later THIS SAME day (Mike Bodhaine asked for
+      // 3pm and kept getting a single ring from the power dialer at 10am
+      // because this only compared calendar dates, never the actual time).
+      // nextFollowUpAt is always set alongside nextFollowUp (defaults to
+      // 9am when no specific time was given), so comparing against it
+      // directly is safe and strictly more correct than the date-only check.
+      var callbackLater = !!(lead.nextFollowUpAt && new Date(lead.nextFollowUpAt).getTime() > Date.now());
       if (!connected && !callbackLater && attempts.length < CADENCE_MAX){
         var last = attempts[attempts.length-1];
         var lastDate = last ? new Date(last.date+"T00:00:00") : null;
@@ -2994,11 +3000,19 @@ function computeQueueForLeads(leads, userId, today){
     if (lead.status==="active" && lead.nextFollowUp){
       var fu = dateOnly(new Date(lead.nextFollowUp+"T00:00:00"));
       var isCallback = /^Call back requested/.test(lead.nextFollowUpNote || "");
-      // Already called today? Don't re-list it in the same dialer session -- unless
-      // it's a callback timed for later today.
-      var timedLaterToday = !!(lead.nextFollowUpAt && new Date(lead.nextFollowUpAt).getTime() > Date.now());
+      // Real bug (2026-09-28): a callback timed for later today (say, 3pm)
+      // used to become dialer-eligible the moment its calendar date arrived
+      // -- 10am, 11am, any time -- because this only ever compared dates,
+      // never the actual time. Mike Bodhaine kept getting a single ring
+      // from the power dialer hours before the 3pm he'd actually asked
+      // for. notYetDue is the hard gate now: nothing with a future
+      // nextFollowUpAt is dialer-eligible, full stop, regardless of
+      // whether it was also attempted earlier today.
+      var notYetDue = !!(lead.nextFollowUpAt && new Date(lead.nextFollowUpAt).getTime() > Date.now());
       var fuContactedToday = (lead.callAttempts||[]).some(function(a){ return a.date === todayISO(); });
-      if (fu <= today && (!fuContactedToday || timedLaterToday)){
+      // Already called today? Don't re-list it in the same dialer session --
+      // unless it's a real callback whose due time has now actually passed.
+      if (fu <= today && !notYetDue && (!fuContactedToday || isCallback)){
         items.push({
           type:"followup", leadId:lead.id, priority: isCallback ? 4 : 2,
           label: isCallback
