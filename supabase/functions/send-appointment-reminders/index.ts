@@ -1,11 +1,11 @@
 // Runs every 5 minutes via pg_cron. Texts the staff member an appointment
-// is coming up in ~30 minutes -- whether they booked it themselves or a
+// is coming up in ~10 minutes -- whether they booked it themselves or a
 // client self-booked it through the public booking link (appointments.user_id
 // is who it's for either way). Joe's ask 2026-09-28: "send me text reminders
 // of this and all of my appointments whether i make them or the client
-// does" -- then widened to the whole team, so this targets whichever staff
-// member the appointment actually belongs to, same as the existing
-// send-callback-reminders does for leads.next_follow_up_at.
+// does" -- widened to the whole team, then refined the same day to "10
+// minutes before each a text with who they're calling and about what" (was
+// originally 30 minutes, with no topic in the text).
 //
 // Dedupe lives in its own table (appointment_reminders_sent, keyed by
 // appointment + start time) rather than a flag on the appointment row, same
@@ -18,7 +18,7 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-const REMINDER_LEAD_MS = 30 * 60 * 1000; // remind ~30 min before start
+const REMINDER_LEAD_MS = 10 * 60 * 1000; // remind ~10 min before start
 const CATCH_WINDOW_MS = 10 * 60 * 1000; // 5-min cron cadence + buffer, so nothing falls between runs
 
 Deno.serve(async () => {
@@ -27,7 +27,7 @@ Deno.serve(async () => {
   const windowEnd = new Date(now + REMINDER_LEAD_MS).toISOString();
 
   const { data: appts, error } = await sb.from("appointments")
-    .select("id, user_id, lead_id, name, phone, start_at, status")
+    .select("id, user_id, lead_id, name, phone, notes, start_at, status")
     .eq("status", "scheduled")
     .gte("start_at", windowStart)
     .lte("start_at", windowEnd);
@@ -44,7 +44,8 @@ Deno.serve(async () => {
     const { data: staff } = await sb.from("users").select("phone").eq("id", userId).single();
     const startLocal = new Date(startAt).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
     const link = appt.lead_id ? (CRM_URL + "?lead=" + appt.lead_id) : CRM_URL;
-    const text = "📅 Appointment with " + (appt.name || "a client") + " at " + startLocal + (appt.phone ? (" (" + appt.phone + ")") : "") + " — " + link;
+    const notesBit = appt.notes ? (" — " + String(appt.notes).slice(0, 160)) : "";
+    const text = "📅 " + (appt.name || "A client") + " at " + startLocal + (appt.phone ? (" (" + appt.phone + ")") : "") + notesBit + " — " + link;
 
     await sb.from("notifications").insert({
       id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: userId, lead_id: appt.lead_id || null, kind: "appointment",
