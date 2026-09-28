@@ -4891,7 +4891,8 @@ function rowToPayrollEntry(r){
   return {
     id: r.id, leadId: r.lead_id || null, personId: r.person_id, role: r.role,
     fileLabel: r.file_label || null, amount: Number(r.amount), status: r.status,
-    note: r.note || "", entryDate: r.entry_date, createdBy: r.created_by || null
+    note: r.note || "", entryDate: r.entry_date, createdBy: r.created_by || null,
+    transactionId: r.transaction_id || null, paidAt: r.paid_at || null, paidBy: r.paid_by || null
   };
 }
 function rowToReferralPartner(r){
@@ -6516,6 +6517,72 @@ function revealGuarantorSsn(leadId){
 function hideGuarantorSsn(){
   if (ssnReveal && ssnReveal.timer) clearTimeout(ssnReveal.timer);
   ssnReveal = null;
+  render();
+}
+// Employee direct-deposit info (Joe's ask, 2026-09-28): each employee
+// submits their own routing/account number once, encrypted server-side
+// exactly like guarantor SSN (get_employee_ach_full enforces owner-only,
+// same reasoning as the SSN reveal above -- held in memory only, auto-hides
+// after 30s, never written to any persisted state).
+var achReveal = null;
+function openMyAchModal(){
+  ui.modal = { type:"myAch" };
+  ui.myAchStatus = { stage:"loading" };
+  render();
+  if (!sb){ ui.myAchStatus = { stage:"ready", data:null }; render(); return; }
+  sb.rpc("get_my_ach_status").then(function(res){
+    if (!ui.modal || ui.modal.type !== "myAch") return;
+    if (res.error){ ui.myAchStatus = { stage:"ready", data:null }; render(); return; }
+    ui.myAchStatus = { stage:"ready", data: (res.data && res.data[0]) || null };
+    render();
+  }).catch(function(){
+    if (!ui.modal || ui.modal.type !== "myAch") return;
+    ui.myAchStatus = { stage:"ready", data:null };
+    render();
+  });
+}
+function saveMyAch(fd){
+  if (!sb) return;
+  sb.rpc("set_employee_ach", {
+    p_user_id: currentUser().id,
+    p_account_holder_name: (fd.get("accountHolderName")||"").trim() || null,
+    p_bank_name: (fd.get("bankName")||"").trim() || null,
+    p_account_type: fd.get("accountType") || null,
+    p_routing_number: (fd.get("routingNumber")||"").trim() || null,
+    p_account_number: (fd.get("accountNumber")||"").trim() || null
+  }).then(function(res){
+    if (res.error){ showToast("Couldn't save — try again"); return; }
+    showToast("Direct deposit info saved");
+    ui.modal = null;
+    render();
+  }).catch(function(){ showToast("Couldn't save — try again"); });
+}
+function loadAchStatusForPayroll(){
+  if (!sb) return;
+  ui.achStatusByUser = {};
+  sb.rpc("get_all_ach_status").then(function(res){
+    if (res.error || !res.data) return;
+    var map = {};
+    res.data.forEach(function(r){ map[r.user_id] = r; });
+    ui.achStatusByUser = map;
+    render();
+  }).catch(function(){});
+}
+function revealEmployeeAch(userId){
+  if (!sb) return;
+  if (achReveal && achReveal.timer) clearTimeout(achReveal.timer);
+  achReveal = { userId: userId, stage:"loading" };
+  render();
+  sb.rpc("get_employee_ach_full", { p_user_id: userId }).then(function(res){
+    if (res.error || !res.data || !res.data[0]){ achReveal = null; showToast("Couldn't reveal — nothing on file"); render(); return; }
+    var d = res.data[0];
+    achReveal = { userId: userId, stage:"ready", data:d, timer: setTimeout(function(){ achReveal = null; render(); }, 30000) };
+    render();
+  }).catch(function(){ achReveal = null; showToast("Couldn't reveal"); render(); });
+}
+function hideEmployeeAch(){
+  if (achReveal && achReveal.timer) clearTimeout(achReveal.timer);
+  achReveal = null;
   render();
 }
 // Joe's ask (2026-09-22): LOs need a real, visible way to fix a client's
@@ -8530,6 +8597,7 @@ function renderShell(){
             (isDemo() ? '<button class="btn btn-sm btn-primary" style="flex:1" data-action="restart-tour">▶ Replay Tour</button>' : '<button class="btn btn-sm" style="flex:1" data-action="open-modal" data-modal="changePin">Change PIN</button>') +
             (isDemo() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="editSignature">Signature</button>') +
             (isDemo() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="mySchedule">My Schedule</button>') +
+            (isDemo() || isOwner() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-my-ach">Direct Deposit</button>') +
             '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="logout">Log Out</button>' +
           '</div>' +
         '</div>' +
@@ -11424,7 +11492,8 @@ function normalizeEntry(e){
   return {
     id: e.id, leadId: e.leadId, personId: e.personId, role: e.role, amount: e.amount, status: e.status,
     fileLabel: e.leadId ? (leadById(e.leadId) ? (leadById(e.leadId).name + " · " + leadById(e.leadId).loanType) : e.fileLabel) : e.fileLabel,
-    entryDate: e.entryDate, personName: (person && person.name) || e.personId, note: e.note
+    entryDate: e.entryDate, personName: (person && person.name) || e.personId, note: e.note,
+    transactionId: e.transactionId || null, paidAt: e.paidAt || null
   };
 }
 function payrollRowHTML(r, showMarkPaid){
@@ -11434,8 +11503,8 @@ function payrollRowHTML(r, showMarkPaid){
     '<td>' + esc(r.personName) + ' <span class="hint">(' + (r.role==="lo"?"LO":"Processor") + ')</span></td>' +
     '<td class="num"><b>' + fmtUSD(r.amount) + '</b></td>' +
     '<td>' + (showMarkPaid
-      ? ('<button class="btn btn-sm" type="button" data-action="mark-payroll-paid" data-entry-id="' + (r.id||"") + '" data-lead-id="' + (r.leadId||"") + '" data-person-id="' + esc(r.personId) + '" data-role="' + r.role + '" data-amount="' + r.amount + '" data-file-label="' + esc(r.fileLabel||"") + '">Mark Paid</button>')
-      : '<span class="badge badge-forest">Paid</span>') + '</td>' +
+      ? ('<button class="btn btn-sm" type="button" data-action="mark-payroll-paid" data-entry-id="' + (r.id||"") + '" data-lead-id="' + (r.leadId||"") + '" data-person-id="' + esc(r.personId) + '" data-role="' + r.role + '" data-amount="' + r.amount + '" data-file-label="' + esc(r.fileLabel||"") + '" data-person-name="' + esc(r.personName||"") + '">Mark Paid</button>')
+      : ('<span class="badge badge-forest">Paid</span>' + (r.transactionId ? ('<div class="cell-sub">Txn: ' + esc(r.transactionId) + '</div>') : '') + (r.paidAt ? ('<div class="cell-sub">' + fmtDate(String(r.paidAt).slice(0,10)) + '</div>') : ''))) + '</td>' +
   '</tr>';
 }
 function renderPayroll(){
@@ -11473,12 +11542,37 @@ function renderPayroll(){
         '<div class="form-row"><label>Status</label><select class="select" name="status"><option value="outstanding">Outstanding</option><option value="paid">Paid</option></select></div>' +
       '</div>' +
       '<div class="form-row"><label>Note (optional)</label><input class="input" name="note" placeholder="e.g. Loan entered in old system, prior to this CRM"></div>' +
+      '<div class="form-row"><label>Transaction ID (optional, if already paid)</label><input class="input" name="transactionId" placeholder="e.g. Capital One confirmation number"></div>' +
       '<button class="btn btn-sm btn-primary" type="submit" style="margin-top:6px">Add Entry</button>' +
     '</form>' +
   '</div>';
 
+  var staff = state.users.filter(function(u){ return u.role !== "owner" && !isDemoAccountId(u.id); });
+  var achMap = ui.achStatusByUser || null;
+  var bankingRows = staff.map(function(u){
+    var st = achMap ? achMap[u.id] : undefined;
+    var revealed = achReveal && achReveal.userId === u.id ? achReveal : null;
+    var statusCell = st
+      ? ('<span class="badge badge-forest">On file</span> <span class="hint">' + esc(st.bank_name||"") + ' ' + esc(st.account_type||"") + ' ····' + esc(st.account_number_last4||"") + '</span>')
+      : '<span class="hint">Not submitted</span>';
+    var actionCell = revealed
+      ? (revealed.stage === "loading"
+          ? '<span class="hint">Retrieving…</span>'
+          : ('<div style="font-family:monospace;font-size:0.9rem">' + esc(revealed.data.account_holder_name||"") + ' — Routing ' + esc(revealed.data.routing_number||"") + ' — Acct ' + esc(revealed.data.account_number||"") + '</div><a href="#" data-action="hide-employee-ach">Hide</a> <span class="hint">· auto-hides in 30s</span>')
+        )
+      : (st ? '<a href="#" data-action="reveal-employee-ach" data-user="' + u.id + '">View full account info</a>' : '<span class="hint">—</span>');
+    return '<tr><td>' + esc(u.name) + '</td><td>' + statusCell + '</td><td>' + actionCell + '</td></tr>';
+  }).join("");
+  var bankingSection = '<div class="panel panel-pad" style="margin-bottom:20px">' +
+    '<div class="rail-title" style="margin-bottom:8px">Team Banking Info</div>' +
+    '<div class="footnote" style="padding:0 0 10px">Where each employee\'s direct deposit info lands once they fill it out from their own login. Look up an account here, send the ACH from your own bank, then come back and mark the deal paid with the transaction ID below.</div>' +
+    (achMap ? '' : '<div class="footnote" style="padding:0 0 10px">Loading…</div>') +
+    '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Status</th><th>Account</th></tr></thead><tbody>' + bankingRows + '</tbody></table></div>' +
+  '</div>';
+
   return topbar("Payroll", "Who's owed what on every closed loan — loan officer commission (their negotiated split of points, 70% on self-generated business, always 50% of YSP) and processing fee (100% to processing) — plus any historical entries from before this CRM.", "") +
     '<div class="content">' +
+      bankingSection +
       addForm +
       '<div class="section-head"><h2>Outstanding</h2></div>' + outstandingTable +
       '<div class="section-head" style="margin-top:24px"><h2>Paid</h2></div>' + paidTable +
@@ -11486,27 +11580,44 @@ function renderPayroll(){
 }
 function markPayrollEntryPaid(btn){
   var d = btn.dataset;
-  if (!sb) return;
-  if (d.entryId){
-    sb.from("payroll_entries").update({ status:"paid" }).eq("id", d.entryId).then(function(res){
+  ui.modal = {
+    type: "confirmMarkPayrollPaid", entryId: d.entryId||null, leadId: d.leadId||null,
+    personId: d.personId, role: d.role, amount: Number(d.amount), fileLabel: d.fileLabel||"",
+    personName: d.personName||""
+  };
+  render();
+}
+function confirmMarkPayrollPaid(fd){
+  var m = ui.modal;
+  if (!sb || !m) return;
+  var transactionId = (fd.get("transactionId")||"").trim() || null;
+  var paidDate = fd.get("paidDate") || todayISO();
+  var paidAtIso = new Date(paidDate + "T12:00:00").toISOString();
+  if (m.entryId){
+    sb.from("payroll_entries").update({
+      status:"paid", transaction_id: transactionId, paid_at: paidAtIso, paid_by: currentUser().id
+    }).eq("id", m.entryId).then(function(res){
       if (res.error){ showToast("Couldn't update — try again"); return; }
-      var e = (state.payrollEntries||[]).filter(function(x){ return x.id===d.entryId; })[0];
-      if (e) e.status = "paid";
+      var e = (state.payrollEntries||[]).filter(function(x){ return x.id===m.entryId; })[0];
+      if (e){ e.status = "paid"; e.transactionId = transactionId; e.paidAt = paidAtIso; }
       showToast("Marked paid");
+      ui.modal = null;
       render();
     });
   } else {
     var id = "pe-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
     var row = {
-      id:id, lead_id: d.leadId||null, person_id: d.personId, role: d.role,
-      file_label: d.leadId ? null : d.fileLabel, amount: Number(d.amount), status:"paid",
-      note: null, entry_date: todayISO(), created_by: currentUser().id
+      id:id, lead_id: m.leadId||null, person_id: m.personId, role: m.role,
+      file_label: m.leadId ? null : m.fileLabel, amount: Number(m.amount), status:"paid",
+      note: null, entry_date: todayISO(), created_by: currentUser().id,
+      transaction_id: transactionId, paid_at: paidAtIso, paid_by: currentUser().id
     };
     sb.from("payroll_entries").insert(row).then(function(res){
       if (res.error){ showToast("Couldn't save — try again"); return; }
       state.payrollEntries = state.payrollEntries || [];
       state.payrollEntries.push(rowToPayrollEntry(row));
       showToast("Marked paid");
+      ui.modal = null;
       render();
     });
   }
@@ -11514,10 +11625,15 @@ function markPayrollEntryPaid(btn){
 function addManualPayrollEntry(fd){
   if (!sb) return;
   var id = "pe-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
+  var status = fd.get("status");
+  var transactionId = (fd.get("transactionId")||"").trim() || null;
   var row = {
     id:id, lead_id:null, person_id: fd.get("personId"), role: fd.get("role"),
-    file_label: fd.get("fileLabel"), amount: Number(fd.get("amount")), status: fd.get("status"),
-    note: fd.get("note") || null, entry_date: todayISO(), created_by: currentUser().id
+    file_label: fd.get("fileLabel"), amount: Number(fd.get("amount")), status: status,
+    note: fd.get("note") || null, entry_date: todayISO(), created_by: currentUser().id,
+    transaction_id: status === "paid" ? transactionId : null,
+    paid_at: status === "paid" ? new Date().toISOString() : null,
+    paid_by: status === "paid" ? currentUser().id : null
   };
   sb.from("payroll_entries").insert(row).then(function(res){
     if (res.error){ showToast("Couldn't save — try again"); return; }
@@ -13047,6 +13163,8 @@ function renderModal(){
   if (ui.modal.type === "scopeOfWork") return modalScopeOfWork(ui.modal.leadId);
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   if (ui.modal.type === "mySchedule") return modalMySchedule();
+  if (ui.modal.type === "myAch") return modalMyAch();
+  if (ui.modal.type === "confirmMarkPayrollPaid") return modalMarkPayrollPaid();
   if (ui.modal.type === "sendPreview") return modalSendPreview(ui.modal.leadId, ui.modal.kind);
   if (ui.modal.type === "composeEmail") return modalComposeEmail(ui.modal);
   if (ui.modal.type === "sendTeamMessage") return modalSendTeamMessage(ui.modal);
@@ -13133,6 +13251,53 @@ function modalSendBack(leadId){
         '<div class="form-row"><label>What\'s missing or incomplete?</label><textarea class="textarea" name="note" rows="3" placeholder="e.g. Bank statements are missing page 2, purchase contract isn\'t signed…" required></textarea></div>' +
       '</div>' +
       '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Send Back</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+function modalMyAch(){
+  var st = ui.myAchStatus || { stage:"loading" };
+  var body, foot;
+  if (st.stage === "loading"){
+    body = '<div class="empty">Loading…</div>';
+    foot = '<button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button>';
+  } else {
+    var d = st.data;
+    var statusNote = d
+      ? ('<div class="footnote" style="padding:0 0 10px;color:var(--c-forest)">On file: ' + esc(d.bank_name||"") + ' ' + esc(d.account_type||"") + ' ending ' + esc(d.account_number_last4||"----") + ' — last updated ' + fmtDate((d.updated_at||"").slice(0,10)) + '. Leave the number fields blank to keep what\'s on file, or type new numbers to replace them.</div>')
+      : '<div class="footnote" style="padding:0 0 10px">Nothing on file yet — fill this out once so Joe can pay you by ACH on your closed deals.</div>';
+    body = statusNote +
+      '<form data-form="save-my-ach" id="save-my-ach-form">' +
+        '<div class="form-row"><label>Account holder name</label><input class="input" name="accountHolderName" value="' + esc((d && d.account_holder_name) || currentUser().name || "") + '" required></div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Bank name</label><input class="input" name="bankName" value="' + esc((d && d.bank_name) || "") + '" required></div>' +
+          '<div class="form-row"><label>Account type</label><select class="select" name="accountType"><option value="Checking"' + (d && d.account_type==="Checking"?" selected":"") + '>Checking</option><option value="Savings"' + (d && d.account_type==="Savings"?" selected":"") + '>Savings</option></select></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Routing number</label><input class="input" name="routingNumber" inputmode="numeric" placeholder="' + (d ? "on file — leave blank to keep" : "9 digits") + '"' + (d ? '' : ' required') + '></div>' +
+          '<div class="form-row"><label>Account number</label><input class="input" name="accountNumber" inputmode="numeric" placeholder="' + (d ? ("on file, ending " + esc(d.account_number_last4||"")) : "Account number") + '"' + (d ? '' : ' required') + '></div>' +
+        '</div>' +
+      '</form>';
+    foot = '<button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit" form="save-my-ach-form">Save</button>';
+  }
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Direct Deposit Info</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' + body + '</div>' +
+      '<div class="modal-foot">' + foot + '</div>' +
+    '</div></div>';
+}
+function modalMarkPayrollPaid(){
+  var m = ui.modal;
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Mark Paid — ' + esc(m.fileLabel||"") + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="confirm-mark-payroll-paid">' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0 0 10px">' + esc(m.personName||"") + ' — ' + fmtUSD(m.amount) + '. Record the transaction ID from your bank once you\'ve sent it, so this is traceable later.</div>' +
+        '<div class="form-row"><label>Transaction ID (optional)</label><input class="input" name="transactionId" placeholder="e.g. Capital One confirmation number"></div>' +
+        '<div class="form-row"><label>Date paid</label><input class="input" type="date" name="paidDate" value="' + todayISO() + '"></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Mark Paid</button></div>' +
       '</form>' +
     '</div></div>';
 }
@@ -14932,6 +15097,7 @@ appEl.addEventListener("click", function(e){
     ui.view = t.dataset.view;
     if (ui.view!=="detail") ui.selectedLeadId=null;
     if (ui.view==="ai-assistant" && ui.aiChatLog===undefined) loadAiChatHistory();
+    if (ui.view==="payroll" && ui.achStatusByUser===undefined) loadAchStatusForPayroll();
     render();
   }
   else if (action === "select-lead"){ ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); }
@@ -14962,7 +15128,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "close-modal"){
     // Skipping the call log inside a Power Dialer session still moves on to the next lead.
     if (ui.modal && ui.modal.type === "callDisposition" && ui.modal.fromDialer && ui.dialer){ ui.modal = { type:"dialer" }; dialerAdvance(); return; }
-    ui.modal = null; ui.importState = null; ui.lwImport = null; render();
+    ui.modal = null; ui.importState = null; ui.lwImport = null; ui.myAchStatus = null; render();
   }
   else if (action === "import-back"){ ui.importState = null; render(); }
   else if (action === "lw-import-back"){ ui.lwImport = null; render(); }
@@ -14990,6 +15156,9 @@ appEl.addEventListener("click", function(e){
   else if (action === "m-desktop"){ ui.forceDesktop = true; render(); }
   else if (action === "reveal-ssn"){ revealGuarantorSsn(t.dataset.lead); }
   else if (action === "hide-ssn"){ hideGuarantorSsn(); }
+  else if (action === "open-my-ach"){ openMyAchModal(); }
+  else if (action === "reveal-employee-ach"){ revealEmployeeAch(t.dataset.user); }
+  else if (action === "hide-employee-ach"){ hideEmployeeAch(); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
   else if (action === "toggle-email"){ ui.expandedEmailId = ui.expandedEmailId===t.dataset.id ? null : t.dataset.id; render(); }
   else if (action === "toggle-conversation"){ ui.expandedConversationLead = ui.expandedConversationLead===t.dataset.lead ? null : t.dataset.lead; render(); }
@@ -15835,6 +16004,10 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "add-payroll-entry"){
     addManualPayrollEntry(fd);
     form.reset();
+  } else if (type === "confirm-mark-payroll-paid"){
+    confirmMarkPayrollPaid(fd);
+  } else if (type === "save-my-ach"){
+    saveMyAch(fd);
   } else if (type === "add-referral-partner"){
     addReferralPartner(fd);
     form.reset();
