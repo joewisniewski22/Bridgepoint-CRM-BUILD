@@ -611,7 +611,7 @@ function borrowerStageLabel(stageKey){
 }
 
 var LOAN_TYPES = ["DSCR","Fix & Flip","Ground Up Construction","Portfolio/Blanket","Bridge","Mixed-Use"];
-var SOURCES = ["Meta Ads","Connected Investors","Referral","Repeat Client","Website","Self-Generated"];
+var SOURCES = ["Meta Ads","Connected Investors","Referral","Repeat Client","Website","Self-Generated","LendingWise Import"];
 var ENTITY_TYPES = ["LLC","Individual","Corporation"];
 var PROPERTY_TYPES = ["SFR","Duplex","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Land"];
 // Constructive's matrix lists Duplex as its own named property type, but
@@ -6247,6 +6247,195 @@ function runImport(fd){
   ui.view = "leads";
   persist();
 }
+// LendingWise exports a MISMO 3.4 XML file per loan file. Namespace-agnostic
+// tag lookup (getElementsByTagNameNS("*", name)) instead of querySelector --
+// the whole document sits in the default MISMO namespace, which unprefixed
+// CSS-selector matching does not reach reliably across browsers.
+function lwTag(root, name){
+  return root ? Array.prototype.slice.call(root.getElementsByTagNameNS("*", name)) : [];
+}
+function lwText(root, name){
+  var els = lwTag(root, name);
+  return els.length ? (els[0].textContent||"").trim() : "";
+}
+function lwNum(root, name){
+  var v = lwText(root, name);
+  if (!v) return null;
+  var n = parseFloat(v.replace(/,/g,""));
+  if (!isFinite(n) || n === 0) return null; // LendingWise leaves unset amounts as "0.00"
+  return n;
+}
+function lwPartyRoleType(party){
+  var els = lwTag(party, "PartyRoleType");
+  return els.length ? (els[0].textContent||"").trim() : "";
+}
+function parseLendingWiseXML(xmlText){
+  var xml;
+  try { xml = new DOMParser().parseFromString(xmlText, "text/xml"); } catch(e){ return { ok:false, error:"Couldn't parse this file as XML." }; }
+  if (!xml || xml.getElementsByTagName("parsererror").length){
+    return { ok:false, error:"Couldn't parse this file as XML." };
+  }
+  var deal = lwTag(xml, "DEAL")[0];
+  if (!deal) return { ok:false, error:"Doesn't look like a LendingWise export (no DEAL found)." };
+
+  var parties = lwTag(deal, "PARTY");
+  var borrowerParty = null, originatorParty = null;
+  parties.forEach(function(p){
+    var role = lwPartyRoleType(p);
+    if (role === "Borrower" && !borrowerParty) borrowerParty = p;
+    if (role === "LoanOriginator" && !originatorParty) originatorParty = p;
+  });
+
+  var firstName = borrowerParty ? lwText(borrowerParty, "FirstName") : "";
+  var lastName = borrowerParty ? lwText(borrowerParty, "LastName") : "";
+  var fullName = [firstName, lastName].filter(Boolean).join(" ");
+  if (!fullName && borrowerParty) fullName = lwText(borrowerParty, "FullName");
+  if (!fullName || fullName.toLowerCase() === "null") fullName = "";
+
+  var email = borrowerParty ? lwText(borrowerParty, "ContactPointEmailValue") : "";
+  var cellPhone = "";
+  if (borrowerParty){
+    var phoneEls = lwTag(borrowerParty, "CONTACT_POINT_TELEPHONE");
+    for (var i=0;i<phoneEls.length;i++){
+      var v = lwText(phoneEls[i], "CellNo") || lwText(phoneEls[i], "ContactPointTelephoneValue");
+      if (v){ cellPhone = v; break; }
+    }
+  }
+  var dob = borrowerParty ? lwText(borrowerParty, "BorrowerBirthDate") : "";
+
+  var mailingAddr = "";
+  if (borrowerParty){
+    var addrEls = lwTag(borrowerParty, "ADDRESS");
+    var mail = addrEls.filter(function(a){ return lwText(a,"AddressType") === "Mailing"; })[0] || addrEls[0];
+    if (mail) mailingAddr = [lwText(mail,"AddressLineText"), lwText(mail,"CityName"), lwText(mail,"StateCode"), lwText(mail,"PostalCode")].filter(Boolean).join(", ");
+  }
+
+  var subjectProp = lwTag(deal, "SUBJECT_PROPERTY")[0];
+  var propertyAddress = "";
+  if (subjectProp){
+    var pAddr = lwTag(subjectProp, "ADDRESS")[0];
+    if (pAddr) propertyAddress = [lwText(pAddr,"AddressLineText"), lwText(pAddr,"CityName"), lwText(pAddr,"StateCode"), lwText(pAddr,"PostalCode")].filter(Boolean).join(", ");
+  }
+  var propertyValue = subjectProp ? lwNum(subjectProp, "PropertyValuationAmount") : null;
+  var salesContractAmount = subjectProp ? lwNum(subjectProp, "SalesContractAmount") : null;
+
+  var loanEl = lwTag(deal, "LOAN")[0];
+  var loanAmount = loanEl ? lwNum(loanEl, "BaseLoanAmount") : null;
+  var notePercent = loanEl ? lwNum(loanEl, "NoteRatePercent") : null;
+  var loanPurpose = loanEl ? lwText(loanEl, "LoanPurposeType") : "";
+  var appReceivedDate = loanEl ? lwText(loanEl, "ApplicationReceivedDate") : "";
+
+  var originatorName = originatorParty ? [lwText(originatorParty,"FirstName"), lwText(originatorParty,"LastName")].filter(Boolean).join(" ") : "";
+
+  if (!fullName && !propertyAddress && !email && !cellPhone){
+    return { ok:false, error:"No borrower name, property address, or contact info found in this file." };
+  }
+
+  return { ok:true, data:{
+    name: fullName || "Unnamed Borrower",
+    email: email || null,
+    phone: cellPhone || null,
+    birthday: dob || null,
+    borrowerAddress: mailingAddr || null,
+    propertyAddress: propertyAddress || null,
+    propertyValue: propertyValue,
+    purchasePrice: salesContractAmount,
+    loanAmount: loanAmount,
+    rate: notePercent,
+    loanPurpose: loanPurpose || null,
+    applicationReceivedDate: appReceivedDate || null,
+    originatorName: originatorName || null
+  }};
+}
+function startLwImportParse(fileList){
+  var files = Array.prototype.slice.call(fileList || []);
+  if (!files.length){ showToast("Choose one or more LendingWise .xml files first"); return; }
+  ui.lwImport = { stage:"loading" };
+  render();
+  Promise.all(files.map(function(f){
+    return f.text().then(function(text){
+      return { fileName: f.name, data: parseLendingWiseXML(text) };
+    }).catch(function(){
+      return { fileName: f.name, data: { ok:false, error:"Couldn't read this file." } };
+    });
+  })).then(function(items){
+    items.forEach(function(item){
+      item.assignedTo = null;
+      item.dupe = null;
+      if (!item.data || !item.data.ok) return;
+      var d = item.data.data;
+      if (d.originatorName){
+        var norm = d.originatorName.toLowerCase().trim();
+        var match = (state.users||[]).filter(function(u){ return u.name && u.name.toLowerCase().trim() === norm; })[0];
+        if (match) item.assignedTo = match.id;
+      }
+      if (!item.assignedTo) item.assignedTo = currentUser().id;
+      var nameKey = (d.name||"").toLowerCase().trim();
+      var addrKey = (d.propertyAddress||"").toLowerCase().trim();
+      var dKeyDigits = (d.phone||"").replace(/\D/g,"");
+      var dupe = (state.leads||[]).filter(function(l){
+        var lNameKey = (l.name||"").toLowerCase().trim();
+        var lAddrKey = (l.propertyAddress||"").toLowerCase().trim();
+        if (nameKey && lNameKey === nameKey && (!addrKey || !lAddrKey || addrKey === lAddrKey)) return true;
+        if (d.email && l.email && d.email.toLowerCase() === l.email.toLowerCase()) return true;
+        if (dKeyDigits && l.phone && l.phone.replace(/\D/g,"") === dKeyDigits) return true;
+        return false;
+      })[0];
+      if (dupe) item.dupe = dupe.name + " (" + dupe.id + ")";
+    });
+    ui.lwImport = { stage:"preview", items: items };
+    render();
+  });
+}
+function importLendingWiseLead(data, assignedTo, loanType){
+  var id = nextLeadId();
+  var d = todayISO();
+  var noteParts = ["Imported from LendingWise by " + currentUser().name];
+  if (data.loanPurpose) noteParts.push("Purpose: " + data.loanPurpose);
+  if (data.applicationReceivedDate) noteParts.push("LendingWise application date: " + data.applicationReceivedDate);
+  if (data.propertyValue) noteParts.push("LendingWise property value: " + fmtUSD(data.propertyValue));
+  if (data.borrowerAddress) noteParts.push("Borrower mailing address: " + data.borrowerAddress);
+  if (data.originatorName) noteParts.push("LendingWise loan originator on file: " + data.originatorName);
+  var lead = {
+    id:id, name:data.name, email:data.email, phone:data.phone, source:"LendingWise Import", loanType:loanType,
+    stage:"new", status:"active", assignedTo:assignedTo, createdAt:d, createdAtTs:nowTs(), firstAttemptAt:null,
+    entityType:"LLC", creditScore:null, experienceDeals:null, liquidity:null,
+    propertyAddress:data.propertyAddress||"", propertyType:null, purchasePrice:data.purchasePrice||null, arv:null, rehabBudget:null,
+    rentEstimate:null, loanAmount:data.loanAmount||null, ltv:null, rate:data.rate||null, termMonths:null,
+    exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null, pointsCharged:null,
+    birthday: data.birthday || null,
+    callAttempts:[], documents:[], thirdParties:[], applicationToken: randomToken(),
+    activity:[{ date:d, type:"note", text:noteParts.join(" — "), author: currentUser().name }]
+  };
+  state.leads.unshift(lead);
+  applyRequiredDocs(id, { silent:true });
+  // In-app only, no text -- this is an existing LendingWise file being
+  // migrated in, not a fresh inbound lead, and a bulk import can bring in
+  // many files in one go (real incident 9/1: an automated text loop was
+  // caused by not thinking through a bulk/automated send path like this one).
+  if (assignedTo && assignedTo !== currentUser().id){
+    notifyUser(assignedTo, id, "note", "📄 LendingWise file imported: " + lead.name + " — " + crmLeadLink(id), { skipText:true });
+  }
+  return lead;
+}
+function runLwImport(fd){
+  var st = ui.lwImport;
+  if (!st || !st.items) return;
+  var loanType = fd.get("loanType") || LOAN_TYPES[0];
+  var created = 0, skipped = 0;
+  st.items.forEach(function(item, idx){
+    if (!item.data || !item.data.ok){ skipped++; return; }
+    if (!fd.get("include_" + idx)){ skipped++; return; }
+    var assignedTo = fd.get("assignedTo_" + idx) || currentUser().id;
+    importLendingWiseLead(item.data.data, assignedTo, loanType);
+    created++;
+  });
+  ui.lwImport = null;
+  ui.modal = null;
+  showToast("Imported " + created + " file(s) from LendingWise" + (skipped ? (", skipped " + skipped) : ""));
+  ui.view = "leads";
+  persist();
+}
 function updateLeadFields(leadId, patch){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -9524,7 +9713,7 @@ function renderToday(){
   '</div>';
 
   if (isProcessor()){
-    return topbar("Today", "Your processing to-do list — everything an LO has ordered or routed to you.", "") +
+    return topbar("Today", "Your processing to-do list — everything an LO has ordered or routed to you.", '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLendingWise">⬆ Import from LendingWise</button>') +
       '<div class="content">' + kpis + renderMyCalendarWidget() +
         '<div class="section"><div class="section-head"><h2>Processing to-do</h2></div>' + renderProcessingTodo() + '</div>' +
       '</div>';
@@ -9594,7 +9783,7 @@ function renderToday(){
     '</div>' + teamList + '</div>';
   }
 
-  return topbar("Today", "Call list generated from new-lead cadence, market rate moves, and refinance timing.", "") +
+  return topbar("Today", "Call list generated from new-lead cadence, market rate moves, and refinance timing.", '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLendingWise">⬆ Import from LendingWise</button>') +
     '<div class="content">' + kpis + quotaBanner + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML + sections +
     '</div>';
 }
@@ -9717,7 +9906,8 @@ function renderLeadsTable(){
     '<div class="table-wrap"><table><thead><tr><th>Borrower</th><th>Loan Type</th><th>Stage</th><th>Amount</th><th>Source</th><th>Loan Officer</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
   ) : '<div class="empty">No leads match these filters.</div>';
 
-  var actions = '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLeads">⬆ Import</button>' +
+  var actions = '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLendingWise">⬆ Import from LendingWise</button>' +
+    '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLeads">⬆ Import</button>' +
     '<button class="btn btn-primary" data-action="open-modal" data-modal="addLead">+ New Lead</button>';
 
   return topbar("Leads & Loans", leads.length + " of " + allScoped.length + " record(s)", actions) +
@@ -12838,6 +13028,7 @@ function renderModal(){
   if (ui.modal.type === "addLead") return modalAddLead();
   if (ui.modal.type === "createLeadFromPricer") return modalCreateLeadFromPricer();
   if (ui.modal.type === "importLeads") return modalImportLeads();
+  if (ui.modal.type === "importLendingWise") return modalImportLendingWise();
   if (ui.modal.type === "logCall") return modalLogCall(ui.modal.leadId);
   if (ui.modal.type === "markLost") return modalMarkLost(ui.modal.leadId);
   if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
@@ -14554,6 +14745,53 @@ function modalImportLeads(){
       '<div class="modal-foot">' + foot + '</div>' +
     '</div></div>';
 }
+function modalImportLendingWise(){
+  var st = ui.lwImport;
+  var body, foot;
+  if (!st || st.stage === "upload"){
+    body =
+      '<div class="footnote" style="padding:0 0 10px">Drop one or more LendingWise export files (.xml) here — the CRM reads the borrower, property, and loan details straight out of the file and creates the matching lead. Everyone can use this while we pull all the files over from LendingWise this week.</div>' +
+      '<form data-form="lw-import-parse" id="lw-import-parse-form">' +
+        '<div class="form-row"><label>LendingWise export file(s) (.xml)</label><input class="input" type="file" name="lwFiles" accept=".xml,text/xml,application/xml" multiple></div>' +
+      '</form>';
+    foot = '<button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button>' +
+      '<button class="btn btn-primary" type="submit" form="lw-import-parse-form">Continue</button>';
+  } else if (st.stage === "loading"){
+    body = '<div class="empty">Reading file(s)…</div>';
+    foot = '<button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button>';
+  } else {
+    var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
+    var rows = st.items.map(function(item, idx){
+      if (!item.data || !item.data.ok){
+        return '<tr><td colspan="5"><b>' + esc(item.fileName) + '</b> — <span style="color:#c0392b">' + esc(item.data ? item.data.error : "Couldn't read file") + '</span></td></tr>';
+      }
+      var d = item.data.data;
+      var dupeNote = item.dupe ? ('<div class="hint" style="color:#b8860b">⚠ Possible duplicate of ' + esc(item.dupe) + '</div>') : "";
+      return '<tr>' +
+        '<td><input type="checkbox" name="include_' + idx + '"' + (item.dupe ? "" : " checked") + '></td>' +
+        '<td><b>' + esc(d.name) + '</b><div class="cell-sub">' + esc(item.fileName) + '</div>' + dupeNote + '</td>' +
+        '<td>' + esc(d.propertyAddress||"—") + '</td>' +
+        '<td>' + (d.loanAmount ? fmtUSD(d.loanAmount) : "—") + '</td>' +
+        '<td><select class="select" name="assignedTo_' + idx + '">' + ownerOptions(item.assignedTo) + '</select></td>' +
+      '</tr>';
+    }).join("");
+    var okCount = st.items.filter(function(i){ return i.data && i.data.ok; }).length;
+    body =
+      '<div class="footnote" style="padding:0 0 10px">' + okCount + ' of ' + st.items.length + ' file(s) parsed. Uncheck any you don\'t want to bring in yet — possible duplicates start unchecked. Loan type below applies to all; fix it per-file afterward if it\'s mixed.</div>' +
+      '<form data-form="lw-import-confirm" id="lw-import-confirm-form">' +
+        '<div class="form-row"><label>Loan type for these files</label><select class="select" name="loanType">' + typeOptions + '</select></div>' +
+        '<div class="table-wrap" style="max-height:320px;overflow:auto"><table><thead><tr><th></th><th>Borrower / File</th><th>Property</th><th>Loan Amt</th><th>Assign to</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '</form>';
+    foot = '<button class="btn btn-ghost" type="button" data-action="lw-import-back">← Back</button>' +
+      '<button class="btn btn-primary" type="submit" form="lw-import-confirm-form">Import ' + okCount + ' File(s)</button>';
+  }
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1" style="max-width:760px">' +
+      '<div class="modal-head"><h3>Import from LendingWise</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' + body + '</div>' +
+      '<div class="modal-foot">' + foot + '</div>' +
+    '</div></div>';
+}
 function modalMarkLost(leadId){
   var lead = leadById(leadId);
   var reasonOptions = LOST_REASONS.map(function(r){ return '<option value="' + r.key + '">' + esc(r.label) + '</option>'; }).join("");
@@ -14719,14 +14957,15 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "open-modal"){
     if (t.dataset.modal === "composeEmail" && prefersOutlook()){ openMailto("", "", ""); return; }
-    ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null, dupId:t.dataset.dup||null }; ui.teamMemberError = null; if (t.dataset.modal === "importLeads") ui.importState = null; render();
+    ui.modal = { type:t.dataset.modal, leadId:t.dataset.lead||null, kind:t.dataset.kind||null, dupId:t.dataset.dup||null }; ui.teamMemberError = null; if (t.dataset.modal === "importLeads") ui.importState = null; if (t.dataset.modal === "importLendingWise") ui.lwImport = null; render();
   }
   else if (action === "close-modal"){
     // Skipping the call log inside a Power Dialer session still moves on to the next lead.
     if (ui.modal && ui.modal.type === "callDisposition" && ui.modal.fromDialer && ui.dialer){ ui.modal = { type:"dialer" }; dialerAdvance(); return; }
-    ui.modal = null; ui.importState = null; render();
+    ui.modal = null; ui.importState = null; ui.lwImport = null; render();
   }
   else if (action === "import-back"){ ui.importState = null; render(); }
+  else if (action === "lw-import-back"){ ui.lwImport = null; render(); }
   else if (action === "move-stage" && t.dataset.target){ moveStage(t.dataset.lead, t.dataset.target); }
   else if (action === "toggle-on-hold"){ toggleOnHold(t.dataset.lead); }
   else if (action === "delete-lead"){ deleteLead(t.dataset.lead, t.dataset.name); }
@@ -15493,6 +15732,12 @@ appEl.addEventListener("submit", function(e){
     }
   } else if (type === "import-confirm"){
     runImport(fd);
+  } else if (type === "lw-import-parse"){
+    var lwFileInput = form.querySelector('[name="lwFiles"]');
+    var lwFiles = lwFileInput && lwFileInput.files;
+    startLwImportParse(lwFiles);
+  } else if (type === "lw-import-confirm"){
+    runLwImport(fd);
   } else if (type === "send-back"){
     sendBackToLO(form.dataset.lead, fd.get("note"));
     render();
