@@ -14259,10 +14259,22 @@ function extractAchFromForm(fd, signatureDataUrl, existing){
    the completed lender PDF and files it as staff-only (never shown to
    the borrower again once submitted).
 --------------------------------------------------------------------- */
-function buildScheduleARowHTML(i, row, lang){
+function buildScheduleARowHTML(i, row, lang, lead){
   lang = lang || "en";
   var L = function(s){ return esc(tr(s, lang)); };
   row = row || {};
+  // Row #1 is almost always the guarantor filling out this form -- default
+  // it from what the application already collected instead of asking the
+  // same name/ownership/address/citizenship again (Joe's ask, 2026-09-29:
+  // any doc that can be auto-populated should be). Only applies the first
+  // time this row is ever generated (no saved row yet); once a real answer
+  // is on file, that always wins.
+  var isFreshFirstRow = i === 0 && !row.name && lead;
+  var defaultName = isFreshFirstRow ? (lead.name || "") : (row.name || "");
+  var defaultOwnPct = isFreshFirstRow ? lead.guarantorOwnershipPct : row.ownPct;
+  var defaultAddress = isFreshFirstRow ? (lead.guarantorAddress || "") : (row.address || "");
+  var defaultGuarantor = isFreshFirstRow ? "Yes" : row.guarantor;
+  var defaultCitizen = isFreshFirstRow ? (lead.citizenshipStatus === "US Citizen" ? "Yes" : "No") : row.citizen;
   var v = function(x){ return x==null ? "" : x; };
   var yn = function(name, val){
     return '<select class="select" name="' + name + '_' + i + '">' +
@@ -14273,23 +14285,23 @@ function buildScheduleARowHTML(i, row, lang){
   return '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">' +
     '<div class="hint" style="margin-bottom:6px">' + L("Owner #") + (i+1) + '</div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>' + L("Name") + '</label><input class="input" name="scheduleAName_' + i + '" value="' + esc(row.name||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Name") + '</label><input class="input" name="scheduleAName_' + i + '" value="' + esc(defaultName) + '"></div>' +
       '<div class="form-row"><label>' + L("SSN / Tax ID") + '</label><input class="input" name="scheduleASsn_' + i + '" value="' + esc(row.ssn||"") + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Title") + '</label><input class="input" name="scheduleATitle_' + i + '" value="' + esc(row.title||"") + '"></div>' +
-      '<div class="form-row"><label>' + L("Ownership %") + '</label><input class="input" type="number" min="0" max="100" name="scheduleAOwnPct_' + i + '" value="' + v(row.ownPct) + '"></div>' +
+      '<div class="form-row"><label>' + L("Ownership %") + '</label><input class="input" type="number" min="0" max="100" name="scheduleAOwnPct_' + i + '" value="' + v(defaultOwnPct) + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>' + L("Primary Address") + '</label><input class="input" name="scheduleAAddress_' + i + '" value="' + esc(row.address||"") + '"></div>' +
+    '<div class="form-row"><label>' + L("Primary Address") + '</label><input class="input" name="scheduleAAddress_' + i + '" value="' + esc(defaultAddress) + '"></div>' +
     '<div class="form-two">' +
-      '<div class="form-row"><label>' + L("Guarantor?") + '</label>' + yn("scheduleAGuarantor", row.guarantor) + '</div>' +
-      '<div class="form-row"><label>' + L("US Citizen?") + '</label>' + yn("scheduleACitizen", row.citizen) + '</div>' +
+      '<div class="form-row"><label>' + L("Guarantor?") + '</label>' + yn("scheduleAGuarantor", defaultGuarantor) + '</div>' +
+      '<div class="form-row"><label>' + L("US Citizen?") + '</label>' + yn("scheduleACitizen", defaultCitizen) + '</div>' +
     '</div>' +
   '</div>';
 }
-function buildScheduleARowsHTML(count, existingRows, lang){
+function buildScheduleARowsHTML(count, existingRows, lang, lead){
   var rows = [];
-  for (var i=0;i<count;i++){ rows.push(buildScheduleARowHTML(i, (existingRows||[])[i], lang)); }
+  for (var i=0;i<count;i++){ rows.push(buildScheduleARowHTML(i, (existingRows||[])[i], lang, lead)); }
   return rows.join("");
 }
 function collectScheduleARowsFromDOM(container){
@@ -14379,7 +14391,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
       '<div class="form-row"><label>' + L("Own or Rent?") + '</label><select class="select" name="rtlOwnRent"><option value="Own"' + (r.ownRent==="Own"?" selected":"") + '>' + L("Own") + '</option><option value="Rent"' + (r.ownRent==="Rent"?" selected":"") + '>' + L("Rent") + '</option></select></div>' +
       '<div class="form-row"><label>' + L("Years/Months at Address") + '</label><input class="input" name="rtlYearsAtAddress" value="' + esc(r.yearsAtAddress||"") + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="rtlHomeAddress" value="' + esc(r.homeAddress||"") + '"></div>' +
+    '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="rtlHomeAddress" value="' + esc(r.homeAddress || lead.guarantorAddress || "") + '"></div>' +
     '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="rtlMaritalStatus">' +
       '<option value=""' + (r.maritalStatus!=="Married" && r.maritalStatus!=="Unmarried" ? " selected" : "") + '>' + L("— Select —") + '</option>' +
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (r.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
@@ -14408,7 +14420,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Ownership — Schedule A") + '</b></div>' +
     '<div class="form-row"><label>' + L("How many owners to list?") + '</label><input class="input" type="number" min="0" max="6" name="scheduleACount" value="' + (scheduleACount||"") + '" data-action="update-schedule-a-count" data-lang="' + lang + '" data-lead="' + lead.id + '"></div>' +
-    '<div id="schedule-a-rows-' + lead.id + '" data-lang="' + lang + '">' + (scheduleACount ? buildScheduleARowsHTML(scheduleACount, r.scheduleA, lang) : '<div class="empty">' + L("Enter a number above to add owner rows (leave 0 if you're the sole owner).") + '</div>') + '</div>' +
+    '<div id="schedule-a-rows-' + lead.id + '" data-lang="' + lang + '">' + (scheduleACount ? buildScheduleARowsHTML(scheduleACount, r.scheduleA, lang, lead) : '<div class="empty">' + L("Enter a number above to add owner rows (leave 0 if you're the sole owner).") + '</div>') + '</div>' +
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Line of Credit") + '</b></div>' +
     '<div class="form-two">' +
@@ -14417,7 +14429,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
     '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Estimated Net Worth") + '</label><input class="input" type="number" name="rtlNetWorth" value="' + v(r.netWorth) + '"></div>' +
-      '<div class="form-row"><label>' + L("Estimated Liquidity") + '</label><input class="input" type="number" name="rtlLiquidity" value="' + v(r.liquidity) + '"></div>' +
+      '<div class="form-row"><label>' + L("Estimated Liquidity") + '</label><input class="input" type="number" name="rtlLiquidity" value="' + v(r.liquidity != null ? r.liquidity : lead.liquidity) + '"></div>' +
     '</div>' +
     '<div class="form-row"><label>' + L("Line of Credit Requested (if applicable)") + '</label><input class="input" type="number" name="rtlLocRequested" value="' + v(r.locRequested) + '"></div>' +
 
@@ -14434,7 +14446,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Current Debt on Property — refinance only, leave blank for a purchase") + '</b></div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Balance Owed") + '</label><input class="input" type="number" name="rtlBalanceOwed" value="' + v(r.balanceOwed) + '"></div>' +
-      '<div class="form-row"><label>' + L("Current Lender") + '</label><input class="input" name="rtlCurrentLender" value="' + esc(r.currentLender||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Current Lender") + '</label><input class="input" name="rtlCurrentLender" value="' + esc(r.currentLender || lead.currentLenderName || "") + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Original Cost") + '</label><input class="input" type="number" name="rtlOriginalCost" value="' + v(r.originalCost) + '"></div>' +
@@ -14637,7 +14649,7 @@ function buildDscrApplicationFieldsHTML(lead, lang){
       '<div class="form-row"><label>' + L("Own or Rent?") + '</label><select class="select" name="dscrOwnRent"><option value="Own"' + (d.ownRent==="Own"?" selected":"") + '>' + L("Own") + '</option><option value="Rent"' + (d.ownRent==="Rent"?" selected":"") + '>' + L("Rent") + '</option></select></div>' +
       '<div class="form-row"><label>' + L("Years/Months at Address") + '</label><input class="input" name="dscrYearsAtAddress" value="' + esc(d.yearsAtAddress||"") + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="dscrHomeAddress" value="' + esc(d.homeAddress||"") + '"></div>' +
+    '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="dscrHomeAddress" value="' + esc(d.homeAddress || lead.guarantorAddress || "") + '"></div>' +
     '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="dscrMaritalStatus">' +
       '<option value=""' + (d.maritalStatus!=="Married" && d.maritalStatus!=="Unmarried" ? " selected" : "") + '>' + L("— Select —") + '</option>' +
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (d.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
@@ -14666,7 +14678,7 @@ function buildDscrApplicationFieldsHTML(lead, lang){
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Ownership — Schedule A") + '</b></div>' +
     '<div class="form-row"><label>' + L("How many owners to list?") + '</label><input class="input" type="number" min="0" max="6" name="scheduleACount" value="' + (scheduleACount||"") + '" data-action="update-schedule-a-count" data-lang="' + lang + '" data-lead="' + lead.id + '"></div>' +
-    '<div id="schedule-a-rows-' + lead.id + '" data-lang="' + lang + '">' + (scheduleACount ? buildScheduleARowsHTML(scheduleACount, d.scheduleA, lang) : '<div class="empty">' + L("Enter a number above to add owner rows (leave 0 if you're the sole owner).") + '</div>') + '</div>' +
+    '<div id="schedule-a-rows-' + lead.id + '" data-lang="' + lang + '">' + (scheduleACount ? buildScheduleARowsHTML(scheduleACount, d.scheduleA, lang, lead) : '<div class="empty">' + L("Enter a number above to add owner rows (leave 0 if you're the sole owner).") + '</div>') + '</div>' +
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Loan Terms") + '</b></div>' +
     '<div class="form-two">' +
@@ -14697,7 +14709,7 @@ function buildDscrApplicationFieldsHTML(lead, lang){
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Current Debt on Property — refinance only, leave blank for a purchase") + '</b></div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Balance Owed") + '</label><input class="input" type="number" name="dscrBalanceOwed" value="' + v(d.balanceOwed) + '"></div>' +
-      '<div class="form-row"><label>' + L("Current Lender") + '</label><input class="input" name="dscrCurrentLender" value="' + esc(d.currentLender||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Current Lender") + '</label><input class="input" name="dscrCurrentLender" value="' + esc(d.currentLender || lead.currentLenderName || "") + '"></div>' +
     '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Original Cost") + '</label><input class="input" type="number" name="dscrOriginalCost" value="' + v(d.originalCost) + '"></div>' +
@@ -15643,7 +15655,7 @@ appEl.addEventListener("change", function(e){
       var saLang = t.dataset.lang || "en";
       var saExisting = collectScheduleARowsFromDOM(saContainer);
       var saCount = Math.max(0, Math.min(parseInt(t.value,10)||0, 6));
-      saContainer.innerHTML = saCount ? buildScheduleARowsHTML(saCount, saExisting, saLang) : '<div class="empty">' + esc(tr("Enter a number above to add owner rows (leave 0 if you're the sole owner).", saLang)) + '</div>';
+      saContainer.innerHTML = saCount ? buildScheduleARowsHTML(saCount, saExisting, saLang, leadById(t.dataset.lead)) : '<div class="empty">' + esc(tr("Enter a number above to add owner rows (leave 0 if you're the sole owner).", saLang)) + '</div>';
     }
   } else if (action === "update-multi-pack-count"){
     var mpContainer = document.getElementById("multi-pack-rows-" + t.dataset.lead);
