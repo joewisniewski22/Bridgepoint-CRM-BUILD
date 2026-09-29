@@ -39,7 +39,15 @@ const DOC_GUIDANCE: Record<string, string> = {
   "Foreign National Liquidity Verification": "Check this shows funds on deposit at a U.S. (FDIC-insured) banking institution, seasoned at least 60 days -- statement dates should span 2+ months. Flag if the institution isn't clearly U.S.-based, if seasoning can't be confirmed from the dates shown, or if the balance looks inconsistent across statements.",
   "Registered Agent Confirmation": "Check it names a registered agent (a company, attorney, or individual) for the borrowing entity in the state(s) where it's qualified to do business. Flag if no registered agent is named or the entity/state isn't identifiable.",
   "Entity Ownership Schedule (Foreign National)": "Check the ownership schedule accounts for every owner/guarantor and their percentage. Flag if more than 2 Foreign Nationals are guarantors or hold 20%+ ownership, if any owner is itself an entity (not a natural person), or if ownership percentages don't add up to 100%.",
+  "Voided Check / Wire Instructions": "Check this is a real voided check or bank-issued wire/ACH instructions sheet showing an account holder name, bank name, and account/routing numbers. Flag if it's illegible, isn't actually a check/wire-instructions document, or the account holder name doesn't match the borrower/entity.",
 };
+
+// Joe's ask (2026-09-29): when this document IS a voided check or wire
+// instructions, pull the actual bank fields off it (account holder, bank
+// name, routing/account numbers) so the ACH Authorization form on the
+// application auto-fills instead of the borrower re-typing every digit by
+// hand after already photographing the check.
+const ACH_EXTRACTION_DOC_NAME = "Voided Check / Wire Instructions";
 const DEFAULT_GUIDANCE = "Check the document looks complete, legible, and consistent with the loan details given below. Flag any illegible sections, missing pages, or obvious inconsistencies.";
 
 const TP_ROLES = ["Realtor", "Title Company", "Escrow Officer", "Insurance Agent", "Attorney", "Appraiser", "Lender Contact"];
@@ -94,6 +102,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const guidance = DOC_GUIDANCE[docName] || DEFAULT_GUIDANCE;
+    const isAchExtraction = docName === ACH_EXTRACTION_DOC_NAME;
     const isForeignNational = context.citizenshipStatus === "Foreign National";
     const fnNote = isForeignNational
       ? "\n\nFOREIGN NATIONAL FILE: this borrower/guarantor is a Foreign National (not a US citizen, permanent resident, or authorized to work in the US). Per BPL's Foreign Nationals guidelines: on a Government-Issued Photo ID, a foreign passport is acceptable and expected -- do not flag it as wrong just for not being a US-issued ID. On bank statements, funds must be at a U.S. (FDIC-insured) institution seasoned 60+ days -- flag if the institution or seasoning can't be confirmed. On entity/ownership documents, flag if more than 2 Foreign Nationals appear as guarantors or 20%+ owners, or if any owner is itself an entity rather than a natural person."
@@ -109,8 +118,14 @@ Deno.serve(async (req: Request) => {
       "- Property address: " + (context.propertyAddress || "unknown") + "\n" +
       (context.ltv ? ("- LTV: " + context.ltv + "%\n") : "") +
       "\nSEPARATELY, also scan the document for contact information belonging to any THIRD PARTY working this deal -- e.g. a real estate agent/realtor, title company, escrow officer, insurance agent, attorney, or appraiser named or shown on the document (letterhead, signature block, stamp, declarations page, etc). Do NOT include the borrower/guarantor themselves, and do NOT include Bridgepoint Lending's own staff. Only include a contact if you actually found a name AND at least a phone number or email on the document -- never guess or fabricate one. Each contact's \"role\" must be exactly one of: " + TP_ROLES.join(", ") + " (pick the closest fit for a contact type that doesn't cleanly match, such as another lender/broker, use \"Lender Contact\"). If no such contacts are found, use an empty array.\n\n" +
+      (isAchExtraction
+        ? ('ADDITIONALLY, this document is supposed to be a voided check or wire/ACH instructions sheet. Read the actual printed/MICR-line bank details off it (do not guess) and include an "achFields" object with: accountHolderName (name printed on the check), bankName, bankCityState (city and state printed on the check, if shown), aba (the 9-digit routing/ABA number from the MICR line), accountNumber (the account number from the MICR line), and accountType ("Checking" or "Savings" if determinable, else null). Only fill a field you can actually read on the document -- use null for anything illegible, not shown, or if this document turns out not to actually be a check/wire-instructions sheet at all.\n\n')
+        : ""
+      ) +
       "Look at the actual document above and respond with ONLY a JSON object (no markdown fences, no commentary) with exactly these keys:\n" +
-      '{"status": "clear" or "flag", "note": "one or two specific sentences explaining what you found", "contacts": [{"role": "...", "name": "...", "company": "... or null", "phone": "... or null", "email": "... or null"}]}\n' +
+      '{"status": "clear" or "flag", "note": "one or two specific sentences explaining what you found", "contacts": [{"role": "...", "name": "...", "company": "... or null", "phone": "... or null", "email": "... or null"}]' +
+      (isAchExtraction ? ', "achFields": {"accountHolderName": "... or null", "bankName": "... or null", "bankCityState": "... or null", "aba": "... or null", "accountNumber": "... or null", "accountType": "... or null"}' : "") +
+      "}\n" +
       "Use \"flag\" if anything above needs a human's attention before this file can move forward; use \"clear\" only if the document genuinely looks complete and consistent.";
 
     const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -134,7 +149,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const raw = (aiData.content && aiData.content[0] && aiData.content[0].text) || "";
-    let parsed: { status?: string; note?: string; contacts?: unknown } = {};
+    let parsed: { status?: string; note?: string; contacts?: unknown; achFields?: unknown } = {};
     try {
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
@@ -156,7 +171,29 @@ Deno.serve(async (req: Request) => {
       }))
       .slice(0, 10);
 
-    return corsJson({ ok: true, status, note, contacts });
+    let achFields: Record<string, string | null> | null = null;
+    if (isAchExtraction && parsed.achFields && typeof parsed.achFields === "object") {
+      const raw2 = parsed.achFields as Record<string, unknown>;
+      const str = (v: unknown, max: number) => (typeof v === "string" && v.trim()) ? v.trim().slice(0, max) : null;
+      const digits = (v: unknown, max: number) => {
+        const s = typeof v === "string" ? v.replace(/\D/g, "") : "";
+        return s ? s.slice(0, max) : null;
+      };
+      const accountType = str(raw2.accountType, 20);
+      achFields = {
+        accountHolderName: str(raw2.accountHolderName, 120),
+        bankName: str(raw2.bankName, 120),
+        bankCityState: str(raw2.bankCityState, 120),
+        aba: digits(raw2.aba, 9),
+        accountNumber: digits(raw2.accountNumber, 20),
+        accountType: (accountType === "Checking" || accountType === "Savings") ? accountType : null,
+      };
+      // Nothing actually read off the document -- don't hand back an
+      // all-null object for the client to bother merging.
+      if (Object.values(achFields).every((v) => v === null)) achFields = null;
+    }
+
+    return corsJson({ ok: true, status, note, contacts, achFields });
   } catch (err) {
     console.log("review-document: server_error", String(err));
     return corsJson({ ok: true, status: "flag", note: "Automatic review hit an error — please check this document manually." });

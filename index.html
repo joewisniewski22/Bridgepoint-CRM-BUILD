@@ -7418,8 +7418,32 @@ function requestAiDocReview(lead, doc){
       if (flagTarget) notifyUser(flagTarget, lead.id, "ai-flag", lead.name + " — " + doc.name + " flagged by AI: " + res.data.note);
     }
     if (res.data.contacts && res.data.contacts.length) applyScannedContacts(lead, res.data.contacts, doc);
+    if (res.data.achFields) applyScannedAchFields(lead, res.data.achFields, doc);
     persist();
   }).catch(function(){});
+}
+// Joe's ask (2026-09-29): a photographed voided check should fill the ACH
+// Authorization form by itself -- borrower shouldn't retype a single bank
+// digit after already taking the picture. Only fills fields still blank on
+// the form (never clobbers something a borrower or staff already typed),
+// and never touches the signature -- the ACH form still has to be reviewed
+// and signed, this just removes the typing.
+function applyScannedAchFields(lead, fields, doc){
+  lead.achForm = lead.achForm || {};
+  var a = lead.achForm;
+  var filled = [];
+  var map = { accountHolderName:"accountHolderName", bankName:"bankName", bankCityState:"bankCityStateZip", aba:"aba", accountNumber:"accountNumber", accountType:"accountType" };
+  Object.keys(map).forEach(function(srcKey){
+    var destKey = map[srcKey];
+    if (fields[srcKey] && !a[destKey]){
+      a[destKey] = fields[srcKey];
+      filled.push(destKey);
+    }
+  });
+  if (filled.length){
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"note", text: "AI read the bank details off " + (doc.name||"the voided check") + " and pre-filled the ACH Authorization form (" + filled.join(", ") + ") — still needs the borrower's signature.", author:"AI Assistant" });
+  }
 }
 function normContactPhone(p){ return (p||"").replace(/\D/g,""); }
 function normContactEmail(e){ return (e||"").trim().toLowerCase(); }
@@ -8411,10 +8435,17 @@ function buildBorrowerPortalHTML(lead, opts){
     var received = d.status==="received";
     var extraCount = (d.files||[]).length;
     var refLink = d.referenceFileUrl ? ('<div style="margin-top:4px"><button class="btn btn-sm btn-ghost" type="button" data-action="view-doc-request-reference" data-lead="' + lead.id + '" data-idx="' + i + '">📎 ' + L("Download example / form") + '</button></div>') : "";
+    // Joe's ask (2026-09-29): a voided check is almost always photographed,
+    // never a saved file someone already has -- jump straight to the phone
+    // camera instead of a generic file picker. Every other document type
+    // (bank statements, entity docs, etc.) stays a plain file picker since
+    // those are legitimately PDFs people already have saved.
+    var isPhotoDoc = d.name === "Voided Check / Wire Instructions";
+    var photoAttrs = isPhotoDoc ? ' accept="image/*" capture="environment"' : "";
     return '<div class="doc-row"><div><div>' + L(d.name) + '</div><div class="cell-sub">' + (received ? (L("Received") + " " + fmtDate(d.receivedAt) + (extraCount ? (" · " + (extraCount+1) + " " + L("files")) : "")) : L("Needed to move forward")) + '</div>' + refLink + '</div>' +
       (received
-        ? ('<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span class="badge badge-forest">' + L("Received") + '</span><label class="btn btn-sm btn-ghost" style="cursor:pointer">' + L("+ Add Another File") + '<input type="file" style="display:none" data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label></div>')
-        : '<label class="btn btn-sm btn-primary" style="cursor:pointer">' + L("Upload") + '<input type="file" style="display:none" data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label>') +
+        ? ('<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span class="badge badge-forest">' + L("Received") + '</span><label class="btn btn-sm btn-ghost" style="cursor:pointer">' + L("+ Add Another File") + '<input type="file" style="display:none"' + photoAttrs + ' data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label></div>')
+        : '<label class="btn btn-sm btn-primary" style="cursor:pointer">' + L("Upload") + '<input type="file" style="display:none"' + photoAttrs + ' data-action="upload-doc" data-lead="' + lead.id + '" data-idx="' + i + '"></label>') +
       '</div>';
   }).join("");
   var docsCard = '<div class="portal-section">' +
