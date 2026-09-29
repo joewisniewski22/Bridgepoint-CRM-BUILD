@@ -7879,6 +7879,53 @@ function uploadGeneratedPdfDocument(leadId, docName, blob, opts){
   });
 }
 
+// Joe's ask (2026-09-29): "for anything in house Constructive Capital
+// complete the latest sizer... put the completed file into the documents
+// list not for borrower to do but in the docs." The Documents tab was
+// entirely checklist-driven (Government ID, Bank Statements, etc.) with no
+// slot for a staff-generated internal file like a Constructive Capital
+// sizer, a lender summary, or anything else that isn't something the
+// borrower provides. This is that slot -- a plain named upload, always
+// staffOnly (mirrors uploadGeneratedPdfDocument's opts.staffOnly), any
+// file type, find-or-create by name so re-running it (e.g. a refreshed
+// sizer after the numbers change) replaces the old file instead of piling
+// up duplicates.
+function addInternalDocumentFile(leadId, name, file){
+  var lead = leadById(leadId);
+  if (!lead || !sb || !file || !name) return;
+  lead.documents = lead.documents || [];
+  var doc = lead.documents.filter(function(d){ return d.name === name && d.staffOnly; })[0];
+  if (!doc){ doc = { name: name, status:"requested", staffOnly:true }; lead.documents.push(doc); }
+  var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  var path = leadId + "/" + Date.now() + "-" + safeName;
+  sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+    if (res.error){ showToast("Upload failed — try again"); return; }
+    doc.status = "received";
+    doc.receivedAt = todayISO();
+    doc.fileName = file.name;
+    doc.storagePath = path;
+    doc.staffOnly = true;
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date:todayISO(), type:"document", text: "Internal document added: " + name, author: currentUser().name });
+    showToast(name + " added");
+    persist();
+  });
+}
+function modalAddInternalDocument(leadId){
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Add Internal Document</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="add-internal-document" data-lead="' + leadId + '">' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0 0 10px">Staff-only — this never shows up in the borrower portal. Use it for things like a completed Constructive Capital sizer, a lender summary, or anything else that isn\'t something the borrower provides.</div>' +
+        '<div class="form-row"><label>Document name</label><input class="input" name="name" placeholder="e.g. Constructive Capital DSCR Sizer" required></div>' +
+        '<div class="form-row"><label>File</label><input class="input" type="file" name="file" required></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+
 /* ---------------------------------------------------------------------
    AI document review — real review via the "review-document" edge
    function (Claude vision), fired automatically on every upload and
@@ -11027,6 +11074,7 @@ function renderTabDocuments(lead){
   var exportBar = '<div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap">' +
     '<button class="btn btn-sm btn-ghost" type="button" data-action="export-all-documents" data-lead="' + lead.id + '" title="Downloads every uploaded document on this file as one ZIP, to save internally">⬇ Export All Documents (ZIP)' + (receivedCount ? (' — ' + receivedCount) : '') + '</button>' +
     (canExportMismo ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="download-mismo-export" data-lead="' + lead.id + '" title="Exports the loan file as a MISMO 3.4 XML document for investors, title, or outside lenders">⬇ Export MISMO 3.4</button>') : '') +
+    (canManage ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-modal" data-modal="addInternalDocument" data-lead="' + lead.id + '" title="A staff-only file — a completed Constructive Capital sizer, a lender summary, anything the borrower never sees">+ Internal Document</button>') : '') +
   '</div>';
 
   var scanBar = "";
@@ -13256,6 +13304,7 @@ function renderModal(){
   if (ui.modal.type === "sendBack") return modalSendBack(ui.modal.leadId);
   if (ui.modal.type === "mySchedule") return modalMySchedule();
   if (ui.modal.type === "todaysSchedule") return modalTodaysSchedule();
+  if (ui.modal.type === "addInternalDocument") return modalAddInternalDocument(ui.modal.leadId);
   if (ui.modal.type === "myAch") return modalMyAch();
   if (ui.modal.type === "confirmMarkPayrollPaid") return modalMarkPayrollPaid();
   if (ui.modal.type === "sendPreview") return modalSendPreview(ui.modal.leadId, ui.modal.kind);
@@ -16098,6 +16147,13 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "add-payroll-entry"){
     addManualPayrollEntry(fd);
     form.reset();
+  } else if (type === "add-internal-document"){
+    var intDocFileInput = form.querySelector('[name="file"]');
+    var intDocFile = intDocFileInput && intDocFileInput.files && intDocFileInput.files[0];
+    if (!intDocFile){ showToast("Choose a file first"); return; }
+    addInternalDocumentFile(form.dataset.lead, (fd.get("name")||"").trim(), intDocFile);
+    ui.modal = null;
+    render();
   } else if (type === "confirm-mark-payroll-paid"){
     confirmMarkPayrollPaid(fd);
   } else if (type === "save-my-ach"){
