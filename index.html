@@ -2257,8 +2257,12 @@ function canEditApplication(lead){
 // get_guarantor_ssn_full() RPC -- owner/full_access, or whoever the lead
 // is actually assigned to -- so the button only ever appears for staff
 // who the RPC will actually let through.
+// Real bug found 2026-09-29 (Erika still couldn't see SSNs despite having
+// full_access=true in the database): this check never actually looked at
+// fullAccess at all -- AND separately, list_users() wasn't sending that
+// column to the browser in the first place. Both are fixed now.
 function canRevealSsn(lead){
-  return isOwner() || currentUser().id === lead.assignedTo;
+  return isOwner() || !!currentUser().fullAccess || currentUser().id === lead.assignedTo;
 }
 function revealGuarantorSsn(leadId){
   var lead = leadById(leadId);
