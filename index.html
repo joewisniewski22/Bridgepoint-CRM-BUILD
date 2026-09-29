@@ -2201,9 +2201,21 @@ function fmtClock(hhmm){
   if (isNaN(h)) return "";
   return ((h % 12) || 12) + ":" + (p[1] || "00") + (h >= 12 ? " PM" : " AM");
 }
+// Real bug found 2026-09-29 (Joe: "the dialer counter stays on 0/20 for
+// team its not working correctly"): this used to be UTC-based
+// (toISOString()), but every staff member is Eastern -- UTC rolls over to
+// the next calendar day at 8pm Eastern (7pm during DST), so every
+// "today"-scoped counter (call quota, callsMadeToday, follow-ups due, etc.)
+// silently reset itself 4-5 hours before the actual end of the business
+// day, making a perfectly real afternoon/evening's worth of calls look like
+// they'd vanished. Same Intl/America-New_York DST-safe computation already
+// used server-side in the reminder cron functions (easternNow()).
 function todayISO(){
-  var d = new Date();
-  return d.toISOString().slice(0,10);
+  var parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", year:"numeric", month:"2-digit", day:"2-digit"
+  }).formatToParts(new Date());
+  var get = function(t){ return parts.find(function(p){ return p.type===t; }).value; };
+  return get("year") + "-" + get("month") + "-" + get("day");
 }
 function startOfToday(){
   var d = new Date(); d.setHours(0,0,0,0); return d;
