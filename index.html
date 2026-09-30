@@ -6521,28 +6521,18 @@ function saveGuarantorSsn(leadId, ssn){
     }
   }).catch(function(){ showToast("Couldn't save SSN — try again"); });
 }
-// Full-SSN reveal for owner / full-access staff (Erika's ask, 2026-09-18).
-// The decrypt happens server-side in get_guarantor_ssn_full, which enforces
-// the same owner/full_access/assigned-LO rule -- the isOwner() check here
-// only decides whether to show the button. Held in memory only, auto-hides
-// after 30s, and never written to lead state or persisted.
-var ssnReveal = null;
-function revealGuarantorSsn(leadId){
-  if (!sb) return;
-  sb.rpc("get_guarantor_ssn_full", { p_lead_id: leadId }).then(function(res){
-    if (res.error || !res.data){ showToast("Couldn't reveal SSN"); return; }
-    if (ssnReveal && ssnReveal.timer) clearTimeout(ssnReveal.timer);
-    var d = String(res.data).replace(/\D/g,"");
-    var shown = d.length === 9 ? (d.slice(0,3) + "-" + d.slice(3,5) + "-" + d.slice(5)) : String(res.data);
-    ssnReveal = { leadId: leadId, value: shown, timer: setTimeout(function(){ ssnReveal = null; render(); }, 30000) };
-    render();
-  }).catch(function(){ showToast("Couldn't reveal SSN"); });
-}
-function hideGuarantorSsn(){
-  if (ssnReveal && ssnReveal.timer) clearTimeout(ssnReveal.timer);
-  ssnReveal = null;
-  render();
-}
+// Real bug found 2026-09-30: this whole file had TWO separate
+// revealGuarantorSsn/hideGuarantorSsn pairs -- this one (dated 9/18, gated
+// on isOwner() only, storing into a singular `ssnReveal` var with a 30s
+// auto-hide) and the newer one up near canRevealSsn (dated 9/26-9/29,
+// gated on the real owner/full_access/assigned-LO rule, keyed into
+// ui.ssnRevealed so buildSsnRevealHTML can find it). Plain function
+// declarations don't block-scope -- whichever is LAST in the file wins,
+// silently, so this older one was overriding the fixed one everywhere,
+// including on the Application view, which reads ui.ssnRevealed and so
+// never saw a thing get revealed no matter how many times "Reveal full
+// SSN" was clicked there. Deleted; canRevealSsn/revealGuarantorSsn/
+// hideGuarantorSsn near the top of the file are now the only copies.
 // Employee direct-deposit info (Joe's ask, 2026-09-28): each employee
 // submits their own routing/account number once, encrypted server-side
 // exactly like guarantor SSN (get_employee_ach_full enforces owner-only,
@@ -10511,11 +10501,7 @@ function renderTabOverview(lead){
     '<div class="field"><label>Guarantor Last Name</label><input class="input" name="guarantorLastName" value="' + esc(lead.guarantorLastName||"") + '"></div>' +
     '<div class="field"><label>Guarantor DOB</label><input class="input" type="date" name="birthday" value="' + (lead.birthday||"") + '"></div>' +
     '<div class="field"><label>Guarantor SSN</label><input class="input" type="password" autocomplete="off" name="guarantorSsn" value="" placeholder="' + (lead.guarantorSsnLast4 ? ("On file, ending " + lead.guarantorSsnLast4 + " — leave blank to keep") : "XXX-XX-XXXX") + '">' +
-      (lead.guarantorSsnLast4 && isOwner() ? (
-        (ssnReveal && ssnReveal.leadId === lead.id)
-          ? '<div class="hint" style="margin-top:6px"><strong style="font-family:monospace;font-size:1rem">' + esc(ssnReveal.value) + '</strong> <button type="button" class="link-btn" data-action="hide-ssn">Hide</button> · auto-hides in 30s</div>'
-          : '<div class="hint" style="margin-top:6px"><button type="button" class="link-btn" data-action="reveal-ssn" data-lead="' + lead.id + '">Show full SSN</button></div>'
-      ) : '') +
+      buildSsnRevealHTML(lead) +
     '</div>' +
     '<div class="field"><label>Guarantor Phone</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||"") + '" placeholder="' + esc(lead.phone||"") + '"></div>' +
     '<div class="field"><label>Guarantor Email</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||"") + '" placeholder="' + esc(lead.email||"") + '"></div>' +
@@ -13917,13 +13903,20 @@ function renderLoanGuidelineHint(lead){
     (lead.loanAmount !== max ? (' &nbsp;<a href="#" data-action="apply-loan-guideline-max" data-lead="' + lead.id + '" data-amount="' + max + '">Use this</a>') : '') +
   '</div>';
 }
+// Joe's ask (2026-09-30), pointing at another lender portal's own SSN
+// field: a press-and-hold reveal ("Hold to Show") instead of a click that
+// leaves the real number sitting on screen until someone remembers to hide
+// it. Wired via pointerdown/pointerup below (not a click handler) --
+// release, for any reason, hides it immediately. Nothing is cached past
+// the hold: releasing clears ui.ssnRevealed so the next hold re-fetches
+// from get_guarantor_ssn_full() rather than reusing a stale value.
 function buildSsnRevealHTML(lead){
   if (ui.publicApply || !lead.guarantorSsnLast4) return "";
   var revealed = ui.ssnRevealed && ui.ssnRevealed[lead.id];
   if (revealed === "loading") return '<div class="footnote" style="padding:4px 0 0">Retrieving…</div>';
-  if (revealed) return '<div class="footnote" style="padding:4px 0 0"><b style="font-family:monospace;letter-spacing:1px">' + esc(revealed) + '</b> &nbsp;<a href="#" data-action="hide-ssn" data-lead="' + lead.id + '">Hide</a></div>';
+  if (revealed) return '<div class="footnote" style="padding:4px 0 0"><b style="font-family:monospace;letter-spacing:1px">' + esc(revealed) + '</b></div>';
   if (!canRevealSsn(lead)) return "";
-  return '<div class="footnote" style="padding:4px 0 0"><a href="#" data-action="reveal-ssn" data-lead="' + lead.id + '">Reveal full SSN</a></div>';
+  return '<div class="footnote" style="padding:4px 0 0"><button type="button" class="link-btn" data-action="reveal-ssn" data-lead="' + lead.id + '">Hold to Show</button></div>';
 }
 function buildApplicationFieldsHTML(lead, lang, opts){
   lang = lang || "en";
@@ -15296,8 +15289,6 @@ appEl.addEventListener("click", function(e){
   else if (action === "select-lead"){ ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); }
   else if (action === "select-lead-from-modal"){ if (t.dataset.lead){ ui.modal=null; ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); } }
   else if (action === "go-to-contacts"){ ui.view="contacts"; ui.selectedLeadId=null; render(); }
-  else if (action === "reveal-ssn"){ revealGuarantorSsn(t.dataset.lead); }
-  else if (action === "hide-ssn"){ hideGuarantorSsn(t.dataset.lead); }
   else if (action === "apply-loan-guideline-max"){
     var lgForm = t.closest("form");
     var lgInput = lgForm && lgForm.querySelector('[name="loanAmount"]');
@@ -15348,8 +15339,6 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "m-skip"){ skipQueueItem(t.dataset.lead); ui.mobileOpen = null; render(); }
   else if (action === "m-desktop"){ ui.forceDesktop = true; render(); }
-  else if (action === "reveal-ssn"){ revealGuarantorSsn(t.dataset.lead); }
-  else if (action === "hide-ssn"){ hideGuarantorSsn(); }
   else if (action === "open-my-ach"){ openMyAchModal(); }
   else if (action === "reveal-employee-ach"){ revealEmployeeAch(t.dataset.user); }
   else if (action === "hide-employee-ach"){ hideEmployeeAch(); }
@@ -15766,6 +15755,24 @@ document.addEventListener("pointermove", function(e){
   box.style.right = "auto";
 });
 document.addEventListener("pointerup", function(){ callDrag = null; });
+// SSN "Hold to Show" (Joe's ask, 2026-09-30, after seeing another lender
+// portal do it this way): press-and-hold instead of click-to-reveal, so
+// the real number is only ever on screen while a finger/mouse button is
+// actually down. Pointer events cover mouse, touch, and pen in one
+// listener. Any release, anywhere (not just back on the button), hides it
+// -- same reasoning as the call-panel drag above, the target under the
+// pointer at release doesn't matter.
+appEl.addEventListener("pointerdown", function(e){
+  var btn = e.target.closest && e.target.closest('[data-action="reveal-ssn"]');
+  if (!btn) return;
+  e.preventDefault();
+  revealGuarantorSsn(btn.dataset.lead);
+});
+var hideAllRevealedSsns = function(){
+  if (ui.ssnRevealed) Object.keys(ui.ssnRevealed).forEach(function(id){ hideGuarantorSsn(id); });
+};
+document.addEventListener("pointerup", hideAllRevealedSsns);
+document.addEventListener("pointercancel", hideAllRevealedSsns);
 // Shows the call-back date/time fields only while "Requested call back" is the chosen outcome.
 appEl.addEventListener("change", function(e){
   var t = e.target;
