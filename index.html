@@ -1100,8 +1100,16 @@ function evaluateRtlGucPricing(lead, points, propertyType, transactionType){
 // ladder and the "LOAN PRICING" Base Rate cell in the V6 pricing engine
 // workbook). DSCR_BASE_RATE_PRICE below is shifted by the same +0.125% so
 // quoting at par still prices at 100.000.
-var DSCR_BASE_PAR_RATE = 6.500;
-var DSCR_MIN_NOTE_RATE = 6.750;
+// +0.125% again per the C3 Surge Rate Sheet effective 9/29/26 (par/6.625%,
+// min note rate 6.875%) -- confirmed against the rate sheet's own price
+// ladder (6.625% -> 100.000 through 7.750% -> 102.125, same shape as
+// before, just shifted). Every FICO/LTV/property/DSCR-band/transaction/
+// loan-amount/prepay adjustment table below is unchanged from the prior
+// sheet -- only the base par rate and floor moved. Guideline matrix (DSCR
+// Rental Matrix, still dated 7.1.26) is unchanged, this is a rate-only
+// update.
+var DSCR_BASE_PAR_RATE = 6.625;
+var DSCR_MIN_NOTE_RATE = 6.875;
 // C3 Surge sheet (eff. 9/9/2026), "Expanded" program -- flat +0.375% for
 // the subject property's state. Confirmed against the live pricing engine
 // spreadsheet (V3 C3 Constructive Capital Pricing Engine.xlsx, Adjustments
@@ -1179,23 +1187,23 @@ var DSCR_FEE_BY_PROPERTY = {
   "Multifamily 5+": 3995
 };
 var DSCR_BASE_RATE_PRICE = [
-  {rate:7.625, price:102.125},{rate:7.500, price:102.000},{rate:7.375, price:101.875},
-  {rate:7.250, price:101.750},{rate:7.125, price:101.500},{rate:7.000, price:101.250},
-  {rate:6.875, price:101.000},{rate:6.750, price:100.750},{rate:6.625, price:100.375},
-  {rate:6.500, price:100.000}
+  {rate:7.750, price:102.125},{rate:7.625, price:102.000},{rate:7.500, price:101.875},
+  {rate:7.375, price:101.750},{rate:7.250, price:101.500},{rate:7.125, price:101.250},
+  {rate:7.000, price:101.000},{rate:6.875, price:100.750},{rate:6.750, price:100.375},
+  {rate:6.625, price:100.000}
 ];
 // The rate/price grid (DSCR_BASE_RATE_PRICE) is a buy-up curve measured from
-// PAR, not a table of absolute rates -- "par" is DSCR_BASE_PAR_RATE (6.500%
-// as of the 9/15/26 C3 Surge sheet) PLUS this specific borrower's own
+// PAR, not a table of absolute rates -- "par" is DSCR_BASE_PAR_RATE (6.625%
+// as of the 9/29/26 C3 Surge sheet) PLUS this specific borrower's own
 // risk-based adjustments (FICO/LTV/DSCR band/property/transaction/loan
 // amount/prepay/geography), so two borrowers with different risk profiles
 // have different par rates. Quoting AT a borrower's own par rate always
 // prices at 100.000 (zero YSP) by definition; only choosing a HIGHER rate
 // than that borrower's par earns YSP, looked up by how far above par the
 // chosen rate is (delta), reusing this same table's shape since it already
-// spans par (6.500, delta 0) through the max buy-up (7.625, delta 1.125) in
+// spans par (6.625, delta 0) through the max buy-up (7.750, delta 1.125) in
 // 0.125% steps. Per the same rate sheet, a hard floor of DSCR_MIN_NOTE_RATE
-// (6.750%) still applies below this curve's own par for exceptionally
+// (6.875%) still applies below this curve's own par for exceptionally
 // strong borrowers.
 function dscrPriceForDelta(deltaFromPar){
   if (deltaFromPar < -0.0001) return null;
