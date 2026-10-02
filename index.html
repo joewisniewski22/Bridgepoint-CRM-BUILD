@@ -6547,6 +6547,7 @@ function importLendingWiseLead(data, assignedTo, loanType){
   if (data.citizenshipRaw === "NonPermanentResidentAlien") noteParts.push("LendingWise lists NonPermanentResidentAlien -- mapped to Foreign National, please confirm");
   if (data.ssnOnFile) noteParts.push("SSN is on file in LendingWise (not copied -- collect through the application)");
   if (!data.phone) noteParts.push("No borrower phone number was in the LendingWise export");
+  if (!data.suggestedLoanType) noteParts.push("The export doesn't say the loan type -- set to " + loanType + (data.interestOnly ? " (interest-only purchase)" : "") + ", please confirm");
   var isRtlImport = RTL_AUTO_LOAN_TYPES.indexOf(loanType) !== -1;
   var lead = {
     id:id, name:data.name, email:data.email, phone:data.phone, source:"LendingWise Import", loanType:loanType,
