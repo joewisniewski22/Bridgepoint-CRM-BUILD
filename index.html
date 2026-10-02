@@ -6447,8 +6447,22 @@ function parseLendingWiseXML(xmlText){
     return { ok:false, error:"No borrower name, property address, or contact info found in this file." };
   }
 
+  // Everything else the export carries. Before this, only name/email/address/
+  // amount/rate came across and the rest of the file was silently dropped
+  // (Joe, on the Warner import: "none of the information from LendingWise
+  // carried over but the address"). SSN is deliberately NOT copied here -- the
+  // CRM keeps SSNs behind a server-side encrypted path, not in the browser.
+  var citizenRaw = borrowerParty ? lwText(borrowerParty, "CitizenshipResidencyType") : "";
+  var citizenshipMap = { USCitizen:"US Citizen", PermanentResidentAlien:"Permanent Resident", NonPermanentResidentAlien:"Foreign National" };
+  var amortMonths = loanEl ? lwNum(loanEl, "LoanAmortizationPeriodCount") : null;
+  var langCode = borrowerParty ? lwText(borrowerParty, "LanguageCode") : "";
+  var propUsage = subjectProp ? lwText(subjectProp, "PropertyUsageType") : "";
+  var transactionType = loanPurpose === "Purchase" ? "purchase" : (loanPurpose === "Refinance" ? "ratetermrefi" : null);
+
   return { ok:true, data:{
     name: fullName || "Unnamed Borrower",
+    firstName: firstName || null,
+    lastName: lastName || null,
     email: email || null,
     phone: cellPhone || null,
     birthday: dob || null,
@@ -6459,6 +6473,19 @@ function parseLendingWiseXML(xmlText){
     loanAmount: loanAmount,
     rate: notePercent,
     loanPurpose: loanPurpose || null,
+    transactionType: transactionType,
+    citizenshipRaw: citizenRaw || null,
+    citizenshipStatus: citizenshipMap[citizenRaw] || null,
+    interestOnly: loanEl ? lwText(loanEl, "InterestOnlyIndicator") === "true" : false,
+    amortizationMonths: amortMonths,
+    estimatedClosingCosts: lwNum(deal, "EstimatedClosingCostsAmount"),
+    monthlyRent: lwNum(deal, "MonthlyRentAmount"),
+    proposedHousingPayment: lwNum(deal, "HousingExpensePaymentAmount"),
+    borrowerCount: loanEl ? lwNum(loanEl, "BorrowerCount") : null,
+    propertyUsage: propUsage || null,
+    language: langCode === "spa" ? "es" : null,
+    ssnOnFile: borrowerParty ? !!lwText(borrowerParty, "TaxpayerIdentifierValue") : false,
+    suggestedLoanType: amortMonths === 360 ? "DSCR" : null,
     applicationReceivedDate: appReceivedDate || null,
     originatorName: originatorName || null
   }};
@@ -6512,12 +6539,28 @@ function importLendingWiseLead(data, assignedTo, loanType){
   if (data.propertyValue) noteParts.push("LendingWise property value: " + fmtUSD(data.propertyValue));
   if (data.borrowerAddress) noteParts.push("Borrower mailing address: " + data.borrowerAddress);
   if (data.originatorName) noteParts.push("LendingWise loan originator on file: " + data.originatorName);
+  if (data.estimatedClosingCosts) noteParts.push("LendingWise estimated closing costs: " + fmtUSD(data.estimatedClosingCosts));
+  if (data.proposedHousingPayment) noteParts.push("LendingWise proposed monthly payment: " + fmtUSD(data.proposedHousingPayment));
+  if (data.interestOnly) noteParts.push("Interest-only on LendingWise");
+  if (data.propertyUsage) noteParts.push("Property use: " + data.propertyUsage);
+  if (data.borrowerCount > 1) noteParts.push(data.borrowerCount + " borrowers on the LendingWise file -- only the primary borrower was imported");
+  if (data.citizenshipRaw === "NonPermanentResidentAlien") noteParts.push("LendingWise lists NonPermanentResidentAlien -- mapped to Foreign National, please confirm");
+  if (data.ssnOnFile) noteParts.push("SSN is on file in LendingWise (not copied -- collect through the application)");
+  if (!data.phone) noteParts.push("No borrower phone number was in the LendingWise export");
+  var isRtlImport = RTL_AUTO_LOAN_TYPES.indexOf(loanType) !== -1;
   var lead = {
     id:id, name:data.name, email:data.email, phone:data.phone, source:"LendingWise Import", loanType:loanType,
     stage:"new", status:"active", assignedTo:assignedTo, createdAt:d, createdAtTs:nowTs(), firstAttemptAt:null,
-    entityType:"LLC", creditScore:null, experienceDeals:null, liquidity:null,
+    entityType:"Individual", creditScore:null, experienceDeals:null, liquidity:null,
     propertyAddress:data.propertyAddress||"", propertyType:null, purchasePrice:data.purchasePrice||null, arv:null, rehabBudget:null,
-    rentEstimate:null, loanAmount:data.loanAmount||null, ltv:null, rate:data.rate||null, termMonths:null,
+    currentValue: data.propertyValue || null,
+    rentEstimate: data.monthlyRent || null, loanAmount:data.loanAmount||null, ltv:null, rate:data.rate||null,
+    termMonths: (!isRtlImport && data.amortizationMonths === 360) ? 360 : null,
+    transactionType: data.transactionType || null,
+    citizenshipStatus: data.citizenshipStatus || null,
+    guarantorFirstName: data.firstName || null, guarantorLastName: data.lastName || null,
+    guarantorEmail: data.email || null, guarantorPhone: data.phone || null, guarantorAddress: data.borrowerAddress || null,
+    preferredLanguage: data.language || "en",
     exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null, pointsCharged:null,
     birthday: data.birthday || null,
     callAttempts:[], documents:[], thirdParties:[], applicationToken: randomToken(),
@@ -6543,7 +6586,7 @@ function runLwImport(fd){
     if (!item.data || !item.data.ok){ skipped++; return; }
     if (!fd.get("include_" + idx)){ skipped++; return; }
     var assignedTo = fd.get("assignedTo_" + idx) || currentUser().id;
-    importLendingWiseLead(item.data.data, assignedTo, loanType);
+    importLendingWiseLead(item.data.data, assignedTo, fd.get("loanType_" + idx) || loanType);
     created++;
   });
   ui.lwImport = null;
@@ -15502,7 +15545,7 @@ function modalImportLendingWise(){
     var typeOptions = LOAN_TYPES.map(function(t){ return '<option value="' + t + '">' + t + '</option>'; }).join("");
     var rows = st.items.map(function(item, idx){
       if (!item.data || !item.data.ok){
-        return '<tr><td colspan="5"><b>' + esc(item.fileName) + '</b> — <span style="color:#c0392b">' + esc(item.data ? item.data.error : "Couldn't read file") + '</span></td></tr>';
+        return '<tr><td colspan="6"><b>' + esc(item.fileName) + '</b> — <span style="color:#c0392b">' + esc(item.data ? item.data.error : "Couldn't read file") + '</span></td></tr>';
       }
       var d = item.data.data;
       var dupeNote = item.dupe ? ('<div class="hint" style="color:#b8860b">⚠ Possible duplicate of ' + esc(item.dupe) + '</div>') : "";
@@ -15511,6 +15554,9 @@ function modalImportLendingWise(){
         '<td><b>' + esc(d.name) + '</b><div class="cell-sub">' + esc(item.fileName) + '</div>' + dupeNote + '</td>' +
         '<td>' + esc(d.propertyAddress||"—") + '</td>' +
         '<td>' + (d.loanAmount ? fmtUSD(d.loanAmount) : "—") + '</td>' +
+        '<td><select class="select" name="loanType_' + idx + '"><option value="">Use default above</option>' +
+          LOAN_TYPES.map(function(t){ return '<option value="' + t + '"' + (d.suggestedLoanType === t ? " selected" : "") + '>' + t + '</option>'; }).join("") +
+        '</select>' + (d.suggestedLoanType ? '<div class="hint">30-yr term suggests ' + esc(d.suggestedLoanType) + '</div>' : '') + '</td>' +
         '<td><select class="select" name="assignedTo_' + idx + '">' + ownerOptions(item.assignedTo) + '</select></td>' +
       '</tr>';
     }).join("");
@@ -15519,7 +15565,7 @@ function modalImportLendingWise(){
       '<div class="footnote" style="padding:0 0 10px">' + okCount + ' of ' + st.items.length + ' file(s) parsed. Uncheck any you don\'t want to bring in yet — possible duplicates start unchecked. Loan type below applies to all; fix it per-file afterward if it\'s mixed.</div>' +
       '<form data-form="lw-import-confirm" id="lw-import-confirm-form">' +
         '<div class="form-row"><label>Loan type for these files</label><select class="select" name="loanType">' + typeOptions + '</select></div>' +
-        '<div class="table-wrap" style="max-height:320px;overflow:auto"><table><thead><tr><th></th><th>Borrower / File</th><th>Property</th><th>Loan Amt</th><th>Assign to</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '<div class="table-wrap" style="max-height:320px;overflow:auto"><table><thead><tr><th></th><th>Borrower / File</th><th>Property</th><th>Loan Amt</th><th>Loan type</th><th>Assign to</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
       '</form>';
     foot = '<button class="btn btn-ghost" type="button" data-action="lw-import-back">← Back</button>' +
       '<button class="btn btn-primary" type="submit" form="lw-import-confirm-form">Import ' + okCount + ' File(s)</button>';
