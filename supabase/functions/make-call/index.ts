@@ -44,6 +44,17 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") return new Response(JSON.stringify({ error: "method_not_allowed" }), { status: 405, headers: CORS_HEADERS });
 
+  // Staff-only. This function is public (the anon key ships in the page), so
+  // without this anyone could place calls from the company number. Server jobs
+  // (service-role key) and signed-in staff only.
+  const callToken = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  let callTrusted = callToken === SERVICE_ROLE_KEY;
+  if (!callTrusted && callToken) {
+    const { data: u } = await createClient(SUPABASE_URL, SERVICE_ROLE_KEY).auth.getUser(callToken).catch(() => ({ data: null }));
+    callTrusted = !!(u && u.user);
+  }
+  if (!callTrusted) return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: CORS_HEADERS });
+
   try {
     const { leadId, phone, userId, direct } = await req.json();
     if ((!leadId && !phone) || !userId) {

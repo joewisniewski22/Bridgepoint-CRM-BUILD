@@ -53,6 +53,35 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400, headers: CORS_HEADERS });
     }
 
+    // This function is public (the anon key ships in the page), so without a
+    // check anyone could text anyone from the company number -- a direct path
+    // to the number getting flagged as spam. Server jobs (service-role key) and
+    // signed-in staff send freely. Anyone else (the borrower portal / booking
+    // page) may only text a staff member, or a lead's own number on a real file.
+    const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    let trusted = token === SERVICE_ROLE_KEY;
+    const authSb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    if (!trusted && token) {
+      const { data: u } = await authSb.auth.getUser(token).catch(() => ({ data: null }));
+      trusted = !!(u && u.user);
+    }
+    if (!trusted) {
+      const digits = (s: string) => (s || "").replace(/\D/g, "").slice(-10);
+      const target = digits(to);
+      let allowed = false;
+      if (target.length === 10) {
+        const { data: staff } = await authSb.from("users").select("phone");
+        allowed = !!(staff || []).some((s: { phone: string | null }) => digits(s.phone || "") === target);
+        if (!allowed && leadId) {
+          const { data: lead } = await authSb.from("leads").select("phone").eq("id", leadId).maybeSingle();
+          allowed = !!(lead && digits(lead.phone || "") === target);
+        }
+      }
+      if (!allowed) {
+        return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: CORS_HEADERS });
+      }
+    }
+
     const telnyxRes = await fetch("https://api.telnyx.com/v2/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + TELNYX_API_KEY },
