@@ -10853,6 +10853,10 @@ function lpValue(key, k){
   }
   var e = lpEntry(key).edits;
   if (Object.prototype.hasOwnProperty.call(e, k)) return e[k];
+  // The file's current loan amount is an OUTPUT of pricing, not an answer to
+  // a question -- never pre-fill it, or the pricer prices that amount instead
+  // of finding each lender's maximum.
+  if (k === "loanAmount") return null;
   var l = leadById(key);
   var v = l ? l[k] : null;
   return v === undefined ? null : v;
