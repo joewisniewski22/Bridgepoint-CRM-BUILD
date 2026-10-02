@@ -120,6 +120,9 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         From: fromName ? (fromName + " <" + fromAddress + ">") : fromAddress,
         To: to,
+        // Optional CC (staff/server sends only -- anonymous callers are limited to
+        // a staff member or the lead's own address above, so they can't use this).
+        ...(mailTrusted && body.cc ? { Cc: String(body.cc) } : {}),
         ReplyTo: replyTo,
         Subject: subject,
         TextBody: plainText,
