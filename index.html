@@ -3909,8 +3909,12 @@ function buildTermSheet(lead, langOverride){
     lines.push((isRehabType ? "Préstamo sobre Valor Después de Reparación: " : "Relación Préstamo-Valor: ") + (ltvRatio ? (ltvRatio + "%") : "Por determinar"));
     if (lead.loanType === "DSCR") lines.push("Relación DSCR: " + (dscrRatioText || "Por determinar"));
     lines.push((isRehabType ? "Pago Mensual (solo interés): " : "Pago Mensual (capital e interés): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "Por determinar"));
+    if (lead.prepayTerm){
+      var prepayLabelEs = lead.prepayTerm === "none" ? "Ninguna" : tr((PREPAY_TERMS.filter(function(t){ return t.key === lead.prepayTerm; })[0] || {}).label || lead.prepayTerm, "es");
+      lines.push("Penalización por Pago Anticipado: " + prepayLabelEs);
+    }
     lines.push("Originación: " + commission);
-    lines.push("Cargo del Prestamista: " + fmtUSD(lenderFeeForLead(lead)));
+    lines.push((lead.underwritingFeeOverride == null ? "Cargo de Suscripción" : "Cargo del Prestamista") + ": " + fmtUSD(lenderFeeForLead(lead)));
     if (adLenderExtras(lead)) lines.push("Cargos del Prestamista (servicio de impuestos, certificación de inundación" + (adLenderExtras(lead).mers ? ", MERS" : "") + "): " + fmtUSD(adLenderExtras(lead).total));
     if (lead.underwritingFeeOverride != null) lines.push("Cargo de Suscripción: " + fmtUSD(underwritingFeeForLead(lead)));
     lines.push("Cargo de Procesamiento: " + fmtUSD(processingFeeForLead(lead)));
@@ -3954,8 +3958,12 @@ function buildTermSheet(lead, langOverride){
     lines.push((isRehabType ? "Loan to After-Repair Value: " : "Loan-to-Value: ") + (ltvRatio ? (ltvRatio + "%") : "TBD"));
     if (lead.loanType === "DSCR") lines.push("DSCR Ratio: " + (dscrRatioText || "TBD"));
     lines.push((isRehabType ? "Monthly Payment (interest only): " : "Monthly Payment (principal & interest): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "TBD"));
+    if (lead.prepayTerm){
+      var prepayLabelEn = lead.prepayTerm === "none" ? "None" : ((PREPAY_TERMS.filter(function(t){ return t.key === lead.prepayTerm; })[0] || {}).label || lead.prepayTerm);
+      lines.push("Prepayment Penalty: " + prepayLabelEn);
+    }
     lines.push("Origination: " + commission);
-    lines.push("Lender Fee" + (lead.underwritingFeeOverride == null ? " (Underwriting)" : "") + ": " + fmtUSD(lenderFeeForLead(lead)));
+    lines.push((lead.underwritingFeeOverride == null ? "Underwriting Fee" : "Lender Fee") + ": " + fmtUSD(lenderFeeForLead(lead)));
     if (adLenderExtras(lead)) lines.push("Lender Charges (tax service, flood certification" + (adLenderExtras(lead).mers ? ", MERS" : "") + "): " + fmtUSD(adLenderExtras(lead).total));
     if (lead.underwritingFeeOverride != null) lines.push("Underwriting Fee: " + fmtUSD(underwritingFeeForLead(lead)));
     lines.push("Processing Fee: " + fmtUSD(processingFeeForLead(lead)));
@@ -11235,6 +11243,7 @@ function lpSelectOption(key, ri, oi){
   lead.loanAmount = r.loanAmountUsed;
   lead.rate = o.rate;
   lead.termMonths = sc.termMonths;
+  lead.prepayTerm = sc.prepayTerm;
   var basis = lpBasis(sc);
   if (basis) lead.ltv = Math.round((lead.loanAmount / basis) * 1000) / 10;
   if (r.fees && r.fees.lenderFee != null) lead.lenderFeeOverride = r.fees.lenderFee;
