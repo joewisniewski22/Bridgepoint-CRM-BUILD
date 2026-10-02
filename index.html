@@ -1520,7 +1520,8 @@ function evaluateGuidelines(lead){
     if (dscrGuidelineValueBasis && lead.loanAmount){
       var ltv = lead.loanAmount / dscrGuidelineValueBasis * 100;
       var tier = DSCR_LTV_BY_FICO.filter(function(t){ return (lead.creditScore||0) >= t.minFico; })[0];
-      var maxLtv = isRural ? 65 : (tier ? tier.purchase : DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length-1].purchase);
+      var ltvTierKey = lead.transactionType === "cashout" ? "cashOut" : (lead.transactionType === "ratetermrefi" ? "rateTerm" : "purchase");
+      var maxLtv = isRural ? 65 : (tier ? tier[ltvTierKey] : DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length-1][ltvTierKey]);
       check("LTV", ltv <= maxLtv, ltv.toFixed(0) + "% — max " + maxLtv + "%" + (isRural ? " for rural properties (65% cap regardless of credit score)" : " for this credit score band") + (lead.transactionType && lead.transactionType!=="purchase" ? " (against current value)" : ""));
     }
     if (isRural){
@@ -1676,13 +1677,57 @@ function evaluateGuidelines(lead){
     return null;
   }
 
+  // Terms applied from the live pricer were checked by the lender's own
+  // pricing engine at that exact amount, so say so. When an outside lender
+  // priced it, Constructive's leverage matrix doesn't apply -- the lender's
+  // own guidelines do -- so those three leverage checks no longer count
+  // against the file.
+  var pricerTerms = pricerTermsFor(lead);
+  if (pricerTerms){
+    if (!pricerTerms.inHouse){
+      checks.forEach(function(c){
+        if (!c.pass && ["Loan amount","LTV","Minimum property value"].indexOf(c.label) !== -1){
+          c.pass = true;
+          c.detail += " — priced by an outside lender whose own guidelines apply";
+        }
+      });
+    }
+    check("Live pricer", true, "Verified live at " + fmtUSD(lead.loanAmount) + " — the lender's maximum on this deal is " + fmtUSD(pricerTerms.maxLoanAmount) + " (checked " + fmtDate(pricerTerms.appliedAt) + ")");
+  }
   var allPass = checks.length > 0 && checks.every(function(c){ return c.pass; });
   return { status: allPass ? "pass" : "review", checks: checks, evaluatedAt: todayISO() };
+}
+// The terms the live pricer last applied to this file (lender, max loan,
+// price). Stored inside guidelineCheck (an existing jsonb column) so it
+// survives reloads without a schema change. Only trusted while the file's
+// loan amount and rate still equal what the pricer applied -- the moment
+// someone hand-edits either, the file falls back to the standard checks.
+function pricerTermsFor(lead){
+  var p = lead.guidelineCheck && lead.guidelineCheck.pricerTerms;
+  return (p && p.loanAmount === lead.loanAmount && p.rate === lead.rate) ? p : null;
+}
+// Re-evaluate the stored guideline check from the file's CURRENT numbers so
+// it can never go stale after terms, inputs, or a pricer selection change.
+function refreshGuidelineCheck(lead){
+  if (!lead || GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return;
+  var prevTerms = lead.guidelineCheck && lead.guidelineCheck.pricerTerms;
+  var result = evaluateGuidelines(lead);
+  if (!result) return;
+  if (prevTerms) result.pricerTerms = prevTerms;
+  lead.guidelineCheck = result;
+}
+// Max loan to show on the file: the lender-verified max from the pricer when
+// its terms are on the file, otherwise the in-house guideline calculation.
+function maxLoanForDisplay(lead){
+  var pt = pricerTermsFor(lead);
+  if (pt && pt.maxLoanAmount) return { amount: pt.maxLoanAmount };
+  return computeMaxLoanAmount(lead);
 }
 function runGuidelineCheck(leadId, opts){
   var lead = leadById(leadId);
   if (!lead) return;
   var result = evaluateGuidelines(lead);
+  if (result && lead.guidelineCheck && lead.guidelineCheck.pricerTerms) result.pricerTerms = lead.guidelineCheck.pricerTerms;
   lead.guidelineCheck = result;
   if (result && result.status === "review" && !(opts && opts.silent)){
     var failedLabels = result.checks.filter(function(c){ return !c.pass; }).map(function(c){ return c.label; }).join(", ");
@@ -2547,6 +2592,10 @@ function yspRevenue(lead){
   if (!lead.loanAmount) return 0;
   var noYsp = (lead.prepayTerm === "none") || (lead.propertyType === "Multifamily 5+");
   if (noYsp) return 0;
+  var appliedTerms = pricerTermsFor(lead);
+  if (appliedTerms && appliedTerms.price != null){
+    return Math.max(0, Math.round((appliedTerms.price - 100) / 100 * lead.loanAmount * 100) / 100);
+  }
   if (lead.rate != null){
     // A rate is already locked in -- price it off that exact rate relative
     // to this borrower's own par, or treat it as out of range. Never fall
@@ -2572,6 +2621,12 @@ function yspBreakdown(lead){
   var noYsp = (lead.prepayTerm === "none") || (lead.propertyType === "Multifamily 5+");
   if (noYsp) return { amount: 0, reason: "not eligible — no-prepay or 5+ unit multifamily" };
   if (lead.rate == null) return { amount: null, reason: "pending — set a rate first" };
+  // Rate and price came straight from the lender's own live quote via the
+  // pricer -- more exact than re-deriving them from the in-house rate sheet.
+  var appliedTerms = pricerTermsFor(lead);
+  if (appliedTerms && appliedTerms.price != null){
+    return { amount: Math.max(0, Math.round((appliedTerms.price - 100) / 100 * lead.loanAmount * 100) / 100), reason: null };
+  }
   var info = dscrLockedRateInfo(lead);
   if (!info) return { amount: null, reason: "can't compute this borrower's par rate yet — missing credit score, purchase price, or loan amount" };
   if (info.belowPar) return { amount: null, reason: "rate is below this borrower's par rate (" + fmtPct(info.parRate) + ") — pricing below par isn't modeled, needs manual calculation" };
@@ -3788,7 +3843,10 @@ function buildTermSheet(lead, langOverride){
   // own guidelines apply, not ours), or guidelineOverrideApproved is set
   // (a trusted staff member -- see canManageOutsideLender() -- has marked
   // this specific file's above-guideline number as real and approved).
-  var termSheetMaxLoanInfo = (lead.outsideLender || lead.guidelineOverrideApproved) ? null : computeMaxLoanAmount(lead);
+  // A third reason to skip it: the live pricer applied these exact terms and
+  // the lender's own engine confirmed the amount (pricerTermsFor is only
+  // non-null while the file's loan amount and rate still match what it applied).
+  var termSheetMaxLoanInfo = (lead.outsideLender || lead.guidelineOverrideApproved || pricerTermsFor(lead)) ? null : computeMaxLoanAmount(lead);
   // hitFlatCeiling means the $2M number is just this pricer's rough
   // quoting backstop, not a real LTV/LTC violation -- don't truncate a
   // genuinely large, already-priced loan (Bridge/Portfolio deals above
@@ -6684,11 +6742,14 @@ function setLoanDetails(leadId, loanAmount, rate, termMonths){
   if (loanAmount!=null && loanAmount !== lead.loanAmount){ lead.loanAmount = loanAmount; changed.push("loan amount to " + fmtUSD(loanAmount)); }
   if (rate!=null && rate !== lead.rate){ lead.rate = rate; changed.push("rate to " + fmtPct(rate)); rateChanged = true; }
   if (termMonths!=null && termMonths !== lead.termMonths){ lead.termMonths = termMonths; changed.push("term to " + termMonths + " months"); }
-  if (lead.purchasePrice && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/lead.purchasePrice)*1000)/10;
+  // LTV on a refinance is against current value, not the original purchase price.
+  var ldBasis = dscrValueBasis(lead, null);
+  if (ldBasis && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/ldBasis)*1000)/10;
   if (!changed.length) return;
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"system", text:"Loan terms updated — " + changed.join(", "), author: currentUser().name });
   if (rateChanged) notifyProcessorOfPricingChange(lead, "the rate (affects yield spread)");
+  refreshGuidelineCheck(lead);
   showToast("Loan details updated");
   persist();
 }
@@ -6712,6 +6773,7 @@ function setPricingInputs(leadId, fd){
   }
   var valueBasis = dscrValueBasis(lead, (ui.pricerInputs && ui.pricerInputs[leadId]) || null);
   if (valueBasis && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/valueBasis)*1000)/10;
+  refreshGuidelineCheck(lead);
   showToast("Pricing inputs saved");
   persist();
 }
@@ -10421,7 +10483,14 @@ function renderTabOverview(lead){
 }
 
 function renderGuidelineCheck(lead){
+  // Always show the check against the file's CURRENT numbers (a stored
+  // snapshot goes stale the moment terms or inputs change); the stored copy
+  // only decides whether a check has ever been run on this file.
   var gc = lead.guidelineCheck;
+  if (gc && GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) !== -1){
+    var liveGc = evaluateGuidelines(lead);
+    if (liveGc) gc = liveGc;
+  }
   var btnLabel = gc ? "Re-check Guidelines" : "Check Guidelines";
   var header = '<div class="section-head" style="margin-top:20px"><h2>Guideline Check</h2>' +
     '<button class="btn btn-sm" data-action="run-guideline-check" data-lead="' + lead.id + '">' + btnLabel + '</button></div>';
@@ -10673,7 +10742,7 @@ function renderTabScenario(lead){
     field("Monthly Property Tax", fmtUSD(lead.monthlyTaxes), true) +
     field("Monthly Insurance", fmtUSD(lead.monthlyInsurance), true) +
     field("Monthly HOA / Dues", lead.monthlyHoa ? fmtUSD(lead.monthlyHoa) : "—", true) +
-    (computeMaxLoanAmount(lead) ? field("Max Loan Amount You Qualify For", fmtUSD(Math.floor(computeMaxLoanAmount(lead).amount)), true) : "") +
+    (maxLoanForDisplay(lead) ? field("Max Loan Amount You Qualify For", fmtUSD(Math.floor(maxLoanForDisplay(lead).amount)), true) : "") +
     field("Day One Loan Amount", fmtUSD(lead.loanAmount), true) +
     field("LTV / LTC", lead.ltv ? lead.ltv + "%" : "—", true) +
     field("Rate", fmtPct(lead.rate), true) +
@@ -10731,6 +10800,10 @@ function renderOutsideTermSheetUpload(lead){
 
 function renderPricingInputsEditor(lead){
   if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
+  // The live Pricer below asks every one of these questions itself (pre-filled
+  // from the application) and saves them to the file -- keeping a second,
+  // separate form for the same fields is how the two ended up disagreeing.
+  if (LP_LIVE_TYPES.indexOf(lead.loanType) !== -1) return "";
   var isDSCR = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
   var isPortfolio = lead.loanType === "Portfolio/Blanket";
   var isRTL = lead.loanType === "Fix & Flip" || lead.loanType === "Bridge" || lead.loanType === "Ground Up Construction";
@@ -10762,7 +10835,7 @@ function dscrRateAdjustField(lead, currentRate, parRate){
 }
 function buildPricerOutputHTML(lead, inputs){
   var isDSCR = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
-  var maxLoanInfo = computeMaxLoanAmount(lead);
+  var maxLoanInfo = maxLoanForDisplay(lead);
   var lockedToActualRate = false;
   var result, effectiveLoanAmount, parRateForDisplay = null;
   if (isDSCR && lead.rate){
@@ -11152,8 +11225,14 @@ function lpSelectOption(key, ri, oi){
   if (canManageOutsideLender()) lead.outsideLender = isInHouse ? null : r.lender;
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"note", text: "Pricer: applied " + fmtUSD(lead.loanAmount) + " at " + fmtPct(o.rate) + (canManageOutsideLender() ? (" with " + r.lender) : "") + (isInHouse || !canManageOutsideLender() ? "" : " (placed with outside lender)"), author: currentUser().name });
+  lead.guidelineCheck = Object.assign({}, lead.guidelineCheck || {}, { pricerTerms: {
+    lender: r.lender, inHouse: isInHouse, program: o.program, loanAmount: lead.loanAmount, rate: lead.rate,
+    price: sc.loanType === "DSCR" ? o.price : null, maxLoanAmount: r.maxLoanAmount || r.loanAmountUsed,
+    appliedAt: todayISO(), appliedBy: currentUser().name
+  } });
+  refreshGuidelineCheck(lead);
   en.selected = { ri: ri, oi: oi };
-  showToast("Applied to the file");
+  showToast("Applied to the file — loan scenario, guideline check, and term sheet now match");
   persist();
   render();
 }
@@ -11165,6 +11244,9 @@ function lpSaveInputs(key){
   en.edits = {};
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"note", text: "Pricer: updated " + n + " scenario input(s) on the file", author: currentUser().name });
+  var saveBasis = dscrValueBasis(lead, null);
+  if (saveBasis && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount / saveBasis) * 1000) / 10;
+  refreshGuidelineCheck(lead);
   showToast("Saved to the file");
   persist();
   render();
