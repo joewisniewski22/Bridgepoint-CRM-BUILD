@@ -1211,6 +1211,17 @@ function dscrPriceForDelta(deltaFromPar){
   return DSCR_BASE_RATE_PRICE.filter(function(p){ return Math.abs(p.rate - tableRate) < 0.001; })[0] || null;
 }
 var DSCR_MAX_BUYUP = 1.125;
+// The number a file's stored LTV/LTC is measured against. Fix & Flip, Bridge and
+// Ground Up loans fund rehab on top of the purchase, so the meaningful ratio is
+// loan-to-COST (purchase + rehab) -- measuring them against purchase price alone
+// is how files ended up showing 100%-900% "LTV".
+function leadLtvBasis(lead, inputs){
+  if (["Fix & Flip","Bridge","Ground Up Construction"].indexOf(lead.loanType) !== -1){
+    var cost = (lead.purchasePrice || 0) + (lead.rehabBudget || 0);
+    return cost > 0 ? cost : (lead.arv || null);
+  }
+  return dscrValueBasis(lead, inputs);
+}
 function dscrValueBasis(lead, inputs){
   // LTV for a refinance is against the property's current value, not
   // whatever was paid for it (possibly years ago) -- purchase price is
@@ -6743,7 +6754,7 @@ function setLoanDetails(leadId, loanAmount, rate, termMonths){
   if (rate!=null && rate !== lead.rate){ lead.rate = rate; changed.push("rate to " + fmtPct(rate)); rateChanged = true; }
   if (termMonths!=null && termMonths !== lead.termMonths){ lead.termMonths = termMonths; changed.push("term to " + termMonths + " months"); }
   // LTV on a refinance is against current value, not the original purchase price.
-  var ldBasis = dscrValueBasis(lead, null);
+  var ldBasis = leadLtvBasis(lead, null);
   if (ldBasis && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/ldBasis)*1000)/10;
   if (!changed.length) return;
   lead.activity = lead.activity || [];
@@ -6771,7 +6782,7 @@ function setPricingInputs(leadId, fd){
     var maxInfo = computeMaxLoanAmount(lead);
     if (maxInfo && maxInfo.amount > 0) lead.loanAmount = Math.floor(maxInfo.amount);
   }
-  var valueBasis = dscrValueBasis(lead, (ui.pricerInputs && ui.pricerInputs[leadId]) || null);
+  var valueBasis = leadLtvBasis(lead, (ui.pricerInputs && ui.pricerInputs[leadId]) || null);
   if (valueBasis && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount/valueBasis)*1000)/10;
   refreshGuidelineCheck(lead);
   showToast("Pricing inputs saved");
@@ -11066,7 +11077,13 @@ function lpFieldHTML(key, f){
   }
   return '<div class="form-row"><label>' + label + '</label>' + input + '</div>';
 }
-function lpBasis(sc){ return (sc.transactionType !== "purchase" && sc.currentValue) ? sc.currentValue : sc.purchasePrice; }
+function lpBasis(sc){
+  if (LP_RTL.indexOf(sc.loanType) !== -1){
+    var cost = (sc.purchasePrice || 0) + (sc.rehabBudget || 0);
+    return cost > 0 ? cost : (sc.arv || null);
+  }
+  return (sc.transactionType !== "purchase" && sc.currentValue) ? sc.currentValue : sc.purchasePrice;
+}
 function lpRenderResults(key){
   var en = lpEntry(key);
   if (en.status === "loading") return '<div class="hint" style="padding:14px 0">Checking every lender live — usually a few seconds…</div>';
@@ -11244,7 +11261,7 @@ function lpSaveInputs(key){
   en.edits = {};
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"note", text: "Pricer: updated " + n + " scenario input(s) on the file", author: currentUser().name });
-  var saveBasis = dscrValueBasis(lead, null);
+  var saveBasis = leadLtvBasis(lead, null);
   if (saveBasis && lead.loanAmount) lead.ltv = Math.round((lead.loanAmount / saveBasis) * 1000) / 10;
   refreshGuidelineCheck(lead);
   showToast("Saved to the file");
