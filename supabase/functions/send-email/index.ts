@@ -81,6 +81,32 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400, headers: CORS_HEADERS });
     }
 
+    // This function is public (the anon key ships in the page), so without a
+    // check anyone could send email from our domain to anyone -- which burns
+    // the domain's sender reputation. Server jobs (service-role key) and
+    // signed-in staff send freely; anyone else (borrower portal / application
+    // page) may only email a staff member, or a lead's own address on a real file.
+    const mailToken = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    let mailTrusted = mailToken === SERVICE_ROLE_KEY;
+    const mailAuthSb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    if (!mailTrusted && mailToken) {
+      const { data: u } = await mailAuthSb.auth.getUser(mailToken).catch(() => ({ data: null }));
+      mailTrusted = !!(u && u.user);
+    }
+    if (!mailTrusted) {
+      const target = (to || "").trim().toLowerCase();
+      let allowed = false;
+      const { data: staff } = await mailAuthSb.from("users").select("email");
+      allowed = !!(staff || []).some((s: { email: string | null }) => (s.email || "").trim().toLowerCase() === target);
+      if (!allowed && leadId) {
+        const { data: lead } = await mailAuthSb.from("leads").select("email").eq("id", leadId).maybeSingle();
+        allowed = !!(lead && (lead.email || "").trim().toLowerCase() === target);
+      }
+      if (!allowed) {
+        return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: CORS_HEADERS });
+      }
+    }
+
     const plainText = ctaUrl ? text.split(CTA_MARKER).join(ctaUrl) : text;
     const replyTo = leadId ? insertPlusTag(INBOUND_ADDRESS, leadId) : INBOUND_ADDRESS;
 
