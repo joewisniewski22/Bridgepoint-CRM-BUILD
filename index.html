@@ -11006,6 +11006,17 @@ function lpRenderResults(key){
   var letters = "ABCDEFGH";
   var basis = lpBasis(sc);
   var points = sc.pointsCharged || 0;
+  // Best par rate: across every eligible lender, the lowest rate that still
+  // prices at par or better (no points cost to the borrower). DSCR only --
+  // RTL "price" is lender points, not a par/premium scale.
+  var bestPar = null;
+  if (!rtl) en.data.forEach(function(r, ri){
+    if (!r.eligible) return;
+    (r.options || []).forEach(function(o, oi){
+      if (o.price < 100 - 0.0005) return;
+      if (!bestPar || o.rate < bestPar.rate || (o.rate === bestPar.rate && o.price < bestPar.price)) bestPar = { ri: ri, oi: oi, rate: o.rate, price: o.price };
+    });
+  });
   var cards = en.data.map(function(r, ri){
     var label = canSee ? r.lender : ("Lender " + letters.charAt(ri));
     var amt = r.loanAmountUsed;
@@ -11034,7 +11045,10 @@ function lpRenderResults(key){
       }
       var pickBtn = (lpIsStandalone(key) || canEditApplication(leadOrNull(key)))
         ? '<button class="btn btn-sm' + (applied ? '' : ' btn-primary') + '" type="button" data-action="lp-select" data-lp="' + esc(key) + '" data-r="' + ri + '" data-o="' + oi + '">' + (applied ? "Applied ✓" : (lpIsStandalone(key) ? "Use this" : "Apply to file")) + '</button>' : '';
-      return '<tr' + (oi === best ? ' style="background:var(--c-forest-bg)"' : '') + '><td>' + (oi === best ? '<span class="badge badge-forest">Best for us</span>' : '') + '</td>' + cells + '<td>' + pickBtn + '</td></tr>';
+      var isPar = !!(bestPar && bestPar.ri === ri && bestPar.oi === oi);
+      var rowBg = isPar ? ' style="background:var(--c-gold-bg);box-shadow:inset 3px 0 0 var(--c-gold)"' : (oi === best ? ' style="background:var(--c-forest-bg)"' : '');
+      var badges = (isPar ? '<span class="badge badge-gold">Best par rate</span> ' : '') + (oi === best ? '<span class="badge badge-forest">Best for us</span>' : '');
+      return '<tr' + rowBg + '><td>' + badges + '</td>' + cells + '<td>' + pickBtn + '</td></tr>';
     }).join("");
     var heads = rtl
       ? '<th></th><th class="num">Rate</th><th class="num">Payment (IO)</th><th class="num">Lender points</th><th class="num">Total points $</th><th></th>'
@@ -11046,7 +11060,7 @@ function lpRenderResults(key){
   var anyEligible = en.data.some(function(r){ return r.eligible; });
   var footer = '<div class="footnote" style="padding-top:10px">' + (rtl
     ? 'Total points $ = the lender\'s points plus your ' + points + '% origination, on the loan amount shown.'
-    : 'Price is the lender\'s own price for that rate: above 100 earns yield spread, below 100 costs points. Est. revenue = your ' + points + '% origination + yield spread (negative if priced below par). "Best for us" is the highest-price option — not necessarily the lowest rate for the borrower.') +
+    : 'Best par rate is the lowest rate across all lenders that still prices at 100 or better — no points cost to the borrower. Price is the lender\'s own price for that rate: above 100 earns yield spread, below 100 costs points. Est. revenue = your ' + points + '% origination + yield spread (negative if priced below par). "Best for us" is the highest-price option — not necessarily the lowest rate for the borrower.') +
     ' Checked live ' + (en.ranAt ? new Date(en.ranAt).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "") + '.</div>';
   var banner = stale ? '<div class="hint" style="color:var(--c-rust);padding:10px 0 0">You\'ve changed something since these were checked — check live rates again to refresh them.</div>' : '';
   var none = anyEligible ? '' : '<div class="hint" style="padding:10px 0 0">No lender fits this scenario as entered — the reasons are listed below. Adjust the deal above and check again.</div>';
