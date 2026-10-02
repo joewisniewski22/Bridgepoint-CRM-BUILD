@@ -3908,7 +3908,12 @@ function buildTermSheet(lead, langOverride){
     lines.push("Plazo: " + (lead.termMonths ? (lead.termMonths + " meses") : "Por determinar"));
     lines.push((isRehabType ? "Préstamo sobre Valor Después de Reparación: " : "Relación Préstamo-Valor: ") + (ltvRatio ? (ltvRatio + "%") : "Por determinar"));
     if (lead.loanType === "DSCR") lines.push("Relación DSCR: " + (dscrRatioText || "Por determinar"));
-    lines.push((isRehabType ? "Pago Mensual (solo interés): " : "Pago Mensual (capital e interés): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "Por determinar"));
+    var hbPayEs = isRehabType ? rehabHoldbackForLead(lead) : null;
+    if (hbPayEs && lead.rate){
+      lines.push("Pago Mensual (solo interés, sobre el monto desembolsado): " + fmtUSD(interestOnlyPayment(hbPayEs.initialAdvance, lead.rate)) + " al cierre, aumentando a " + fmtUSD(termSheetMonthlyPayment(lead)) + " una vez desembolsado por completo");
+    } else {
+      lines.push((isRehabType ? "Pago Mensual (solo interés): " : "Pago Mensual (capital e interés): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "Por determinar"));
+    }
     if (lead.prepayTerm){
       var prepayLabelEs = lead.prepayTerm === "none" ? "Ninguna" : tr((PREPAY_TERMS.filter(function(t){ return t.key === lead.prepayTerm; })[0] || {}).label || lead.prepayTerm, "es");
       lines.push("Penalización por Pago Anticipado: " + prepayLabelEs);
@@ -3957,7 +3962,14 @@ function buildTermSheet(lead, langOverride){
     lines.push("Term: " + (lead.termMonths ? (lead.termMonths + " months") : "TBD"));
     lines.push((isRehabType ? "Loan to After-Repair Value: " : "Loan-to-Value: ") + (ltvRatio ? (ltvRatio + "%") : "TBD"));
     if (lead.loanType === "DSCR") lines.push("DSCR Ratio: " + (dscrRatioText || "TBD"));
-    lines.push((isRehabType ? "Monthly Payment (interest only): " : "Monthly Payment (principal & interest): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "TBD"));
+    // Rehab loans charge interest only on what's actually been drawn, so the
+    // payment at closing is on the initial advance and grows as draws fund.
+    var hbPay = isRehabType ? rehabHoldbackForLead(lead) : null;
+    if (hbPay && lead.rate){
+      lines.push("Monthly Payment (interest only, on funded amount): " + fmtUSD(interestOnlyPayment(hbPay.initialAdvance, lead.rate)) + " at closing, rising to " + fmtUSD(termSheetMonthlyPayment(lead)) + " once fully drawn");
+    } else {
+      lines.push((isRehabType ? "Monthly Payment (interest only): " : "Monthly Payment (principal & interest): ") + (termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "TBD"));
+    }
     if (lead.prepayTerm){
       var prepayLabelEn = lead.prepayTerm === "none" ? "None" : ((PREPAY_TERMS.filter(function(t){ return t.key === lead.prepayTerm; })[0] || {}).label || lead.prepayTerm);
       lines.push("Prepayment Penalty: " + prepayLabelEn);
