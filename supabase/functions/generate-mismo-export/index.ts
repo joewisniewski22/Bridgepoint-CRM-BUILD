@@ -1,3 +1,4 @@
+import { createClient as __guardCreateClient } from "https://esm.sh/@supabase/supabase-js@2";
 // Exports a loan file as a MISMO 3.4 Reference Model XML document -- the
 // standard mortgage-industry format for exchanging loan data with
 // investors, title/settlement systems, and other lenders (e.g. the outside
@@ -256,6 +257,19 @@ async function callerCanSeeSsn(req: Request, leadAssignedTo: string | null): Pro
 }
 
 Deno.serve(async (req: Request) => {
+  // Staff-or-server only. This function is reachable from the public internet
+  // (the anon key ships in the page), so without this check anyone could call it.
+  {
+    const guardToken = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    let guardOk = guardToken === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!guardOk && guardToken && req.method !== "OPTIONS") {
+      const { data: guardUser } = await __guardCreateClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!).auth.getUser(guardToken).catch(() => ({ data: null }));
+      guardOk = !!(guardUser && guardUser.user);
+    }
+    if (!guardOk && req.method !== "OPTIONS") {
+      return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" } });
+    }
+  }
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), { status: 405, headers: CORS_HEADERS });

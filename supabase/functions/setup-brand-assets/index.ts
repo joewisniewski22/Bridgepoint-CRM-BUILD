@@ -1,3 +1,4 @@
+import { createClient as __guardCreateClient } from "https://esm.sh/@supabase/supabase-js@2";
 // One-time setup: creates a public storage bucket for brand assets (logo,
 // staff photos) and uploads a file into it. Uses the service role key so
 // no RLS policy juggling is needed -- this is an admin-only utility, not
@@ -23,6 +24,19 @@ function base64ToBytes(base64: string): Uint8Array {
 }
 
 Deno.serve(async (req: Request) => {
+  // Staff-or-server only. This function is reachable from the public internet
+  // (the anon key ships in the page), so without this check anyone could call it.
+  {
+    const guardToken = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    let guardOk = guardToken === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!guardOk && guardToken && req.method !== "OPTIONS") {
+      const { data: guardUser } = await __guardCreateClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!).auth.getUser(guardToken).catch(() => ({ data: null }));
+      guardOk = !!(guardUser && guardUser.user);
+    }
+    if (!guardOk && req.method !== "OPTIONS") {
+      return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" } });
+    }
+  }
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   try {
     const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);

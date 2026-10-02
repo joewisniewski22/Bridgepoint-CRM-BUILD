@@ -1,3 +1,4 @@
+import { createClient as __guardCreateClient } from "https://esm.sh/@supabase/supabase-js@2";
 // Meta Marketing API integration -- lets the CRM (and the AI Assistant)
 // read ad performance and adjust campaign budgets on Joe's behalf, and is
 // the foundation for tying ad spend to real closed-loan outcomes (Joe's
@@ -48,6 +49,19 @@ async function graphFetch(path: string, params: Record<string, string> = {}, met
 }
 
 Deno.serve(async (req: Request) => {
+  // Staff-or-server only. This function is reachable from the public internet
+  // (the anon key ships in the page), so without this check anyone could call it.
+  {
+    const guardToken = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    let guardOk = guardToken === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!guardOk && guardToken && req.method !== "OPTIONS") {
+      const { data: guardUser } = await __guardCreateClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!).auth.getUser(guardToken).catch(() => ({ data: null }));
+      guardOk = !!(guardUser && guardUser.user);
+    }
+    if (!guardOk && req.method !== "OPTIONS") {
+      return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" } });
+    }
+  }
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), { status: 405, headers: CORS_HEADERS });
@@ -123,6 +137,17 @@ Deno.serve(async (req: Request) => {
       const result = await graphFetch("/" + pageId, { fields: "instagram_business_account,connected_instagram_account" });
       if (!result.ok) return new Response(JSON.stringify({ error: "meta_error", detail: result.data }), { status: 502, headers: CORS_HEADERS });
       return new Response(JSON.stringify({ ok: true, result: result.data }), { headers: CORS_HEADERS });
+    }
+
+    // Read-only diagnostics: which permissions the token carries and which
+    // Pages it can reach (a Page is required for organic posting).
+    if (action === "permissions") {
+      const result = await graphFetch("/me/permissions", {});
+      return new Response(JSON.stringify({ ok: result.ok, result: result.data }), { headers: CORS_HEADERS });
+    }
+    if (action === "pages") {
+      const result = await graphFetch("/me/accounts", { fields: "id,name,tasks" });
+      return new Response(JSON.stringify({ ok: result.ok, result: result.data }), { headers: CORS_HEADERS });
     }
 
     if (action === "whoami") {
