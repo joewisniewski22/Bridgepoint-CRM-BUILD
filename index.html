@@ -1422,7 +1422,9 @@ var US_STATE_NAME_TO_ABBR = {
 };
 function stateFromAddress(address){
   if (!address) return null;
-  var trimmed = address.trim();
+  // Google Places addresses end with ", USA" -- strip it so the state is
+  // the last real component instead of silently never matching.
+  var trimmed = address.trim().replace(/,\s*(USA|US|United States)\s*$/i, "");
   var m = /,\s*([A-Za-z]{2})\s*\d{0,5}\s*$/.exec(trimmed);
   if (m) return m[1].toUpperCase();
   // Some addresses (phone-taken applications especially) spell the state
@@ -9054,8 +9056,6 @@ function renderTeamSnapshot(){
   '</div>';
 }
 
-var STANDALONE_PRICER_LOAN_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction","Portfolio/Blanket"];
-var STANDALONE_PRICER_NUMERIC_KEYS = ["creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","experienceDeals","rehabBudget","propertyCount","termMonths","arv"];
 function defaultStandalonePricer(){
   return {
     loanType:"DSCR", propertyType:"SFR", creditScore:null, purchasePrice:null, currentValue:null, currentLoanBalance:null,
@@ -9139,136 +9139,44 @@ function computeMaxLoanAmount(sp){
 }
 function renderStandalonePricer(){
   ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
-  var sp = ui.standalonePricer;
-  var isDSCR = sp.loanType === "DSCR" || sp.loanType === "Portfolio/Blanket";
-  var isPortfolio = sp.loanType === "Portfolio/Blanket";
-  var isRTL = sp.loanType === "Fix & Flip" || sp.loanType === "Bridge" || sp.loanType === "Ground Up Construction";
-  var v = function(x){ return x!=null ? x : ""; };
-  var sel = function(name, value){ return sp[name]===value ? " selected" : ""; };
-
-  var loanTypeOptions = STANDALONE_PRICER_LOAN_TYPES.map(function(t){ return '<option value="' + t + '"' + sel("loanType", t) + '>' + t + '</option>'; }).join("");
-  var propTypeOptions = PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + sel("propertyType", t) + '>' + t + '</option>'; }).join("");
-  var citizenshipOptions = '<option value="">—</option>' + CITIZENSHIP_STATUSES.map(function(t){ return '<option value="' + t + '"' + sel("citizenshipStatus", t) + '>' + t + '</option>'; }).join("");
-
-  var ruralBanner = sp.ruralStatus === "rural"
-    ? '<div class="hint" style="color:var(--c-rust);margin-bottom:12px">⚠️ This address appears to be in a rural area — DSCR overlay applies (65% max LTV, 1.20x min DSCR, 720 min FICO). Not Constructive\'s exact internal definition, just the closest free proxy (Census Urban Areas) available.</div>'
-    : "";
-
-  var fields = ruralBanner + '<div class="form-two">' +
-      '<div class="form-row"><label>Loan Type</label><select class="select" name="loanType" data-action="standalone-pricer-field">' + loanTypeOptions + '</select></div>' +
-      '<div class="form-row"><label>Property Type</label><select class="select" name="propertyType" data-action="standalone-pricer-field">' + propTypeOptions + '</select></div>' +
-    '</div>' +
-    '<div class="form-row"><label>Property Address</label>' +
-      '<input class="input" name="propertyAddress" list="address-suggest-standalone" autocomplete="off" data-action="address-lookup" data-lead="standalone" value="' + esc(sp.propertyAddress||"") + '">' +
-      '<datalist id="address-suggest-standalone"></datalist>' +
-      '<div id="rural-alert-standalone"></div>' +
-    '</div>' +
-    '<div class="form-two">' +
-      '<div class="form-row"><label>Credit Score</label><input class="input" type="number" min="300" max="850" name="creditScore" data-action="standalone-pricer-field" value="' + v(sp.creditScore) + '"></div>' +
-      '<div class="form-row"><label>' + (isPortfolio?"Total ":"") + 'Purchase Price</label><input class="input" type="number" name="purchasePrice" data-action="standalone-pricer-field" value="' + v(sp.purchasePrice) + '"></div>' +
-    '</div>' +
-    (isDSCR ? ('<div class="form-row"><label>Current Value <span class="hint">(refi LTV basis)</span></label><input class="input" type="number" name="currentValue" data-action="standalone-pricer-field" value="' + v(sp.currentValue) + '"></div>') : '') +
-    ((isDSCR || isRTL) ? ('<div class="form-row"><label>Current Loan Balance <span class="hint">(if refinancing — existing lender payoff)</span></label><input class="input" type="number" name="currentLoanBalance" data-action="standalone-pricer-field" value="' + v(sp.currentLoanBalance) + '"></div>') : '') +
-    '<div class="form-row"><label>Term (months)</label><input class="input" type="number" name="termMonths"' +
-      (LOAN_TYPE_TERM_RANGE[sp.loanType] ? (' min="' + LOAN_TYPE_TERM_RANGE[sp.loanType].min + '" max="' + LOAN_TYPE_TERM_RANGE[sp.loanType].max + '"') : '') +
-      ' data-action="standalone-pricer-field" value="' + v(sp.termMonths) + '"></div>' +
-    (isDSCR ? ('<div class="form-row"><label>Monthly Rent Estimate</label><input class="input" type="number" name="rentEstimate" data-action="standalone-pricer-field" value="' + v(sp.rentEstimate) + '"></div>') : '') +
-    (isRTL ? ('<div class="form-two">' +
-        '<div class="form-row"><label>Investing Experience (deals)</label><input class="input" type="number" min="0" name="experienceDeals" data-action="standalone-pricer-field" value="' + v(sp.experienceDeals) + '"></div>' +
-        '<div class="form-row"><label>Rehab / Construction Budget</label><input class="input" type="number" name="rehabBudget" data-action="standalone-pricer-field" value="' + v(sp.rehabBudget) + '"></div>' +
-      '</div>') : '') +
-    (isRTL ? ('<div class="form-row"><label>After-Repair Value (ARV)</label><input class="input" type="number" name="arv" data-action="standalone-pricer-field" value="' + v(sp.arv) + '"></div>') : '') +
-    (isPortfolio ? ('<div class="form-row"><label>Number of Properties</label><input class="input" type="number" min="1" name="propertyCount" data-action="standalone-pricer-field" value="' + v(sp.propertyCount) + '"></div>') : '') +
-    '<div class="form-row"><label>Citizenship Status</label><select class="select" name="citizenshipStatus" data-action="standalone-pricer-field">' + citizenshipOptions + '</select></div>' +
-    (sp.citizenshipStatus === "Foreign National" ? ('<div class="form-row"><label>Country of Citizenship</label><input class="input" name="countryOfDomicile" data-action="standalone-pricer-field" value="' + esc(sp.countryOfDomicile||"") + '" placeholder="e.g. Mexico"></div>') : '') +
-    (isDSCR ? ('<div class="form-two">' +
-        '<div class="form-row"><label>Transaction Type</label><select class="select" name="transactionType" data-action="standalone-pricer-field">' +
-          TRANSACTION_TYPES.map(function(t){ return '<option value="' + t.key + '"' + sel("transactionType", t.key) + '>' + t.label + '</option>'; }).join("") +
-        '</select></div>' +
-        '<div class="form-row"><label>Prepayment Penalty</label><select class="select" name="prepayTerm" data-action="standalone-pricer-field">' +
-          PREPAY_TERMS.map(function(t){ return '<option value="' + t.key + '"' + sel("prepayTerm", t.key) + '>' + t.label + '</option>'; }).join("") +
-        '</select></div>' +
-      '</div>') : ('<div class="form-two">' +
-        '<div class="form-row"><label>Buy-Down Points (to Lender)</label><select class="select" name="points" data-action="standalone-pricer-field">' +
-          '<option value="0.00"' + sel("points","0.00") + '>0.00 (default)</option><option value="0.50"' + sel("points","0.50") + '>0.50 — buy down the rate</option><option value="1.00"' + sel("points","1.00") + '>1.00 — buy down the rate further</option>' +
-        '</select></div>' +
-        '<div class="form-row"><label>Transaction Type</label><select class="select" name="transactionType" data-action="standalone-pricer-field">' +
-          TRANSACTION_TYPES.map(function(t){ return '<option value="' + t.key + '"' + sel("transactionType", t.key) + '>' + t.label + '</option>'; }).join("") +
-        '</select></div>' +
-      '</div>'));
-
-  return topbar("Pricer", "Price any scenario across DSCR, Fix & Flip, Bridge, Ground Up Construction, and Portfolio/Blanket — Mixed-Use isn't modeled yet, no real rate sheet for it.", "") +
-    '<div class="content"><div class="panel panel-pad" style="max-width:640px">' +
-      fields + '<div class="section-head" style="margin-top:20px"><h2>Result</h2></div>' +
-      '<div id="pricer-output-standalone">' + buildStandalonePricerOutputHTML(sp) + '</div>' +
-    '</div></div>';
+  if (LP_LIVE_TYPES.indexOf(ui.standalonePricer.loanType) === -1) ui.standalonePricer.loanType = "DSCR";
+  return topbar("Pricer", "Live pricing across every lender we have access to — DSCR, Fix & Flip, Bridge, and Ground Up Construction. Each lender reports the most it will lend on the deal.", "") +
+    '<div class="content"><div class="panel panel-pad" style="max-width:980px">' + renderLivePricerPanel("standalone") + '</div></div>';
 }
-function standaloneRateAdjustField(currentRate, parRate){
-  var maxRate = Math.round((parRate + DSCR_MAX_BUYUP)*1000)/1000;
-  return '<div class="field"><label>Rate</label><div class="val mono">' +
-    '<input type="number" step="0.125" min="' + parRate + '" max="' + maxRate + '" data-action="standalone-pricer-rate-live" value="' + currentRate + '" style="width:90px;font:inherit;padding:2px 4px">%' +
-  '</div></div>';
+function lpStandaloneSelection(){
+  var en = lpEntry("standalone");
+  if (en.status !== "done" || !en.selected || !en.data) return null;
+  var r = en.data[en.selected.ri];
+  if (!r || !r.options || !r.options[en.selected.oi]) return null;
+  return { scenario: JSON.parse(en.snapshot), result: r, option: r.options[en.selected.oi] };
 }
-function buildStandalonePricerOutputHTML(sp){
-  var isDSCR = sp.loanType === "DSCR" || sp.loanType === "Portfolio/Blanket";
-  var maxLoanInfo = computeMaxLoanAmount(sp);
-  var effectiveLoanAmount = maxLoanInfo ? Math.floor(maxLoanInfo.amount) : null;
-  var result = effectiveLoanAmount ? evaluatePricing(Object.assign({}, sp, { loanAmount: effectiveLoanAmount }), sp) : null;
-  if (!maxLoanInfo){
-    return '<div class="hint">Fill in credit score (DSCR/Portfolio) or investing experience (Fix & Flip/Bridge/Ground Up), plus purchase price, to see the max loan amount and pricing.</div>';
-  } else if (!result){
-    return '<div class="hint">Add a bit more info to see live pricing at the max qualifying amount.</div>';
-  } else if (result.ineligible){
-    return '<div class="hint" style="color:var(--c-rust)">' + esc(result.reason) + '</div>';
-  }
-  var rateField = (isDSCR && result.parRate!=null) ? standaloneRateAdjustField(result.rate, result.parRate) : field("Rate", fmtPct(result.rate), true);
-  var rows = field("Max Loan Amount You Qualify For", fmtUSD(effectiveLoanAmount), true) +
-    rateField +
-    field("Lender Fee", fmtUSD(result.fee), true) +
-    field("Processing Fee", fmtUSD(PROCESSING_FEE_DEFAULT), true) +
-    (isDSCR ? field("Wholesale Price", result.price!=null ? result.price.toFixed(3) : "—", true) : "") +
-    (isDSCR ? field("Yield Spread (YSP)", (result.ysp!=null && result.ysp>0) ? (fmtPct(result.ysp) + " — " + fmtUSD(result.yspDollar)) : (result.noYspAllowed ? "Not available" : (result.ysp===0 ? "$0 (at par)" : "None (par or better)")), true) : "") +
-    (isDSCR && result.dscr ? field("DSCR at this rate", result.dscr.toFixed(2) + "x", true) : "") +
-    (!isDSCR ? field("Experience Tier", esc(result.tier), true) : "");
-  return '<div class="field-grid">' + rows + '</div>' +
-    (isDSCR ? '<div class="footnote" style="padding-top:8px">Defaults to this borrower\'s par rate (no yield spread). Use the up/down arrows on Rate to quote higher and earn yield spread — updates live.</div>' : '') +
-    (maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.adj ? ('<div class="footnote" style="padding-top:8px">' + maxLoanInfo.stateAdj.state + ' property — max leverage reduced ' + maxLoanInfo.stateAdj.adj + '% per the matrix\'s state adjustment table.</div>') : '') +
-    (maxLoanInfo.stateAdj && maxLoanInfo.stateAdj.needsManualCheck ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">NY property — county-specific leverage reduction applies (-15% for the five boroughs, -5% Suffolk/Nassau). Verify manually, not applied here.</div>' : '') +
-    (maxLoanInfo.hitFlatCeiling ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">This scenario qualifies for more than $2,000,000 by the LTV/LTC math above — that\'s past what this quick pricer models with confidence. Get loans this size priced directly rather than trusting this number.</div>' : '') +
-    (result.notes && result.notes.length ? ('<div class="footnote" style="padding-top:8px">' + result.notes.map(esc).join(" · ") + '</div>') : '') +
-    '<div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">' +
-      '<button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button>' +
-      '<button class="btn btn-sm" type="button" data-action="generate-standalone-term-sheet">📄 Generate Term Sheet</button>' +
-    '</div>';
-}
-// Joe's ask (2026-09-26): the standalone Pricer could only spin off a
-// full lead ("Create Lead From This Scenario") -- no way to just hand
-// someone a term sheet for a scenario before there's a real borrower/file
-// attached. Reuses the exact same buildTermSheet() every real lead's term
-// sheet goes through (never a hand-written duplicate), fed a throwaway
-// lead-shaped object built from the pricer's own inputs/result so the fee
-// math (lender fee, processing fee, etc.) is identical to a real file's.
+// Joe's ask (2026-09-26): hand someone a term sheet for a scenario before
+// there's a real borrower/file attached. Reuses the exact same buildTermSheet()
+// every real lead's term sheet goes through (never a hand-written duplicate),
+// fed a throwaway lead-shaped object built from the picked pricer option so
+// the fee math is identical to a real file's -- including the lender's own
+// quoted fee when the lender returned one.
 function generateStandalonePricerTermSheet(){
   if (!sb) return;
-  var sp = ui.standalonePricer || defaultStandalonePricer();
-  var maxLoanInfo = computeMaxLoanAmount(sp);
-  var effectiveLoanAmount = maxLoanInfo ? Math.floor(maxLoanInfo.amount) : null;
-  var result = effectiveLoanAmount ? evaluatePricing(Object.assign({}, sp, { loanAmount: effectiveLoanAmount }), sp) : null;
-  if (!result || result.ineligible){ showToast("Fill in the scenario before generating a term sheet"); return; }
+  var sel = lpStandaloneSelection();
+  if (!sel){ showToast("Pick a rate option first"); return; }
+  var sc = sel.scenario;
   var fakeLead = {
-    id: "PRICER-SCRATCH", name: "Prospective Borrower", loanType: sp.loanType, propertyType: sp.propertyType,
-    propertyAddress: sp.propertyAddress || null, purchasePrice: sp.purchasePrice, currentValue: sp.currentValue,
-    currentLoanBalance: sp.currentLoanBalance, arv: sp.arv, rehabBudget: sp.rehabBudget, rentEstimate: sp.rentEstimate,
-    propertyCount: sp.propertyCount, creditScore: sp.creditScore, experienceDeals: sp.experienceDeals,
-    citizenshipStatus: sp.citizenshipStatus, countryOfDomicile: sp.countryOfDomicile || null,
-    transactionType: sp.transactionType, prepayTerm: sp.prepayTerm, ruralStatus: sp.ruralStatus,
-    termMonths: sp.termMonths, exitStrategy: null, assignedTo: currentUser().id,
-    loanAmount: effectiveLoanAmount, rate: result.rate, pointsCharged: Number(sp.points) || 0,
-    lenderFeeOverride: null, processingFeeOverride: null, underwritingFeeOverride: null,
+    id: "PRICER-SCRATCH", name: "Prospective Borrower", loanType: sc.loanType, propertyType: sc.propertyType,
+    propertyAddress: sc.propertyAddress || null, purchasePrice: sc.purchasePrice, currentValue: sc.currentValue,
+    currentLoanBalance: sc.currentLoanBalance, arv: sc.arv, rehabBudget: sc.rehabBudget, rentEstimate: sc.rentEstimate,
+    monthlyTaxes: sc.monthlyTaxes, monthlyInsurance: sc.monthlyInsurance, monthlyHoa: sc.monthlyHoa,
+    creditScore: sc.creditScore, experienceDeals: sc.experienceDeals,
+    citizenshipStatus: sc.citizenshipStatus, countryOfDomicile: sc.countryOfDomicile || null,
+    transactionType: sc.transactionType, prepayTerm: sc.prepayTerm, ruralStatus: sc.ruralStatus,
+    termMonths: sc.termMonths, exitStrategy: null, assignedTo: currentUser().id,
+    loanAmount: sel.result.loanAmountUsed, rate: sel.option.rate, pointsCharged: sc.pointsCharged || 0,
+    lenderFeeOverride: (sel.result.fees && sel.result.fees.lenderFee != null) ? sel.result.fees.lenderFee : null,
+    processingFeeOverride: null, underwritingFeeOverride: null,
     commitmentFeeOverride: null, commitmentFeeRefundable: false, preferredLanguage: "en"
   };
-  var ltvBasis = (fakeLead.transactionType && fakeLead.transactionType !== "purchase" && fakeLead.currentValue) ? fakeLead.currentValue : fakeLead.purchasePrice;
-  if (ltvBasis) fakeLead.ltv = Math.round((effectiveLoanAmount/ltvBasis)*1000)/10;
+  var ltvBasis = lpBasis(sc);
+  if (ltvBasis) fakeLead.ltv = Math.round((fakeLead.loanAmount / ltvBasis) * 1000) / 10;
   var body = buildTermSheet(fakeLead) + "\n\n(Preliminary quote generated from the Pricer -- no borrower or loan file attached yet. Not a commitment to lend.)";
   showToast("Generating term sheet…");
   sb.functions.invoke("generate-doc-pdf", { body: { text: body, label: "Term Sheet (Preliminary Quote)" } }).then(function(res){
@@ -10604,7 +10512,7 @@ function renderOutsideLenderFitBox(lead){
 // NextRes added 2026-09-26 -- Joe is now a table funder with them and will
 // upload their real term sheets via the existing Upload Outside Term Sheet
 // flow (no dedicated rate sheet/pricer built in yet, unlike Constructive).
-var OUTSIDE_LENDERS = ["Kiavi", "RELIP", "RCN", "A&D Mortgage", "NextRes"];
+var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes"];
 function canManageOutsideLender(){ return ui.viewAs==="owner" || ui.viewAs==="lo-fiore" || ui.viewAs==="proc-erika"; }
 function canViewOutsideLender(){ return canManageOutsideLender(); }
 function setOutsideLender(leadId, lender){
@@ -10914,7 +10822,344 @@ function buildPricerOutputHTML(lead, inputs){
   }
   return output;
 }
+/* ---------------------------------------------------------------------
+   Live multi-lender Pricer (replaces the single-lender rate-sheet pricer
+   for DSCR / Fix & Flip / Bridge / Ground Up Construction). Asks the
+   questions, calls the check-live-rates edge function, and each lender
+   reports the MAXIMUM loan it will do -- the user never types a loan
+   amount unless they want to price a smaller one on purpose. Same panel
+   serves a loan file (key = lead id, pre-filled from the application,
+   editable any time) and the standalone Pricer tab (key = "standalone").
+   Lender names are masked from anyone who can't see outside-lender fit
+   (canManageOutsideLender). Portfolio/Blanket still uses the legacy
+   pricer below -- there's no live lender check for it.
+--------------------------------------------------------------------- */
+var LP_LIVE_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction"];
+var LP_RTL = ["Fix & Flip","Bridge","Ground Up Construction"];
+var LP_ENTITY_TYPES = ["LLC","Individual","Corporation"];
+var LP_NUMERIC = ["creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
+var LP_SAVE_KEYS = ["transactionType","propertyType","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
+
+function lpEntry(key){
+  ui.livePricer = ui.livePricer || {};
+  return ui.livePricer[key] || (ui.livePricer[key] = { edits:{}, status:"idle", data:null, snapshot:null, error:null, selected:null });
+}
+function lpIsStandalone(key){ return key === "standalone"; }
+function lpValue(key, k){
+  if (lpIsStandalone(key)){
+    ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
+    var sv = ui.standalonePricer[k];
+    return sv === undefined ? null : sv;
+  }
+  var e = lpEntry(key).edits;
+  if (Object.prototype.hasOwnProperty.call(e, k)) return e[k];
+  var l = leadById(key);
+  var v = l ? l[k] : null;
+  return v === undefined ? null : v;
+}
+function lpSetValue(key, k, v){
+  if (lpIsStandalone(key)){
+    ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
+    ui.standalonePricer[k] = v;
+  } else {
+    lpEntry(key).edits[k] = v;
+  }
+}
+function lpBlank(v){ return v === null || v === undefined || v === "" || (typeof v === "number" && isNaN(v)); }
+
+function lpGroups(key){
+  var g = function(k){ return lpValue(key, k); };
+  var lt = g("loanType") || "DSCR";
+  var rtl = LP_RTL.indexOf(lt) !== -1;
+  var txn = g("transactionType") || "purchase";
+  var refi = txn !== "purchase";
+  var fn = g("citizenshipStatus") === "Foreign National";
+  var needsRehab = lt !== "Bridge";
+  var txnOpts = TRANSACTION_TYPES.map(function(t){ return [t.key, t.label]; });
+  var propOpts = PROPERTY_TYPES.filter(function(t){ return t !== "Land"; }).map(function(t){ return [t, t]; });
+  var deal = [];
+  if (lpIsStandalone(key)) deal.push({ k:"loanType", label:"Loan Type", type:"select", opts:LP_LIVE_TYPES.map(function(t){ return [t, t]; }) });
+  deal.push({ k:"transactionType", label:"Transaction", type:"select", opts:txnOpts });
+  deal.push({ k:"propertyType", label:"Property Type", type:"select", opts:propOpts });
+  deal.push({ k:"propertyAddress", label:"Property Address", type:"text", req:true, hint:"state is read from this" });
+  var money = [];
+  money.push({ k:"purchasePrice", label: refi ? "Original Purchase Price" : "Purchase Price", type:"num", req: (!refi || rtl), hint: refi ? (rtl ? "what they paid" : "optional on a refinance") : null });
+  money.push({ k:"currentValue", label: rtl ? "Current / As-Is Value" : "Current Property Value", type:"num", req: refi, hint: refi ? "refinance leverage is measured against this" : "leave blank to use the purchase price" });
+  if (rtl && needsRehab){
+    money.push({ k:"arv", label:"After-Repair Value (ARV)", type:"num", req:true });
+    money.push({ k:"rehabBudget", label:"Rehab / Construction Budget", type:"num", req:true });
+  }
+  if (refi) money.push({ k:"currentLoanBalance", label:"Existing Loan Payoff", type:"num", hint:"NextRes needs this on a refinance" });
+  if (rtl) money.push({ k:"termMonths", label:"Term (months)", type:"num", req:true, min:6, max:36 });
+  money.push({ k:"loanAmount", label:"Loan Amount", type:"num", hint:"optional — leave blank and each lender's maximum is found for you" });
+  var groups = [{ title:"The deal", fields:deal }, { title:"Value & loan", fields:money }];
+  if (!rtl){
+    groups.push({ title:"Rental income", fields:[
+      { k:"rentEstimate", label:"Monthly Rent", type:"num", req:true },
+      { k:"monthlyTaxes", label:"Monthly Taxes", type:"num", req:true },
+      { k:"monthlyInsurance", label:"Monthly Insurance", type:"num", req:true },
+      { k:"monthlyHoa", label:"Monthly HOA / Dues", type:"num" },
+      { k:"prepayTerm", label:"Prepayment Penalty", type:"select", opts:PREPAY_TERMS.map(function(t){ return [t.key, t.label]; }) }
+    ]});
+  }
+  var borrower = [
+    { k:"creditScore", label:"Credit Score", type:"num", req:true, min:300, max:850 },
+    { k:"citizenshipStatus", label:"Citizenship", type:"select", req:true, blank:true, opts:CITIZENSHIP_STATUSES.map(function(t){ return [t, t]; }) }
+  ];
+  if (fn) borrower.push({ k:"countryOfDomicile", label:"Country of Citizenship", type:"text", req:true });
+  if (fn && rtl) borrower.push({ k:"liquidity", label:"U.S. Bank Liquidity", type:"num", req:true, hint:"seasoned 60+ days" });
+  if (rtl) borrower.push({ k:"experienceDeals", label:"Completed Deals (3 yrs)", type:"num", req:true });
+  borrower.push({ k:"entityType", label:"Borrower Entity", type:"select", opts:LP_ENTITY_TYPES.map(function(t){ return [t, t]; }) });
+  groups.push({ title:"Borrower", fields:borrower });
+  return groups;
+}
+function lpMissing(key){
+  var out = [];
+  lpGroups(key).forEach(function(grp){
+    grp.fields.forEach(function(f){
+      if (!f.req) return;
+      var v = lpValue(key, f.k);
+      if (lpBlank(v) || (f.k === "creditScore" && v < 300)) out.push(f.label);
+    });
+  });
+  return out;
+}
+function lpScenario(key){
+  var g = function(k){ return lpValue(key, k); };
+  var lt = g("loanType") || "DSCR";
+  var rtl = LP_RTL.indexOf(lt) !== -1;
+  var lead = lpIsStandalone(key) ? null : leadById(key);
+  var addr = lpIsStandalone(key) ? (g("propertyAddress") || "") : (lead.propertyAddress || "");
+  var nameParts = lead && lead.name ? String(lead.name).trim().split(/\s+/) : [];
+  var range = LOAN_TYPE_TERM_RANGE[lt];
+  var num = function(k){ var v = g(k); return lpBlank(v) ? null : Number(v); };
+  return {
+    loanType: lt,
+    transactionType: g("transactionType") || "purchase",
+    propertyAddress: addr,
+    propertyState: stateFromAddress(addr) || "",
+    propertyType: g("propertyType") || "SFR",
+    creditScore: num("creditScore"),
+    purchasePrice: num("purchasePrice"),
+    currentValue: num("currentValue"),
+    loanAmount: num("loanAmount"),
+    rehabBudget: rtl ? num("rehabBudget") : null,
+    arv: rtl ? num("arv") : null,
+    entityType: g("entityType") || "LLC",
+    citizenshipStatus: g("citizenshipStatus") || "US Citizen",
+    experienceDeals: num("experienceDeals"),
+    rentEstimate: rtl ? null : num("rentEstimate"),
+    monthlyTaxes: rtl ? null : num("monthlyTaxes"),
+    monthlyInsurance: rtl ? null : num("monthlyInsurance"),
+    monthlyHoa: rtl ? null : (num("monthlyHoa") || 0),
+    pointsCharged: lpPoints(key),
+    termMonths: rtl ? (num("termMonths") || (range ? range["default"] : 12)) : 360,
+    prepayTerm: rtl ? "none" : (g("prepayTerm") || "5yr"),
+    guarantorFirstName: (lead && lead.guarantorFirstName) || nameParts[0] || "Borrower",
+    guarantorLastName: (lead && lead.guarantorLastName) || nameParts.slice(1).join(" ") || "Borrower",
+    ruralStatus: g("ruralStatus"),
+    liquidity: num("liquidity"),
+    countryOfDomicile: g("countryOfDomicile"),
+    currentLoanBalance: num("currentLoanBalance")
+  };
+}
+function lpPoints(key){
+  var p = lpValue(key, "pointsCharged");
+  return lpBlank(p) ? 0 : Number(p);
+}
+
+function lpFieldHTML(key, f){
+  var v = lpValue(key, f.k);
+  var label = esc(f.label) + (f.req ? ' <span style="color:var(--c-rust)">*</span>' : '') + (f.hint ? ' <span class="hint">(' + esc(f.hint) + ')</span>' : '');
+  if (f.k === "propertyAddress" && !lpIsStandalone(key)){
+    var lead = leadById(key);
+    return '<div class="form-row"><label>' + label + '</label><div class="val" style="padding:8px 0">' + (lead.propertyAddress ? esc(lead.propertyAddress) : '<span style="color:var(--c-rust)">Add the property address in the section above — the state is needed to price.</span>') + '</div></div>';
+  }
+  var common = ' data-action="lp-field" data-lp="' + esc(key) + '" data-field="' + f.k + '"';
+  var input;
+  if (f.k === "propertyAddress"){
+    input = '<input class="input" name="propertyAddress" list="address-suggest-standalone" autocomplete="off" data-action="address-lookup" data-lead="standalone" value="' + esc(v == null ? "" : v) + '"><datalist id="address-suggest-standalone"></datalist><div id="rural-alert-standalone"></div>';
+  } else if (f.type === "select"){
+    input = '<select class="select"' + common + '>' + (f.blank ? '<option value="">—</option>' : '') +
+      f.opts.map(function(o){ return '<option value="' + esc(o[0]) + '"' + (String(v) === String(o[0]) ? " selected" : "") + '>' + esc(o[1]) + '</option>'; }).join("") + '</select>';
+  } else if (f.type === "text"){
+    input = '<input class="input" type="text" autocomplete="off"' + common + ' value="' + esc(v == null ? "" : v) + '">';
+  } else {
+    input = '<input class="input" type="number" step="any"' + (f.min != null ? ' min="' + f.min + '"' : '') + (f.max != null ? ' max="' + f.max + '"' : '') + common + ' value="' + (v == null ? "" : v) + '">';
+  }
+  return '<div class="form-row"><label>' + label + '</label>' + input + '</div>';
+}
+function lpBasis(sc){ return (sc.transactionType !== "purchase" && sc.currentValue) ? sc.currentValue : sc.purchasePrice; }
+function lpRenderResults(key){
+  var en = lpEntry(key);
+  if (en.status === "loading") return '<div class="hint" style="padding:14px 0">Checking every lender live — usually a few seconds…</div>';
+  if (en.status === "error") return '<div class="hint" style="color:var(--c-rust);padding:14px 0">' + esc(en.error || "Couldn't reach the pricer — try again.") + '</div>';
+  if (en.status !== "done" || !en.data) return '<div class="hint" style="padding:14px 0">Answer the questions above, then check live rates. Each lender reports the most it will lend on this deal.</div>';
+  var sc = JSON.parse(en.snapshot);
+  var rtl = LP_RTL.indexOf(sc.loanType) !== -1;
+  var canSee = canManageOutsideLender();
+  var stale = en.snapshot !== JSON.stringify(lpScenario(key));
+  var letters = "ABCDEFGH";
+  var basis = lpBasis(sc);
+  var points = sc.pointsCharged || 0;
+  var cards = en.data.map(function(r, ri){
+    var label = canSee ? r.lender : ("Lender " + letters.charAt(ri));
+    var amt = r.loanAmountUsed;
+    var best = -1;
+    if (r.eligible && !rtl) (r.options || []).forEach(function(o, oi){ if (best === -1 || o.price > r.options[best].price) best = oi; });
+    var head = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div class="rail-title" style="margin:0">' + esc(label) + '</div>' +
+      (r.eligible ? '<span class="badge badge-forest">Eligible</span>' : (r.unavailable ? '<span class="badge badge-neutral">Unavailable</span>' : '<span class="badge badge-rust">Not eligible</span>')) + '</div>';
+    if (!r.eligible){
+      return '<div class="panel panel-pad" style="margin-top:12px">' + head + '<div class="footnote" style="padding-top:8px;color:' + (r.unavailable ? 'var(--ink-muted)' : 'var(--c-rust)') + '">' + esc(canSee || !r.unavailable ? (r.reason || "Doesn't fit this lender's guidelines.") : "Not available right now.") + '</div></div>';
+    }
+    var ltvTxt = (basis && amt && !rtl) ? (" · " + (Math.round(amt / basis * 1000) / 10) + "% LTV") : "";
+    var summary = '<div style="padding:10px 0 4px"><span style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-muted)">' + (r.maxLoanAmount && r.maxLoanAmount === amt ? "Maximum loan" : "Priced at") + '</span> <b class="mono" style="font-size:20px">' + fmtUSD(amt) + '</b><span class="footnote">' + ltvTxt + (r.fees && r.fees.lenderFee != null ? " · lender fee " + fmtUSD(r.fees.lenderFee) : "") + '</span></div>';
+    var rows = (r.options || []).map(function(o, oi){
+      var io = rtl || /\(IO\)$/.test(o.program);
+      var pmt = io ? interestOnlyPayment(amt, o.rate) : monthlyPayment(amt, o.rate, sc.termMonths);
+      var applied = en.selected && en.selected.ri === ri && en.selected.oi === oi;
+      var cells = '<td class="num">' + o.rate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%</td><td class="num">' + (pmt ? fmtUSD(Math.round(pmt)) : "—") + '</td>';
+      if (rtl){
+        var lenderPts = Math.round((o.price - 100) * 1000) / 1000;
+        cells += '<td class="num">' + lenderPts + ' pt' + (lenderPts === 1 ? "" : "s") + ' to lender</td><td class="num">' + fmtUSD(Math.round(amt * (points + lenderPts) / 100)) + '</td>';
+      } else {
+        var ysp = Math.round((o.price - 100) * 1000) / 1000;
+        var yspDollar = Math.round(ysp / 100 * amt);
+        cells += '<td class="num">' + o.price.toFixed(3) + '</td><td class="num" style="color:' + (ysp < 0 ? 'var(--c-rust)' : 'inherit') + '">' + (ysp > 0 ? "+" : "") + ysp.toFixed(3) + ' (' + fmtUSD(yspDollar) + ')</td>' +
+          '<td class="num">' + (o.dscr != null ? o.dscr.toFixed(2) + "x" : "—") + '</td><td class="num">' + fmtUSD(Math.round(amt * points / 100) + yspDollar) + '</td>';
+      }
+      var pickBtn = (lpIsStandalone(key) || canEditApplication(leadOrNull(key)))
+        ? '<button class="btn btn-sm' + (applied ? '' : ' btn-primary') + '" type="button" data-action="lp-select" data-lp="' + esc(key) + '" data-r="' + ri + '" data-o="' + oi + '">' + (applied ? "Applied ✓" : (lpIsStandalone(key) ? "Use this" : "Apply to file")) + '</button>' : '';
+      return '<tr' + (oi === best ? ' style="background:var(--c-forest-bg)"' : '') + '><td>' + (oi === best ? '<span class="badge badge-forest">Best for us</span>' : '') + '</td>' + cells + '<td>' + pickBtn + '</td></tr>';
+    }).join("");
+    var heads = rtl
+      ? '<th></th><th class="num">Rate</th><th class="num">Payment (IO)</th><th class="num">Lender points</th><th class="num">Total points $</th><th></th>'
+      : '<th></th><th class="num">Rate</th><th class="num">Payment</th><th class="num">Price</th><th class="num">YSP</th><th class="num">DSCR</th><th class="num">Est. revenue</th><th></th>';
+    var assumptions = (canSee && r.assumptions && r.assumptions.length) ? '<div class="footnote" style="padding-top:8px">Assumed: ' + r.assumptions.map(esc).join(" · ") + '</div>' : '';
+    return '<div class="panel panel-pad" style="margin-top:12px">' + head + summary +
+      '<div class="table-wrap"><table style="white-space:nowrap"><thead><tr>' + heads + '</tr></thead><tbody>' + rows + '</tbody></table></div>' + assumptions + '</div>';
+  }).join("");
+  var anyEligible = en.data.some(function(r){ return r.eligible; });
+  var footer = '<div class="footnote" style="padding-top:10px">' + (rtl
+    ? 'Total points $ = the lender\'s points plus your ' + points + '% origination, on the loan amount shown.'
+    : 'Price is the lender\'s own price for that rate: above 100 earns yield spread, below 100 costs points. Est. revenue = your ' + points + '% origination + yield spread (negative if priced below par). "Best for us" is the highest-price option — not necessarily the lowest rate for the borrower.') +
+    ' Checked live ' + (en.ranAt ? new Date(en.ranAt).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "") + '.</div>';
+  var banner = stale ? '<div class="hint" style="color:var(--c-rust);padding:10px 0 0">You\'ve changed something since these were checked — check live rates again to refresh them.</div>' : '';
+  var none = anyEligible ? '' : '<div class="hint" style="padding:10px 0 0">No lender fits this scenario as entered — the reasons are listed below. Adjust the deal above and check again.</div>';
+  return banner + none + cards + footer;
+}
+function leadOrNull(key){ return lpIsStandalone(key) ? null : leadById(key); }
+
+function renderLivePricerPanel(key){
+  var en = lpEntry(key);
+  var isLead = !lpIsStandalone(key);
+  var lead = leadOrNull(key);
+  var missing = lpMissing(key);
+  var edited = isLead && Object.keys(en.edits).length > 0;
+  var canEdit = isLead && canEditApplication(lead);
+  var form = lpGroups(key).map(function(grp){
+    return '<div class="rail-title" style="margin:14px 0 6px">' + esc(grp.title) + '</div><div class="form-two">' + grp.fields.map(function(f){ return lpFieldHTML(key, f); }).join("") + '</div>';
+  }).join("");
+  var pointsRow = '<div class="rail-title" style="margin:14px 0 6px">Your pricing</div><div class="form-two"><div class="form-row"><label>Origination Points <span class="hint">(your fee, % of the loan)</span></label><input class="input" type="number" step="0.125" min="0" max="15" data-action="lp-points" data-lp="' + esc(key) + '" value="' + (lpPoints(key) || "") + '"' + ((isLead && !canEdit) ? ' disabled' : '') + '></div></div>';
+  var note = isLead
+    ? '<div class="footnote" style="padding:0 0 4px">Filled in from this file\'s application' + (edited ? ' — <b>you\'ve changed some answers</b>; they only apply here until you apply an option or save them to the file' : '') + '. Everything stays editable.</div>'
+    : '';
+  var buttons = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:16px">' +
+    '<button class="btn btn-primary" type="button" data-action="lp-run" data-lp="' + esc(key) + '"' + (en.status === "loading" ? ' disabled' : '') + '>' + (en.status === "loading" ? "Checking…" : "Check Live Rates") + '</button>' +
+    (edited && canEdit ? '<button class="btn btn-sm" type="button" data-action="lp-save-inputs" data-lp="' + esc(key) + '">Save changes to the file</button>' : '') +
+    (edited ? '<button class="btn btn-sm btn-ghost" type="button" data-action="lp-reset" data-lp="' + esc(key) + '">Reset to application</button>' : '') +
+    (missing.length ? '<span class="footnote" style="color:var(--c-rust)">Still needed: ' + missing.map(esc).join(", ") + '</span>' : '') +
+    '</div>';
+  var cta = '';
+  if (en.status === "done" && en.selected){
+    cta = isLead
+      ? '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm" type="button" data-action="lp-send-term-sheet" data-lp="' + esc(key) + '">Send Term Sheet at This Rate</button></div>'
+      : '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" type="button" data-action="open-modal" data-modal="createLeadFromPricer">Create Lead From This Scenario →</button><button class="btn btn-sm" type="button" data-action="generate-standalone-term-sheet">📄 Generate Term Sheet</button></div>';
+  }
+  return note + form + pointsRow + buttons + '<div id="lp-results-' + esc(key) + '">' + lpRenderResults(key) + '</div>' + cta;
+}
+
+function lpRun(key){
+  var missing = lpMissing(key);
+  if (missing.length){ showToast("Still needed: " + missing.join(", ")); return; }
+  if (!sb){ showToast("Not connected — try again in a moment"); return; }
+  var en = lpEntry(key);
+  var scenario = lpScenario(key);
+  en.status = "loading"; en.error = null; en.selected = null;
+  render();
+  sb.functions.invoke("check-live-rates", { body: { lead: scenario } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){ en.status = "error"; en.error = "Couldn't reach the pricer — try again."; }
+    else { en.status = "done"; en.data = res.data.results; en.snapshot = JSON.stringify(scenario); en.ranAt = new Date().toISOString(); }
+    render();
+  }).catch(function(){ en.status = "error"; en.error = "Couldn't reach the pricer — try again."; render(); });
+}
+function lpHandleField(key, field, raw){
+  var v;
+  if (LP_NUMERIC.indexOf(field) !== -1){
+    var n = parseFloat(String(raw).replace(/,/g, ""));
+    v = isNaN(n) ? null : n;
+  } else {
+    v = raw === "" ? null : raw;
+  }
+  lpSetValue(key, field, v);
+  if (lpIsStandalone(key) && field === "loanType"){
+    var sp = ui.standalonePricer;
+    sp.termMonths = clampTermToLoanType(sp.loanType, sp.termMonths);
+    lpEntry(key).status = "idle"; lpEntry(key).data = null; lpEntry(key).selected = null;
+  }
+  render();
+}
+function lpSelectOption(key, ri, oi){
+  var en = lpEntry(key);
+  if (!en.data || !en.data[ri] || !en.data[ri].options || !en.data[ri].options[oi]) return;
+  var r = en.data[ri], o = r.options[oi];
+  var sc = JSON.parse(en.snapshot);
+  if (lpIsStandalone(key)){
+    en.selected = { ri: ri, oi: oi };
+    showToast("Option selected");
+    render();
+    return;
+  }
+  var lead = leadById(key);
+  if (!lead || !canEditApplication(lead)){ showToast("You can't change this file's terms"); return; }
+  Object.keys(en.edits).forEach(function(k){ if (LP_SAVE_KEYS.indexOf(k) !== -1) lead[k] = en.edits[k]; });
+  en.edits = {};
+  lead.loanAmount = r.loanAmountUsed;
+  lead.rate = o.rate;
+  lead.termMonths = sc.termMonths;
+  var basis = lpBasis(sc);
+  if (basis) lead.ltv = Math.round((lead.loanAmount / basis) * 1000) / 10;
+  if (r.fees && r.fees.lenderFee != null) lead.lenderFeeOverride = r.fees.lenderFee;
+  var isInHouse = String(r.lender).indexOf("Constructive") === 0;
+  if (canManageOutsideLender()) lead.outsideLender = isInHouse ? null : r.lender;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"note", text: "Pricer: applied " + fmtUSD(lead.loanAmount) + " at " + fmtPct(o.rate) + (canManageOutsideLender() ? (" with " + r.lender) : "") + (isInHouse || !canManageOutsideLender() ? "" : " (placed with outside lender)"), author: currentUser().name });
+  en.selected = { ri: ri, oi: oi };
+  showToast("Applied to the file");
+  persist();
+  render();
+}
+function lpSaveInputs(key){
+  var lead = leadById(key), en = lpEntry(key);
+  if (!lead || !canEditApplication(lead)) return;
+  var n = 0;
+  Object.keys(en.edits).forEach(function(k){ if (LP_SAVE_KEYS.indexOf(k) !== -1){ lead[k] = en.edits[k]; n++; } });
+  en.edits = {};
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"note", text: "Pricer: updated " + n + " scenario input(s) on the file", author: currentUser().name });
+  showToast("Saved to the file");
+  persist();
+  render();
+}
+function lpResetInputs(key){ lpEntry(key).edits = {}; render(); }
+
 function renderPricer(lead){
+  if (LP_LIVE_TYPES.indexOf(lead.loanType) === -1) return renderLegacyPricer(lead);
+  if (lead.outsideLender && !canManageOutsideLender()) return renderLegacyPricer(lead);
+  return '<div class="section-head" style="margin-top:20px"><h2>Pricer</h2></div>' +
+    '<div class="panel panel-pad">' + renderLivePricerPanel(lead.id) + '</div>';
+}
+function renderLegacyPricer(lead){
   if (GUIDELINE_LOAN_TYPES.indexOf(lead.loanType) === -1) return "";
   if (lead.outsideLender){
     return '<div class="section-head" style="margin-top:20px"><h2>Pricer</h2></div>' +
@@ -14971,21 +15216,25 @@ function createLeadFromScenario(data){
   var sp = ui.standalonePricer || defaultStandalonePricer();
   var id = nextLeadId();
   var d = todayISO();
-  var maxLoanInfo = computeMaxLoanAmount(sp);
-  var maxLoanAmount = maxLoanInfo ? Math.floor(maxLoanInfo.amount) : null;
-  var result = maxLoanAmount ? evaluatePricing(Object.assign({}, sp, { loanAmount: maxLoanAmount }), sp) : null;
+  var sel = lpStandaloneSelection();
+  var sc = sel ? sel.scenario : sp;
+  var maxLoanAmount = sel ? sel.result.loanAmountUsed : null;
+  var basisValue = sel ? lpBasis(sel.scenario) : sp.purchasePrice;
+  var nn = function(v){ return v != null ? v : null; };
   var lead = {
     id:id, name:data.name, email:data.email||null, phone:data.phone, source:data.source, loanType: sp.loanType,
     stage:"new", status:"active", assignedTo:data.assignedTo, createdAt:d, createdAtTs:nowTs(), firstAttemptAt:null,
-    entityType:"LLC", creditScore: sp.creditScore, experienceDeals: sp.experienceDeals, liquidity:null,
-    propertyAddress: data.propertyAddress||sp.propertyAddress||"", propertyType: sp.propertyType, purchasePrice: sp.purchasePrice, arv:sp.arv, rehabBudget: sp.rehabBudget,
-    rentEstimate: sp.rentEstimate, loanAmount: maxLoanAmount,
+    entityType: sc.entityType || "LLC", creditScore: sc.creditScore, experienceDeals: sc.experienceDeals, liquidity: nn(sc.liquidity),
+    propertyAddress: data.propertyAddress||sp.propertyAddress||"", propertyType: sc.propertyType, purchasePrice: sc.purchasePrice, currentValue: nn(sc.currentValue), currentLoanBalance: nn(sc.currentLoanBalance), arv: sc.arv, rehabBudget: sc.rehabBudget,
+    rentEstimate: sc.rentEstimate, monthlyTaxes: nn(sc.monthlyTaxes), monthlyInsurance: nn(sc.monthlyInsurance), monthlyHoa: nn(sc.monthlyHoa), loanAmount: maxLoanAmount,
     ruralStatus: sp.ruralStatus||null, ruralCheckedAt: sp.ruralStatus ? todayISO() : null,
-    ltv: (sp.purchasePrice && maxLoanAmount) ? Math.round((maxLoanAmount/sp.purchasePrice)*1000)/10 : null,
-    rate: (result && !result.ineligible) ? result.rate : null, termMonths: sp.termMonths,
-    exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null, pointsCharged:null,
+    ltv: (basisValue && maxLoanAmount) ? Math.round((maxLoanAmount/basisValue)*1000)/10 : null,
+    rate: sel ? sel.option.rate : null, termMonths: sc.termMonths,
+    exitStrategy:null, closeDate:null, nextFollowUp:null, nextFollowUpNote:null, pointsCharged: sel ? (sc.pointsCharged || null) : null,
+    lenderFeeOverride: (sel && sel.result.fees && sel.result.fees.lenderFee != null) ? sel.result.fees.lenderFee : null,
+    outsideLender: (sel && canManageOutsideLender() && String(sel.result.lender).indexOf("Constructive") !== 0) ? sel.result.lender : null,
     callAttempts:[], documents:[], thirdParties:[], applicationToken: randomToken(),
-    citizenshipStatus: sp.citizenshipStatus, transactionType: sp.transactionType, prepayTerm: sp.prepayTerm,
+    citizenshipStatus: sc.citizenshipStatus, countryOfDomicile: sc.countryOfDomicile || null, transactionType: sc.transactionType, prepayTerm: sc.prepayTerm,
     propertyCount: sp.propertyCount,
     activity:[{ date:d, type:"note", text:"Lead created from the Pricer (" + sp.loanType + " scenario)", author: currentUser().name }]
   };
@@ -15000,6 +15249,7 @@ function createLeadFromScenario(data){
   }
   startAiEngagement(lead);
   ui.standalonePricer = null;
+  if (ui.livePricer) delete ui.livePricer.standalone;
   ui.modal = null;
   showToast("Created " + lead.name + " from pricer scenario");
   ui.view = "detail"; ui.selectedLeadId = id; ui.activeTab = "scenario";
@@ -15499,6 +15749,11 @@ appEl.addEventListener("click", function(e){
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }
+  else if (action === "lp-run"){ lpRun(t.dataset.lp); }
+  else if (action === "lp-select"){ lpSelectOption(t.dataset.lp, parseInt(t.dataset.r, 10), parseInt(t.dataset.o, 10)); }
+  else if (action === "lp-reset"){ lpResetInputs(t.dataset.lp); }
+  else if (action === "lp-save-inputs"){ lpSaveInputs(t.dataset.lp); }
+  else if (action === "lp-send-term-sheet"){ promptSendTermSheet(t.dataset.lp); }
   else if (action === "generate-standalone-term-sheet"){ generateStandalonePricerTermSheet(); }
   else if (action === "logout"){ logout(); }
   else if (action === "restart-tour"){ ui.view = "tour"; ui.tourStep = 0; render(); }
@@ -15693,6 +15948,11 @@ appEl.addEventListener("change", function(e){
       var mpCount = Math.max(0, Math.min(parseInt(t.value,10)||0, 4));
       mpContainer.innerHTML = mpCount ? buildMultiPackRowsHTML(mpCount, mpExisting, mpLang) : '<div class="empty">' + esc(tr("Enter a number above if this is a Blanket/Portfolio loan covering more than one property.", mpLang)) + '</div>';
     }
+  } else if (action === "lp-field"){
+    lpHandleField(t.dataset.lp, t.dataset.field, t.value);
+  } else if (action === "lp-points"){
+    if (lpIsStandalone(t.dataset.lp)){ lpSetValue("standalone", "pointsCharged", t.value === "" ? null : Number(t.value)); render(); }
+    else { setPointsCharged(t.dataset.lp, t.value); render(); }
   } else if (action === "pricer-input"){
     // Real bug Joe caught (2026-09-14): this used to call
     // syncPricerRateToLead() on every change, which writes lead.rate the
@@ -15709,18 +15969,6 @@ appEl.addEventListener("change", function(e){
     ui.pricerInputs = ui.pricerInputs || {};
     ui.pricerInputs[t.dataset.lead] = ui.pricerInputs[t.dataset.lead] || {};
     ui.pricerInputs[t.dataset.lead][t.dataset.key] = t.value;
-    render();
-  } else if (action === "standalone-pricer-field"){
-    ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
-    var spKey = t.name;
-    var spVal = t.value;
-    ui.standalonePricer[spKey] = (STANDALONE_PRICER_NUMERIC_KEYS.indexOf(spKey) !== -1)
-      ? (spVal === "" ? null : Number(spVal))
-      : (spVal || null);
-    if (spKey === "loanType"){
-      ui.standalonePricer.rateOverride = null;
-      ui.standalonePricer.termMonths = clampTermToLoanType(ui.standalonePricer.loanType, ui.standalonePricer.termMonths);
-    }
     render();
   } else if (action === "address-lookup" && t.dataset.lead === "standalone"){
     ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
@@ -15835,13 +16083,6 @@ appEl.addEventListener("input", function(e){
     var prInputs = ui.pricerInputs[t.dataset.lead] || (ui.pricerInputs[t.dataset.lead] = {});
     prInputs.rateOverride = t.value !== "" ? Number(t.value) : null;
     outBox.innerHTML = buildPricerOutputHTML(prLead, prInputs);
-    return;
-  }
-  if (t.dataset.action === "standalone-pricer-rate-live"){
-    ui.standalonePricer = ui.standalonePricer || defaultStandalonePricer();
-    ui.standalonePricer.rateOverride = t.value !== "" ? Number(t.value) : null;
-    var spOutBox = document.getElementById("pricer-output-standalone");
-    if (spOutBox) spOutBox.innerHTML = buildStandalonePricerOutputHTML(ui.standalonePricer);
     return;
   }
   if (t.dataset.action === "call-live-notes"){
