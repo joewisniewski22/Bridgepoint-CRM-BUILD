@@ -562,6 +562,7 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@telnyx/webrtc@2.27.10/lib/bundle.min.js"></script>
 <script id="app-script">(function(){
 "use strict";
@@ -5634,6 +5635,160 @@ function exportAllDocuments(leadId){
       showToast(okCount < docs.length ? ("Downloaded " + okCount + " of " + docs.length + " document(s) — some failed") : ("Downloaded " + okCount + " document(s)"));
     });
   }).catch(function(){ showToast("Couldn't export documents — try again"); });
+}
+// Complete File PDF -- one merged PDF for an Account Executive: a summary cover
+// (the same wholesale submission summary used for lender emails, plus the list
+// of what's inside), then every received document on the file in order. PDFs
+// are merged as-is, JPG/PNG photos become one page each; anything else (Word,
+// Excel, HEIC...) can't be merged and is listed on the cover instead. Staff-only
+// internal documents are left out. Built in the browser with pdf-lib.
+var COMPLETE_FILE_EMAIL_LIMIT = 7 * 1024 * 1024; // Postmark caps a message at 10 MB including base64 overhead
+function completeFileDocs(lead){
+  var out = [];
+  (lead.documents||[]).forEach(function(d){
+    if (d.status !== "received" || d.staffOnly || d.isTermSheetOption) return;
+    if (d.storagePath) out.push({ label:d.name, fileName:d.fileName, storagePath:d.storagePath });
+    (d.files||[]).forEach(function(f){ if (f.storagePath) out.push({ label:d.name, fileName:f.fileName, storagePath:f.storagePath }); });
+  });
+  return out;
+}
+function bytesToBase64(bytes){
+  var s = "", chunk = 0x8000;
+  for (var i=0;i<bytes.length;i+=chunk) s += String.fromCharCode.apply(null, bytes.subarray(i, i+chunk));
+  return btoa(s);
+}
+function base64ToBytes(b64){
+  var bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (var i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+function mergeCompleteFileDocs(lead){
+  var docs = completeFileDocs(lead);
+  return Promise.all(docs.map(function(d){
+    return sb.storage.from("lead-documents").download(d.storagePath).then(function(res){
+      if (res.error || !res.data) return { d:d, err:"couldn't be downloaded" };
+      return res.data.arrayBuffer().then(function(buf){ return { d:d, bytes:new Uint8Array(buf) }; });
+    }).catch(function(){ return { d:d, err:"couldn't be downloaded" }; });
+  })).then(function(items){
+    var included = [], skipped = [];
+    return PDFLib.PDFDocument.create().then(function(merged){
+      var chain = Promise.resolve();
+      items.forEach(function(it){
+        chain = chain.then(function(){
+          var label = it.d.label + (it.d.fileName ? " (" + it.d.fileName + ")" : "");
+          if (it.err){ skipped.push({ label:label, reason:it.err }); return; }
+          var b = it.bytes;
+          var isPdf = b[0]===0x25 && b[1]===0x50 && b[2]===0x44 && b[3]===0x46;
+          var isJpg = b[0]===0xFF && b[1]===0xD8;
+          var isPng = b[0]===0x89 && b[1]===0x50 && b[2]===0x4E && b[3]===0x47;
+          if (isPdf){
+            return PDFLib.PDFDocument.load(b, { ignoreEncryption:true }).then(function(src){
+              return merged.copyPages(src, src.getPageIndices()).then(function(pages){
+                pages.forEach(function(p){ merged.addPage(p); });
+                included.push(label);
+              });
+            }).catch(function(){ skipped.push({ label:label, reason:"PDF is locked or damaged and couldn't be merged" }); });
+          }
+          if (isJpg || isPng){
+            return (isJpg ? merged.embedJpg(b) : merged.embedPng(b)).then(function(img){
+              var pw = 612, ph = 792, m = 36;
+              var scale = Math.min((pw-2*m)/img.width, (ph-2*m)/img.height, 1);
+              var w = img.width*scale, h = img.height*scale;
+              var page = merged.addPage([pw, ph]);
+              page.drawImage(img, { x:(pw-w)/2, y:(ph-h)/2, width:w, height:h });
+              included.push(label);
+            }).catch(function(){ skipped.push({ label:label, reason:"image couldn't be read" }); });
+          }
+          skipped.push({ label:label, reason:"this file type can't be merged into a PDF — send it separately" });
+        });
+      });
+      return chain.then(function(){ return { merged:merged, included:included, skipped:skipped }; });
+    });
+  });
+}
+function buildCompleteFile(lead){
+  if (typeof PDFLib === "undefined") return Promise.reject(new Error("the PDF tool didn't load, refresh the page"));
+  return mergeCompleteFileDocs(lead).then(function(r){
+    var lines = ["", "DOCUMENTS INCLUDED IN THIS FILE (in order)"];
+    r.included.forEach(function(n, i){ lines.push((i+1) + ". " + n); });
+    if (!r.included.length) lines.push("(no documents uploaded yet)");
+    if (r.skipped.length){
+      lines.push("", "NOT INCLUDED");
+      r.skipped.forEach(function(s){ lines.push("- " + s.label + ": " + s.reason); });
+    }
+    var coverText = buildLenderSummary(lead) + "\n" + lines.join("\n");
+    return sb.functions.invoke("generate-doc-pdf", { body:{ text:coverText, label:"Complete File — " + (lead.name||"") } }).then(function(res){
+      if (res.error || !res.data || !res.data.ok) throw new Error("couldn't build the cover page");
+      return PDFLib.PDFDocument.load(base64ToBytes(res.data.pdfBase64));
+    }).then(function(cover){
+      return PDFLib.PDFDocument.create().then(function(finalDoc){
+        return finalDoc.copyPages(cover, cover.getPageIndices()).then(function(cp){
+          cp.forEach(function(p){ finalDoc.addPage(p); });
+          return finalDoc.copyPages(r.merged, r.merged.getPageIndices());
+        }).then(function(mp){
+          mp.forEach(function(p){ finalDoc.addPage(p); });
+          return finalDoc.save();
+        });
+      });
+    }).then(function(bytes){ return { bytes:bytes, included:r.included, skipped:r.skipped }; });
+  });
+}
+function downloadCompleteFile(leadId){
+  var lead = leadById(leadId);
+  if (!lead || !sb) return;
+  showToast("Building the complete file…");
+  buildCompleteFile(lead).then(function(r){
+    var blob = new Blob([r.bytes], { type:"application/pdf" });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = (lead.name||"Loan").replace(/[\\/:*?"<>|]/g,"_") + " - " + lead.id + " - Complete File.pdf";
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"note", text:"Exported complete file PDF (" + r.included.length + " document(s)" + (r.skipped.length ? (", " + r.skipped.length + " not merged") : "") + ")", author: currentUser().name });
+    showToast("Complete file downloaded — " + r.included.length + " document(s)" + (r.skipped.length ? (", " + r.skipped.length + " couldn't be merged (listed on the cover)") : ""));
+    persist();
+  }).catch(function(err){ showToast("Couldn't build the complete file — " + (err && err.message ? err.message : "try again")); });
+}
+function emailCompleteFile(leadId, toEmail, note){
+  var lead = leadById(leadId);
+  if (!lead || !sb || !toEmail || !canManageOutsideLender()) return;
+  var lo = docLoanOfficer(lead);
+  showToast("Building the complete file…");
+  buildCompleteFile(lead).then(function(r){
+    if (r.bytes.length > COMPLETE_FILE_EMAIL_LIMIT){
+      showToast("That file is " + (Math.round(r.bytes.length/104857.6)/10) + " MB — too big to email. Use Complete File (PDF) to download it and send it another way.");
+      return null;
+    }
+    var filename = (lead.name||"Loan").replace(/[\\/:*?"<>|]/g,"_") + " - Complete File.pdf";
+    var body = (note ? (note.trim() + "\n\n") : "") + "Attached is the complete file for " + lead.name + " (" + r.included.length + " document(s))." + (r.skipped.length ? (" " + r.skipped.length + " item(s) couldn't be merged and are listed on the first page.") : "");
+    return sb.functions.invoke("send-email", { body:{ leadId:lead.id, to:toEmail, subject:"Bridgepoint Lending — Complete File — " + lead.name, text:body, fromName:lo.name, fromAddress:lo.email, fromUserId:lo.id, fromPhotoUrl:lo.photoUrl||null, attachmentBase64:bytesToBase64(r.bytes), attachmentName:filename } }).then(function(res){
+      if (!res || res.error || !res.data || !res.data.ok){ showToast("Couldn't send the complete file"); return; }
+      lead.activity = lead.activity || [];
+      lead.activity.push({ date: todayISO(), type:"application", text:"Complete file emailed to " + toEmail + " (" + r.included.length + " document(s))", author: lo.name || currentUser().name });
+      ui.modal = null;
+      showToast("Complete file sent to " + toEmail);
+      persist();
+    });
+  }).catch(function(err){ showToast("Couldn't build the complete file — " + (err && err.message ? err.message : "try again")); });
+}
+function modalEmailCompleteFile(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return '<div class="modal-backdrop" id="modal-host" data-action="backdrop"><div class="modal" data-stop="1"><div class="modal-head"><h3>Not available</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div></div></div>';
+  var count = completeFileDocs(lead).length;
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Email Complete File — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0 0 10px">Sends one PDF: the submission summary on top, then the ' + count + ' document(s) on this file. Internal staff-only documents are left out. If it is too big to email, use Complete File (PDF) to download it instead.</div>' +
+        '<form data-form="email-complete-file" data-lead="' + lead.id + '">' +
+          '<div class="form-row"><label>Send to</label><input class="input" type="email" name="toEmail" value="' + esc(aeEmail()||"") + '" list="email-contact-suggest" required><datalist id="email-contact-suggest">' + emailContactOptionsHTML() + '</datalist></div>' +
+          '<div class="form-row"><label>Note (optional, goes above the attachment)</label><textarea class="textarea" name="note" rows="3" placeholder="Here is the complete file you asked for..."></textarea></div>' +
+          '<div class="modal-foot" style="padding:14px 0 0"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Send</button></div>' +
+        '</form>' +
+      '</div>' +
+    '</div></div>';
 }
 function downloadMismoExport(leadId){
   var lead = leadById(leadId);
@@ -11525,6 +11680,8 @@ function renderTabDocuments(lead){
   var canExportMismo = isOwner() || isProcessor() || currentUser().id === lead.assignedTo;
   var exportBar = '<div style="margin-bottom:10px;display:flex;gap:8px;flex-wrap:wrap">' +
     '<button class="btn btn-sm btn-ghost" type="button" data-action="export-all-documents" data-lead="' + lead.id + '" title="Downloads every uploaded document on this file as one ZIP, to save internally">⬇ Export All Documents (ZIP)' + (receivedCount ? (' — ' + receivedCount) : '') + '</button>' +
+    (canExportMismo ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="download-complete-file" data-lead="' + lead.id + '" title="One PDF with the loan summary on top and every uploaded document merged in behind it — for sending to an Account Executive">⬇ Complete File (PDF)</button>') : '') +
+    (canManageOutsideLender() ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-modal" data-modal="emailCompleteFile" data-lead="' + lead.id + '" title="Emails the complete file PDF (summary plus every uploaded document) to your Account Executive or anyone you choose">✉ Email Complete File</button>') : '') +
     (canExportMismo ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="download-mismo-export" data-lead="' + lead.id + '" title="Exports the loan file as a MISMO 3.4 XML document for investors, title, or outside lenders">⬇ Export MISMO 3.4</button>') : '') +
     (canManage ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-modal" data-modal="addInternalDocument" data-lead="' + lead.id + '" title="A staff-only file — a completed Constructive Capital sizer, a lender summary, anything the borrower never sees">+ Internal Document</button>') : '') +
   '</div>';
@@ -13737,6 +13894,7 @@ function renderModal(){
   if (ui.modal.type === "createLeadFromPricer") return modalCreateLeadFromPricer();
   if (ui.modal.type === "importLeads") return modalImportLeads();
   if (ui.modal.type === "importLendingWise") return modalImportLendingWise();
+  if (ui.modal.type === "emailCompleteFile") return modalEmailCompleteFile(ui.modal.leadId);
   if (ui.modal.type === "logCall") return modalLogCall(ui.modal.leadId);
   if (ui.modal.type === "markLost") return modalMarkLost(ui.modal.leadId);
   if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
@@ -15867,6 +16025,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "download-document-pdf"){
     downloadDocumentPdf(t.dataset.lead, t.dataset.kind);
   }
+  else if (action === "download-complete-file"){ downloadCompleteFile(t.dataset.lead); }
   else if (action === "export-all-documents"){
     exportAllDocuments(t.dataset.lead);
   }
@@ -16581,6 +16740,8 @@ appEl.addEventListener("submit", function(e){
   } else if (type === "submit-for-review"){
     submitForReview(form.dataset.lead, fd.get("reviewNote"));
     form.reset();
+  } else if (type === "email-complete-file"){
+    emailCompleteFile(form.dataset.lead, (fd.get("toEmail")||"").trim(), fd.get("note"));
   } else if (type === "outside-term-sheet"){
     var tsFileInput = form.querySelector('[name="termSheetFile"]');
     var tsFile = tsFileInput && tsFileInput.files && tsFileInput.files[0];
