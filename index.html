@@ -5643,14 +5643,38 @@ function exportAllDocuments(leadId){
 // Excel, HEIC...) can't be merged and is listed on the cover instead. Staff-only
 // internal documents are left out. Built in the browser with pdf-lib.
 var COMPLETE_FILE_EMAIL_LIMIT = 7 * 1024 * 1024; // Postmark caps a message at 10 MB including base64 overhead
+// The signed loan application is saved as a staff-only document, but it is the
+// one staff-only document an Account Executive needs, so it is always included
+// and always goes first. The ACH form carries the borrower's bank account
+// number and has no place in a lender submission, so it is always left out.
 function completeFileDocs(lead){
-  var out = [];
+  var apps = [], others = [];
+  var APP_NAMES = [RTL_APPLICATION_DOC_NAME, DSCR_APPLICATION_DOC_NAME];
   (lead.documents||[]).forEach(function(d){
-    if (d.status !== "received" || d.staffOnly || d.isTermSheetOption) return;
-    if (d.storagePath) out.push({ label:d.name, fileName:d.fileName, storagePath:d.storagePath });
-    (d.files||[]).forEach(function(f){ if (f.storagePath) out.push({ label:d.name, fileName:f.fileName, storagePath:f.storagePath }); });
+    if (d.status !== "received" || d.isTermSheetOption || d.name === ACH_FORM_DOC_NAME) return;
+    var isApp = APP_NAMES.indexOf(d.name) !== -1;
+    if (d.staffOnly && !isApp) return;
+    var target = isApp ? apps : others;
+    if (d.storagePath) target.push({ label:d.name, fileName:d.fileName, storagePath:d.storagePath, isApp:isApp });
+    (d.files||[]).forEach(function(f){ if (f.storagePath) target.push({ label:d.name, fileName:f.fileName, storagePath:f.storagePath, isApp:isApp }); });
   });
-  return out;
+  return apps.concat(others);
+}
+// No signed application on file yet (e.g. the application was taken by phone):
+// build one straight from the file's data so the package still has an
+// application. Marked clearly as unsigned.
+function generatedApplicationItem(lead){
+  var isRtl = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
+  var isDscr = lead.loanType === "DSCR" || lead.loanType === "Portfolio/Blanket";
+  if ((!isRtl && !isDscr) || !(window.jspdf && window.jspdf.jsPDF)) return Promise.resolve(null);
+  var hasSigned = (lead.documents||[]).some(function(d){ return d.status === "received" && d.storagePath && (d.name === RTL_APPLICATION_DOC_NAME || d.name === DSCR_APPLICATION_DOC_NAME); });
+  if (hasSigned) return Promise.resolve(null);
+  try {
+    var blob = isRtl ? buildRtlApplicationPdfBlob(lead) : buildDscrApplicationPdfBlob(lead);
+    return blob.arrayBuffer().then(function(buf){
+      return { d:{ label:"Loan Application (built from the file, not yet signed)", fileName:null, isApp:true }, bytes:new Uint8Array(buf) };
+    });
+  } catch(e){ return Promise.resolve(null); }
 }
 function bytesToBase64(bytes){
   var s = "", chunk = 0x8000;
@@ -5669,7 +5693,9 @@ function mergeCompleteFileDocs(lead){
       if (res.error || !res.data) return { d:d, err:"couldn't be downloaded" };
       return res.data.arrayBuffer().then(function(buf){ return { d:d, bytes:new Uint8Array(buf) }; });
     }).catch(function(){ return { d:d, err:"couldn't be downloaded" }; });
-  })).then(function(items){
+  })).then(function(downloaded){
+    return generatedApplicationItem(lead).then(function(genItem){ return genItem ? [genItem].concat(downloaded) : downloaded; });
+  }).then(function(items){
     var included = [], skipped = [];
     return PDFLib.PDFDocument.create().then(function(merged){
       var chain = Promise.resolve();
@@ -5781,7 +5807,7 @@ function modalEmailCompleteFile(leadId){
     '<div class="modal" data-stop="1">' +
       '<div class="modal-head"><h3>Email Complete File — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
       '<div class="modal-body">' +
-        '<div class="footnote" style="padding:0 0 10px">Sends one PDF: the submission summary on top, then the ' + count + ' document(s) on this file. Internal staff-only documents are left out. If it is too big to email, use Complete File (PDF) to download it instead.</div>' +
+        '<div class="footnote" style="padding:0 0 10px">Sends one PDF: the submission summary on top, then the ' + count + ' document(s) on this file. The signed loan application goes first (or one built from the file if it is not signed yet). Other internal staff-only documents and the ACH bank form are never included. If it is too big to email, use Complete File (PDF) to download it and send it from Outlook.</div>' +
         '<form data-form="email-complete-file" data-lead="' + lead.id + '">' +
           '<div class="form-row"><label>Send to</label><input class="input" type="email" name="toEmail" value="' + esc(aeEmail()||"") + '" list="email-contact-suggest" required><datalist id="email-contact-suggest">' + emailContactOptionsHTML() + '</datalist></div>' +
           '<div class="form-row"><label>Note (optional, goes above the attachment)</label><textarea class="textarea" name="note" rows="3" placeholder="Here is the complete file you asked for..."></textarea></div>' +
