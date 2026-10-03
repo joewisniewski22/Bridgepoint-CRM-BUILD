@@ -41,6 +41,35 @@ function et(d = new Date()) {
   const g = (t: string) => p.find((x) => x.type === t)?.value || "";
   return { date: `${g("year")}-${g("month")}-${g("day")}`, hour: parseInt(g("hour"), 10) % 24, minute: parseInt(g("minute"), 10) };
 }
+// ---------------------------------------------------------------------------
+// Fairness rule (Joe, 2026-10-03): leads that arrive at crazy hours never count
+// against a loan officer. The accountability clock starts at the lead's
+// creation time if that is inside 8:00am-8:00pm Eastern, otherwise at the next
+// 8:00am Eastern. (Weekends are NOT excluded -- tell Joe/ask before changing.)
+// ---------------------------------------------------------------------------
+const CLOCK_OPEN_HOUR = 8;
+const CLOCK_CLOSE_HOUR = 20;
+function etWallToUtc(dateStr: string, hour: number): number {
+  let guess = Date.parse(`${dateStr}T${String(hour).padStart(2, "0")}:00:00Z`);
+  for (let i = 0; i < 2; i++) {
+    const e = et(new Date(guess));
+    let diff = hour * 60 - (e.hour * 60 + e.minute);
+    if (diff > 720) diff -= 1440;
+    if (diff < -720) diff += 1440;
+    guess += diff * 60000;
+  }
+  return guess;
+}
+function clockStartMs(createdIso: string): number {
+  const created = new Date(createdIso);
+  const c = et(created);
+  if (c.hour >= CLOCK_OPEN_HOUR && c.hour < CLOCK_CLOSE_HOUR) return created.getTime();
+  if (c.hour < CLOCK_OPEN_HOUR) return etWallToUtc(c.date, CLOCK_OPEN_HOUR);
+  const next = new Date(Date.parse(c.date + "T12:00:00Z") + 86400000).toISOString().slice(0, 10);
+  return etWallToUtc(next, CLOCK_OPEN_HOUR);
+}
+const isOffHours = (iso: string) => clockStartMs(iso) !== new Date(iso).getTime();
+
 const first = (n: string) => String(n || "").trim().split(/\s+/)[0] || "there";
 const post = (fn: string, payload: Record<string, unknown>) => fetch(SUPABASE_URL + "/functions/v1/" + fn, {
   method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify(payload),
@@ -168,12 +197,13 @@ Deno.serve(async (req: Request) => {
         const loId = (l.assigned_to as string) || "owner";
         const lo = users[loId];
         if (!lo) continue;
-        const ageMin = (Date.now() - new Date(l.created_at_ts).getTime()) / 60000;
+        // Business-hours clock: a 2am lead starts counting at 8am.
+        const ageMin = (Date.now() - clockStartMs(l.created_at_ts)) / 60000;
         if (ageMin < 5 || ageMin > 72 * 60) continue;
         const steps: Array<{ k: string; joe?: boolean; msg: (m: number) => string }> = [];
         const link = CRM_URL + "?lead=" + l.id;
         const ph = l.phone ? " " + l.phone : "";
-        if (ageMin >= 5) steps.push({ k: "sla05", msg: (m) => `⏰ ${l.name} filled out a ${l.loan_type || ""} form ${m} min ago and nobody has called. Speed wins these — call now${ph}: ${link}` });
+        if (ageMin >= 5) steps.push({ k: "sla05", msg: (m) => `⏰ New ${l.loan_type || ""} ad lead ${l.name} is ${m} min old and nobody has called. Speed wins these — call now${ph}: ${link}` });
         if (ageMin >= 15) steps.push({ k: "sla15", msg: (m) => `🚨 ${l.name} has been waiting ${m} min for a call. The first call is what closes these.${ph} ${link}` });
         if (ageMin >= 30) steps.push({ k: "sla30", joe: true, msg: (m) => `🔴 ${m} min and ${l.name} still hasn't been called.${loId !== "owner" ? " Joe has been notified." : ""}${ph} ${link}` });
         if (ageMin >= 60) steps.push({ k: "sla60", joe: true, msg: (m) => `🔴🔴 ${l.name} has now waited ${Math.round(m / 60 * 10) / 10}h with no call. Call immediately.${ph} ${link}` });
@@ -229,7 +259,7 @@ Deno.serve(async (req: Request) => {
       const todayMs = new Date(t.date + "T12:00:00Z").getTime();
       const byLo: Record<string, string[]> = {};
       for (const l of active) {
-        const ageMin = (Date.now() - new Date(l.created_at_ts).getTime()) / 60000;
+        const ageMin = (Date.now() - clockStartMs(l.created_at_ts)) / 60000;
         const loId = (l.assigned_to as string) || "owner";
         let why = "";
         if (!isContacted(l) && ageMin >= 60) why = "not called yet";
@@ -256,30 +286,96 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // ---------------- 4. Daily scoreboard to Joe (5:00pm ET) ----------------
-    if (t.hour === 17 && t.minute < 10 && (await claim("_slot_owner", "score-" + t.date, ""))) {
-      const launched = all.filter((l) => String(l.created_at_ts) >= LAUNCH_DATE);
-      const todays = launched.filter((l) => String(l.created_at_ts).slice(0, 10) === t.date);
-      const fastCalls = launched.filter((l) => l.first_attempt_at && (new Date(l.first_attempt_at).getTime() - new Date(l.created_at_ts).getTime()) <= 5 * 60000);
-      const called = launched.filter((l) => isContacted(l));
-      const uncalled = launched.filter((l) => l.status === "active" && !isContacted(l));
-      const apps = launched.filter((l) => ["app_sent", "app_completed", "docs", "processing", "underwriting", "approved", "ctc", "closed", "postclosing"].indexOf(l.stage) !== -1);
-      const closed = launched.filter((l) => ["closed", "postclosing"].indexOf(l.stage) !== -1);
-      const perLo: Record<string, { n: number; c: number }> = {};
-      launched.forEach((l) => { const id = (l.assigned_to as string) || "owner"; const x = (perLo[id] = perLo[id] || { n: 0, c: 0 }); x.n++; if (isContacted(l)) x.c++; });
-      const loLine = Object.entries(perLo).map(([id, v]) => `${first(users[id]?.name || id)} ${v.c}/${v.n} called`).join(" · ");
-      const summary = `Ad leads today ${todays.length} (total ${launched.length}). Called within 5 min: ${fastCalls.length}/${launched.length}. Still uncalled: ${uncalled.length}. Past application stage: ${apps.length}. Closed: ${closed.length} of ${GOAL_DEALS}-deal goal.`;
-      await textStaff("owner", "📊 " + summary + " " + loLine, null, "scoreboard");
+    // ---------------- 4. Accountability reports (Joe: "if they're not doing what they're supposed to do I want to know") ----------------
+    // Standards (change here): first call within 15 business minutes on >=80% of
+    // counted leads, nobody uncalled past 30 business minutes, no 2+ day silent
+    // files, and fewer than 2 missed-30-minute alerts a week. Off-hours leads
+    // (clock starts next 8:00am ET) are listed but never counted against anyone.
+    const STAGES_PAST_APP = ["app_sent", "app_completed", "docs", "processing", "underwriting", "approved", "ctc", "closed", "postclosing"];
+    const lead7 = Date.now() - 7 * 86400000;
+    const todayMs2 = new Date(t.date + "T12:00:00Z").getTime();
+    function report(subset: Row[]) {
+      const rows: Record<string, any> = {};
+      for (const l of subset) {
+        const id = (l.assigned_to as string) || "owner";
+        const r = (rows[id] = rows[id] || { n: 0, counted: 0, off: 0, mins: [] as number[], within5: 0, within15: 0, late: [] as string[], stale: [] as string[], viol: 0, apps: 0, closed: 0, never: 0 });
+        r.n++;
+        const off = isOffHours(l.created_at_ts);
+        if (off) r.off++;
+        const start = clockStartMs(l.created_at_ts);
+        const callMs = l.first_attempt_at ? new Date(l.first_attempt_at).getTime() : null;
+        if (start <= Date.now()) {
+          r.counted++;
+          if (callMs != null) {
+            const m = Math.max(0, (callMs - start) / 60000);
+            r.mins.push(m);
+            if (m <= 5) r.within5++;
+            if (m <= 15) r.within15++;
+          } else if (!isContacted(l) && l.status === "active") {
+            const age = (Date.now() - start) / 60000;
+            if (age >= 30) r.late.push(l.name + " (" + Math.round(age) + " min)");
+            if (age >= 15) { /* counts against the 15-minute rate by simply not being in within15 */ }
+          }
+        }
+        if (logged[l.id] && logged[l.id]["sla30"] && new Date(logged[l.id]["sla30"]).getTime() > lead7) r.viol++;
+        if (STAGES_PAST_APP.indexOf(l.stage) !== -1) r.apps++;
+        if (["closed", "postclosing"].indexOf(l.stage) !== -1) r.closed++;
+        if (l.status === "active" && ["new", "attempting", "qualifying", "app_sent"].indexOf(l.stage) !== -1) {
+          const lastStr = (l.last_contact_at || String(l.created_at_ts).slice(0, 10)) as string;
+          const days = Math.floor((todayMs2 - new Date(lastStr.slice(0, 10) + "T12:00:00Z").getTime()) / 86400000);
+          if (days >= 2 && isContacted(l)) r.stale.push(l.name + " (" + days + "d)");
+        }
+      }
+      return rows;
+    }
+    function flagsFor(r: any): string[] {
+      const f: string[] = [];
+      const measured = r.mins.length + r.late.length;
+      if (measured >= 3 && r.within15 / measured < 0.8) f.push("only " + Math.round(100 * r.within15 / measured) + "% called within 15 min (standard 80%)");
+      if (r.late.length) f.push(r.late.length + " lead(s) uncalled 30+ min: " + r.late.slice(0, 3).join(", "));
+      if (r.stale.length >= 3) f.push(r.stale.length + " files silent 2+ days");
+      if (r.viol >= 2) f.push(r.viol + " missed-30-minute alerts this week");
+      return f;
+    }
+    function lineFor(id: string, r: any) {
+      const avg = r.mins.length ? Math.round(r.mins.reduce((a: number, b: number) => a + b, 0) / r.mins.length) : null;
+      return `${users[id]?.name || id}: ${r.counted} leads counted${r.off ? " (+" + r.off + " overnight, not counted)" : ""} · avg first call ${avg == null ? "n/a" : avg + " min"} · ≤5 min ${r.within5}, ≤15 min ${r.within15} · uncalled 30+ min ${r.late.length} · silent 2d+ ${r.stale.length} · apps ${r.apps} · closed ${r.closed}`;
+    }
+    async function sendReport(kind: "daily" | "weekly", subset: Row[], title: string) {
+      const rows = report(subset);
+      const ids = Object.keys(rows);
+      if (!ids.length) return;
+      const flagged: string[] = [];
+      ids.forEach((id) => { const f = flagsFor(rows[id]); if (f.length) flagged.push(`${users[id]?.name || id}: ${f.join("; ")}`); });
+      const closed = subset.filter((l) => ["closed", "postclosing"].indexOf(l.stage) !== -1).length;
+      const apps = subset.filter((l) => STAGES_PAST_APP.indexOf(l.stage) !== -1).length;
+      const head = `${title}: ${subset.length} ad leads, ${apps} past application stage, ${closed} closed (goal ${GOAL_DEALS}).`;
+      const body = head + "\n\nBY LOAN OFFICER\n" + ids.map((id) => "- " + lineFor(id, rows[id])).join("\n") +
+        "\n\n" + (flagged.length ? "NEEDS A CONVERSATION\n- " + flagged.join("\n- ") : "Everyone is meeting the standards.") +
+        "\n\nStandards: first call within 15 business minutes on 80%+ of leads; nobody uncalled past 30 minutes; no file silent 2+ days; fewer than 2 missed-30-minute alerts a week. Leads that arrive 8pm-8am Eastern start counting at 8am.\n" + CRM_URL;
+      await textStaff("owner", (flagged.length ? "⚠️ " : "📊 ") + head + (flagged.length ? " NEEDS A CONVERSATION: " + flagged.join(" | ") : " Everyone meeting standards."), null, "scoreboard");
       const owner = users["owner"];
-      if (owner?.email) {
-        const body = "Ad lead scoreboard — " + t.date + "\n\n" + summary + "\n\nBy loan officer (called / assigned): " + loLine +
-          (uncalled.length ? "\n\nStill uncalled:\n- " + uncalled.slice(0, 15).map((l) => l.name + " (" + (users[l.assigned_to as string]?.name || l.assigned_to) + ")").join("\n- ") : "") +
-          "\n\nOpen the CRM: " + CRM_URL;
-        await post("send-email", { to: owner.email, subject: "Ad lead scoreboard — " + t.date, text: body, fromName: "Bridgepoint CRM" });
+      if (owner?.email) await post("send-email", { to: owner.email, subject: (flagged.length ? "⚠️ " : "") + title + " — " + t.date, text: body, fromName: "Bridgepoint CRM" });
+      if (kind === "daily") {
+        for (const id of ids) {
+          if (id === "owner") continue;
+          const r = rows[id]; const f = flagsFor(r);
+          const avg = r.mins.length ? Math.round(r.mins.reduce((a: number, b: number) => a + b, 0) / r.mins.length) : null;
+          await textStaff(id, `Your ad-lead scorecard: ${r.counted} leads, avg first call ${avg == null ? "n/a" : avg + " min"}, ${r.late.length} uncalled 30+ min, ${r.stale.length} silent 2d+.` + (f.length ? " Below standard: " + f.join("; ") + ". Joe has this report." : " On standard — nice work."), null, "scoreboard");
+        }
       }
       out.scoreboard++;
     }
 
+    const launchedLeads = all.filter((l) => String(l.created_at_ts) >= LAUNCH_DATE);
+    // On-demand report to Joe only (no loan officer texts), same secret as cron.
+    if (body.force === "report") await sendReport("weekly", launchedLeads, "Ad lead report (on demand)");
+    if (t.hour === 17 && t.minute < 10 && (await claim("_slot_owner", "score-" + t.date, ""))) {
+      await sendReport("daily", launchedLeads, "Ad lead scorecard (since launch)");
+    }
+    if (new Date(t.date + "T12:00:00Z").getUTCDay() === 1 && t.hour === 8 && t.minute < 10 && (await claim("_slot_owner", "weekly-" + t.date, ""))) {
+      await sendReport("weekly", launchedLeads.filter((l) => new Date(l.created_at_ts).getTime() > lead7), "Weekly ad lead report (last 7 days)");
+    }
     return new Response(JSON.stringify({ ok: true, checked: active.length, ...out }), { headers: { "Content-Type": "application/json" } });
   } catch (err) {
     console.error("ad-lead-followup: error", String(err));
