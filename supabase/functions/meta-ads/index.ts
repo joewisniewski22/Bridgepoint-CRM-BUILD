@@ -213,7 +213,9 @@ Deno.serve(async (req: Request) => {
       if (!name) return new Response(JSON.stringify({ error: "missing_fields", detail: "name is required" }), { status: 400, headers: CORS_HEADERS });
       const params: Record<string, string> = {
         name, objective, status,
-        special_ad_categories: JSON.stringify([]),
+        // Mortgage / long-term financing ads fall under Meta's CREDIT special ad
+        // category (no age/zip/interest targeting). Callers opt in per campaign.
+        special_ad_categories: JSON.stringify(Array.isArray(body.specialAdCategories) ? body.specialAdCategories : []),
         bid_strategy: body.bidStrategy || "LOWEST_COST_WITHOUT_CAP",
       };
       if (dailyBudgetCents) params.daily_budget = String(dailyBudgetCents);
