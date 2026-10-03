@@ -9401,7 +9401,17 @@ function startFollowupPolling(){
   if (FU_POLL_STARTED) return;
   FU_POLL_STARTED = true;
   setInterval(loadFollowupTasks, 90000);
-  document.addEventListener("visibilitychange", function(){ if (!document.hidden) loadFollowupTasks(); });
+  document.addEventListener("visibilitychange", function(){
+    if (document.hidden) return;
+    loadFollowupTasks();
+    // Back from a call made on their own phone: jump straight to "How did it go?"
+    if (ui.view === "brief" && ui.brief && ui.brief.called){
+      ui.brief.called = false;
+      var lg = document.getElementById("br-log");
+      if (lg && lg.scrollIntoView) lg.scrollIntoView({ block:"start" });
+      showToast("How did the call go? Log it below.");
+    }
+  });
 }
 function taskById(id){ return (state.tasks||[]).filter(function(t){ return t.id === id; })[0] || null; }
 function taskDueMs(t){ return new Date(t.dueAt).getTime(); }
@@ -9696,6 +9706,7 @@ function renderBriefScreen(){
     (facts.length ? ('<div class="br-sec"><div class="br-h">The deal</div><div class="br-facts">' + facts.join("") + '</div></div>') : '') +
     '<div class="br-sec"><div class="br-h">What to say</div>' +
       (brief && brief.opening ? ('<div class="br-say">“' + esc(brief.opening) + '”</div>') : '<div class="hint">Brief is still being written — refresh in a minute, or just make the call.</div>') +
+      (brief && brief.voicemail ? ('<div class="br-h2">If it goes to voicemail</div><div class="br-say">“' + esc(brief.voicemail) + '”</div>') : '') +
       (questions.length ? ('<div class="br-h2">Ask</div><ol class="br-q">' + questions.map(function(q){ return '<li>' + esc(q) + '</li>'; }).join("") + '</ol>') : '') +
       (objections.length ? ('<details class="br-obj"><summary>If they say…</summary>' + objections.map(function(o){ return '<div class="br-ob"><b>' + esc(o.q) + '</b><div>' + esc(o.a) + '</div></div>'; }).join("") + '</details>') : '') +
       ((brief && brief.next_step) ? ('<div class="br-next"><b>Before you hang up:</b> ' + esc(brief.next_step) + '</div>') : '') +

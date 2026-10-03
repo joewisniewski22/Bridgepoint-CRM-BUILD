@@ -349,20 +349,37 @@ Deno.serve(async (req: Request) => {
     async function sendReport(kind: "daily" | "weekly", subset: Row[], title: string) {
       const rows = report(subset);
       const ids = Object.keys(rows);
-      if (!ids.length) return;
+      // Follow-up tasks (the follow-up engine): who has what due / overdue / done, for every lead, not just ad leads.
+      const { data: fuT } = await sb.from("followup_tasks").select("assigned_to,status,due_at,completed_at").limit(20000);
+      const fu: Record<string, any> = {};
+      (fuT || []).forEach((x: Row) => {
+        const o = (fu[x.assigned_to] = fu[x.assigned_to] || { dueNow: 0, over24: 0, done7: 0, skipped7: 0 });
+        const dueMs = new Date(x.due_at).getTime();
+        if (x.status === "open") { if (dueMs <= Date.now()) o.dueNow++; if (Date.now() - dueMs > 24 * 3600000) o.over24++; }
+        else if (x.completed_at && new Date(x.completed_at).getTime() > lead7) { if (x.status === "done") o.done7++; if (x.status === "skipped") o.skipped7++; }
+      });
+      if (!ids.length && !Object.keys(fu).length) return;
       const flagged: string[] = [];
-      ids.forEach((id) => { const f = flagsFor(rows[id]); if (f.length) flagged.push(`${users[id]?.name || id}: ${f.join("; ")}`); });
+      const everyone = Array.from(new Set(ids.concat(Object.keys(fu))));
+      everyone.forEach((id) => {
+        const f = rows[id] ? flagsFor(rows[id]) : [];
+        if (fu[id] && fu[id].over24) f.push(fu[id].over24 + " follow-up(s) overdue 24h+");
+        if (fu[id] && fu[id].skipped7 >= 3) f.push(fu[id].skipped7 + " follow-ups marked not needed this week");
+        if (f.length) flagged.push(`${users[id]?.name || id}: ${f.join("; ")}`);
+      });
+      const fuLines = Object.keys(fu).map((id) => `- ${users[id]?.name || id}: ${fu[id].dueNow} due now · ${fu[id].over24} overdue 24h+ · ${fu[id].done7} completed this week · ${fu[id].skipped7} skipped`);
       const closed = subset.filter((l) => ["closed", "postclosing"].indexOf(l.stage) !== -1).length;
       const apps = subset.filter((l) => STAGES_PAST_APP.indexOf(l.stage) !== -1).length;
       const head = `${title}: ${subset.length} ad leads, ${apps} past application stage, ${closed} closed (goal ${GOAL_DEALS}).`;
-      const body = head + "\n\nBY LOAN OFFICER\n" + ids.map((id) => "- " + lineFor(id, rows[id])).join("\n") +
+      const body = head + "\n\nBY LOAN OFFICER (ad leads)\n" + (ids.map((id) => "- " + lineFor(id, rows[id])).join("\n") || "- no ad leads in this period") +
+        (fuLines.length ? "\n\nFOLLOW-UP TASKS (all leads)\n" + fuLines.join("\n") : "") +
         "\n\n" + (flagged.length ? "NEEDS A CONVERSATION\n- " + flagged.join("\n- ") : "Everyone is meeting the standards.") +
         "\n\nStandards: first call within 15 business minutes on 80%+ of leads; nobody uncalled past 30 minutes; no file silent 2+ days; fewer than 2 missed-30-minute alerts a week. Leads that arrive 8pm-8am Eastern start counting at 8am.\n" + CRM_URL;
       await textStaff("owner", (flagged.length ? "⚠️ " : "📊 ") + head + (flagged.length ? " NEEDS A CONVERSATION: " + flagged.join(" | ") : " Everyone meeting standards."), null, "scoreboard");
       const owner = users["owner"];
       if (owner?.email) await post("send-email", { to: owner.email, subject: (flagged.length ? "⚠️ " : "") + title + " — " + t.date, text: body, fromName: "Bridgepoint CRM" });
       if (kind === "daily") {
-        for (const id of ids) {
+        for (const id of ids.filter((x) => x !== "owner")) {
           if (id === "owner") continue;
           const r = rows[id]; const f = flagsFor(r);
           const avg = r.mins.length ? Math.round(r.mins.reduce((a: number, b: number) => a + b, 0) / r.mins.length) : null;

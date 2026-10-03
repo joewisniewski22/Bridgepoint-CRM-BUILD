@@ -81,6 +81,13 @@ const hash = (s) => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 
 const first = (n) => String(n || "").trim().split(/\s+/)[0] || "there";
 const daysAgo = (ms) => Math.max(0, Math.round((Date.now() - ms) / 86400000));
 
+// Fairness clock (Joe: overnight leads never count against a loan officer): when does the work clock start?
+function workStartMs(ms) {
+  const e = etParts(new Date(ms));
+  if (e.hour >= 8 && e.hour < 20) return ms;
+  if (e.hour < 8) return etMs(e.date, 8, 0);
+  return etMs(addDays(e.date, 1), 8, 0);
+}
 // If a timestamp falls outside 8:30am-6:30pm ET, move it to the next business morning (10:00).
 function intoWindow(ms) {
   const e = etParts(new Date(ms));
@@ -482,6 +489,7 @@ function fallbackBrief(l, plan) {
     opening: `Hi ${first_}, it's ${"{your name}"} with Bridgepoint Lending — do you have two minutes?`,
     questions: ["Where does the deal stand right now?", "What's your timeline to close?", "Is there anything holding you back from moving forward?"],
     objections: [{ q: "I'm shopping around", a: "Totally fair — what matters most to you: rate, speed, or certainty? I'll show you where we're strongest." }, { q: "Not ready yet", a: "No problem — what would need to happen first? I can check back on a date that suits you." }],
+    voicemail: `Hi ${first_}, it's ${"{your name}"} at Bridgepoint Lending about your loan request — I have a couple of quick things on your deal. I'll text you too; call me back when you can.`,
     next_step: "Book a specific day and time for the next step before you hang up.",
     text_after: `Great talking with you, ${first_}. As discussed, [next step]. I'll follow up ${"[day]"}.`,
   };
@@ -513,6 +521,7 @@ Write the brief in ${lang} as strict JSON with these keys (keep each short and c
 "opening" (a natural first sentence the loan officer can say, max 200 chars; use their first name and a concrete fact),
 "questions" (array of exactly 3 short discovery questions, most important first),
 "objections" (array of 2-3 objects {"q":"...","a":"..."} with the most likely objection at this stage and a short honest reply),
+"voicemail" (what to say if it goes to voicemail: max 220 chars, friendly, gives ONE concrete reason to call back and says you will text them),
 "next_step" (the specific next step to ask for before hanging up — always a concrete date/time or action),
 "text_after" (a friendly 1-2 sentence text the loan officer can send right after the call, with [bracketed] blanks only where truly needed).
 No emojis anywhere. Return ONLY the JSON.`;
@@ -714,6 +723,16 @@ Deno.serve(async (req) => {
         } else if (tk.reminder_count >= 1 && !(tk.meta && tk.meta.escalated) && now - new Date(tk.due_at).getTime() > 24 * 3600000 && tk.assigned_to !== "owner") {
           (escalate[tk.assigned_to] = escalate[tk.assigned_to] || []).push({ tk, l });
         }
+      }
+      // Urgent follow-ups (new lead, terms owed, scheduled callback) not touched 30 business-minutes after due: tell Joe once.
+      for (const tk of openTasks.filter((x) => x.urgent && x.notified_at && x.assigned_to !== "owner" && !(x.meta && x.meta.joe30))) {
+        const l = byId[tk.lead_id]; if (!l || !userAllowed("owner")) continue;
+        const start = workStartMs(new Date(tk.due_at).getTime());
+        if (now - start < 30 * 60000) continue;
+        await textUser("owner", `🔴 ${users[tk.assigned_to]?.name || tk.assigned_to} hasn't acted on "${tk.title.slice(0, 40)}" for ${l.name} in ${Math.round((now - start) / 60000)} min. ${l.phone || ""} ${CRM_URL}?lead=${l.id}`, l.id, "escalation");
+        await sb.from("followup_tasks").update({ meta: Object.assign({}, tk.meta, { joe30: true }) }).eq("id", tk.id);
+        tk.meta = Object.assign({}, tk.meta, { joe30: true });
+        stats.escalations++;
       }
       for (const [loId, items] of Object.entries(escalate)) {
         if (!userAllowed("owner")) break;
