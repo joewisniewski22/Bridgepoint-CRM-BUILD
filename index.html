@@ -4168,6 +4168,7 @@ function buildLenderSummary(lead){
   lines.push("PROPERTY");
   lines.push("Address: " + (lead.propertyAddress || "TBD"));
   lines.push("Property Type: " + (lead.propertyType || "TBD"));
+  if (lead.propertyType === "Mixed-Use") lines.push("Units: " + (unitBreakdownText(lead) || "TBD — residential/commercial split not on file"));
   if (isDscr){
     lines.push("Purchase Price: " + fmtUSD(lead.purchasePrice));
     if (lead.currentValue) lines.push("Current Value: " + fmtUSD(lead.currentValue));
@@ -4469,7 +4470,7 @@ function leadToRow(l){
     units_ready_for_rent: l.unitsReadyForRent || null, property_occupied: l.propertyOccupied || null, taxes_current: l.taxesCurrent || null,
     property_lease_status: l.propertyLeaseStatus || null, delayed_purchase: l.delayedPurchase || null,
     ny_cema_loan: l.nyCemaLoan || null, ny_closing_attorney: l.nyClosingAttorney || null,
-    num_units: l.numUnits || null, lease_detail: l.leaseDetail || [],
+    num_units: l.numUnits || null, num_residential_units: (l.numResidentialUnits != null ? l.numResidentialUnits : null), num_commercial_units: (l.numCommercialUnits != null ? l.numCommercialUnits : null), lease_detail: l.leaseDetail || [],
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
@@ -4523,7 +4524,7 @@ function rowToLead(r){
     unitsReadyForRent: r.units_ready_for_rent || null, propertyOccupied: r.property_occupied || null, taxesCurrent: r.taxes_current || null,
     propertyLeaseStatus: r.property_lease_status || null, delayedPurchase: r.delayed_purchase || null,
     nyCemaLoan: r.ny_cema_loan || null, nyClosingAttorney: r.ny_closing_attorney || null,
-    numUnits: r.num_units || null, leaseDetail: r.lease_detail || [],
+    numUnits: r.num_units || null, numResidentialUnits: (r.num_residential_units != null ? r.num_residential_units : null), numCommercialUnits: (r.num_commercial_units != null ? r.num_commercial_units : null), leaseDetail: r.lease_detail || [],
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
@@ -4724,6 +4725,23 @@ function submitPublicApplication(leadId, patch){
 // text/number/select fields, not SSN, ACH/RTL/DSCR signatures, or file
 // uploads, which stay submit-only rather than re-processed on every
 // keystroke.
+// Mixed-use buildings are described by how many units are residential vs.
+// commercial (lenders size and price them on that split); every other type
+// just has a single unit count. numUnits is always the total.
+function unitCountFromForm(fd, key){
+  var x = fd.get(key);
+  return (x===null||x===undefined||x==="") ? null : Number(x);
+}
+function unitTotalFromForm(fd){
+  var res = unitCountFromForm(fd, "numResidentialUnits"), com = unitCountFromForm(fd, "numCommercialUnits");
+  if (res !== null || com !== null) return (res||0) + (com||0);
+  return unitCountFromForm(fd, "numUnits");
+}
+function unitBreakdownText(lead){
+  if (lead.numResidentialUnits == null && lead.numCommercialUnits == null) return lead.numUnits ? String(lead.numUnits) : "";
+  var res = lead.numResidentialUnits || 0, com = lead.numCommercialUnits || 0;
+  return (res + com) + " total (" + res + " residential, " + com + " commercial)";
+}
 function extractApplicationBaseFieldsFromForm(fd){
   var numOrNull = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
   return {
@@ -4768,7 +4786,7 @@ function extractApplicationBaseFieldsFromForm(fd){
     delayedPurchase: fd.get("delayedPurchase"),
     nyCemaLoan: fd.get("nyCemaLoan"),
     nyClosingAttorney: fd.get("nyClosingAttorney"),
-    numUnits: fd.get("numUnits") ? Number(fd.get("numUnits")) : null,
+    numResidentialUnits: unitCountFromForm(fd, "numResidentialUnits"), numCommercialUnits: unitCountFromForm(fd, "numCommercialUnits"), numUnits: unitTotalFromForm(fd),
     leaseDetail: extractLeaseDetailFromForm(fd),
     transactionType: fd.get("transactionType"),
     prepayTerm: fd.get("prepayTerm"),
@@ -8069,7 +8087,7 @@ function buildRtlApplicationPdfBlob(lead){
   w.twoCol("Delayed Purchase?", lead.delayedPurchase, "New York CEMA Loan?", lead.nyCemaLoan);
   if (lead.nyClosingAttorney) w.row("NY Closing Attorney", lead.nyClosingAttorney);
   w.row("Interior Access Contact", (r.accessName||"—") + " (" + (r.accessRelationship||"") + ") — " + (r.accessPhone||"") + " — " + (r.accessEmail||""));
-  if (lead.numUnits) w.row("Number of Units", lead.numUnits);
+  if (lead.numUnits) w.row("Number of Units", unitBreakdownText(lead));
   if ((lead.leaseDetail||[]).length){
     w.heading("Lease Detail — All Units");
     lead.leaseDetail.forEach(function(u, i){
@@ -8157,7 +8175,7 @@ function buildDscrApplicationPdfBlob(lead){
   w.twoCol("Property Currently Leased", lead.propertyLeaseStatus, "Delayed Purchase?", lead.delayedPurchase);
   w.twoCol("New York CEMA Loan?", lead.nyCemaLoan, "NY Closing Attorney", lead.nyClosingAttorney);
   w.row("Interior Access Contact", (d.accessName||"—") + " (" + (d.accessRelationship||"") + ") — " + (d.accessPhone||"") + " — " + (d.accessEmail||""));
-  if (lead.numUnits) w.row("Number of Units", lead.numUnits);
+  if (lead.numUnits) w.row("Number of Units", unitBreakdownText(lead));
   if ((lead.leaseDetail||[]).length){
     w.heading("Lease Detail — All Units");
     lead.leaseDetail.forEach(function(u, i){
@@ -14624,6 +14642,10 @@ function buildApplicationFieldsHTML(lead, lang, opts){
       '<div class="form-row"><label>' + L("Current Lender / Mortgage Company") + ' <span class="hint">(' + L("if refinance") + ')</span></label><input class="input" name="currentLenderName" value="' + esc(lead.currentLenderName||"") + '"></div>' +
     '</div>' +
     (LEASE_DETAIL_PROPERTY_TYPES.indexOf(lead.propertyType) !== -1 ? ('<div class="form-row"><label>' + L("Number of Units") + '</label><input class="input" type="number" min="0" max="20" name="numUnits" value="' + v(lead.numUnits) + '" data-action="update-lease-detail-count" data-lang="' + lang + '" data-lead="' + lead.id + '"></div>') : "") +
+    '<div data-mixed-units class="form-two" style="' + (lead.propertyType === "Mixed-Use" ? "" : "display:none") + '">' +
+      '<div class="form-row"><label>' + L("Residential Units") + '</label><input class="input" type="number" min="0" max="20" name="numResidentialUnits" value="' + v(lead.numResidentialUnits) + '"></div>' +
+      '<div class="form-row"><label>' + L("Commercial Units") + '</label><input class="input" type="number" min="0" max="20" name="numCommercialUnits" value="' + v(lead.numCommercialUnits) + '"></div>' +
+    '</div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Are all units ready for rent?") + '</label>' + appYn("unitsReadyForRent", lead.unitsReadyForRent) + '</div>' +
       '<div class="form-row"><label>' + L("Is the property currently occupied?") + '</label>' + appYn("propertyOccupied", lead.propertyOccupied) + '</div>' +
@@ -16255,7 +16277,12 @@ appEl.addEventListener("click", function(e){
 appEl.addEventListener("change", function(e){
   var t = e.target;
   if (!t.dataset) return;
-  var autoSaveChangeForm = t.closest && t.closest('form[data-form="public-application"]');
+  // Picking Mixed-Use on an application form reveals the residential/commercial unit counts.
+  if (t.name === "propertyType" && t.closest && t.closest("form")){
+    var mixedBox = t.closest("form").querySelector("[data-mixed-units]");
+    if (mixedBox) mixedBox.style.display = t.value === "Mixed-Use" ? "" : "none";
+  }
+  var autoSaveChangeForm =t.closest && t.closest('form[data-form="public-application"]');
   if (autoSaveChangeForm) scheduleApplicationAutoSave(autoSaveChangeForm);
   var action = t.dataset.action;
   if (action === "filter"){
@@ -16580,7 +16607,7 @@ appEl.addEventListener("submit", function(e){
       delayedPurchase: fd.get("delayedPurchase"),
       nyCemaLoan: fd.get("nyCemaLoan"),
       nyClosingAttorney: fd.get("nyClosingAttorney"),
-      numUnits: fd.get("numUnits") ? Number(fd.get("numUnits")) : null,
+      numResidentialUnits: unitCountFromForm(fd, "numResidentialUnits"), numCommercialUnits: unitCountFromForm(fd, "numCommercialUnits"), numUnits: unitTotalFromForm(fd),
       leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
@@ -16638,7 +16665,7 @@ appEl.addEventListener("submit", function(e){
       delayedPurchase: fd.get("delayedPurchase"),
       nyCemaLoan: fd.get("nyCemaLoan"),
       nyClosingAttorney: fd.get("nyClosingAttorney"),
-      numUnits: fd.get("numUnits") ? Number(fd.get("numUnits")) : null,
+      numResidentialUnits: unitCountFromForm(fd, "numResidentialUnits"), numCommercialUnits: unitCountFromForm(fd, "numCommercialUnits"), numUnits: unitTotalFromForm(fd),
       leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
@@ -16703,7 +16730,7 @@ appEl.addEventListener("submit", function(e){
       delayedPurchase: fd.get("delayedPurchase"),
       nyCemaLoan: fd.get("nyCemaLoan"),
       nyClosingAttorney: fd.get("nyClosingAttorney"),
-      numUnits: fd.get("numUnits") ? Number(fd.get("numUnits")) : null,
+      numResidentialUnits: unitCountFromForm(fd, "numResidentialUnits"), numCommercialUnits: unitCountFromForm(fd, "numCommercialUnits"), numUnits: unitTotalFromForm(fd),
       leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
