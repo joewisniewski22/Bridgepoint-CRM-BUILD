@@ -168,8 +168,13 @@ Deno.serve(async (req: Request) => {
   }
   const now = new Date();
   const t = et(now);
-  const staffWindow = t.hour >= 8 && t.hour < 21;
-  const borrowerWindow = t.hour >= 9 && t.hour < 19;
+  // Once the full follow-up engine is live (followup_config.mode = 'live') IT owns the speed-to-lead
+  // nagging, the borrower nurture and the loan-officer digests for every lead; this function keeps only
+  // the accountability reports, so nobody is texted twice for the same thing.
+  const { data: fuCfg } = await sb.from("followup_config").select("mode").eq("id", 1).single();
+  const engineLive = !!(fuCfg && fuCfg.mode === "live");
+  const staffWindow = !engineLive && t.hour >= 8 && t.hour < 21;
+  const borrowerWindow = !engineLive && t.hour >= 9 && t.hour < 19;
   const out: Record<string, number> = { sla: 0, touches: 0, nags: 0, escalations: 0, scoreboard: 0 };
 
   try {
@@ -254,7 +259,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // ---------------- 3. Loan officer accountability (9:00, 13:00, 16:30 ET) ----------------
-    const slot = (t.hour === 9 && t.minute < 10) ? "am" : (t.hour === 13 && t.minute < 10) ? "mid" : (t.hour === 16 && t.minute >= 30 && t.minute < 40) ? "pm" : null;
+    const slot = engineLive ? null : (t.hour === 9 && t.minute < 10) ? "am" : (t.hour === 13 && t.minute < 10) ? "mid" : (t.hour === 16 && t.minute >= 30 && t.minute < 40) ? "pm" : null;
     if (slot) {
       const todayMs = new Date(t.date + "T12:00:00Z").getTime();
       const byLo: Record<string, string[]> = {};

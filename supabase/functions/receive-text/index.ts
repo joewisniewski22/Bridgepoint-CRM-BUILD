@@ -214,12 +214,16 @@ Deno.serve(async (req: Request) => {
       // alert flow. Standard CTIA keywords, checked as the whole (trimmed)
       // message, case-insensitive.
       const isOptOut = /^(stop|stopall|unsubscribe|cancel|end|quit)$/i.test(msg.text.trim());
+      if (/^(start|unstop)$/i.test(msg.text.trim())) {
+        await sb.from("leads").update({ sms_opt_out: false }).eq("id", match.id as string);
+      }
       if (isOptOut) {
         const optOutActivity = [...activity, {
           date: new Date().toISOString().slice(0, 10), type: "system",
           text: "Client replied STOP -- automation paused (TCPA opt-out)", author: "System",
         }];
-        await sb.from("leads").update({ automation_paused: true, activity: optOutActivity }).eq("id", match.id as string);
+        // sms_opt_out is what the follow-up engine checks before ANY automated text, forever.
+        await sb.from("leads").update({ automation_paused: true, sms_opt_out: true, activity: optOutActivity }).eq("id", match.id as string);
         if (match.phone) {
           fetch(SUPABASE_URL + "/functions/v1/send-text", {
             method: "POST",

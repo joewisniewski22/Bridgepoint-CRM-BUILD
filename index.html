@@ -552,6 +552,64 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 .m-btn.primary{grid-column:1/-1;background:var(--brand);color:#fff;border-color:var(--brand);font-size:1.05rem;min-height:52px}
 .m-btn.ghost{background:transparent;color:var(--muted, #6b6459)}
 .m-foot{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:22px;font-size:.85rem}
+/* Call brief (follow-up system) -- phone-first, also fine on desktop */
+.br-wrap{max-width:560px;margin:0 auto;padding:0 12px calc(40px + env(safe-area-inset-bottom));min-height:100vh}
+.br-top{position:sticky;top:0;z-index:20;background:var(--bg);display:flex;align-items:center;justify-content:space-between;padding:calc(10px + env(safe-area-inset-top)) 0 10px;border-bottom:1px solid var(--border);margin-bottom:12px}
+.br-back,.br-skip{border:0;background:transparent;font:inherit;font-weight:700;color:var(--brand);padding:8px 4px;cursor:pointer;min-height:44px}
+.br-pos{font-size:.8rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-muted)}
+.br-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:14px;margin-bottom:12px}
+.br-chiprow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.br-tag{font-size:.78rem;font-weight:700;background:var(--brand-tint);color:var(--brand);padding:4px 10px;border-radius:99px}
+.br-due{font-size:.78rem;font-weight:700;color:var(--ink-muted)}
+.br-due.late{color:var(--c-rust)}
+.br-name{font-family:var(--font-display);font-size:1.6rem;font-weight:700;line-height:1.15}
+.br-sub{color:var(--ink-muted);font-size:.9rem;margin-top:2px}
+.br-callrow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.br-btn{min-height:50px;border:1px solid var(--border);background:var(--surface);border-radius:12px;font:inherit;font-weight:700;color:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;padding:0 10px}
+.br-btn.br-call{background:var(--brand);color:#fff;border-color:var(--brand);font-size:1.02rem}
+.br-callrow .br-btn:only-child{grid-column:1/-1}
+.br-minirow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.br-mini{min-height:38px;border:1px solid var(--border);background:var(--surface-2);border-radius:10px;font:inherit;font-weight:600;font-size:.85rem;color:inherit;cursor:pointer;padding:0 12px;text-decoration:none;display:inline-flex;align-items:center}
+.br-why{background:var(--c-gold-bg);border:1px solid var(--c-gold);border-radius:16px;padding:12px 14px;margin-bottom:12px}
+.br-h{font-size:.72rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-muted);margin-bottom:6px}
+.br-h2{font-size:.78rem;font-weight:700;color:var(--ink-muted);margin:12px 0 6px}
+.br-big{font-weight:700;font-size:1.02rem;line-height:1.35;color:var(--ink)}
+.br-line{font-size:.9rem;margin-top:6px;line-height:1.4}
+.br-lever{color:var(--ink-muted);font-size:.84rem}
+.br-sec{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:14px;margin-bottom:12px}
+.br-note{font-size:.88rem;margin-top:6px;padding:8px 10px;background:var(--surface-2);border-radius:10px;line-height:1.4}
+.br-note span{font-weight:700;color:var(--ink-muted);margin-right:4px}
+.br-tl{margin:8px 0 0;padding-left:18px;font-size:.88rem;line-height:1.5;color:var(--ink)}
+.br-facts{display:grid;gap:6px}
+.br-fact{display:flex;justify-content:space-between;gap:12px;font-size:.88rem;border-bottom:1px dashed var(--border-soft);padding-bottom:5px}
+.br-fact span{color:var(--ink-muted)}
+.br-fact b{text-align:right;font-weight:600}
+.br-say{font-size:1.02rem;line-height:1.45;font-style:italic;padding:10px 12px;background:var(--surface-2);border-radius:12px}
+.br-q{margin:0;padding-left:20px;line-height:1.55;font-size:.95rem}
+.br-obj{margin-top:10px}
+.br-obj summary{cursor:pointer;font-weight:700;font-size:.9rem;padding:6px 0}
+.br-ob{margin-top:8px;font-size:.88rem;line-height:1.4}
+.br-next{margin-top:12px;padding:10px 12px;background:var(--brand-tint);border-radius:12px;font-size:.9rem;line-height:1.4}
+.br-ta{width:100%;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit;padding:10px 12px;resize:vertical;min-height:84px}
+.br-outcomes{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.br-oc{min-height:52px;border:1.5px solid var(--border);background:var(--surface);border-radius:12px;font:inherit;font-weight:700;color:inherit;cursor:pointer}
+.br-oc.sel{border-color:var(--brand);background:var(--brand-tint);box-shadow:inset 0 0 0 1px var(--brand)}
+.br-chips{display:flex;flex-wrap:wrap;gap:8px}
+.br-chip{min-height:40px;border:1.5px solid var(--border);background:var(--surface);border-radius:99px;font:inherit;font-weight:600;font-size:.85rem;color:inherit;cursor:pointer;padding:0 14px}
+.br-chip.sel{border-color:var(--brand);background:var(--brand-tint)}
+.br-inline{display:flex;gap:8px;margin-top:8px}
+.br-check{display:flex;align-items:center;gap:8px;margin:12px 0 6px;font-weight:600}
+.br-save{width:100%;min-height:56px;margin-top:14px;border:0;border-radius:14px;background:var(--c-forest);color:#fff;font:inherit;font-weight:800;font-size:1.05rem;cursor:pointer}
+.br-foot{display:flex;justify-content:center;gap:22px;margin-top:14px}
+.br-link{border:0;background:transparent;color:var(--ink-muted);font:inherit;font-size:.85rem;text-decoration:underline;cursor:pointer;padding:6px}
+.br-quotehead{width:100%;display:flex;justify-content:space-between;align-items:center;border:0;background:transparent;font:inherit;font-weight:800;font-size:.95rem;color:inherit;cursor:pointer;padding:2px 0}
+.br-quotebody{margin-top:10px}
+.br-fields{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.br-fields .form-row{margin-bottom:8px}
+.br-fields label{font-size:.75rem}
+.br-qrow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:10px;border:1px solid var(--border);border-radius:12px;margin-top:8px}
+.br-qrow.best{border-color:var(--c-gold);background:var(--c-gold-bg)}
+.br-qbtns{display:flex;gap:6px;flex-wrap:wrap}
 @media (prefers-color-scheme: dark){ .m-tab.on,.m-btn.primary{color:#10151f} }
 @media (max-width:700px){
   .call-float{left:8px !important;right:8px !important;top:auto !important;bottom:8px;width:auto}
@@ -2222,6 +2280,7 @@ try {
   var bookForLead = qp.get("forLead");
   var adLeadCampaign = qp.get("adlead");
   if (deepLinkLead) ui.pendingDeepLinkLead = deepLinkLead;
+  if (qp.get("brief")) ui.pendingBrief = qp.get("brief");
   if (adLeadCampaign){
     ui.adLanding = { campaign: adLeadCampaign, status: "form" };
   } else if (qp.get("showcase")){
@@ -3223,6 +3282,11 @@ function computeQueueForLeads(leads, userId, today){
     }
   });
 
+  // A lead with a due follow-up task is worked from the task's call brief; hide the older, coarser
+  // cadence / stale-app / stale-docs / expiring / scheduled-follow-up items for it so nothing is listed twice.
+  var dueTaskLeads = leadsWithDueTask();
+  var SUPERSEDED_BY_TASK = ["hot","cadence","stale-app","stale-docs","expiring","followup"];
+  items = items.filter(function(it){ return !(dueTaskLeads[it.leadId] && SUPERSEDED_BY_TASK.indexOf(it.type) !== -1); });
   items.sort(function(a,b){ return b.priority - a.priority; });
   return items;
 }
@@ -4470,7 +4534,7 @@ function leadToRow(l){
     units_ready_for_rent: l.unitsReadyForRent || null, property_occupied: l.propertyOccupied || null, taxes_current: l.taxesCurrent || null,
     property_lease_status: l.propertyLeaseStatus || null, delayed_purchase: l.delayedPurchase || null,
     ny_cema_loan: l.nyCemaLoan || null, ny_closing_attorney: l.nyClosingAttorney || null,
-    num_units: l.numUnits || null, num_residential_units: (l.numResidentialUnits != null ? l.numResidentialUnits : null), num_commercial_units: (l.numCommercialUnits != null ? l.numCommercialUnits : null), lease_detail: l.leaseDetail || [],
+    nurture_off: !!l.nurtureOff, num_units: l.numUnits || null, num_residential_units: (l.numResidentialUnits != null ? l.numResidentialUnits : null), num_commercial_units: (l.numCommercialUnits != null ? l.numCommercialUnits : null), lease_detail: l.leaseDetail || [],
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
     ach_form: l.achForm || null, rtl_app: l.rtlApp || null, dscr_app: l.dscrApp || null, portal_chat: l.portalChat || [],
     assigned_processor: l.assignedProcessor || null, on_hold: !!l.onHold, uw_conditions: l.uwConditions || [],
@@ -4524,7 +4588,7 @@ function rowToLead(r){
     unitsReadyForRent: r.units_ready_for_rent || null, propertyOccupied: r.property_occupied || null, taxesCurrent: r.taxes_current || null,
     propertyLeaseStatus: r.property_lease_status || null, delayedPurchase: r.delayed_purchase || null,
     nyCemaLoan: r.ny_cema_loan || null, nyClosingAttorney: r.ny_closing_attorney || null,
-    numUnits: r.num_units || null, numResidentialUnits: (r.num_residential_units != null ? r.num_residential_units : null), numCommercialUnits: (r.num_commercial_units != null ? r.num_commercial_units : null), leaseDetail: r.lease_detail || [],
+    nurtureOff: !!r.nurture_off, smsOptOut: !!r.sms_opt_out, numUnits: r.num_units || null, numResidentialUnits: (r.num_residential_units != null ? r.num_residential_units : null), numCommercialUnits: (r.num_commercial_units != null ? r.num_commercial_units : null), leaseDetail: r.lease_detail || [],
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
     achForm: r.ach_form || null, rtlApp: r.rtl_app || null, dscrApp: r.dscr_app || null, portalChat: r.portal_chat || [],
     assignedProcessor: r.assigned_processor || null, onHold: !!r.on_hold, uwConditions: r.uw_conditions || [],
@@ -4960,6 +5024,10 @@ function hydrateFromSupabase(){
       ui.pendingDeepLinkLead = null;
     }
     render();
+    // Follow-up tasks (needs the leads loaded first so a ?brief= link can open straight into its brief).
+    loadFollowupTasks();
+    startFollowupPolling();
+    if (isOwner()) loadFollowupConfig();
   });
   sb.from("notifications").select("*").then(function(res){
     if (res.error){ console.error("notification fetch error", res.error); return; }
@@ -5281,7 +5349,9 @@ function logCall(leadId, outcome, notes, callback){
   var d = todayISO();
   if (!lead.firstAttemptAt) lead.firstAttemptAt = nowTs();
   lead.callAttempts = lead.callAttempts || [];
-  lead.callAttempts.push({ date:d, outcome:outcome, notes:notes||"", newBusiness: isNewBusinessLead(lead) });
+  lead.callAttempts.push({ date:d, at:nowTs(), outcome:outcome, notes:notes||"", newBusiness: isNewBusinessLead(lead) });
+  // A logged call completes this lead's open follow-up task; the follow-up engine schedules the next step.
+  completeOpenTasksForLead(leadId, outcome);
   lead.activity = lead.activity || [];
   var outLabel = (CALL_OUTCOMES.filter(function(o){ return o.key===outcome; })[0] || {}).label || outcome;
   lead.activity.push({ date:d, type:"call", text:"Call logged — " + outLabel + (notes ? ": " + notes : ""), author: currentUser().name });
@@ -5403,7 +5473,8 @@ function sendTextMessage(leadId, message){
       var d = todayISO();
       if (!lead.firstAttemptAt) lead.firstAttemptAt = nowTs();
       lead.callAttempts = lead.callAttempts || [];
-      lead.callAttempts.push({ date:d, outcome:"texted", notes:message });
+      lead.callAttempts.push({ date:d, at:nowTs(), outcome:"texted", notes:message });
+      completeOpenTasksForLead(lead.id, "texted");
       lead.activity = lead.activity || [];
       lead.activity.push({
         date:d, type:"text",
@@ -8484,6 +8555,8 @@ function render(){
   // on demand the next time a bound input is focused/typed into.
   document.querySelectorAll(".pac-container").forEach(function(el){ el.remove(); });
   var app = document.getElementById("app");
+  // The call brief is a long page; keep the scroll position when it re-renders (e.g. after Get live rates).
+  var briefScrollY = (ui.view === "brief") ? (window.pageYOffset || 0) : null;
   // The live call-notes box must keep focus and cursor when a call-state
   // event triggers a full re-render mid-typing.
   var ae = document.activeElement;
@@ -8538,6 +8611,8 @@ function render(){
       app.innerHTML = renderTour();
     } else if (ui.view === "portal"){
       app.innerHTML = renderPortal();
+    } else if (ui.view === "brief"){
+      app.innerHTML = renderBriefScreen();
     } else {
       app.innerHTML = isMobileMode() ? renderMobileShell() : renderShell();
     }
@@ -8591,6 +8666,7 @@ function render(){
   var textThreadScroll = document.getElementById("text-thread-scroll");
   if (textThreadScroll) textThreadScroll.scrollTop = textThreadScroll.scrollHeight;
   if (ui.mobileTab === "messages" && ui.mobileMessagesLeadId) window.scrollTo(0, document.body.scrollHeight);
+  if (briefScrollY !== null && ui.view === "brief") window.scrollTo(0, briefScrollY);
   if (keepNotesFocus){
     var notesEl = document.getElementById("call-live-notes");
     if (notesEl){ notesEl.focus(); try { notesEl.setSelectionRange(notesSel[0], notesSel[1]); } catch(e){} }
@@ -9033,6 +9109,7 @@ function renderShell(){
         navItem("contacts","📇","Contacts") +
         (isOwner() || !isProcessor() ? navItem("coaching","🎯","Coaching") : "") +
         (ui.viewAs === "owner" ? navItem("training","🎓","New Hire Training") : "") +
+        (isOwner() ? navItem("followups","📋","Follow-Up Center", (fuLoStats().reduce(function(s,r){ return s + r.over24; }, 0)) || null) : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
         (isOwner() ? navItem("settings","⚙","Settings") : "") +
@@ -9065,6 +9142,7 @@ function renderShell(){
   else if (ui.view === "pipeline") body = renderPipeline();
   else if (ui.view === "leads") body = renderLeadsTable();
   else if (ui.view === "detail") body = renderLeadDetail();
+  else if (ui.view === "followups") body = renderFollowUps();
   else if (ui.view === "team") body = renderTeam();
   else if (ui.view === "payroll") body = renderPayroll();
   else if (ui.view === "ai-assistant") body = renderAiAssistant();
@@ -9259,7 +9337,7 @@ function renderMobileShell(){
     }
   } else {
     var mq = mobileQueue();
-    body = '<div class="m-section">Today\'s calls (' + mq.newBusiness.length + ')</div>' +
+    body = mobileTaskCards() + '<div class="m-section">Today\'s calls (' + mq.newBusiness.length + ')</div>' +
       (mq.newBusiness.length ? mq.newBusiness.map(function(it){ return renderMobileCard(it, { skippable:true }); }).join("") : '<div class="empty">Nothing queued right now.</div>') +
       (mq.followUps.length ? ('<div class="m-section">Pipeline follow-ups (' + mq.followUps.length + ')</div>' + mq.followUps.map(function(it){ return renderMobileCard(it, {}); }).join("")) : '');
   }
@@ -9279,6 +9357,497 @@ function renderMobileShell(){
       '<button type="button" class="link-btn" data-action="open-modal" data-modal="changePin">Change PIN</button>' +
       '<button type="button" class="link-btn" data-action="logout">Log out</button></div>' +
   '</div>';
+}
+
+/* ---------------------------------------------------------------------
+   FOLLOW-UP SYSTEM (Joe, 2026-10-03) -- Bridgepoint investor lending.
+   The followup-engine edge function decides, for every lead, the one next
+   best follow-up (timing grounded in sales research: speed to lead, 6-9
+   touches front-loaded, phone then SMS, quote/app/doc cadences) and creates
+   a task here. A task is shown in Today, texted to the loan officer with a
+   link (?brief=<taskId>) that opens the CALL BRIEF below: who they are, why
+   now, what was said last time, what to say and ask, a live quote tool, a
+   recap text, and a one-tap outcome log that completes the task and lets the
+   engine schedule the next step.
+--------------------------------------------------------------------- */
+state.tasks = state.tasks || [];
+var FU_SIG = "";
+var FU_POLL_STARTED = false;
+function rowToTask(r){
+  return { id:r.id, leadId:r.lead_id, assignedTo:r.assigned_to, situation:r.situation, stepKey:r.step_key, channel:r.channel,
+    title:r.title, goal:r.goal, lever:r.lever, dueAt:r.due_at, priority:r.priority||50, urgent:!!r.urgent, status:r.status,
+    brief:r.brief||null, meta:r.meta||{}, createdAt:r.created_at, notifiedAt:r.notified_at, completedAt:r.completed_at,
+    completedBy:r.completed_by, outcome:r.outcome };
+}
+function loadFollowupTasks(){
+  if (!sb || !ui.loggedIn || isDemoAccountId(ui.viewAs)) return;
+  var since = new Date(Date.now() - 30*86400000).toISOString();
+  Promise.all([
+    sb.from("followup_tasks").select("*").eq("status","open").order("due_at",{ ascending:true }).limit(2000),
+    sb.from("followup_tasks").select("*").neq("status","open").gte("completed_at", since).order("completed_at",{ ascending:false }).limit(2000)
+  ]).then(function(rs){
+    if (!rs[0] || rs[0].error || !rs[0].data) return;
+    var list = rs[0].data.concat((rs[1] && rs[1].data) || []).map(rowToTask);
+    var sig = list.map(function(t){ return t.id + ":" + t.status + ":" + t.dueAt + ":" + (t.brief ? 1 : 0); }).join("|");
+    var changed = sig !== FU_SIG;
+    state.tasks = list; FU_SIG = sig;
+    if (ui.pendingBrief){ maybeOpenPendingBrief(); return; }
+    var ae = document.activeElement;
+    var typing = ae && (ae.tagName === "TEXTAREA" || ae.tagName === "INPUT" || ae.tagName === "SELECT");
+    if (changed && !(typing && ui.view === "brief")) render();
+  }).catch(function(){});
+}
+function startFollowupPolling(){
+  if (FU_POLL_STARTED) return;
+  FU_POLL_STARTED = true;
+  setInterval(loadFollowupTasks, 90000);
+  document.addEventListener("visibilitychange", function(){ if (!document.hidden) loadFollowupTasks(); });
+}
+function taskById(id){ return (state.tasks||[]).filter(function(t){ return t.id === id; })[0] || null; }
+function taskDueMs(t){ return new Date(t.dueAt).getTime(); }
+function dueTasksFor(userId){
+  var now = Date.now();
+  return (state.tasks||[]).filter(function(t){ return t.status === "open" && t.assignedTo === userId && taskDueMs(t) <= now && !!leadById(t.leadId); })
+    .sort(function(a,b){ return (Number(b.urgent) - Number(a.urgent)) || (b.priority - a.priority) || (taskDueMs(a) - taskDueMs(b)); });
+}
+function laterTasksFor(userId, hours){
+  var now = Date.now(), until = now + (hours||10)*3600000;
+  return (state.tasks||[]).filter(function(t){ return t.status === "open" && t.assignedTo === userId && taskDueMs(t) > now && taskDueMs(t) <= until && !!leadById(t.leadId); })
+    .sort(function(a,b){ return taskDueMs(a) - taskDueMs(b); });
+}
+function openTaskForLead(leadId){
+  return (state.tasks||[]).filter(function(t){ return t.leadId === leadId && t.status === "open"; })[0] || null;
+}
+function leadsWithDueTask(){
+  var m = {}, now = Date.now();
+  (state.tasks||[]).forEach(function(t){ if (t.status === "open" && taskDueMs(t) <= now) m[t.leadId] = true; });
+  return m;
+}
+function taskDueLabel(t){
+  var ms = Date.now() - taskDueMs(t);
+  if (ms < -60000) return "Due " + new Date(t.dueAt).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+  if (ms < 15*60000) return "Due now";
+  var h = Math.floor(ms / 3600000);
+  if (h < 1) return "Overdue " + Math.round(ms/60000) + " min";
+  if (h < 24) return "Overdue " + h + "h";
+  return "Overdue " + Math.floor(h/24) + "d";
+}
+function taskIsOverdue(t){ return Date.now() - taskDueMs(t) > 4*3600000; }
+function taskChannelIcon(t){ return t.channel === "call" ? "📞" : (t.channel === "text" ? "💬" : "✉️"); }
+// Any logged call or text on a lead completes its open follow-up (the engine then schedules the next step).
+function completeOpenTasksForLead(leadId, outcome){
+  var me = currentUser();
+  (state.tasks||[]).forEach(function(t){
+    if (t.leadId !== leadId || t.status !== "open") return;
+    t.status = "done"; t.completedAt = new Date().toISOString(); t.outcome = outcome; t.completedBy = me.id;
+    if (sb) sb.from("followup_tasks").update({ status:"done", completed_at:t.completedAt, completed_by:me.id, outcome:outcome }).eq("id", t.id).then(function(){}, function(){});
+  });
+}
+
+function renderTaskCard(t, opts){
+  var lead = leadById(t.leadId);
+  if (!lead) return "";
+  opts = opts || {};
+  var overdue = taskIsOverdue(t);
+  return '<div class="queue-card' + (t.urgent ? ' type-hot' : '') + '">' +
+    '<div class="badge-wrap"><span class="badge ' + (t.urgent ? 'badge-hot' : (overdue ? 'badge-rust' : 'badge-slate')) + '">' + taskChannelIcon(t) + ' ' + esc(taskDueLabel(t)) + '</span></div>' +
+    '<div class="queue-main">' +
+      '<div class="queue-title">' + esc(lead.name) + ' — ' + esc(t.title) + '</div>' +
+      '<div class="queue-reason">' + esc((t.brief && t.brief.why_now) || t.goal || "") + '</div>' +
+      '<div class="queue-meta"><span>' + esc(lead.loanType||"") + '</span><span>' + esc(stageLabel(lead.stage)) + '</span><span>' + esc(lead.phone||"") + '</span>' +
+        (opts.showLo ? ('<span>LO: ' + esc(userName(t.assignedTo)) + '</span>') : '') + '</div>' +
+    '</div>' +
+    '<div class="queue-actions">' +
+      '<button class="btn btn-sm btn-primary" data-action="open-brief" data-task="' + t.id + '">Open Brief</button>' +
+      '<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View</button>' +
+    '</div>' +
+  '</div>';
+}
+function renderFollowUpSection(){
+  var uid = ui.viewAs;
+  var due = dueTasksFor(uid), later = laterTasksFor(uid, 10);
+  if (!due.length && !later.length) return "";
+  return '<div class="section"><div class="section-head"><h2>📋 Your Follow-Ups</h2>' +
+    '<div style="display:flex;align-items:center;gap:10px;flex:1"><span class="hint">' + due.length + ' due now' + (later.length ? (' · ' + later.length + ' more later today') : '') + ' — each one opens a brief with what to say and a one-tap log</span>' +
+    (due.length ? '<button class="btn btn-sm btn-primary" data-action="open-brief" data-task="' + due[0].id + '">▶ Work the list</button>' : '') + '</div></div>' +
+    (due.length ? due.map(function(t){ return renderTaskCard(t, {}); }).join("") : '<div class="empty">Nothing due right now — next up below.</div>') +
+    (later.length ? ('<div class="hint" style="padding:10px 4px 0">Coming up today: ' + later.slice(0, 6).map(function(t){ var l = leadById(t.leadId); return esc((l ? l.name : "") + " (" + new Date(t.dueAt).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) + ")"); }).join(" · ") + (later.length > 6 ? " …" : "") + '</div>') : '') +
+  '</div>';
+}
+function renderTeamFollowUpGlance(){
+  var rows = fuLoStats();
+  if (!rows.some(function(r){ return r.open; })) return "";
+  return '<div class="section"><div class="section-head"><h2>📋 Team Follow-Ups</h2><div style="display:flex;align-items:center;gap:10px;flex:1"><span class="hint">Who has follow-ups waiting right now</span><button class="btn btn-sm" data-action="nav" data-view="followups">Open Follow-Up Center</button></div></div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Loan officer</th><th class="num">Due now</th><th class="num">Overdue 24h+</th><th class="num">Done (7d)</th></tr></thead><tbody>' +
+    rows.filter(function(r){ return r.open || r.done7; }).map(function(r){ return '<tr><td>' + esc(r.name) + '</td><td class="num">' + r.dueNow + '</td><td class="num" style="' + (r.over24 ? 'color:var(--c-rust);font-weight:700' : '') + '">' + r.over24 + '</td><td class="num">' + r.done7 + '</td></tr>'; }).join("") +
+    '</tbody></table></div></div>';
+}
+function mobileTaskCards(){
+  var due = dueTasksFor(ui.viewAs);
+  if (!due.length) return "";
+  return '<div class="m-section">📋 Follow-ups due now (' + due.length + ')</div>' + due.map(function(t){
+    var lead = leadById(t.leadId); if (!lead) return "";
+    return '<div class="m-card">' +
+      '<div class="m-badge' + (t.urgent ? ' hot' : '') + '">' + taskChannelIcon(t) + ' ' + esc(taskDueLabel(t)) + '</div>' +
+      '<div class="m-name">' + esc(lead.name) + '</div>' +
+      '<div class="m-sub">' + esc(t.title) + (lead.loanType ? (' · ' + esc(lead.loanType)) : '') + '</div>' +
+      '<div class="m-reason">' + esc((t.brief && t.brief.why_now) || t.goal || "") + '</div>' +
+      '<div class="m-actions"><button type="button" class="m-btn primary" data-action="open-brief" data-task="' + t.id + '">Open Brief</button></div>' +
+    '</div>';
+  }).join("");
+}
+
+/* ---- Per-lead follow-up panel (lead file, Overview tab) ---- */
+function renderFollowUpCard(lead){
+  var tasks = (state.tasks||[]).filter(function(t){ return t.leadId === lead.id; });
+  var open = tasks.filter(function(t){ return t.status === "open"; })[0];
+  var recent = tasks.filter(function(t){ return t.status !== "open"; }).sort(function(a,b){ return new Date(b.completedAt||0) - new Date(a.completedAt||0); }).slice(0, 4);
+  if (!open && !recent.length && !lead.nurtureOff && !lead.smsOptOut) return "";
+  var openHTML = open
+    ? ('<div class="doc-row"><div><div><b>' + taskChannelIcon(open) + ' Next follow-up:</b> ' + esc(open.title) + '</div><div class="cell-sub">' + esc(taskDueLabel(open)) + ' · ' + esc(userName(open.assignedTo)) + '</div></div>' +
+        '<button class="btn btn-sm btn-primary" data-action="open-brief" data-task="' + open.id + '">Open Brief</button></div>')
+    : '<div class="hint">No follow-up due — the plan schedules the next one automatically.</div>';
+  var recentHTML = recent.map(function(t){
+    var o = (CALL_OUTCOMES.filter(function(x){ return x.key === t.outcome; })[0] || {}).label || t.outcome || t.status;
+    return '<div class="cell-sub" style="padding:2px 0">' + fmtDate((t.completedAt||"").slice(0,10)) + ' — ' + esc(t.title) + ' → ' + esc(o) + '</div>';
+  }).join("");
+  var flags = (lead.smsOptOut ? '<span class="badge badge-rust">Opted out of texts</span> ' : '') + (lead.nurtureOff ? '<span class="badge badge-neutral">Automated follow-ups paused</span>' : '');
+  return '<div class="section-head" style="margin-top:0"><h2>Follow-Up Plan</h2>' +
+      '<button class="btn btn-sm btn-ghost" data-action="toggle-nurture" data-lead="' + lead.id + '">' + (lead.nurtureOff ? 'Resume automated texts/emails' : 'Pause automated texts/emails') + '</button></div>' +
+    (flags ? ('<div style="margin-bottom:8px">' + flags + '</div>') : '') + openHTML + (recentHTML ? ('<div style="margin-top:8px">' + recentHTML + '</div>') : '') +
+    '<div style="height:14px"></div>';
+}
+
+/* ---- Owner Follow-Up Center ---- */
+function fuLoStats(){
+  var now = Date.now(), wk = now - 7*86400000;
+  var people = (state.users||[]).filter(function(u){ return u.role === "loan_officer" || u.id === "owner"; });
+  return people.map(function(u){
+    var mine = (state.tasks||[]).filter(function(t){ return t.assignedTo === u.id; });
+    var open = mine.filter(function(t){ return t.status === "open"; });
+    var done7 = mine.filter(function(t){ return t.status === "done" && t.completedAt && new Date(t.completedAt).getTime() >= wk; });
+    var delays = done7.map(function(t){ return Math.max(0, new Date(t.completedAt).getTime() - taskDueMs(t)) / 60000; });
+    var avg = delays.length ? Math.round(delays.reduce(function(a,b){ return a+b; }, 0) / delays.length) : null;
+    var skipped = mine.filter(function(t){ return t.status === "skipped" && t.completedAt && new Date(t.completedAt).getTime() >= wk; }).length;
+    var snoozes = mine.reduce(function(s,t){ return s + ((t.meta && t.meta.snoozes) || 0); }, 0);
+    return { id:u.id, name:u.name, open:open.length,
+      dueNow: open.filter(function(t){ return taskDueMs(t) <= now; }).length,
+      over24: open.filter(function(t){ return now - taskDueMs(t) > 24*3600000; }).length,
+      done7:done7.length, avgDelayMin:avg, skipped:skipped, snoozes:snoozes };
+  });
+}
+function loadFollowupConfig(){
+  if (!sb || !isOwner()) return;
+  sb.from("followup_config").select("*").eq("id", 1).single().then(function(res){ if (res.data){ ui.fuConfig = res.data; render(); } }, function(){});
+}
+function saveFollowupConfig(mode, backlog){
+  if (!sb) return;
+  sb.from("followup_config").update({ mode:mode, backlog_per_day:backlog, updated_at:new Date().toISOString() }).eq("id", 1).then(function(res){
+    if (res.error){ showToast("Couldn't save — try again"); return; }
+    ui.fuConfig = Object.assign({}, ui.fuConfig || {}, { mode:mode, backlog_per_day:backlog });
+    showToast("Follow-up system set to " + mode);
+    render();
+  });
+}
+function fmtMinutes(m){ if (m == null) return "—"; if (m < 90) return m + " min"; if (m < 2880) return Math.round(m/60) + " h"; return Math.round(m/1440) + " d"; }
+function renderFollowUps(){
+  if (!isOwner()) return topbar("Follow-Ups", "", "") + '<div class="content"><div class="empty">Your follow-ups are on the Today page.</div></div>';
+  if (ui.fuConfig === undefined){ ui.fuConfig = null; loadFollowupConfig(); }
+  var cfg = ui.fuConfig || { mode:"…", backlog_per_day:6 };
+  var rows = fuLoStats();
+  var now = Date.now();
+  var totalDue = rows.reduce(function(s,r){ return s + r.dueNow; }, 0), total24 = rows.reduce(function(s,r){ return s + r.over24; }, 0), totalDone = rows.reduce(function(s,r){ return s + r.done7; }, 0);
+  var modeDesc = { off:"Nothing runs.", shadow:"Tasks and briefs are created, but nobody is texted.", pilot:"Only the pilot users (you) get texts and tasks. Everyone else is untouched.", live:"Everyone gets tasks, texts, reminders and AI follow-ups." };
+  var modeSel = '<select class="select" id="fu-mode" style="max-width:180px">' + ["off","shadow","pilot","live"].map(function(m){ return '<option value="' + m + '"' + (cfg.mode === m ? " selected" : "") + '>' + m.charAt(0).toUpperCase() + m.slice(1) + '</option>'; }).join("") + '</select>';
+  var overdueList = (state.tasks||[]).filter(function(t){ return t.status === "open" && now - taskDueMs(t) > 4*3600000 && !!leadById(t.leadId); })
+    .sort(function(a,b){ return taskDueMs(a) - taskDueMs(b); }).slice(0, 40);
+  var recent = (state.tasks||[]).filter(function(t){ return t.status === "done" && t.completedAt; }).sort(function(a,b){ return new Date(b.completedAt) - new Date(a.completedAt); }).slice(0, 12);
+  return topbar("Follow-Up Center", "Every follow-up the system has scheduled — who owes what, and what is getting done.", "") +
+    '<div class="content">' +
+      '<div class="kpi-row"><div class="kpi"><div class="kpi-label">Due now</div><div class="kpi-value num">' + totalDue + '</div><div class="kpi-sub">across the team</div></div>' +
+        '<div class="kpi"><div class="kpi-label">Overdue 24h+</div><div class="kpi-value num" style="' + (total24 ? 'color:var(--c-rust)' : '') + '">' + total24 + '</div><div class="kpi-sub">needs attention</div></div>' +
+        '<div class="kpi"><div class="kpi-label">Completed (7 days)</div><div class="kpi-value num">' + totalDone + '</div><div class="kpi-sub">follow-ups logged</div></div></div>' +
+      '<div class="section"><div class="section-head"><h2>System mode</h2></div>' +
+        '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">' + modeSel +
+          '<label class="hint">Older leads dripped per loan officer per day <input class="input" id="fu-backlog" type="number" min="0" max="30" value="' + (cfg.backlog_per_day || 6) + '" style="width:70px;display:inline-block"></label>' +
+          '<button class="btn btn-sm btn-primary" data-action="fu-save-config">Save</button></div>' +
+        '<div class="footnote" style="padding-top:8px">' + esc(modeDesc[cfg.mode] || "") + ' Switch to Live when you are ready for the whole team; texts only go out 8:30am–8pm Eastern.</div></div>' +
+      '<div class="section"><div class="section-head"><h2>By loan officer</h2></div><div class="table-wrap"><table><thead><tr><th>Loan officer</th><th class="num">Open</th><th class="num">Due now</th><th class="num">Overdue 24h+</th><th class="num">Done (7d)</th><th class="num">Avg time after due</th><th class="num">Skipped</th><th class="num">Snoozed</th></tr></thead><tbody>' +
+        rows.map(function(r){ return '<tr><td>' + esc(r.name) + '</td><td class="num">' + r.open + '</td><td class="num">' + r.dueNow + '</td><td class="num" style="' + (r.over24 ? 'color:var(--c-rust);font-weight:700' : '') + '">' + r.over24 + '</td><td class="num">' + r.done7 + '</td><td class="num">' + fmtMinutes(r.avgDelayMin) + '</td><td class="num">' + r.skipped + '</td><td class="num">' + r.snoozes + '</td></tr>'; }).join("") +
+      '</tbody></table></div></div>' +
+      '<div class="section"><div class="section-head"><h2>Overdue follow-ups (4h+)</h2></div>' +
+        (overdueList.length ? overdueList.map(function(t){ var l = leadById(t.leadId); return '<div class="queue-card"><div class="badge-wrap"><span class="badge badge-rust">' + esc(taskDueLabel(t)) + '</span></div><div class="queue-main"><div class="queue-title">' + esc(l.name) + ' — ' + esc(t.title) + '</div><div class="queue-meta"><span>LO: ' + esc(userName(t.assignedTo)) + '</span><span>' + esc(stageLabel(l.stage)) + '</span><span>' + esc(l.phone||"") + '</span></div></div><div class="queue-actions"><button class="btn btn-sm btn-primary" data-action="fu-nudge" data-task="' + t.id + '">Text ' + esc((userName(t.assignedTo)||"").split(" ")[0]) + ' now</button><button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + l.id + '">View</button></div></div>'; }).join("") : '<div class="empty">Nothing is more than 4 hours overdue. 👍</div>') +
+      '</div>' +
+      '<div class="section"><div class="section-head"><h2>Recently completed</h2></div>' +
+        (recent.length ? recent.map(function(t){ var l = leadById(t.leadId); var o = (CALL_OUTCOMES.filter(function(x){ return x.key === t.outcome; })[0] || {}).label || t.outcome || "done"; return '<div class="doc-row"><div><div>' + esc(l ? l.name : t.leadId) + ' — ' + esc(t.title) + '</div><div class="cell-sub">' + esc(userName(t.completedBy || t.assignedTo)) + ' · ' + esc(o) + ' · ' + esc(new Date(t.completedAt).toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" })) + '</div></div></div>'; }).join("") : '<div class="empty">Nothing completed yet.</div>') +
+      '</div>' +
+    '</div>';
+}
+
+/* ---- The Call Brief ---- */
+function briefReset(){
+  ui.brief = { outcome:null, notes:"", next:"auto", nextDate:"", nextTime:"10:00", cbDate:"", cbTime:"10:00", closeFile:true, lostReason:"changed-mind", quoteOpen:false, afterText:null, called:false };
+}
+function openBrief(taskId){
+  var t = taskById(taskId);
+  if (!t){ showToast("That follow-up is already done"); return; }
+  if (ui.view !== "brief") ui.briefReturn = ui.view || "today";
+  ui.view = "brief"; ui.briefTaskId = taskId; ui.selectedLeadId = null;
+  briefReset();
+  render();
+  try { window.scrollTo(0, 0); } catch(e){}
+}
+function closeBrief(){
+  ui.view = ui.briefReturn && ui.briefReturn !== "brief" ? ui.briefReturn : "today";
+  ui.briefTaskId = null; ui.brief = null;
+  render();
+}
+function nextBriefTask(afterId){
+  var q = dueTasksFor(ui.viewAs).filter(function(t){ return t.id !== afterId; });
+  return q[0] || null;
+}
+function maybeOpenPendingBrief(){
+  var p = ui.pendingBrief;
+  if (!p) return;
+  ui.pendingBrief = null;
+  var t = null;
+  if (p === "next") t = dueTasksFor(ui.viewAs)[0] || null;
+  else t = taskById(p);
+  if (!t){ ui.view = "today"; render(); showToast(p === "next" ? "You're all caught up — no follow-ups due" : "That follow-up is already done"); return; }
+  openBrief(t.id);
+}
+function briefTimeline(lead){
+  var out = [];
+  var dAgo = function(iso){ if (!iso) return null; var n = Math.round((Date.now() - new Date(String(iso).slice(0,10) + "T12:00:00").getTime()) / 86400000); return n <= 0 ? "today" : (n === 1 ? "yesterday" : n + " days ago"); };
+  if (lead.createdAtTs || lead.createdAt) out.push("Came in " + dAgo(lead.createdAtTs || lead.createdAt));
+  if (lead.applicationSentAt) out.push("Application sent " + dAgo(lead.applicationSentAt));
+  if (lead.applicationTakenAt) out.push("Application completed " + dAgo(lead.applicationTakenAt));
+  if (lead.termsheetSentAt){ var exp = addDaysISO(lead.termsheetSentAt, 15); out.push("Term sheet sent " + dAgo(lead.termsheetSentAt) + " (good through " + fmtDate(exp) + ")"); }
+  if (lead.preapprovalSentAt) out.push("Pre-approval sent " + dAgo(lead.preapprovalSentAt));
+  var od = (lead.documents||[]).filter(function(d){ return d.status === "requested" && !d.staffOnly && !d.isTermSheetOption; });
+  if (od.length) out.push("Still needed: " + od.slice(0, 4).map(function(d){ return d.name; }).join(", ") + (od.length > 4 ? " +" + (od.length - 4) + " more" : ""));
+  var n = (lead.callAttempts||[]).length;
+  if (n) out.push(n + " call/text attempt" + (n > 1 ? "s" : "") + " so far");
+  return out;
+}
+function briefLastNotes(lead){
+  return (lead.callAttempts||[]).filter(function(a){ return a.notes; }).slice(-2).reverse();
+}
+var BRIEF_OUTCOME_ICONS = { "connected":"✅", "left-voicemail":"📨", "no-answer":"📵", "callback":"🕒", "not-interested":"🚫", "wrong-number":"❌" };
+function renderBriefScreen(){
+  var t = taskById(ui.briefTaskId);
+  var lead = t ? leadById(t.leadId) : null;
+  if (!t || !lead){
+    return '<div class="br-wrap"><div class="br-top"><button class="br-back" data-action="brief-close">‹ Back</button></div><div class="br-card"><div class="br-name">That follow-up is already done 👍</div><div style="margin-top:12px"><button class="br-save" data-action="brief-close">Back to Today</button></div></div></div>';
+  }
+  if (!ui.brief) briefReset();
+  var b = ui.brief;
+  var brief = t.brief || null;
+  var due = dueTasksFor(ui.viewAs);
+  var pos = due.map(function(x){ return x.id; }).indexOf(t.id);
+  var posLabel = pos >= 0 ? ("Follow-up " + (pos + 1) + " of " + due.length) : "Follow-up";
+  var phoneRaw = (lead.phone||"").replace(/[^0-9+]/g, "");
+  var callBtns = lead.phone
+    ? ((SOFTPHONE_ENABLED ? '<button type="button" class="br-btn br-call" data-action="brief-call" data-lead="' + lead.id + '">📞 Call from CRM</button>' : '') +
+       '<a class="br-btn' + (SOFTPHONE_ENABLED ? '' : ' br-call') + '" href="tel:' + esc(phoneRaw) + '" data-action="brief-called">📱 ' + (SOFTPHONE_ENABLED ? 'My phone' : 'Call ' + esc(lead.phone)) + '</a>')
+    : '<div class="hint">No phone on file — add one in the file.</div>';
+  var facts = [];
+  var pushFact = function(k, v){ if (v) facts.push('<div class="br-fact"><span>' + esc(k) + '</span><b>' + v + '</b></div>'); };
+  pushFact("Loan", esc(lead.loanType||"—") + (lead.loanAmount ? (" · " + fmtUSD(lead.loanAmount)) : "") + (lead.rate ? (" @ " + fmtPct(lead.rate)) : ""));
+  pushFact("Stage", esc(stageLabel(lead.stage)));
+  pushFact("Property", esc(lead.propertyAddress||"") + (lead.propertyType ? (" (" + esc(lead.propertyType) + ")") : ""));
+  pushFact("Credit / experience", (lead.creditScore ? esc(String(lead.creditScore)) : "") + (lead.experienceDeals != null ? (" · " + lead.experienceDeals + " deals") : ""));
+  pushFact("Source", esc(lead.source||""));
+  var tl = briefTimeline(lead);
+  var notes = briefLastNotes(lead);
+  var recap = (brief && brief.recap) || "";
+  var why = (brief && brief.why_now) || t.goal || "";
+  var questions = (brief && brief.questions) || [];
+  var objections = (brief && brief.objections) || [];
+  var afterText = b.afterText != null ? b.afterText : ((brief && brief.text_after) || "");
+  var outcomes = CALL_OUTCOMES.map(function(o){
+    return '<button type="button" class="br-oc' + (b.outcome === o.key ? ' sel' : '') + '" data-action="brief-outcome" data-o="' + o.key + '">' + (BRIEF_OUTCOME_ICONS[o.key]||"") + ' ' + esc(o.label) + '</button>';
+  }).join("");
+  var nextChips = [["auto","Let the plan schedule it (recommended)"],["tomorrow","Tomorrow 10am"],["3d","In 3 days"],["1w","Next week"],["pick","Pick a date…"]].map(function(c){
+    return '<button type="button" class="br-chip' + (b.next === c[0] ? ' sel' : '') + '" data-action="brief-next-step" data-n="' + c[0] + '">' + esc(c[1]) + '</button>';
+  }).join("");
+  var show = function(cond){ return cond ? "" : ' style="display:none"'; };
+  var lostReasons = LOST_REASONS.map(function(r){ return '<option value="' + r.key + '"' + (b.lostReason === r.key ? " selected" : "") + '>' + esc(r.label) + '</option>'; }).join("");
+  return '<div class="br-wrap">' +
+    '<div class="br-top"><button class="br-back" data-action="brief-close">‹ Back</button><div class="br-pos">' + esc(posLabel) + '</div>' +
+      '<button class="br-skip" data-action="brief-peek-next">Next ›</button></div>' +
+    '<div class="br-card">' +
+      '<div class="br-chiprow"><span class="br-tag">' + taskChannelIcon(t) + ' ' + esc(t.title) + '</span><span class="br-due' + (taskIsOverdue(t) ? ' late' : '') + '">' + esc(taskDueLabel(t)) + '</span></div>' +
+      '<div class="br-name">' + esc(lead.name) + '</div>' +
+      '<div class="br-sub">' + esc(lead.loanType||"") + ' · ' + esc(stageLabel(lead.stage)) + (isOwner() ? (' · LO: ' + esc(userName(lead.assignedTo))) : '') + '</div>' +
+      '<div class="br-callrow">' + callBtns + '</div>' +
+      '<div class="br-minirow"><button type="button" class="br-mini" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">💬 Text</button>' +
+        '<button type="button" class="br-mini" data-action="compose-lead-email" data-lead="' + lead.id + '">✉ Email</button>' +
+        (canEditApplication(lead) && !isProcessor() ? '<button type="button" class="br-mini" data-action="open-modal" data-modal="sendApplication" data-lead="' + lead.id + '">📄 Send app</button>' : '') +
+        '<button type="button" class="br-mini" data-action="select-lead" data-lead="' + lead.id + '">Open file</button></div>' +
+    '</div>' +
+    '<div class="br-why"><div class="br-h">Why now</div><div class="br-big">' + esc(why) + '</div>' +
+      (brief && brief.objective ? ('<div class="br-line"><b>Goal:</b> ' + esc(brief.objective) + '</div>') : (t.goal ? ('<div class="br-line"><b>Goal:</b> ' + esc(t.goal) + '</div>') : '')) +
+      (t.lever ? ('<div class="br-line br-lever"><b>Play:</b> ' + esc(t.lever) + '</div>') : '') + '</div>' +
+    ((recap || notes.length || tl.length) ? ('<div class="br-sec"><div class="br-h">What we know</div>' +
+      (recap ? ('<div class="br-line">' + esc(recap) + '</div>') : '') +
+      (notes.length ? notes.map(function(a){ return '<div class="br-note"><span>' + esc(fmtDate(a.date)) + ' · ' + esc((CALL_OUTCOMES.filter(function(o){ return o.key === a.outcome; })[0] || {}).label || a.outcome) + '</span> ' + esc(a.notes) + '</div>'; }).join("") : '') +
+      (tl.length ? ('<ul class="br-tl">' + tl.map(function(x){ return '<li>' + esc(x) + '</li>'; }).join("") + '</ul>') : '') + '</div>') : '') +
+    (facts.length ? ('<div class="br-sec"><div class="br-h">The deal</div><div class="br-facts">' + facts.join("") + '</div></div>') : '') +
+    '<div class="br-sec"><div class="br-h">What to say</div>' +
+      (brief && brief.opening ? ('<div class="br-say">“' + esc(brief.opening) + '”</div>') : '<div class="hint">Brief is still being written — refresh in a minute, or just make the call.</div>') +
+      (questions.length ? ('<div class="br-h2">Ask</div><ol class="br-q">' + questions.map(function(q){ return '<li>' + esc(q) + '</li>'; }).join("") + '</ol>') : '') +
+      (objections.length ? ('<details class="br-obj"><summary>If they say…</summary>' + objections.map(function(o){ return '<div class="br-ob"><b>' + esc(o.q) + '</b><div>' + esc(o.a) + '</div></div>'; }).join("") + '</details>') : '') +
+      ((brief && brief.next_step) ? ('<div class="br-next"><b>Before you hang up:</b> ' + esc(brief.next_step) + '</div>') : '') +
+    '</div>' +
+    renderCallQuote(lead) +
+    '<div class="br-sec"><div class="br-h">After the call — text them a recap</div>' +
+      '<textarea class="br-ta" data-action="brief-field" data-field="afterText" rows="3" placeholder="Short recap text…">' + esc(afterText) + '</textarea>' +
+      '<div style="margin-top:8px"><button type="button" class="br-btn" data-action="brief-send-text" data-lead="' + lead.id + '">💬 Send this text</button></div></div>' +
+    '<div class="br-sec" id="br-log"><div class="br-h">How did it go?</div>' +
+      '<div class="br-outcomes">' + outcomes + '</div>' +
+      '<div id="br-after"' + show(!!b.outcome) + '>' +
+        '<textarea class="br-ta" id="br-notes" data-action="brief-field" data-field="notes" rows="3" placeholder="Quick notes — what they said, what you agreed to (talk or type)…">' + esc(b.notes) + '</textarea>' +
+        '<div id="br-cb"' + show(b.outcome === "callback") + '><div class="br-h2">When did they ask you to call back?</div><div class="br-inline"><input class="input" type="date" data-action="brief-field" data-field="cbDate" value="' + esc(b.cbDate) + '"><input class="input" type="time" data-action="brief-field" data-field="cbTime" value="' + esc(b.cbTime) + '"></div></div>' +
+        '<div id="br-nextstep"' + show(b.outcome === "connected") + '><div class="br-h2">Next step — always book one</div><div class="br-chips">' + nextChips + '</div>' +
+          '<div id="br-nextpick" class="br-inline"' + show(b.next === "pick") + '><input class="input" type="date" data-action="brief-field" data-field="nextDate" value="' + esc(b.nextDate) + '"><input class="input" type="time" data-action="brief-field" data-field="nextTime" value="' + esc(b.nextTime) + '"></div></div>' +
+        '<div id="br-lost"' + show(b.outcome === "not-interested") + '><label class="br-check"><input type="checkbox" data-action="brief-lost-toggle"' + (b.closeFile ? " checked" : "") + '> Close this file</label><select class="select" data-action="brief-field" data-field="lostReason">' + lostReasons + '</select></div>' +
+        '<button type="button" class="br-save" data-action="brief-save">Save &amp; next ›</button>' +
+      '</div>' +
+      '<div class="br-foot"><button type="button" class="br-link" data-action="brief-snooze">Snooze to tomorrow</button><button type="button" class="br-link" data-action="brief-skip">Not needed</button></div>' +
+    '</div>' +
+  '</div>';
+}
+
+/* ---- Live quote on the call (reuses the live multi-lender pricer for this file) ---- */
+var BRIEF_QUOTE_FIELDS = ["transactionType","propertyType","purchasePrice","currentValue","arv","rehabBudget","rentEstimate","monthlyTaxes","monthlyInsurance","creditScore","experienceDeals","citizenshipStatus"];
+function renderCallQuote(lead){
+  if (typeof LP_LIVE_TYPES === "undefined" || LP_LIVE_TYPES.indexOf(lead.loanType) === -1) return "";
+  var key = lead.id;
+  var open = !!(ui.brief && ui.brief.quoteOpen);
+  var head = '<button type="button" class="br-quotehead" data-action="brief-quote-toggle"><span>💰 Quick quote — live rates while you talk</span><span>' + (open ? '▾' : '▸') + '</span></button>';
+  if (!open) return '<div class="br-sec br-quote">' + head + '</div>';
+  var fields = [];
+  lpGroups(key).forEach(function(g){ g.fields.forEach(function(f){ if (BRIEF_QUOTE_FIELDS.indexOf(f.k) !== -1) fields.push(f); }); });
+  var missing = lpMissing(key);
+  return '<div class="br-sec br-quote">' + head +
+    '<div class="br-quotebody"><div class="br-fields">' + fields.map(function(f){ return lpFieldHTML(key, f); }).join("") + '</div>' +
+    (missing.length ? '<div class="hint" style="color:var(--c-rust)">Still needed: ' + missing.map(esc).join(", ") + '</div>' : '') +
+    '<button type="button" class="br-btn br-call" style="margin-top:8px" data-action="lp-run" data-lp="' + esc(key) + '">' + (lpEntry(key).status === "loading" ? "Checking…" : "Get live rates") + '</button>' +
+    '<div id="br-quote-results">' + briefQuoteResults(lead) + '</div></div></div>';
+}
+function briefQuoteResults(lead){
+  var key = lead.id, en = lpEntry(key);
+  if (en.status === "loading") return '<div class="hint" style="padding:10px 0">Checking every lender live — a few seconds…</div>';
+  if (en.status === "error") return '<div class="hint" style="color:var(--c-rust);padding:10px 0">' + esc(en.error || "Couldn't reach the pricer — try again.") + '</div>';
+  if (en.status !== "done" || !en.data) return '<div class="hint" style="padding:10px 0">Fill the numbers, then tap Get live rates. Each lender reports the most it will lend on this deal.</div>';
+  var sc = JSON.parse(en.snapshot), rtl = LP_RTL.indexOf(sc.loanType) !== -1, canSee = canManageOutsideLender();
+  var rows = [];
+  en.data.forEach(function(r, ri){
+    if (!r.eligible) return;
+    (r.options||[]).forEach(function(o, oi){
+      rows.push({ ri:ri, oi:oi, lender: canSee ? r.lender : ("Option " + "ABCDEFGH".charAt(ri)), rate:o.rate, price:o.price, amt:r.loanAmountUsed, io: rtl || /\(IO\)$/.test(o.program) });
+    });
+  });
+  if (!rows.length) return '<div class="hint" style="padding:10px 0">No lender fits this scenario as entered. Adjust the numbers above (or open the full pricer in the file for the reasons).</div>';
+  var show;
+  if (rtl){
+    var byLender = {};
+    rows.forEach(function(x){ if (!byLender[x.ri] || x.rate < byLender[x.ri].rate) byLender[x.ri] = x; });
+    show = Object.keys(byLender).map(function(k){ return byLender[k]; }).sort(function(a,b){ return a.rate - b.rate; }).slice(0, 3);
+  } else {
+    var par = rows.filter(function(x){ return x.price >= 100 - 0.0005; }).sort(function(a,b){ return a.rate - b.rate; });
+    show = (par.length ? par : rows.slice().sort(function(a,b){ return a.rate - b.rate; })).slice(0, 3);
+  }
+  var cards = show.map(function(x, i){
+    var pmt = x.io ? interestOnlyPayment(x.amt, x.rate) : monthlyPayment(x.amt, x.rate, sc.termMonths);
+    var rateTxt = x.rate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + "%";
+    var line = "Up to " + fmtUSD(x.amt) + " at " + rateTxt + (pmt ? (" · about " + fmtUSD(Math.round(pmt)) + "/mo" + (x.io ? " (interest only)" : "")) : "");
+    return '<div class="br-qrow' + (i === 0 ? ' best' : '') + '"><div><b>' + esc(rateTxt) + '</b> · ' + esc(fmtUSD(x.amt)) + (pmt ? (' · ' + esc(fmtUSD(Math.round(pmt))) + '/mo') : '') + '<div class="cell-sub">' + esc(x.lender) + (i === 0 && !rtl ? ' · best par rate' : '') + '</div></div>' +
+      '<div class="br-qbtns"><button type="button" class="br-mini" data-action="brief-quote-text" data-line="' + esc(line) + '">Use in text</button>' +
+      (canEditApplication(lead) ? '<button type="button" class="br-mini" data-action="lp-select" data-lp="' + esc(key) + '" data-r="' + x.ri + '" data-o="' + x.oi + '">Apply to file</button>' : '') + '</div></div>';
+  }).join("");
+  return '<div style="padding-top:10px">' + cards + '<div class="footnote" style="padding-top:6px">Estimates for the conversation — subject to underwriting. <a href="#" data-action="select-lead" data-lead="' + lead.id + '">Open the full pricer in the file</a>.</div></div>';
+}
+function nextStepDateFrom(choice, pickDate, pickTime){
+  var d = new Date();
+  if (choice === "tomorrow") d = new Date(Date.now() + 86400000);
+  else if (choice === "3d") d = new Date(Date.now() + 3*86400000);
+  else if (choice === "1w") d = new Date(Date.now() + 7*86400000);
+  var date = choice === "pick" ? pickDate : (d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"));
+  var time = choice === "pick" ? (pickTime || "10:00") : "10:00";
+  if (!date) return null;
+  return { date:date, iso:new Date(date + "T" + time + ":00").toISOString() };
+}
+function briefSave(){
+  var b = ui.brief, t = taskById(ui.briefTaskId);
+  if (!b || !t) return;
+  var lead = leadById(t.leadId); if (!lead) return;
+  if (!b.outcome){ showToast("Tap how the call went first"); return; }
+  var cb = null;
+  if (b.outcome === "callback"){
+    if (!b.cbDate){ showToast("Pick the day they asked you to call back"); return; }
+    cb = { date:b.cbDate, time:b.cbTime || "10:00" };
+  }
+  var notes = (b.notes || "").trim();
+  logCall(lead.id, b.outcome, notes, cb);
+  if (b.outcome === "connected" && b.next && b.next !== "auto"){
+    var ns = nextStepDateFrom(b.next, b.nextDate, b.nextTime);
+    if (ns){ lead.nextFollowUp = ns.date; lead.nextFollowUpAt = ns.iso; lead.nextFollowUpNote = "Next step agreed on the call" + (notes ? (": " + notes.slice(0, 120)) : ""); persist(); }
+  }
+  if (b.outcome === "not-interested" && b.closeFile) markLostWithReason(lead.id, b.lostReason || "changed-mind", notes);
+  if (t.status === "open") completeOpenTasksForLead(lead.id, b.outcome);
+  var nxt = nextBriefTask(t.id);
+  if (nxt){ showToast("Logged. Next up: " + (leadById(nxt.leadId) || {}).name); openBrief(nxt.id); }
+  else { showToast("Logged — you're all caught up 🎉"); closeBrief(); }
+}
+// Outcome / next-step pickers update the DOM directly (no re-render) so typed notes and scroll position stay put.
+function briefPickOutcome(o){
+  if (!ui.brief) return;
+  ui.brief.outcome = o;
+  document.querySelectorAll(".br-oc").forEach(function(el){ el.classList.toggle("sel", el.dataset.o === o); });
+  var vis = function(id, on){ var el = document.getElementById(id); if (el) el.style.display = on ? "" : "none"; };
+  vis("br-after", true);
+  vis("br-cb", o === "callback");
+  vis("br-nextstep", o === "connected");
+  vis("br-lost", o === "not-interested");
+  var n = document.getElementById("br-notes");
+  if (n && n.scrollIntoView) n.scrollIntoView({ block:"center", behavior:"smooth" });
+}
+function briefPickNextStep(n){
+  if (!ui.brief) return;
+  ui.brief.next = n;
+  document.querySelectorAll(".br-chip").forEach(function(el){ el.classList.toggle("sel", el.dataset.n === n); });
+  var p = document.getElementById("br-nextpick"); if (p) p.style.display = n === "pick" ? "" : "none";
+}
+function fuNudge(taskId){
+  var t = taskById(taskId); if (!t || !sb) return;
+  var lead = leadById(t.leadId), lo = userById(t.assignedTo);
+  if (!lead || !lo || !lo.phone){ showToast("No phone number on file for that loan officer"); return; }
+  var text = "Bridgepoint CRM: Joe is checking on this one — " + lead.name + ": " + t.title + ". " + (lead.phone || "") + " Brief + log: " + CRM_URL + "?brief=" + t.id;
+  sb.functions.invoke("send-text", { body: { to: lo.phone, text: text, fromName: "Bridgepoint CRM" } }).then(function(res){
+    showToast(res.error ? "Couldn't send the text" : ("Texted " + lo.name));
+  }).catch(function(){ showToast("Couldn't send the text"); });
+}
+function briefSnooze(){
+  var t = taskById(ui.briefTaskId); if (!t) return;
+  var snoozes = (t.meta && t.meta.snoozes) || 0;
+  if (snoozes >= 2){ showToast("Already snoozed twice — please make the call or mark it not needed"); return; }
+  var d = new Date(Date.now() + 86400000); d.setHours(10, 0, 0, 0);
+  t.dueAt = d.toISOString(); t.meta = Object.assign({}, t.meta, { snoozes:snoozes + 1 }); t.notifiedAt = null;
+  if (sb) sb.from("followup_tasks").update({ due_at:t.dueAt, meta:t.meta, notified_at:null, reminder_count:0 }).eq("id", t.id).then(function(){}, function(){});
+  var nxt = nextBriefTask(t.id);
+  showToast("Snoozed to tomorrow 10am");
+  if (nxt) openBrief(nxt.id); else closeBrief();
+}
+function briefSkip(){
+  var t = taskById(ui.briefTaskId); if (!t) return;
+  if (!window.confirm("Mark this follow-up as not needed? (Joe can see skipped follow-ups.)")) return;
+  var me = currentUser();
+  t.status = "skipped"; t.completedAt = new Date().toISOString(); t.completedBy = me.id; t.outcome = "skipped";
+  if (sb) sb.from("followup_tasks").update({ status:"skipped", completed_at:t.completedAt, completed_by:me.id, outcome:"skipped" }).eq("id", t.id).then(function(){}, function(){});
+  var nxt = nextBriefTask(t.id);
+  if (nxt) openBrief(nxt.id); else closeBrief();
 }
 
 function topbar(title, sub, actionsHTML){
@@ -10259,7 +10828,7 @@ function renderToday(){
   }
 
   return topbar("Today", "Call list generated from new-lead cadence, market rate moves, and refinance timing.", '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLendingWise">⬆ Import from LendingWise</button>') +
-    '<div class="content">' + kpis + quotaBanner + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML + sections +
+    '<div class="content">' + kpis + quotaBanner + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML + (scopeIsMine ? renderFollowUpSection() : renderTeamFollowUpGlance()) + sections +
     '</div>';
 }
 
@@ -10747,7 +11316,7 @@ function renderTabOverview(lead){
       '<div class="field" style="align-self:end"><button class="btn btn-sm btn-primary" type="submit">Save</button></div>' +
     '</form>';
 
-  return renderLoanPlacementBanner(lead) + renderRelatedLoansBox(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + viewLenderSummaryBtn + renderTermSheetOptionsBox(lead) + contactInfoForm + '<div class="field-grid" style="margin-top:16px">' +
+  return renderFollowUpCard(lead) + renderLoanPlacementBanner(lead) + renderRelatedLoansBox(lead) + renderLeadAppointmentBox(lead) + viewTermSheetBtn + viewLenderSummaryBtn + renderTermSheetOptionsBox(lead) + contactInfoForm + '<div class="field-grid" style="margin-top:16px">' +
     field("Entity Type", esc(lead.entityType||"—")) +
     field("Guarantor Address", esc(lead.guarantorAddress || (lead.rtlApp && lead.rtlApp.homeAddress) || (lead.dscrApp && lead.dscrApp.homeAddress) || "—")) +
     field("Source", esc(lead.source)) +
@@ -15994,6 +16563,44 @@ appEl.addEventListener("click", function(e){
   else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
   else if (action === "clear-guideline-override"){ clearGuidelineOverride(t.dataset.lead); }
   else if (action === "dialer-call"){ startDialerCall(t.dataset.lead); }
+  else if (action === "open-brief"){ openBrief(t.dataset.task); }
+  else if (action === "brief-close"){ closeBrief(); }
+  else if (action === "brief-peek-next"){ var bpn = nextBriefTask(ui.briefTaskId); if (bpn) openBrief(bpn.id); else showToast("That's the last follow-up for now"); }
+  else if (action === "brief-call"){ if (ui.brief) ui.brief.called = true; startDialerCall(t.dataset.lead); }
+  else if (action === "brief-called"){ if (ui.brief) ui.brief.called = true; }
+  else if (action === "brief-outcome"){ briefPickOutcome(t.dataset.o); }
+  else if (action === "brief-next-step"){ briefPickNextStep(t.dataset.n); }
+  else if (action === "brief-save"){ briefSave(); }
+  else if (action === "brief-snooze"){ briefSnooze(); }
+  else if (action === "brief-skip"){ briefSkip(); }
+  else if (action === "brief-lost-toggle"){ if (ui.brief) ui.brief.closeFile = !!t.checked; }
+  else if (action === "brief-quote-toggle"){ if (ui.brief){ ui.brief.quoteOpen = !ui.brief.quoteOpen; render(); } }
+  else if (action === "brief-quote-text"){
+    if (ui.brief){
+      ui.brief.afterText = "Based on what we talked about: " + t.dataset.line + ". That's an estimate, subject to underwriting — want me to send over a formal term sheet?";
+      render();
+      var qta = document.querySelector('[data-field="afterText"]'); if (qta && qta.scrollIntoView) qta.scrollIntoView({ block:"center" });
+    }
+  }
+  else if (action === "brief-send-text"){
+    var bt = taskById(ui.briefTaskId), btxt = ui.brief && ui.brief.afterText != null ? ui.brief.afterText : ((bt && bt.brief && bt.brief.text_after) || "");
+    if (bt && btxt.trim()){ sendTextMessage(bt.leadId, btxt); if (ui.brief) ui.brief.afterText = null; }
+    else showToast("Write the text first");
+  }
+  else if (action === "toggle-nurture"){
+    var tnLead = leadById(t.dataset.lead);
+    if (tnLead){
+      tnLead.nurtureOff = !tnLead.nurtureOff;
+      tnLead.activity = tnLead.activity || [];
+      tnLead.activity.push({ date: todayISO(), type:"system", text: tnLead.nurtureOff ? "Automated follow-up texts/emails paused" : "Automated follow-up texts/emails resumed", author: currentUser().name });
+      persist();
+    }
+  }
+  else if (action === "fu-save-config"){
+    var fuMode = document.getElementById("fu-mode"), fuBack = document.getElementById("fu-backlog");
+    if (fuMode) saveFollowupConfig(fuMode.value, Math.max(0, Math.min(30, parseInt(fuBack && fuBack.value, 10) || 6)));
+  }
+  else if (action === "fu-nudge"){ fuNudge(t.dataset.task); }
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
   else if (action === "softphone-mute"){ toggleSoftphoneMute(); }
@@ -16514,6 +17121,10 @@ appEl.addEventListener("input", function(e){
   }
   if (t.dataset.action === "call-live-notes"){
     ui.callNotes = t.value;
+    return;
+  }
+  if (t.dataset.action === "brief-field"){
+    if (ui.brief) ui.brief[t.dataset.field] = t.value;
     return;
   }
   if (t.dataset.action === "m-search"){
