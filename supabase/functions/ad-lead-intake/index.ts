@@ -11,10 +11,7 @@
 // Routing: every ad lead lands on the owner, matching meta-leads-webhook
 // ("default to me until I change it"). Change ASSIGNEE to re-route.
 //
-// Texting window: the first-contact text only goes out 11:00-21:00 Eastern
-// (8am Pacific at the earliest, 9pm Eastern at the latest) so a 2am form fill
-// never wakes anyone up; the email still goes immediately and the owner is
-// alerted either way.
+// First-contact text and email go out immediately at any hour (Joe's call).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -45,9 +42,6 @@ function num(v: unknown): number | null {
 }
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: CORS_HEADERS });
-}
-function easternHour(): number {
-  return parseInt(new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: "America/New_York" }).format(new Date()), 10) % 24;
 }
 
 Deno.serve(async (req: Request) => {
@@ -177,14 +171,9 @@ Deno.serve(async (req: Request) => {
             leadId: id, to: email, subject: "Your " + loanType + " loan request — Bridgepoint Lending", text: message,
             fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photo_url || null, initiatedBy: "ai",
           });
-          const h = easternHour();
-          if (h >= 11 && h < 21) {
-            await post("send-text", { leadId: id, to: phone, text: message, fromName: lo.name, initiatedBy: "ai" });
-          } else {
-            const { data: cur } = await sb.from("leads").select("activity").eq("id", id).single();
-            const a = ((cur?.activity as unknown[]) || []).concat([{ date: today, type: "system", text: "First text held — outside the 11am–9pm Eastern texting window. Email was sent; call or text this lead in the morning.", author: "System" }]);
-            await sb.from("leads").update({ activity: a }).eq("id", id);
-          }
+          // Joe, 2026-10-03: text and email go out at any hour -- someone filling
+          // out the form at 2am is awake. (No quiet-hours hold.)
+          await post("send-text", { leadId: id, to: phone, text: message, fromName: lo.name, initiatedBy: "ai" });
         }
       } catch (e) {
         console.error("ad-lead-intake: AI first contact failed", String(e));
