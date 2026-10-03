@@ -128,7 +128,13 @@ async function generate(touch: typeof TOUCHES[number], l: Row, lo: Row): Promise
 
 Deno.serve(async (req: Request) => {
   // Cron / server only: this sends texts, so it must not be triggerable from the open internet.
-  if ((req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "") !== SERVICE_ROLE_KEY) {
+  // The cron job sends a shared secret kept in the ad_followup_auth table (RLS on,
+  // no policies, so only the service role can read it). The service-role key in
+  // the pg_cron command isn't byte-identical to this function's env key, so a
+  // plain key comparison rejects the cron itself.
+  const body = await req.json().catch(() => ({}));
+  const { data: auth } = await sb.from("ad_followup_auth").select("secret").eq("id", 1).single();
+  if (!auth || !body || body.secret !== auth.secret) {
     return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: { "Content-Type": "application/json" } });
   }
   const now = new Date();
