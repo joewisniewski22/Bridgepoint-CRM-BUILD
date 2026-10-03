@@ -11025,6 +11025,7 @@ function renderTabScenario(lead){
     : "";
   return ruralBanner + renderLoanTypeEditor(lead) + renderPropertyAddressEditor(lead) + '<div class="field-grid">' +
     field("Property Type", esc(lead.propertyType||"—")) +
+    (lead.propertyType === "Mixed-Use" ? field("Units", esc(unitBreakdownText(lead) || "—")) : "") +
     (lead.loanType === "Portfolio/Blanket" ? field("Number of Properties", lead.propertyCount||"—", true) : "") +
     field("Citizenship Status", esc(lead.citizenshipStatus||"—")) +
     field("Purchase Price", fmtUSD(lead.purchasePrice), true) +
@@ -11204,12 +11205,15 @@ function buildPricerOutputHTML(lead, inputs){
 var LP_LIVE_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction"];
 var LP_RTL = ["Fix & Flip","Bridge","Ground Up Construction"];
 var LP_ENTITY_TYPES = ["LLC","Individual","Corporation"];
-var LP_NUMERIC = ["creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
-var LP_SAVE_KEYS = ["transactionType","propertyType","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
+var LP_NUMERIC = ["numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
+var LP_SAVE_KEYS = ["transactionType","propertyType","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
 
 function lpEntry(key){
   ui.livePricer = ui.livePricer || {};
   return ui.livePricer[key] || (ui.livePricer[key] = { edits:{}, status:"idle", data:null, snapshot:null, error:null, selected:null });
+}
+function syncUnitTotal(lead){
+  if (lead.numResidentialUnits != null || lead.numCommercialUnits != null) lead.numUnits = (lead.numResidentialUnits||0) + (lead.numCommercialUnits||0);
 }
 function lpIsStandalone(key){ return key === "standalone"; }
 function lpValue(key, k){
@@ -11253,6 +11257,10 @@ function lpGroups(key){
   deal.push({ k:"transactionType", label:"Transaction", type:"select", opts:txnOpts });
   deal.push({ k:"propertyType", label:"Property Type", type:"select", opts:propOpts });
   deal.push({ k:"propertyAddress", label:"Property Address", type:"text", req:true, hint:"state is read from this" });
+  if (g("propertyType") === "Mixed-Use"){
+    deal.push({ k:"numResidentialUnits", label:"Residential Units", type:"num", req:true, min:0, max:20 });
+    deal.push({ k:"numCommercialUnits", label:"Commercial Units", type:"num", req:true, min:0, max:20 });
+  }
   var money = [];
   money.push({ k:"purchasePrice", label: refi ? "Original Purchase Price" : "Purchase Price", type:"num", req: (!refi || rtl), hint: refi ? (rtl ? "what they paid" : "optional on a refinance") : null });
   money.push({ k:"currentValue", label: rtl ? "Current / As-Is Value" : "Current Property Value", type:"num", req: refi, hint: refi ? "refinance leverage is measured against this" : "leave blank to use the purchase price" });
@@ -11514,6 +11522,7 @@ function lpSelectOption(key, ri, oi){
   var lead = leadById(key);
   if (!lead || !canEditApplication(lead)){ showToast("You can't change this file's terms"); return; }
   Object.keys(en.edits).forEach(function(k){ if (LP_SAVE_KEYS.indexOf(k) !== -1) lead[k] = en.edits[k]; });
+  syncUnitTotal(lead);
   en.edits = {};
   lead.loanAmount = r.loanAmountUsed;
   lead.rate = o.rate;
@@ -11542,6 +11551,7 @@ function lpSaveInputs(key){
   if (!lead || !canEditApplication(lead)) return;
   var n = 0;
   Object.keys(en.edits).forEach(function(k){ if (LP_SAVE_KEYS.indexOf(k) !== -1){ lead[k] = en.edits[k]; n++; } });
+  syncUnitTotal(lead);
   en.edits = {};
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"note", text: "Pricer: updated " + n + " scenario input(s) on the file", author: currentUser().name });
