@@ -161,7 +161,7 @@ const SIT = {
   connected: {
     pri: 62, label: "Spoke with them — keep it moving",
     steps: [
-      { off: { d: 1 }, ch: "call", title: "Follow up on yesterday's conversation", goal: "Re-open the loop on what you discussed and confirm the exact next step.", lever: "Zeigarnik open loop + commitment/consistency: tie back to what THEY said they wanted." },
+      { off: { d: 1 }, ch: "call", title: "Follow up on your last conversation", goal: "Re-open the loop on what you discussed and confirm the exact next step.", lever: "Zeigarnik open loop + commitment/consistency: tie back to what THEY said they wanted." },
       { off: { d: 3 }, ch: "call", title: "Day 3 check-in — add value", goal: "Share one useful thing (a ballpark, a lender tip) and ask where the property/deal stands.", lever: "Reciprocity: give before you ask." },
       { off: { d: 7 }, ch: "call", title: "Week-1 call — lock a start date", goal: "Get a specific day they will start the application or send the contract/address.", lever: "Implementation intention: 'what day works to get this started?'" },
       { off: { d: 14 }, ch: "call", title: "Two-week check-in", goal: "Find out whether anything changed and whether another lender is in the picture.", lever: "Competition awareness without pressure; offer to beat the clock." },
@@ -179,7 +179,7 @@ const SIT = {
   app_sent: {
     pri: 75, label: "Application sent — get it finished",
     steps: [
-      { off: { d: 1 }, ch: "call", title: "Application sent yesterday — offer to take it by phone", goal: "Offer to complete the application together over the phone (about 10 minutes). Biggest completion lever.", lever: "Effort minimisation + commitment: a small first step ('let's just start') beats waiting." },
+      { off: { d: 1 }, ch: "call", title: "Application sent — offer to take it by phone", goal: "Offer to complete the application together over the phone (about 10 minutes). Biggest completion lever.", lever: "Effort minimisation + commitment: a small first step ('let's just start') beats waiting." },
       { off: { d: 3 }, ch: "call", title: "Day 3 — help them finish the application", goal: "Find the blocker (missing info, questions, cold feet) and remove it.", lever: "Zeigarnik: an unfinished task nags — help them close it." },
       { off: { d: 5 }, ch: "text", title: "Day 5 — send a text from the CRM", goal: "A short personal text offering help; include the link again.", lever: "Easy next step." },
       { off: { d: 8 }, ch: "call", title: "Day 8 call", goal: "Reconnect; confirm the deal is still alive.", lever: "Loss aversion: delays can cost them the property." },
@@ -208,7 +208,7 @@ const SIT = {
   quote: {
     pri: 80, label: "Terms sent — get a decision",
     steps: [
-      { off: { d: 1 }, ch: "call", title: "Term sheet sent yesterday — did they get it?", goal: "Confirm receipt, walk through the key terms, and ask what questions they have.", lever: "Most winning quotes close within a day of first review — be there while it is fresh." },
+      { off: { d: 1 }, ch: "call", title: "Terms sent — did they get them?", goal: "Confirm receipt, walk through the key terms, and ask what questions they have.", lever: "Most winning quotes close within a day of first review — be there while it is fresh." },
       { off: { d: 3 }, ch: "call", title: "Day 3 — add value and ask about timeline", goal: "Compare total cost (not just rate) and ask when they plan to close on the property.", lever: "Reciprocity + anchoring on total cost and speed to close." },
       { off: { d: 7 }, ch: "call", title: "Day 7 — decision timeline", goal: "Ask directly what is needed to decide and by when; handle objections.", lever: "Implementation intention: get a decision DATE." },
       { off: { d: 11 }, ch: "call", title: "Terms expiring soon", goal: "Remind them the term sheet is good through its expiry date and ask to move forward.", lever: "Real scarcity: the expiry date is real." },
