@@ -47,6 +47,32 @@ function extractMessage(body: Record<string, unknown>): Extracted | null {
   };
 }
 
+const FORWARD_PREFIX = "[Business line] ";
+
+// Relay an inbound text that has no loan officer to the owner's personal cell
+// (Joe, 2026-10-03: "send everything to my cell phone unless the number is
+// associated with a lead, then send that to the assigned LO"). Loop safety:
+// never relays our own relays (prefix) or anything from the company number,
+// and callers never pass the owner's own texts.
+async function forwardToOwner(sb: ReturnType<typeof createClient>, from: string, text: string) {
+  try {
+    if (!text || text.indexOf(FORWARD_PREFIX) === 0) return;
+    const companyDigits = (Deno.env.get("TELNYX_FROM_NUMBER") || "").replace(/\D/g, "").slice(-10);
+    if (companyDigits && from.replace(/\D/g, "").slice(-10) === companyDigits) return;
+    const { data: owner } = await sb.from("users").select("phone").eq("id", "owner").single();
+    if (!owner || !owner.phone) return;
+    if (owner.phone.replace(/\D/g, "").slice(-10) === from.replace(/\D/g, "").slice(-10)) return;
+    const res = await fetch(SUPABASE_URL + "/functions/v1/send-text", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+      body: JSON.stringify({ to: owner.phone, text: FORWARD_PREFIX + "From " + from + ": " + text.slice(0, 400), fromName: "Bridgepoint CRM" }),
+    });
+    console.log("receive-text: forwarded text to owner", res.status);
+  } catch (e) {
+    console.error("receive-text: forward to owner failed", String(e));
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") {
@@ -136,6 +162,11 @@ Deno.serve(async (req: Request) => {
       });
       await sb.from("leads").update({ activity }).eq("id", match.id as string);
 
+      if (!match.assigned_to) {
+        // A lead's own text goes to its assigned loan officer; one with no
+        // loan officer would otherwise reach nobody, so it goes to the owner.
+        await forwardToOwner(sb, msg.from, (match.name as string) + " (unassigned lead " + match.id + "): " + msg.text);
+      }
       if (match.assigned_to) {
         await sb.from("notifications").insert({
           id: "N" + crypto.randomUUID().slice(0, 8),
@@ -280,9 +311,14 @@ Deno.serve(async (req: Request) => {
         const replyKey = "staff-reply-" + crypto.randomUUID().slice(0, 8);
         await sb.from("team_polls").insert({ id: replyKey, poll_key: replyKey, staff_id: staffMatch.id, vote: "reply", raw_text: msg.text });
         console.log("receive-text: logged staff reply", staffMatch.id);
+        // "Send everything to my cell" -- other staff members' texts too (the
+        // owner's own texts are skipped inside forwardToOwner).
+        await forwardToOwner(sb, msg.from, (staffMatch.name as string) + ": " + msg.text);
       }
     } else {
       console.log("receive-text: no lead or staff matched sender", msg.from);
+      // Not a lead and not staff (verification codes, banks, wrong numbers...).
+      await forwardToOwner(sb, msg.from, msg.text);
     }
 
     return new Response(JSON.stringify({ ok: true, matched: !!match }), { headers: CORS_HEADERS });
