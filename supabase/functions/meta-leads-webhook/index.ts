@@ -17,6 +17,32 @@ const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+// English ad-lead routing (Joe, 2026-10-03): 30% to Joe, the rest split evenly
+// between Fiore, Taeya and Theresa. Deterministic rotation, not random: each
+// new lead goes to whoever is furthest below their target share of the ad
+// leads created since ROUTING_START. (Spanish-ad leads are routed separately
+// in highlevel-leads-webhook.)
+const ROUTING_START = "2026-10-03";
+const ROUTE_TARGETS: Array<{ id: string; weight: number }> = [
+  { id: "owner", weight: 0.30 },
+  { id: "lo-fiore", weight: 0.70 / 3 },
+  { id: "lo-taeya", weight: 0.70 / 3 },
+  { id: "lo-theresa", weight: 0.70 / 3 },
+];
+async function pickEnglishAdLO(client: ReturnType<typeof createClient>): Promise<string> {
+  const { data } = await client.from("leads").select("assigned_to")
+    .gte("created_at", ROUTING_START).like("source", "Meta Ads%").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
+  const counts: Record<string, number> = {};
+  (data || []).forEach((r: Record<string, unknown>) => { counts[r.assigned_to as string] = (counts[r.assigned_to as string] || 0) + 1; });
+  const total = (data || []).length;
+  let best = ROUTE_TARGETS[0], bestDeficit = -Infinity;
+  for (const r of ROUTE_TARGETS) {
+    const deficit = r.weight * (total + 1) - (counts[r.id] || 0);
+    if (deficit > bestDeficit + 1e-9) { best = r; bestDeficit = deficit; }
+  }
+  return best.id;
+}
+
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -59,6 +85,7 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const extraAnswers = fields.filter((f) => !dedicated.has(f.name.toLowerCase()) && f.values && f.values.length)
     .map((f) => f.name + ": " + f.values.join(", ")).join(" · ");
 
+  const assignee = await pickEnglishAdLO(sb);
   const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
   const today = new Date().toISOString().slice(0, 10);
   const activity: Record<string, string>[] = [
@@ -68,7 +95,7 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const row = {
     id, name: fullName, email: email || null, phone: phone || null,
     source: "Meta Ads", loan_type: null, stage: "new", status: "active",
-    assigned_to: "owner", created_at: today, created_at_ts: new Date().toISOString(),
+    assigned_to: assignee, created_at: today, created_at_ts: new Date().toISOString(),
     // Enrolls this lead in the same AI conversion-texting automation every
     // other inbound source uses (see index.html's startAiEngagement / the
     // highlevel-leads-webhook) -- routing here still defaults everyone to
@@ -89,10 +116,10 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const link = CRM_URL + "?lead=" + id;
   const alertText = "🔥 New Facebook lead: " + fullName + " — open & dial: " + link;
   await sb.from("notifications").insert({
-    id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: "owner", lead_id: id,
+    id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: assignee, lead_id: id,
     kind: "hot-lead", text: alertText, date: today, read: false,
   });
-  const { data: owner } = await sb.from("users").select("phone,email").eq("id", "owner").single();
+  const { data: owner } = await sb.from("users").select("phone,email").eq("id", assignee).single();
   if (owner?.phone) {
     fetch(SUPABASE_URL + "/functions/v1/send-text", {
       method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },

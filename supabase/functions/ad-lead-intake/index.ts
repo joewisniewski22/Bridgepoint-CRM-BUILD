@@ -8,8 +8,7 @@
 // and a repeat submission from the same phone/email within 30 days is attached
 // to the existing file instead of creating a duplicate.
 //
-// Routing: every ad lead lands on the owner, matching meta-leads-webhook
-// ("default to me until I change it"). Change ASSIGNEE to re-route.
+// Routing: round-robin across the loan officers per pickEnglishAdLO below.
 //
 // First-contact text and email go out immediately at any hour (Joe's call).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -18,9 +17,34 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
-const ASSIGNEE = "owner";
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+// English ad-lead routing (Joe, 2026-10-03): 30% to Joe, the rest split evenly
+// between Fiore, Taeya and Theresa. Deterministic rotation, not random: each
+// new lead goes to whoever is furthest below their target share of the ad
+// leads created since ROUTING_START. (Spanish-ad leads are routed separately
+// in highlevel-leads-webhook.)
+const ROUTING_START = "2026-10-03";
+const ROUTE_TARGETS: Array<{ id: string; weight: number }> = [
+  { id: "owner", weight: 0.30 },
+  { id: "lo-fiore", weight: 0.70 / 3 },
+  { id: "lo-taeya", weight: 0.70 / 3 },
+  { id: "lo-theresa", weight: 0.70 / 3 },
+];
+async function pickEnglishAdLO(client: ReturnType<typeof createClient>): Promise<string> {
+  const { data } = await client.from("leads").select("assigned_to")
+    .gte("created_at", ROUTING_START).like("source", "Meta Ads%").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
+  const counts: Record<string, number> = {};
+  (data || []).forEach((r: Record<string, unknown>) => { counts[r.assigned_to as string] = (counts[r.assigned_to as string] || 0) + 1; });
+  const total = (data || []).length;
+  let best = ROUTE_TARGETS[0], bestDeficit = -Infinity;
+  for (const r of ROUTE_TARGETS) {
+    const deficit = r.weight * (total + 1) - (counts[r.id] || 0);
+    if (deficit > bestDeficit + 1e-9) { best = r; bestDeficit = deficit; }
+  }
+  return best.id;
+}
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -99,6 +123,7 @@ Deno.serve(async (req: Request) => {
     }
 
     // --- Build the file --------------------------------------------------
+    const ASSIGNEE = await pickEnglishAdLO(sb);
     const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
     const answers: string[] = [];
     if (goal) answers.push("Goal: " + (goal === "purchase" ? "purchase" : goal === "refi" ? "rate/term refinance" : "cash-out refinance"));
@@ -156,7 +181,7 @@ Deno.serve(async (req: Request) => {
         if (rent) known.push("Monthly rent: about $" + Math.round(rent).toLocaleString());
         if (rehab) known.push("Rehab budget: about $" + Math.round(rehab).toLocaleString());
         if (arv) known.push("After-repair value: about $" + Math.round(arv).toLocaleString());
-        const prompt = "You are " + lo.name + ", owner of Bridgepoint Lending (business-purpose real estate investor loans — not consumer mortgages). " +
+        const prompt = "You are " + lo.name + ", a loan officer at Bridgepoint Lending (business-purpose real estate investor loans — not consumer mortgages). " +
           "A real estate investor just filled out our " + loanType + " web form. Write a short first text message (max 3 sentences, plain, friendly, no emojis, no promises of approval, no rates). " +
           "Thank them by first name, show you read their answers, and invite them to grab a quick call here: " + bookingLink + " — or just reply with the property address and you'll run numbers.\n\n" +
           "First name: " + name.split(/\s+/)[0] + "\nWhat they told us:\n- " + known.join("\n- ") + "\n\nReply with ONLY the message text.";
