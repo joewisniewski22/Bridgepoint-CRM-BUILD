@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fix &amp; Flip Loans | Bridgepoint Lending</title>
+<meta name="description" content="Fix and flip funding for real estate investors. Funds the purchase and the rehab. Get a real quote from a loan officer.">
+<meta name="robots" content="noindex">
+<link rel="icon" href="/assets/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/lp/lp.css">
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <img src="/assets/logo-wide.png" alt="Bridgepoint Lending — real estate financing solutions">
+  <a class="call" href="tel:+18502798588">Questions? <span>(850) 279-8588</span></a>
+</div></header>
+
+<section class="hero"><div class="wrap grid">
+  <div>
+    <div class="eyebrow">Fix &amp; flip loans</div>
+    <h1>Fix &amp; flip funding for investors who can't wait on a <em>bank</em>.</h1>
+    <p class="lead">Tell us about your deal. A real loan officer will text you back with real numbers, not a form letter.</p>
+    <ul class="points">
+      <li>Funding for the purchase and the rehab</li>
+      <li>No W-2s or tax returns &mdash; we underwrite the deal</li>
+      <li>Flexible terms built for flippers and repeat investors</li>
+      <li>Close in your LLC</li>
+    </ul>
+  </div>
+
+  <div class="card" id="quiz" data-program="fixflip">
+    <h2>Get your fix &amp; flip quote</h2>
+    <p class="sub">Four quick steps. About a minute.</p>
+    <div class="bar" aria-hidden="true"><i></i></div>
+    <div class="stepno" aria-live="polite"></div>
+
+    <div class="step" data-need="goal">
+      <p class="q">What are you looking to do?</p>
+      <div class="choices" data-key="goal" data-auto>
+        <button type="button" class="choice" data-val="purchase" aria-pressed="false">Buy a property to fix &amp; flip</button>
+        <button type="button" class="choice" data-val="refi" aria-pressed="false">Refinance a property I already own</button>
+      </div>
+    </div>
+
+    <div class="step" data-need="propertyType">
+      <p class="q">What type of property?</p>
+      <div class="choices two" data-key="propertyType" data-auto>
+        <button type="button" class="choice" data-val="SFR" aria-pressed="false">Single-family</button>
+        <button type="button" class="choice" data-val="Duplex" aria-pressed="false">Duplex</button>
+        <button type="button" class="choice" data-val="2-4 Unit" aria-pressed="false">3&ndash;4 units</button>
+        <button type="button" class="choice" data-val="Multifamily 5+" aria-pressed="false">5+ units</button>
+        <button type="button" class="choice" data-val="Condo" aria-pressed="false">Condo</button>
+        <button type="button" class="choice" data-val="Mixed-Use" aria-pressed="false">Mixed-use</button>
+      </div>
+    </div>
+
+    <div class="step" data-need="experience,credit" data-req="value,rehab,arv">
+      <p class="q">The deal &mdash; rough numbers are fine</p>
+      <div class="fields">
+        <div><label class="f" for="f-value">Purchase price (or current value)</label><div class="in pre"><input id="f-value" name="value" inputmode="numeric" autocomplete="off" placeholder="180,000"></div></div>
+        <div class="fields two" style="gap:12px">
+          <div><label class="f" for="f-rehab">Rehab budget</label><div class="in pre"><input id="f-rehab" name="rehab" inputmode="numeric" autocomplete="off" placeholder="60,000"></div></div>
+          <div><label class="f" for="f-arv">After-repair value</label><div class="in pre"><input id="f-arv" name="arv" inputmode="numeric" autocomplete="off" placeholder="340,000"></div></div>
+        </div>
+      </div>
+      <p class="q" style="margin-top:16px">Flips completed in the last 3 years</p>
+      <div class="choices two" data-key="experience">
+        <button type="button" class="choice" data-val="First deal" aria-pressed="false">First deal</button>
+        <button type="button" class="choice" data-val="1-2 deals" aria-pressed="false">1&ndash;2</button>
+        <button type="button" class="choice" data-val="3-5 deals" aria-pressed="false">3&ndash;5</button>
+        <button type="button" class="choice" data-val="6+ deals" aria-pressed="false">6+</button>
+      </div>
+      <p class="q" style="margin-top:16px">Estimated credit score</p>
+      <div class="choices two" data-key="credit">
+        <button type="button" class="choice" data-val="760+" aria-pressed="false">760+</button>
+        <button type="button" class="choice" data-val="720-759" aria-pressed="false">720&ndash;759</button>
+        <button type="button" class="choice" data-val="680-719" aria-pressed="false">680&ndash;719</button>
+        <button type="button" class="choice" data-val="640-679" aria-pressed="false">640&ndash;679</button>
+        <button type="button" class="choice" data-val="Under 640" aria-pressed="false">Under 640</button>
+      </div>
+      <div class="nav"><button type="button" class="btn ghost" data-back>Back</button><button type="button" class="btn primary" data-next>Continue</button></div>
+    </div>
+
+    <div class="step">
+      <form novalidate>
+        <p class="q">Where should we send your quote?</p>
+        <div class="fields">
+          <div><label class="f" for="f-name">Full name</label><div class="in"><input id="f-name" name="name" autocomplete="name"></div></div>
+          <div><label class="f" for="f-phone">Mobile number</label><div class="in"><input id="f-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"></div></div>
+          <div><label class="f" for="f-email">Email</label><div class="in"><input id="f-email" name="email" type="email" autocomplete="email"></div></div>
+          <div><label class="f" for="f-timeline">When do you need to close?</label><div class="in"><select id="f-timeline" name="timeline"><option>ASAP (under 30 days)</option><option>30-60 days</option><option>60+ days</option><option>Just exploring</option></select></div></div>
+          <div class="hp" aria-hidden="true"><label>Website <input name="website" tabindex="-1" autocomplete="off"></label></div>
+        </div>
+        <label class="consent"><input type="checkbox" name="consent"><span>I agree that Bridgepoint Lending may call, text and email me about my loan request at the number and email above, including with automated technology and AI-assisted messages. Consent is not a condition of any loan. Msg &amp; data rates may apply. Reply STOP to opt out. See our <a href="/lp/privacy.html">Privacy Policy</a>.</span></label>
+        <div class="nav"><button type="button" class="btn ghost" data-back>Back</button><button type="submit" class="btn gold">Get my quote</button></div>
+      </form>
+    </div>
+    <div class="msg" role="alert"></div>
+  </div>
+</div></section>
+
+<section class="sec"><div class="wrap">
+  <h2>How it works</h2>
+  <div class="how">
+    <div><b>Tell us about the deal</b><span>Four quick questions about the property, the rehab and the numbers.</span></div>
+    <div><b>A loan officer reaches out</b><span>You get a text and email with real numbers for your deal.</span></div>
+    <div><b>Fund and get building</b><span>We handle the file with you from application to closing.</span></div>
+  </div>
+</div></section>
+
+<section class="sec" style="padding-top:0"><div class="wrap">
+  <h2>Common questions</h2>
+  <div class="faq">
+    <details><summary>Do you fund the rehab too?</summary><p>Yes. Fix &amp; flip loans can include construction funds for the rehab, based on your budget and the after-repair value. Your loan officer will walk through the exact structure.</p></details>
+    <details><summary>Will getting a quote hurt my credit?</summary><p>No. We only ask for a credit range to start. A credit check comes later, and only with your OK.</p></details>
+    <details><summary>Is this for a home I'll live in?</summary><p>No. These are business-purpose loans for investment properties only.</p></details>
+    <details><summary>Where do you lend?</summary><p>We lend on investment properties across most of the U.S. Send us your property and we'll confirm quickly.</p></details>
+    <details><summary>How fast can I close?</summary><p>Many deals close in a few weeks. Your loan officer will give you a realistic timeline for your specific deal.</p></details>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <p>Bridgepoint Lending provides business-purpose loans secured by investment real estate. Not for personal, family or household use. All loans are subject to underwriting and approval; rates, terms and availability vary by property, borrower and market. This is not a commitment to lend. Not available in all states.</p>
+  <p>&copy; Bridgepoint Lending. <a href="/lp/privacy.html">Privacy Policy</a></p>
+</div></footer>
+<script src="/lp/lp.js"></script>
+</body>
+</html>
