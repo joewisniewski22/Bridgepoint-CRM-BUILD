@@ -71,7 +71,8 @@ $head = @'
     <a href="{{BASE}}/blog/">Resources</a>
     <a href="{{BASE}}/about/">About</a>
     <a class="phone" href="tel:+18502798588">(850) 279-8588</a>
-    <a class="btn btn-gold" href="{{BASE}}/get-quote/">Get a Quote</a>
+    <a href="{{BASE}}/get-quote/">Get a Quote</a>
+    <a class="btn btn-gold" href="{{BASE}}/apply/">Apply Now</a>
   </nav>
 </div></header>
 <main id="main">
@@ -97,6 +98,7 @@ $foot = @'
       <li><a href="{{BASE}}/estimate/">Rate &amp; Loan Estimator</a></li>
       <li><a href="{{BASE}}/dscr-calculator/">DSCR Calculator</a></li>
       <li><a href="{{BASE}}/fix-and-flip-calculator/">Fix &amp; Flip Calculator</a></li>
+      <li><a href="{{BASE}}/apply/">Apply Now</a></li>
       <li><a href="{{BASE}}/get-quote/">Get a Quote</a></li></ul></div>
     <div><h4>Company</h4><ul>
       <li><a href="{{BASE}}/about/">About</a></li>

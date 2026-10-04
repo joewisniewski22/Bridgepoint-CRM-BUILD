@@ -34,7 +34,7 @@ const ROUTE_TARGETS: Array<{ id: string; weight: number }> = [
 ];
 async function pickEnglishAdLO(client: ReturnType<typeof createClient>): Promise<string> {
   const { data } = await client.from("leads").select("assigned_to")
-    .gte("created_at", ROUTING_START).or("source.like.Meta Ads*,source.like.Website*Quote Form").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
+    .gte("created_at", ROUTING_START).or("source.like.Meta Ads*,source.like.Website*Quote Form,source.like.Website*Application").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
   const counts: Record<string, number> = {};
   (data || []).forEach((r: Record<string, unknown>) => { counts[r.assigned_to as string] = (counts[r.assigned_to as string] || 0) + 1; });
   const total = (data || []).length;
@@ -81,7 +81,8 @@ Deno.serve(async (req: Request) => {
     const LOAN_TYPES: Record<string, string> = { dscr: "DSCR", fixflip: "Fix & Flip", bridge: "Bridge", ground: "Ground Up Construction", portfolio: "Portfolio/Blanket" };
     const program = LOAN_TYPES[String(b.program)] ? String(b.program) : "dscr";
     const loanType = LOAN_TYPES[program];
-    const isSite = clean(b.src, 10) === "site"; // bplending.com forms vs. the ad landing pages
+    const isSite = clean(b.src, 10) === "site";
+    const isApply = isSite && b.apply === true; // "Apply Now" on bplending.com: they get their application link on screen // bplending.com forms vs. the ad landing pages
     const channel = isSite ? "website" : "Meta-ad landing page";
     const stateCode = clean(b.state, 2).toUpperCase();
     const addressIn = clean(b.address, 160);
@@ -114,7 +115,7 @@ Deno.serve(async (req: Request) => {
 
     // --- Repeat submission? Attach to the existing file, don't duplicate. ---
     const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-    const { data: recent } = await sb.from("leads").select("id,name,phone,email,activity,assigned_to,status").gte("created_at", since);
+    const { data: recent } = await sb.from("leads").select("id,name,phone,email,activity,assigned_to,status,application_token").gte("created_at", since);
     const existing = (recent || []).find((l: Record<string, unknown>) =>
       (((l.phone as string) || "").replace(/\D/g, "").slice(-10) === phoneDigits) || (!!l.email && (l.email as string).toLowerCase() === email));
     if (existing) {
@@ -127,12 +128,13 @@ Deno.serve(async (req: Request) => {
           text: (existing.name as string) + " just filled out the " + loanType + " " + (isSite ? "website" : "ad") + " form again — they're actively shopping", date: today, read: false,
         });
       }
-      return json({ ok: true, repeat: true });
+      return json({ ok: true, repeat: true, applyUrl: isApply && existing.application_token ? (CRM_URL + "?apply=" + existing.id + "&t=" + existing.application_token) : undefined });
     }
 
     // --- Build the file --------------------------------------------------
     const ASSIGNEE = await pickEnglishAdLO(sb);
     const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
+    const appToken = crypto.randomUUID();
     const answers: string[] = [];
     if (goal) answers.push("Goal: " + (goal === "purchase" ? "purchase" : goal === "refi" ? "rate/term refinance" : "cash-out refinance"));
     if (creditLabel) answers.push("Credit: " + creditLabel);
@@ -146,11 +148,11 @@ Deno.serve(async (req: Request) => {
       { date: today, type: "system", text: "TCPA consent recorded " + stamp + ": borrower checked the box agreeing to calls, texts and email from Bridgepoint Lending at " + phone + " / " + email + " (marketing, may be autodialed, not a condition of any loan; msg & data rates apply; reply STOP to opt out).", author: "System" },
     ];
     const row: Record<string, unknown> = {
-      id, name, email, phone, source: isSite ? ("Website — " + loanType + " Quote Form") : ("Meta Ads — " + loanType + " Landing Page"), loan_type: loanType, property_address: addressIn || null,
-      stage: "new", status: "active", assigned_to: ASSIGNEE, created_at: today, created_at_ts: stamp,
+      id, name, email, phone, source: isSite ? ("Website — " + loanType + (isApply ? " Application" : " Quote Form")) : ("Meta Ads — " + loanType + " Landing Page"), loan_type: loanType, property_address: addressIn || null,
+      stage: isApply ? "app_sent" : "new", status: "active", application_sent_at: isApply ? today : null, assigned_to: ASSIGNEE, created_at: today, created_at_ts: stamp,
       property_type: propertyType, transaction_type: transactionType,
       credit_score: credit, experience_deals: experienceDeals,
-      ai_stage: "engaging", entity_type: "LLC", application_token: crypto.randomUUID(), preferred_language: "en",
+      ai_stage: "engaging", entity_type: "LLC", application_token: appToken, preferred_language: "en",
       activity,
     };
     if (program === "dscr" || program === "portfolio") {
@@ -170,7 +172,7 @@ Deno.serve(async (req: Request) => {
 
     // --- Alert the loan officer -------------------------------------------
     const link = CRM_URL + "?lead=" + id;
-    const alertText = "🔥 New " + loanType + (isSite ? " website lead: " : " ad lead: ") + name + " — open & dial: " + link;
+    const alertText = isApply ? ("🔥 " + name + " just clicked Apply Now on the website (" + loanType + ") and is filling out the application — call now: " + CRM_URL + "?lead=" + id) : "🔥 New " + loanType + (isSite ? " website lead: " : " ad lead: ") + name + " — open & dial: " + link;
     await sb.from("notifications").insert({
       id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: ASSIGNEE, lead_id: id, kind: "hot-lead", text: alertText, date: today, read: false,
     });
@@ -182,7 +184,7 @@ Deno.serve(async (req: Request) => {
     if (lo?.email) await post("send-email", { to: lo.email, subject: "New " + loanType + " lead: " + name, text: alertText, fromName: "Bridgepoint CRM" });
 
     // --- AI first contact (English), consent recorded above ----------------
-    if (lo) {
+    if (lo && !isApply) {
       try {
         const bookingLink = CRM_URL + "?book=" + ASSIGNEE;
         const known: string[] = ["Loan type: " + loanType].concat(answers);
@@ -214,7 +216,7 @@ Deno.serve(async (req: Request) => {
         console.error("ad-lead-intake: AI first contact failed", String(e));
       }
     }
-    return json({ ok: true, leadId: id });
+    return json({ ok: true, leadId: id, applyUrl: isApply ? (CRM_URL + "?apply=" + id + "&t=" + appToken) : undefined });
   } catch (err) {
     console.error("ad-lead-intake: error", String(err));
     return json({ error: "server_error", detail: "Something went wrong — please try again." }, 500);
