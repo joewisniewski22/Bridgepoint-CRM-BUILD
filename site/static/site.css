@@ -207,3 +207,23 @@ footer.ft .logo img{height:40px;display:block}
 .cat{margin:0 0 6px;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--gold)}
 .hub-sec{margin-bottom:44px}
 .hub-sec h2{font-size:clamp(22px,3.6vw,30px);margin-bottom:16px}
+
+/* funded deals + reviews */
+.fd-grid{display:grid;gap:18px}
+@media (min-width:700px){ .fd-grid{grid-template-columns:repeat(2,1fr)} }
+@media (min-width:1000px){ .fd-grid{grid-template-columns:repeat(3,1fr)} }
+.fd-card{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;text-decoration:none;color:inherit}
+.fd-card:hover{border-color:var(--gold)}
+.fd-img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;background:var(--line)}
+.fd-body{padding:18px 20px 20px;display:flex;flex-direction:column;gap:4px}
+.fd-body h3{font-size:19px;margin:0}
+.fd-body p{margin:0;color:var(--muted);font-size:15px}
+.fd-amt{margin-top:6px;font-weight:700;color:var(--navy)}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .fd-amt{color:#f3f5fa} }
+.fd-hero{width:100%;border-radius:var(--radius);margin:0 0 20px;display:block}
+.rv-grid{display:grid;gap:18px}
+@media (min-width:800px){ .rv-grid{grid-template-columns:repeat(3,1fr)} }
+.rv{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px}
+.rv .stars{color:var(--gold);letter-spacing:2px;font-size:18px}
+.rv p{margin:8px 0 10px}
+.rv .who{font-size:14px;color:var(--muted)}

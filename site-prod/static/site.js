@@ -67,4 +67,40 @@
     if (window.fbq) window.fbq("track", "Lead");
     if (window.gtag) window.gtag("event", "conversion_thank_you");
   }
+  // Live proof sections: recently funded loans and customer reviews. Both render only when there is approved data,
+  // so nothing appears (and nothing is faked) until Joe approves real posts/reviews in the CRM.
+  (function(){
+    var prod = !(window.BP_BASE);
+    if (!prod) return; // preview under /site has no API routes
+    function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+    var recent = document.getElementById("recent");
+    fetch("/api/funded?format=json&limit=3").then(function(r){ return r.ok ? r.json() : []; }).then(function(rows){
+      if (!rows || !rows.length) return;
+      if (recent) {
+        var g = recent.querySelector(".fd-grid");
+        g.innerHTML = rows.map(function(d){
+          var loc = [d.city, d.state].filter(Boolean).join(", ");
+          return '<a class="fd-card" href="/funded/' + esc(d.slug) + '/">' + (d.imageUrl ? '<img class="fd-img" loading="lazy" alt="Funded property in ' + esc(loc) + '" src="' + esc(d.imageUrl) + '">' : '') +
+            '<div class="fd-body"><div class="cat">' + esc(d.loanType || "Loan") + '</div><h3>' + esc(d.headline || (d.loanType + " loan in " + loc)) + '</h3><p>' + esc(loc) + (d.propertyType ? " · " + esc(d.propertyType) : "") + '</p>' + (d.loanAmount ? '<span class="fd-amt">$' + Math.round(d.loanAmount).toLocaleString("en-US") + '</span>' : '') + '</div></a>';
+        }).join("");
+        recent.hidden = false;
+      }
+      var col = document.querySelector(".ft .cols > div:last-child ul");
+      if (col) { var li = document.createElement("li"); li.innerHTML = '<a href="/funded/">Recently Funded</a>'; col.insertBefore(li, col.children[2] || null); }
+    }).catch(function(){});
+    var rv = document.getElementById("reviews");
+    if (rv) {
+      fetch("https://idzkigmvovehjpapatxv.supabase.co/rest/v1/site_reviews?select=author,rating,body,source,source_url,loan_type,city,state&status=eq.approved&order=created_at.desc&limit=6", { headers: { apikey: "sb_publishable_zn3PaFZPVrsUq0LEWxbDJg_k1TUlzVd" } })
+        .then(function(r){ return r.ok ? r.json() : []; }).then(function(rows){
+          if (!rows || !rows.length) return;
+          rv.querySelector(".rv-grid").innerHTML = rows.map(function(x){
+            var stars = ""; for (var i = 0; i < 5; i++) stars += i < x.rating ? "★" : "☆";
+            var loc = [x.city, x.state].filter(Boolean).join(", ");
+            return '<div class="rv"><div class="stars" aria-label="' + x.rating + ' out of 5 stars">' + stars + '</div><p>“' + esc(x.body) + '”</p><div class="who">' + esc(x.author) + (loc ? " · " + esc(loc) : "") + (x.source ? " · via " + esc(x.source) : "") + '</div></div>';
+          }).join("");
+          rv.hidden = false;
+        }).catch(function(){});
+    }
+  })();
+
 })();

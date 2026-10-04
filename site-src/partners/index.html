@@ -1,0 +1,70 @@
+---
+title: Referral Partners | Send Us Your Investor Deals | BridgePoint Lending
+description: Real estate agents, wholesalers, contractors, CPAs and attorneys: send your investor clients to BridgePoint Lending for fast, straightforward financing and a loan officer who keeps you in the loop.
+canon: /partners/
+priority: 0.7
+---
+<section class="hero"><div class="wrap grid">
+  <div>
+    <div class="eyebrow">Referral partners</div>
+    <h1>Send us your investors. <em>We&rsquo;ll take care of them.</em></h1>
+    <p class="lead">Agents, wholesalers, contractors, CPAs and attorneys work with investors every day. When your client needs financing, a fast answer and a loan officer who keeps you informed makes you look good.</p>
+    <ul class="ticks">
+      <li>Flips, bridge, construction, rentals and commercial &mdash; one place to send every deal</li>
+      <li>Your client gets a named loan officer, fast ballpark numbers and honest answers</li>
+      <li>You stay in the loop from first call to closing</li>
+      <li>Tell us about your business and we&rsquo;ll follow up personally</li>
+    </ul>
+  </div>
+  <div class="qw" id="pw">
+    <h2>Become a partner</h2>
+    <p class="sub">Takes a minute. A real person will call you &mdash; no automated sequences.</p>
+    <form id="pform" novalidate>
+      <div class="fields">
+        <div><label class="f" for="p-name">Your name</label><div class="in"><input id="p-name" name="name" autocomplete="name"></div></div>
+        <div><label class="f" for="p-company">Company (optional)</label><div class="in"><input id="p-company" name="company" autocomplete="organization"></div></div>
+        <div class="fields two">
+          <div><label class="f" for="p-phone">Mobile phone</label><div class="in"><input id="p-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"></div></div>
+          <div><label class="f" for="p-email">Email</label><div class="in"><input id="p-email" name="email" type="email" autocomplete="email"></div></div>
+        </div>
+        <div><label class="f" for="p-kind">I am a&hellip;</label><div class="in"><select id="p-kind" name="kind"><option>Real estate agent</option><option>Wholesaler</option><option>Contractor / builder</option><option>CPA / attorney</option><option>Loan officer / broker</option><option>Other</option></select></div></div>
+        <div><label class="f" for="p-notes">What kind of deals do you see? (optional)</label><div class="in"><input id="p-notes" name="notes" maxlength="300"></div></div>
+        <input type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;opacity:0">
+        <label class="consent"><input type="checkbox" name="consent"><span>I agree that BridgePoint Lending may call, text and email me about working together at the number and email above. Msg &amp; data rates may apply; reply STOP to opt out. Not a condition of any loan.</span></label>
+        <div class="err" id="p-err" role="alert" aria-live="polite"></div>
+        <button class="btn btn-gold" type="submit" id="p-btn">Send</button>
+      </div>
+    </form>
+    <div id="p-done" hidden><h2>Thanks &mdash; we&rsquo;ll be in touch.</h2><p class="sub">Someone from BridgePoint will call you shortly. Prefer to talk now? Call <a href="tel:+18502798588">(850) 279-8588</a>.</p></div>
+  </div>
+</div></section>
+
+<section class="sec"><div class="wrap">
+  <div class="sec-head"><h2>What your clients can finance</h2><p>One team for every kind of investor deal.</p></div>
+  <div class="cards c3">
+    <div class="card"><h3>Buying &amp; renovating</h3><p>Fix and flip and bridge loans that close fast and fund the rehab in draws.</p><a class="more" href="{{BASE}}/fix-and-flip-loans/">Fix &amp; flip loans</a></div>
+    <div class="card"><h3>Building</h3><p>Ground-up construction financing with funds released as the work is completed.</p><a class="more" href="{{BASE}}/ground-up-construction-loans/">Construction loans</a></div>
+    <div class="card"><h3>Holding</h3><p>DSCR and portfolio loans for investors who keep their properties as rentals.</p><a class="more" href="{{BASE}}/dscr-loans/">DSCR loans</a></div>
+  </div>
+  <p class="note" style="margin-top:22px">BridgePoint makes business-purpose loans on investment property only. Participation does not guarantee approval of any borrower. Referral arrangements are discussed individually and must comply with applicable law.</p>
+</div></section>
+<script>
+(function(){
+  var f=document.getElementById("pform"); if(!f) return;
+  var err=document.getElementById("p-err"), btn=document.getElementById("p-btn");
+  f.addEventListener("submit",function(e){
+    e.preventDefault(); err.textContent="";
+    var d=new FormData(f), phone=String(d.get("phone")||"").replace(/\D/g,"");
+    if(String(d.get("name")||"").trim().length<2) return err.textContent="Please enter your name.";
+    if(phone.replace(/^1(?=\d{10}$)/,"").length!==10) return err.textContent="Please enter a 10-digit phone number.";
+    if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(d.get("email")||""))) return err.textContent="Please enter a valid email.";
+    if(!f.elements.consent.checked) return err.textContent="Please check the box so we can contact you.";
+    btn.disabled=true; btn.textContent="Sending…";
+    fetch("https://idzkigmvovehjpapatxv.supabase.co/functions/v1/partner-intake",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:d.get("name"),company:d.get("company"),phone:d.get("phone"),email:d.get("email"),kind:d.get("kind"),notes:d.get("notes"),website:d.get("website"),consent:true})})
+    .then(function(r){return r.json().then(function(j){return {ok:r.ok,j:j};});})
+    .then(function(res){ if(!res.ok||!res.j.ok) throw new Error((res.j&&res.j.detail)||"Something went wrong."); f.hidden=true; document.getElementById("p-done").hidden=false; })
+    .catch(function(x){ err.textContent=x.message||"Something went wrong — please call (850) 279-8588."; btn.disabled=false; btn.textContent="Send"; });
+  });
+})();
+</script>

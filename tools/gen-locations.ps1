@@ -4,6 +4,7 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "states.ps1")
+. (Join-Path $PSScriptRoot "metros.ps1")
 $excluded = @((Get-Content (Join-Path $PSScriptRoot "excluded-states.txt") -Raw).Trim() -split "\s+" | Where-Object { $_ })
 $served = @($AllStates | Where-Object { $excluded -notcontains $_.abbr })
 $dir = Join-Path $root "site-src\locations"
@@ -15,6 +16,12 @@ foreach ($s in $served) {
   $d = Join-Path $dir $s.slug
   New-Item -ItemType Directory -Force -Path $d | Out-Null
   $n = $s.name; $a = $s.abbr
+  $ml = @($Metros | Where-Object { $_.abbr -eq $a })
+  $cityBlock = ""
+  if ($ml.Count) {
+    $links = ($ml | ForEach-Object { '<a class="pill" href="{{BASE}}/locations/' + $s.slug + '/' + $_.slug + '/">' + $_.name + '</a>' }) -join ""
+    $cityBlock = '<h2>Cities in ' + $n + '</h2><div class="pills">' + $links + '</div>'
+  }
   $html = @"
 ---
 title: Real Estate Investor Loans in $n | DSCR, Fix & Flip, Bridge | BridgePoint Lending
@@ -43,7 +50,8 @@ priority: 0.7
       <li><a href="{{BASE}}/ground-up-construction-loans/">Ground-up construction loans</a></li>
       <li><a href="{{BASE}}/portfolio-loans/">Portfolio and blanket loans</a></li>
     </ul>
-    <h2>Markets we see investors active in</h2>
+$($cityBlock)
+$1
     <p>$($s.metros), and surrounding areas. If your property is somewhere else in $n, send it over &mdash; we will confirm quickly.</p>
     <p class="note">Availability, terms and pricing vary by property, borrower and program. Business-purpose loans only.</p>
     <h2>Common questions about $n investor loans</h2>
@@ -58,6 +66,53 @@ priority: 0.7
 <section class="band"><div class="wrap"><h2>Have a $n deal?</h2><p>Get a ballpark in about a minute, then exact numbers from a loan officer.</p><a class="btn btn-gold" href="{{BASE}}/get-quote/">Get My $n Estimate</a></div></section>
 "@
   [IO.File]::WriteAllText((Join-Path $d "index.html"), $html, $utf8)
+}
+
+# --- Metro pages: /locations/<state>/<metro>/ ---
+$metroCount = 0
+foreach ($m in $Metros) {
+  $st = $served | Where-Object { $_.abbr -eq $m.abbr } | Select-Object -First 1
+  if (-not $st) { continue }
+  $n = $m.name; $sn = $st.name; $a = $m.abbr
+  $d = Join-Path (Join-Path $dir $st.slug) $m.slug
+  New-Item -ItemType Directory -Force -Path $d | Out-Null
+  $mhtml = @"
+---
+title: Investor Loans in ${n}, ${a} | Fix & Flip, Bridge, DSCR, Construction | BridgePoint Lending
+description: Real estate investor loans in ${n}, ${sn}: fix and flip, bridge, ground-up construction, DSCR rental and portfolio loans. See a ballpark estimate in about a minute.
+canon: /locations/$($st.slug)/$($m.slug)/
+priority: 0.6
+---
+<section class="hero"><div class="wrap grid">
+  <div>
+    <div class="eyebrow">$n, $a investor loans</div>
+    <h1>Investor loans in <em>$n.</em></h1>
+    <p class="lead">Fix &amp; flips, bridge loans, construction and rentals in the $n area. See a ballpark estimate, then get exact numbers from a loan officer who actually answers.</p>
+    <ul class="ticks"><li>Purchase and rehab funding for $n investment properties</li><li>Long-term rental financing when the work is done</li><li>Close in your LLC</li></ul>
+  </div>
+  <div class="qw" data-qw data-program="auto" data-state="$a" data-title="$n loan estimate" data-sub="About a minute. See a ballpark, then get exact numbers."></div>
+</div></section>
+<section class="sec"><div class="wrap"><div class="crumbs"><a href="{{BASE}}/">Home</a> &rsaquo; <a href="{{BASE}}/locations/">Locations</a> &rsaquo; <a href="{{BASE}}/locations/$($st.slug)/">$sn</a> &rsaquo; $n</div>
+  <div class="prose">
+    <h2>Financing for $n real estate investors</h2>
+    <p>$($m.angle)</p>
+    <h2>Loan programs for $n properties</h2>
+    <ul>
+      <li><a href="{{BASE}}/fix-and-flip-loans/">Fix and flip loans</a> &mdash; purchase plus rehab funding</li>
+      <li><a href="{{BASE}}/bridge-loans/">Bridge loans</a> &mdash; fast short-term financing</li>
+      <li><a href="{{BASE}}/ground-up-construction-loans/">Ground-up construction loans</a></li>
+      <li><a href="{{BASE}}/dscr-loans/">DSCR rental loans</a> &mdash; qualify on the property&rsquo;s rent</li>
+      <li><a href="{{BASE}}/portfolio-loans/">Portfolio and blanket loans</a></li>
+      <li><a href="{{BASE}}/commercial-multifamily-loans/">Commercial and multifamily</a></li>
+    </ul>
+    <p>Looking elsewhere in $sn? See our <a href="{{BASE}}/locations/$($st.slug)/">$sn investor loan page</a>.</p>
+    <p class="note">Availability, terms and pricing vary by property, borrower and program. Business-purpose loans only.</p>
+  </div>
+</div></section>
+<section class="band"><div class="wrap"><h2>Have a $n deal?</h2><p>Get a ballpark in about a minute, then exact numbers from a loan officer.</p><a class="btn btn-gold" href="{{BASE}}/get-quote/">Get My $n Estimate</a></div></section>
+"@
+  [IO.File]::WriteAllText((Join-Path $d "index.html"), $mhtml, $utf8)
+  $metroCount++
 }
 
 $cards = ($served | ForEach-Object { "<a class=""pill"" href=""{{BASE}}/locations/$($_.slug)/"">$($_.name)</a>" }) -join "`n  "
@@ -88,4 +143,4 @@ $t = [IO.File]::ReadAllText($pe)
 $arr = ($served | ForEach-Object { '"' + $_.abbr + '"' }) -join ","
 $t = [regex]::Replace($t, 'const STATES = \[[^\]]*\];', 'const STATES = [' + $arr + '];')
 [IO.File]::WriteAllText($pe, $t, $utf8)
-Write-Output ("Generated " + $served.Count + " state pages + hub; excluded: " + ($excluded -join ", "))
+Write-Output ("Generated " + $served.Count + " state pages, " + $metroCount + " metro pages + hub; excluded: " + ($excluded -join ", "))

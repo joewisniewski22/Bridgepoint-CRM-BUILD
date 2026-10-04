@@ -5028,6 +5028,7 @@ function hydrateFromSupabase(){
     loadFollowupTasks();
     startFollowupPolling();
     if (isOwner()) loadFollowupConfig();
+    if (isOwner()) loadFundedDeals();
   });
   sb.from("notifications").select("*").then(function(res){
     if (res.error){ console.error("notification fetch error", res.error); return; }
@@ -9110,6 +9111,7 @@ function renderShell(){
         (isOwner() || !isProcessor() ? navItem("coaching","🎯","Coaching") : "") +
         (ui.viewAs === "owner" ? navItem("training","🎓","New Hire Training") : "") +
         (isOwner() ? navItem("followups","📋","Follow-Up Center", (fuLoStats().reduce(function(s,r){ return s + r.over24; }, 0)) || null) : "") +
+        (isOwner() ? navItem("webposts","🌐","Website Posts", wpPendingCount() || null) : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
         (isOwner() ? navItem("settings","⚙","Settings") : "") +
@@ -9143,6 +9145,7 @@ function renderShell(){
   else if (ui.view === "leads") body = renderLeadsTable();
   else if (ui.view === "detail") body = renderLeadDetail();
   else if (ui.view === "followups") body = renderFollowUps();
+  else if (ui.view === "webposts") body = renderWebsitePosts();
   else if (ui.view === "team") body = renderTeam();
   else if (ui.view === "payroll") body = renderPayroll();
   else if (ui.view === "ai-assistant") body = renderAiAssistant();
@@ -9591,6 +9594,103 @@ function renderFollowUps(){
       '<div class="section"><div class="section-head"><h2>Recently completed</h2></div>' +
         (recent.length ? recent.map(function(t){ var l = leadById(t.leadId); var o = (CALL_OUTCOMES.filter(function(x){ return x.key === t.outcome; })[0] || {}).label || t.outcome || "done"; return '<div class="doc-row"><div><div>' + esc(l ? l.name : t.leadId) + ' — ' + esc(t.title) + '</div><div class="cell-sub">' + esc(userName(t.completedBy || t.assignedTo)) + ' · ' + esc(o) + ' · ' + esc(new Date(t.completedAt).toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" })) + '</div></div></div>'; }).join("") : '<div class="empty">Nothing completed yet.</div>') +
       '</div>' +
+    '</div>';
+}
+
+/* ---- Website Posts: funded-loan posts for bplending.com (owner only) ---- */
+function loadFundedDeals(){
+  if (!sb || !isOwner()) return;
+  sb.from("funded_deals").select("*").order("created_at", { ascending:false }).then(function(res){
+    if (res.error) return;
+    ui.webposts = { deals: res.data || [], loaded: true };
+    render();
+  }, function(){});
+}
+function wpPendingCount(){ return ui.webposts && ui.webposts.loaded ? ui.webposts.deals.filter(function(d){ return d.status === "draft"; }).length : 0; }
+function wpDeal(id){ return ((ui.webposts && ui.webposts.deals) || []).filter(function(d){ return d.id === id; })[0]; }
+function wpSlug(d, v){
+  var base = [d.loan_type || "loan", "loan", v.city || d.city, v.state || d.state].join(" ").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return base + "-" + String(d.id).replace(/[^a-z0-9]/gi, "").slice(-4).toLowerCase();
+}
+function wpRead(id){
+  function el(n){ return document.getElementById("wp-" + n + "-" + id); }
+  function val(n){ var e = el(n); return e ? e.value : ""; }
+  function chk(n){ var e = el(n); return !!(e && e.checked); }
+  return { headline: val("headline").trim(), summary: val("summary").trim(), city: val("city").trim(), state: val("state").trim().toUpperCase(), show_amount: chk("amt"), show_photo: chk("photo"), borrower_ok: chk("ok") };
+}
+function wpPatch(id, patch, okMsg){
+  return sb.from("funded_deals").update(patch).eq("id", id).then(function(res){
+    if (res.error){ showToast("Couldn't save — " + res.error.message); return false; }
+    var d = wpDeal(id); if (d) Object.keys(patch).forEach(function(k){ d[k] = patch[k]; });
+    if (okMsg) showToast(okMsg); else render();
+    return true;
+  });
+}
+function wpDraftAI(id){
+  var v = wpRead(id);
+  wpPatch(id, { city: v.city || null, state: v.state || null, show_amount: v.show_amount }).then(function(){
+    showToast("Writing a draft…");
+    sb.functions.invoke("funded-deal-admin", { body: { action:"draft", dealId:id } }).then(function(res){
+      var out = res && res.data;
+      if (res.error || !out || !out.ok){ showToast("Couldn't draft that — try again", true); return; }
+      wpPatch(id, { headline: out.headline, summary: out.summary }, "Draft written — read it, edit anything, then approve");
+    });
+  });
+}
+function wpApprove(id){
+  var d = wpDeal(id), v = wpRead(id);
+  if (!v.borrower_ok){ showToast("Check the box confirming the borrower is OK with this being posted", true); return; }
+  if (!v.headline || v.summary.length < 40){ showToast("Add a headline and a short summary first", true); return; }
+  if (!v.city || !v.state){ showToast("Add the city and state", true); return; }
+  function finish(imageUrl){
+    wpPatch(id, { headline:v.headline, summary:v.summary, city:v.city, state:v.state, show_amount:v.show_amount, show_photo:v.show_photo, borrower_ok:true,
+      image_url: v.show_photo ? (imageUrl || d.image_url || null) : null, slug: d.slug || wpSlug(d, v), status:"approved", approved_at:new Date().toISOString(), approved_by: currentUser().id },
+      "Published to the website (live within a few minutes)");
+  }
+  if (v.show_photo && !d.image_url){
+    showToast("Getting the property photo…");
+    sb.functions.invoke("funded-deal-admin", { body: { action:"image", dealId:id } }).then(function(res){
+      var out = res && res.data;
+      if (out && out.ok){ finish(out.url); return; }
+      showToast("No property photo available yet — publishing without one", true);
+      finish(null);
+    });
+  } else finish(null);
+}
+function renderWebsitePosts(){
+  if (!isOwner()) return topbar("Website Posts", "", "") + '<div class="content"><div class="empty">Owner only.</div></div>';
+  if (!ui.webposts){ ui.webposts = { deals: [], loaded: false }; loadFundedDeals(); }
+  var deals = ui.webposts.deals;
+  function money(n){ return n ? "$" + Math.round(Number(n)).toLocaleString("en-US") : "—"; }
+  function card(d){
+    var live = d.status === "approved";
+    var url = d.slug ? "https://bplending.com/funded/" + d.slug + "/" : "";
+    var photoNote = d.image_url ? "Photo saved" : "A Street View photo of the property will be added when you publish (if Google has one).";
+    return '<div class="section" style="border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px">' +
+      '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><b>' + esc(d.loan_type || "Loan") + '</b> · ' + esc(d.property_type || "property") + ' · ' + money(d.loan_amount) + ' · funded ' + esc(d.funded_date || "date not set") + '</div>' +
+        '<span class="badge ' + (live ? "badge-forest" : d.status === "rejected" ? "badge-rust" : "badge-gold") + '">' + (live ? "Live on website" : d.status === "rejected" ? "Not posting" : "Needs your review") + '</span></div>' +
+      '<div class="form-row" style="display:flex;gap:10px;margin-top:10px"><input class="input" id="wp-city-' + d.id + '" value="' + esc(d.city || "") + '" placeholder="City" style="flex:2"><input class="input" id="wp-state-' + d.id + '" value="' + esc(d.state || "") + '" placeholder="ST" maxlength="2" style="flex:1"></div>' +
+      '<div class="form-row" style="margin-top:8px"><input class="input" id="wp-headline-' + d.id + '" value="' + esc(d.headline || "") + '" placeholder="Headline (e.g. Fix &amp; flip loan funded in Tampa, FL)" maxlength="120"></div>' +
+      '<div class="form-row" style="margin-top:8px"><textarea class="textarea" id="wp-summary-' + d.id + '" rows="4" placeholder="Short summary of the deal. No borrower name or street address.">' + esc(d.summary || "") + '</textarea></div>' +
+      '<div style="display:grid;gap:6px;margin-top:8px;font-size:14px">' +
+        '<label><input type="checkbox" id="wp-amt-' + d.id + '"' + (d.show_amount ? " checked" : "") + '> Show the loan amount</label>' +
+        '<label><input type="checkbox" id="wp-photo-' + d.id + '"' + (d.show_photo ? " checked" : "") + '> Show a photo of the property <span class="hint">(' + photoNote + ')</span></label>' +
+        '<label><b><input type="checkbox" id="wp-ok-' + d.id + '"' + (d.borrower_ok ? " checked" : "") + '> I have the borrower’s OK to post this deal publicly</b></label></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">' +
+        '<button class="btn btn-sm" data-action="wp-draft" data-deal="' + d.id + '">✨ Write a draft for me</button>' +
+        '<button class="btn btn-sm" data-action="wp-save" data-deal="' + d.id + '">Save</button>' +
+        (live ? '<button class="btn btn-sm" data-action="wp-unpublish" data-deal="' + d.id + '">Take down</button>' + (url ? ' <a class="btn btn-sm btn-ghost" target="_blank" rel="noopener" href="' + url + '">View</a>' : '')
+              : '<button class="btn btn-sm btn-primary" data-action="wp-approve" data-deal="' + d.id + '">Approve &amp; publish</button>') +
+        (d.status === "rejected" ? '<button class="btn btn-sm btn-ghost" data-action="wp-restore" data-deal="' + d.id + '">Move back to review</button>' : (!live ? '<button class="btn btn-sm btn-ghost" data-action="wp-reject" data-deal="' + d.id + '">Don’t post this one</button>' : "")) +
+      '</div></div>';
+  }
+  var drafts = deals.filter(function(d){ return d.status === "draft"; }), liveDeals = deals.filter(function(d){ return d.status === "approved"; }), rej = deals.filter(function(d){ return d.status === "rejected"; });
+  return topbar("Website Posts", "Funded loans you can show off on bplending.com — nothing goes public until you approve it.", "") +
+    '<div class="content">' +
+      '<div class="section"><div class="footnote">When a loan is marked Closed/Funded, a draft shows up here. Add the borrower’s OK, tighten the wording, and publish. Posts never show the borrower’s name or street address.</div></div>' +
+      '<div class="section"><div class="section-head"><h2>Needs your review (' + drafts.length + ')</h2></div>' + (drafts.length ? drafts.map(card).join("") : '<div class="empty">Nothing waiting. New funded loans will appear here.</div>') + '</div>' +
+      '<div class="section"><div class="section-head"><h2>Live on the website (' + liveDeals.length + ')</h2></div>' + (liveDeals.length ? liveDeals.map(card).join("") : '<div class="empty">No posts are live yet.</div>') + '</div>' +
+      (rej.length ? '<div class="section"><div class="section-head"><h2>Not posting (' + rej.length + ')</h2></div>' + rej.map(card).join("") + '</div>' : "") +
     '</div>';
 }
 
@@ -16612,6 +16712,12 @@ appEl.addEventListener("click", function(e){
     if (fuMode) saveFollowupConfig(fuMode.value, Math.max(0, Math.min(30, parseInt(fuBack && fuBack.value, 10) || 6)));
   }
   else if (action === "fu-nudge"){ fuNudge(t.dataset.task); }
+  else if (action === "wp-draft"){ wpDraftAI(t.dataset.deal); }
+  else if (action === "wp-save"){ var wv = wpRead(t.dataset.deal); wpPatch(t.dataset.deal, { headline:wv.headline||null, summary:wv.summary||null, city:wv.city||null, state:wv.state||null, show_amount:wv.show_amount, show_photo:wv.show_photo, borrower_ok:wv.borrower_ok }, "Saved"); }
+  else if (action === "wp-approve"){ wpApprove(t.dataset.deal); }
+  else if (action === "wp-unpublish"){ wpPatch(t.dataset.deal, { status:"draft" }, "Taken down from the website"); }
+  else if (action === "wp-reject"){ wpPatch(t.dataset.deal, { status:"rejected" }, "Won’t be posted"); }
+  else if (action === "wp-restore"){ wpPatch(t.dataset.deal, { status:"draft" }, "Moved back to review"); }
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
   else if (action === "softphone-mute"){ toggleSoftphoneMute(); }

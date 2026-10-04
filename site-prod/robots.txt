@@ -1,4 +1,6 @@
 User-agent: *
 Allow: /
 Disallow: /thank-you/
+Disallow: /funded-shell/
 Sitemap: https://bplending.com/sitemap.xml
+Sitemap: https://bplending.com/funded-sitemap.xml

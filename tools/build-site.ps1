@@ -16,6 +16,21 @@ $exAbbr = @((Get-Content (Join-Path $PSScriptRoot "excluded-states.txt") -Raw).T
 $exList = @($AllStates | Where-Object { $exAbbr -contains $_.abbr } | ForEach-Object { $_.name })
 $exNames = if ($exList.Count -gt 1) { ($exList[0..($exList.Count-2)] -join ", ") + " or " + $exList[-1] } else { $exList -join "" }
 $stCount = @($AllStates | Where-Object { $exAbbr -notcontains $_.abbr -and $_.abbr -ne "DC" }).Count
+# Optional tracking / verification tags, filled from tools/site-config.json (blank = nothing is injected).
+$cfg = Get-Content (Join-Path $PSScriptRoot "site-config.json") -Raw | ConvertFrom-Json
+$tracking = ""
+if ($cfg.googleSiteVerification) { $tracking += '<meta name="google-site-verification" content="' + $cfg.googleSiteVerification + '">' + "`n" }
+if ($cfg.bingSiteVerification) { $tracking += '<meta name="msvalidate.01" content="' + $cfg.bingSiteVerification + '">' + "`n" }
+if ($cfg.ga4Id) {
+  $tracking += '<script async src="https://www.googletagmanager.com/gtag/js?id=' + $cfg.ga4Id + '"></script>' + "`n"
+  $tracking += "<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag('js',new Date());gtag('config','" + $cfg.ga4Id + "');</script>`n"
+}
+if ($cfg.metaPixelId) {
+  $px = @'
+<script>!function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,document,'script','https://connect.facebook.net/en_US/fbevents.js');fbq('init','@@PX@@');fbq('track','PageView');</script>
+'@
+  $tracking += $px.Replace('@@PX@@', $cfg.metaPixelId)
+}
 if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 New-Item -ItemType Directory -Path $outDir | Out-Null
 
@@ -42,6 +57,7 @@ $head = @'
 <link rel="stylesheet" href="{{BASE}}/static/site.css">
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"FinancialService","name":"BridgePoint Lending","url":"https://bplending.com","logo":"https://bplending.com/static/logo-wide.png","telephone":"+1-850-279-8588","email":"info@bplending.com","areaServed":"US","description":"Private lender for real estate investors: DSCR rental loans, fix and flip, bridge, ground-up construction and portfolio loans. Business-purpose loans only."}</script>
 <script>window.BP_BASE="{{BASE}}";</script>
+{{TRACKING}}
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -86,6 +102,7 @@ $foot = @'
       <li><a href="{{BASE}}/about/">About</a></li>
       <li><a href="{{BASE}}/locations/">Locations</a></li>
       <li><a href="{{BASE}}/blog/">Resources</a></li>
+      <li><a href="{{BASE}}/partners/">Referral Partners</a></li>
       <li><a href="{{BASE}}/contact/">Contact</a></li>
       <li><a href="{{BASE}}/privacy-policy/">Privacy Policy</a></li>
       <li><a href="{{BASE}}/terms-of-service/">Terms of Service</a></li></ul></div>
@@ -114,7 +131,7 @@ Get-ChildItem $srcDir -Recurse -Filter *.html | ForEach-Object {
   if ($body.Contains("data-qw")) { $scripts += "`n" + '<script src="{{BASE}}/static/quote.js" defer></script>' }
   $html = $head + $body + "`n" + $foot
   $html = $html.Replace("{{SCRIPTS}}", $scripts).Replace("{{ROBOTS}}", $robots)
-  $html = $html.Replace("{{TITLE}}", $meta["title"]).Replace("{{DESC}}", $meta["description"]).Replace("{{CANON}}", $canon).Replace("{{DOMAIN}}", $domain).Replace("{{BASE}}", $Base).Replace("{{EXCLUDED_NAMES}}", $exNames).Replace("{{STATE_COUNT}}", [string]$stCount)
+  $html = $html.Replace("{{TITLE}}", $meta["title"]).Replace("{{DESC}}", $meta["description"]).Replace("{{CANON}}", $canon).Replace("{{DOMAIN}}", $domain).Replace("{{BASE}}", $Base).Replace("{{EXCLUDED_NAMES}}", $exNames).Replace("{{STATE_COUNT}}", [string]$stCount).Replace("{{TRACKING}}", $tracking)
   $dest = Join-Path $outDir $rel
   New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
   [IO.File]::WriteAllText($dest, $html, (New-Object Text.UTF8Encoding($false)))
@@ -134,5 +151,5 @@ $sm = '<?xml version="1.0" encoding="UTF-8"?>' + "`n" + '<urlset xmlns="http://w
 foreach ($p in ($pages | Sort-Object { $_.canon })) { $sm += "  <url><loc>$domain$($p.canon)</loc><lastmod>$today</lastmod><priority>$($p.pri)</priority></url>`n" }
 $sm += "</urlset>`n"
 [IO.File]::WriteAllText((Join-Path $outDir "sitemap.xml"), $sm, (New-Object Text.UTF8Encoding($false)))
-[IO.File]::WriteAllText((Join-Path $outDir "robots.txt"), "User-agent: *`nAllow: /`nDisallow: /thank-you/`nSitemap: $domain/sitemap.xml`n", (New-Object Text.UTF8Encoding($false)))
+[IO.File]::WriteAllText((Join-Path $outDir "robots.txt"), "User-agent: *`nAllow: /`nDisallow: /thank-you/`nDisallow: /funded-shell/`nSitemap: $domain/sitemap.xml`nSitemap: $domain/funded-sitemap.xml`n", (New-Object Text.UTF8Encoding($false)))
 Write-Output ("Built " + $pages.Count + " indexable pages into " + $outDir + " (base '" + $Base + "')")
