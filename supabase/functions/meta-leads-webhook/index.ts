@@ -31,7 +31,7 @@ const ROUTE_TARGETS: Array<{ id: string; weight: number }> = [
 ];
 async function pickEnglishAdLO(client: ReturnType<typeof createClient>): Promise<string> {
   const { data } = await client.from("leads").select("assigned_to")
-    .gte("created_at", ROUTING_START).like("source", "Meta Ads%").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
+    .gte("created_at", ROUTING_START).or("source.like.Meta Ads*,source.like.Website*").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
   const counts: Record<string, number> = {};
   (data || []).forEach((r: Record<string, unknown>) => { counts[r.assigned_to as string] = (counts[r.assigned_to as string] || 0) + 1; });
   const total = (data || []).length;

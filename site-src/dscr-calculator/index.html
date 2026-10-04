@@ -1,0 +1,36 @@
+---
+title: DSCR Calculator | Debt Service Coverage Ratio for Rental Properties | BridgePoint Lending
+description: Free DSCR calculator. Enter rent, price, rate, taxes and insurance to see your debt service coverage ratio and monthly cash flow on a rental property.
+canon: /dscr-calculator/
+priority: 0.9
+---
+<section class="phead"><div class="wrap"><h1>DSCR calculator</h1><p>See how a rental property’s income compares with its monthly payment — the ratio DSCR lenders look at.</p></div></section>
+<section class="sec"><div class="wrap">
+  <div class="calc">
+    <div class="panel" id="dscr-calc">
+      <h3>Enter the deal</h3>
+      <div class="fields">
+        <div><label for="c-rent">Monthly rent</label><input id="c-rent" inputmode="numeric" value="2800"></div>
+        <div><label for="c-price">Purchase price / value</label><input id="c-price" inputmode="numeric" value="350000"></div>
+        <div><label for="c-ltv">Loan-to-value (%)</label><input id="c-ltv" inputmode="decimal" value="75"></div>
+        <div><label for="c-rate">Interest rate (%)</label><input id="c-rate" inputmode="decimal" value="7.25"></div>
+        <div><label for="c-tax">Monthly taxes</label><input id="c-tax" inputmode="numeric" value="380"></div>
+        <div><label for="c-ins">Monthly insurance</label><input id="c-ins" inputmode="numeric" value="140"></div>
+        <div><label for="c-hoa">Monthly HOA</label><input id="c-hoa" inputmode="numeric" value="0"></div>
+        <div style="display:flex;align-items:end"><label style="display:flex;gap:8px;align-items:center;margin:0 0 14px"><input id="c-io" type="checkbox" style="width:auto;min-height:0"> Interest-only</label></div>
+      </div>
+      <p class="meta">Uses a 30-year amortization unless interest-only is checked. Illustrative only.</p>
+    </div>
+    <div>
+      <div class="result"><div class="big" id="r-ratio">—</div><div class="lab">Debt service coverage ratio</div>
+        <ul><li><span>Loan amount</span><b id="r-loan">—</b></li><li><span>Principal &amp; interest</span><b id="r-pi">—</b></li><li><span>Total payment (PITIA)</span><b id="r-pitia">—</b></li><li><span>Monthly cash flow</span><b id="r-cash">—</b></li></ul>
+        <p id="r-verdict" style="margin:16px 0 0;font-size:15px;color:#e1e8f4"></p></div>
+      <p style="margin-top:18px"><a class="btn btn-gold" href="{{BASE}}/get-quote/">See what you could qualify for</a></p>
+    </div>
+  </div>
+  <div class="prose" style="margin-top:36px">
+    <h2>How to read your DSCR</h2>
+    <ul><li><b>1.25 or higher:</b> strong coverage that works for most programs.</li><li><b>1.00 – 1.24:</b> the rent covers the payment; many programs accept it.</li><li><b>Below 1.00:</b> the rent does not cover the payment. Some programs allow it with less leverage or other tradeoffs.</li></ul>
+    <p>New to DSCR loans? Read <a href="{{BASE}}/blog/what-is-a-dscr-loan/">what a DSCR loan is</a>, or see our <a href="{{BASE}}/dscr-loans/">DSCR loan programs</a>.</p>
+  </div>
+</div></section>
