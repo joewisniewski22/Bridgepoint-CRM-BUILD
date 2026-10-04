@@ -2,6 +2,6 @@
   "rewrites": [
     { "source": "/lp/:path*", "has": [{ "type": "host", "value": "(www\\.)?bplending\\.com" }], "destination": "/lp/:path*" },
     { "source": "/assets/:path*", "has": [{ "type": "host", "value": "(www\\.)?bplending\\.com" }], "destination": "/assets/:path*" },
-    { "source": "/:path*", "has": [{ "type": "host", "value": "(www\\.)?bplending\\.com" }], "destination": "/site/:path*" }
+    { "source": "/:path*", "has": [{ "type": "host", "value": "(www\\.)?bplending\\.com" }], "destination": "/site-prod/:path*" }
   ]
 }

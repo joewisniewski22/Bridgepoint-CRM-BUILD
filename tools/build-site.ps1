@@ -1,13 +1,14 @@
 ﻿# Builds the bplending.com marketing site: site-src/**/*.html (front matter + body) -> site/**
 #   -Base ""      production: pages are served from the domain root (vercel.json rewrites bplending.com -> /site)
-#   -Base "/site" preview:    pages live under https://<crm-host>/site/ so every internal link is prefixed
+#   -Base "/site" preview:    pages live under https://<crm-host>/site/ so every internal link is prefixed\n#   -OutName site-prod        output folder (production build is served for bplending.com via vercel.json)
 # Run:  powershell -File tools/build-site.ps1 -Base "/site"      (preview)
 #       powershell -File tools/build-site.ps1 -Base ""           (production)
-param([string]$Base = "/site")
+param([string]$Base = "/site", [string]$OutName = "site")
 $ErrorActionPreference = "Stop"
+if ($Base -eq "root") { $Base = "" }   # PowerShell drops empty-string arguments, so pass -Base root for the production build
 $root = Split-Path -Parent $PSScriptRoot
 $srcDir = Join-Path $root "site-src"
-$outDir = Join-Path $root "site"
+$outDir = Join-Path $root $OutName
 $domain = "https://bplending.com"
 if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 New-Item -ItemType Directory -Path $outDir | Out-Null
