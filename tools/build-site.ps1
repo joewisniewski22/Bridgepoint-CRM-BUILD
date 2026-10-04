@@ -3,9 +3,10 @@
 #   -Base "/site" preview:    pages live under https://<crm-host>/site/ so every internal link is prefixed\n#   -OutName site-prod        output folder (production build is served for bplending.com via vercel.json)
 # Run:  powershell -File tools/build-site.ps1 -Base "/site"      (preview)
 #       powershell -File tools/build-site.ps1 -Base ""           (production)
-param([string]$Base = "/site", [string]$OutName = "site")
+param([switch]$Prod)
 $ErrorActionPreference = "Stop"
-if ($Base -eq "root") { $Base = "" }   # PowerShell drops empty-string arguments, so pass -Base root for the production build
+# Preview (default): served from /site on the CRM host. -Prod: served from the domain root for bplending.com (via vercel.json routes).
+if ($Prod) { $Base = ""; $OutName = "site-prod" } else { $Base = "/site"; $OutName = "site" }
 $root = Split-Path -Parent $PSScriptRoot
 $srcDir = Join-Path $root "site-src"
 $outDir = Join-Path $root $OutName

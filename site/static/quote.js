@@ -16,7 +16,8 @@
   var TYPES = [["SFR","Single-family"],["Duplex","Duplex"],["2-4 Unit","3–4 units"],["Multifamily 5+","5+ units"],["Condo","Condo"],["Mixed-Use","Mixed-use"]];
   var CREDIT = ["760+","720-759","680-719","640-679","Under 640"];
   var EXPERIENCE = [["First deal","First deal"],["1-2 deals","1–2"],["3-5 deals","3–5"],["6+ deals","6+"]];
-  var STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" ");
+  // States we do not lend in (Joe, 2026-10-04): NV, ND, SD (license-required). Remove more here as he confirms them.
+  var STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NH NJ NM NY NC OH OK OR PA RI SC TN TX UT VT VA WA WV WI WY".split(" ");
 
   function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return { "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]; }); }
   function usd(n){ return "$" + Math.round(n).toLocaleString("en-US"); }
