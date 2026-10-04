@@ -18,7 +18,7 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type", "Access-Control-Allow-Methods": "POST, OPTIONS", "Content-Type": "application/json" };
 const HOURLY_LIMIT = 25;
 
-const STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
+const STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NH","NJ","NM","NY","NC","OH","OK","OR","PA","RI","SC","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
 const PROPERTY_TYPES = ["SFR", "Duplex", "2-4 Unit", "Multifamily 5+", "Mixed-Use", "Condo"];
 const CREDIT = { "760+": 780, "720-759": 740, "680-719": 700, "640-679": 660, "Under 640": 620 };
 const LOAN_TYPES = { dscr: "DSCR", fixflip: "Fix & Flip", bridge: "Bridge", ground: "Ground Up Construction" };
