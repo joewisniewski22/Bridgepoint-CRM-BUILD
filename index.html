@@ -9602,7 +9602,8 @@ function loadFundedDeals(){
   if (!sb || !isOwner()) return;
   sb.from("funded_deals").select("*").order("created_at", { ascending:false }).then(function(res){
     if (res.error) return;
-    ui.webposts = { deals: res.data || [], loaded: true };
+    ui.webposts = { deals: res.data || [], loaded: true, recs: (ui.webposts && ui.webposts.recs) || [], health: (ui.webposts && ui.webposts.health) || null, intelLoaded: !!(ui.webposts && ui.webposts.intelLoaded) };
+    if (!ui.webposts.intelLoaded) loadSiteIntel();
     render();
   }, function(){});
 }
@@ -9657,6 +9658,57 @@ function wpApprove(id){
     });
   } else finish(null);
 }
+function loadSiteIntel(){
+  if (!sb || !isOwner()) return;
+  Promise.all([
+    sb.from("marketing_recs").select("*").eq("status", "open").order("priority", { ascending:true }).order("created_at", { ascending:false }).limit(20),
+    sb.from("web_health_log").select("checked_at,pages,issues,speed,funnel,summary").order("id", { ascending:false }).limit(1)
+  ]).then(function(r){
+    if (!ui.webposts) return;
+    ui.webposts.recs = (r[0] && r[0].data) || [];
+    ui.webposts.health = (r[1] && r[1].data && r[1].data[0]) || null;
+    ui.webposts.intelLoaded = true;
+    render();
+  }, function(){});
+}
+function wpRunCheck(){
+  showToast("Running the website check… this takes about a minute");
+  sb.functions.invoke("web-presence-monitor", { body: { force:true, quiet:true } }).then(function(res){
+    if (res.error){ showToast("The check didn't finish — try again in a minute", true); return; }
+    showToast("Check finished"); loadSiteIntel();
+  });
+}
+function wpRecAct(id, status){
+  sb.from("marketing_recs").update({ status:status, updated_at:new Date().toISOString() }).eq("id", id).then(function(res){
+    if (res.error){ showToast("Couldn't save — try again", true); return; }
+    ui.webposts.recs = (ui.webposts.recs || []).filter(function(x){ return String(x.id) !== String(id); });
+    render();
+  });
+}
+function wpIntelHTML(){
+  var w = ui.webposts || {}, h = w.health, recs = w.recs || [];
+  var f = (h && h.funnel) || {};
+  function delta(a, b){ if (a == null) return ""; var d = a - (b || 0); return ' <span class="hint">(' + (d >= 0 ? "+" : "") + d + ' vs last week)</span>'; }
+  var serious = h && h.issues ? h.issues.filter(function(i){ return i.sev === "high"; }) : [];
+  var speedRows = h && h.speed ? h.speed.filter(function(s){ return typeof s.performance === "number"; }) : [];
+  var health = h ? ('<div class="kpi-row">' +
+      '<div class="kpi"><div class="kpi-label">Pages checked</div><div class="kpi-value num">' + h.pages + '</div><div class="kpi-sub">' + new Date(h.checked_at).toLocaleDateString() + '</div></div>' +
+      '<div class="kpi"><div class="kpi-label">Broken pages/links</div><div class="kpi-value num" style="' + (serious.length ? "color:var(--c-rust)" : "") + '">' + serious.length + '</div><div class="kpi-sub">' + ((h.issues || []).length - serious.length) + ' minor SEO notes</div></div>' +
+      '<div class="kpi"><div class="kpi-label">Estimator runs (7d)</div><div class="kpi-value num">' + (f.estimates_7d || 0) + '</div><div class="kpi-sub">' + delta(f.estimates_7d, f.estimates_prev7d) + '</div></div>' +
+      '<div class="kpi"><div class="kpi-label">Website leads (7d)</div><div class="kpi-value num">' + (f.website_leads_7d || 0) + '</div><div class="kpi-sub">' + delta(f.website_leads_7d, f.website_leads_prev7d) + '</div></div>' +
+    '</div>' +
+    (speedRows.length ? '<div class="footnote">Mobile speed: ' + speedRows.map(function(s){ return esc(s.path) + " " + Math.round(s.performance * 100); }).join(" · ") + '</div>' : ''))
+    : '<div class="empty">No check has run yet.</div>';
+  return '<div class="section"><div class="section-head"><h2>Website watchdog</h2><button class="btn btn-sm" data-action="wp-run-check">Run check now</button></div>' +
+      '<div class="footnote" style="padding-bottom:8px">Checks every page and link daily, reads the funnel, and suggests what to improve. It texts you only if something is broken.</div>' + health + '</div>' +
+    '<div class="section"><div class="section-head"><h2>Recommended this week (' + recs.length + ')</h2></div>' +
+      (recs.length ? recs.map(function(r){
+        return '<div class="queue-card"><div class="badge-wrap"><span class="badge ' + (r.priority === 1 ? "badge-rust" : r.priority === 2 ? "badge-gold" : "badge-forest") + '">' + esc(r.area || "site") + '</span></div>' +
+          '<div class="queue-main"><b>' + esc(r.title) + '</b><div class="hint" style="white-space:pre-wrap">' + esc(r.detail || "") + '</div></div>' +
+          '<div class="queue-actions"><button class="btn btn-sm btn-primary" data-action="wp-rec-done" data-id="' + r.id + '">Done</button> <button class="btn btn-sm btn-ghost" data-action="wp-rec-dismiss" data-id="' + r.id + '">Dismiss</button></div></div>';
+      }).join("") : '<div class="empty">Nothing open. New suggestions appear after each daily check.</div>') + '</div>';
+}
+
 function renderWebsitePosts(){
   if (!isOwner()) return topbar("Website Posts", "", "") + '<div class="content"><div class="empty">Owner only.</div></div>';
   if (!ui.webposts){ ui.webposts = { deals: [], loaded: false }; loadFundedDeals(); }
@@ -9688,7 +9740,7 @@ function renderWebsitePosts(){
   return topbar("Website Posts", "Funded loans you can show off on bplending.com — nothing goes public until you approve it.", "") +
     '<div class="content">' +
       '<div class="section"><div class="footnote">When a loan is marked Closed/Funded, a draft shows up here. Add the borrower’s OK, tighten the wording, and publish. Posts never show the borrower’s name or street address.</div></div>' +
-      '<div class="section"><div class="section-head"><h2>Needs your review (' + drafts.length + ')</h2></div>' + (drafts.length ? drafts.map(card).join("") : '<div class="empty">Nothing waiting. New funded loans will appear here.</div>') + '</div>' +
+      wpIntelHTML() + '<div class="section"><div class="section-head"><h2>Needs your review (' + drafts.length + ')</h2></div>' + (drafts.length ? drafts.map(card).join("") : '<div class="empty">Nothing waiting. New funded loans will appear here.</div>') + '</div>' +
       '<div class="section"><div class="section-head"><h2>Live on the website (' + liveDeals.length + ')</h2></div>' + (liveDeals.length ? liveDeals.map(card).join("") : '<div class="empty">No posts are live yet.</div>') + '</div>' +
       (rej.length ? '<div class="section"><div class="section-head"><h2>Not posting (' + rej.length + ')</h2></div>' + rej.map(card).join("") + '</div>' : "") +
     '</div>';
@@ -16718,6 +16770,9 @@ appEl.addEventListener("click", function(e){
   else if (action === "wp-unpublish"){ wpPatch(t.dataset.deal, { status:"draft" }, "Taken down from the website"); }
   else if (action === "wp-reject"){ wpPatch(t.dataset.deal, { status:"rejected" }, "Won’t be posted"); }
   else if (action === "wp-restore"){ wpPatch(t.dataset.deal, { status:"draft" }, "Moved back to review"); }
+  else if (action === "wp-run-check"){ wpRunCheck(); }
+  else if (action === "wp-rec-done"){ wpRecAct(t.dataset.id, "done"); }
+  else if (action === "wp-rec-dismiss"){ wpRecAct(t.dataset.id, "dismissed"); }
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
   else if (action === "softphone-mute"){ toggleSoftphoneMute(); }

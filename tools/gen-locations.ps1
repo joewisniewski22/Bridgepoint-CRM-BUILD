@@ -24,7 +24,7 @@ foreach ($s in $served) {
   }
   $html = @"
 ---
-title: Real Estate Investor Loans in $n | DSCR, Fix & Flip, Bridge | BridgePoint Lending
+title: ${n} Investor Loans: Fix & Flip, DSCR, Bridge | BridgePoint
 description: Investor loans in $n ($a): DSCR rental loans, fix and flip, bridge, ground-up construction and portfolio loans. See a ballpark estimate in a minute.
 canon: /locations/$($s.slug)/
 priority: 0.7
@@ -78,8 +78,8 @@ foreach ($m in $Metros) {
   New-Item -ItemType Directory -Force -Path $d | Out-Null
   $mhtml = @"
 ---
-title: Investor Loans in ${n}, ${a} | Fix & Flip, Bridge, DSCR, Construction | BridgePoint Lending
-description: Real estate investor loans in ${n}, ${sn}: fix and flip, bridge, ground-up construction, DSCR rental and portfolio loans. See a ballpark estimate in about a minute.
+title: Investor Loans in ${n}, ${a} | Fix & Flip, DSCR | BridgePoint
+description: Real estate investor loans in ${n}, ${sn}: fix and flip, bridge, construction and DSCR. Get a ballpark estimate in about a minute.
 canon: /locations/$($st.slug)/$($m.slug)/
 priority: 0.6
 ---
