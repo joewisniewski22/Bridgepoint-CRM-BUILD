@@ -50,7 +50,7 @@ $head = @'
   <button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="site-nav">☰</button>
   <nav class="nav" id="site-nav" aria-label="Main">
     <a href="{{BASE}}/loan-programs/">Loan Programs</a>
-    <a href="{{BASE}}/dscr-calculator/">Calculators</a>
+    <a href="{{BASE}}/estimate/">Free Tools</a>
     <a href="{{BASE}}/locations/">Locations</a>
     <a href="{{BASE}}/blog/">Resources</a>
     <a href="{{BASE}}/about/">About</a>
@@ -71,11 +71,12 @@ $foot = @'
       <p><a href="tel:+18502798588">(850) 279-8588</a><br><a href="mailto:info@bplending.com">info@bplending.com</a></p>
     </div>
     <div><h4>Loans</h4><ul>
-      <li><a href="{{BASE}}/dscr-loans/">DSCR Rental Loans</a></li>
       <li><a href="{{BASE}}/fix-and-flip-loans/">Fix &amp; Flip Loans</a></li>
       <li><a href="{{BASE}}/bridge-loans/">Bridge Loans</a></li>
       <li><a href="{{BASE}}/ground-up-construction-loans/">Ground-Up Construction</a></li>
-      <li><a href="{{BASE}}/portfolio-loans/">Portfolio Loans</a></li></ul></div>
+      <li><a href="{{BASE}}/dscr-loans/">DSCR Rental Loans</a></li>
+      <li><a href="{{BASE}}/portfolio-loans/">Portfolio Loans</a></li>
+      <li><a href="{{BASE}}/commercial-multifamily-loans/">Commercial &amp; Multifamily</a></li></ul></div>
     <div><h4>Tools</h4><ul>
       <li><a href="{{BASE}}/estimate/">Rate &amp; Loan Estimator</a></li>
       <li><a href="{{BASE}}/dscr-calculator/">DSCR Calculator</a></li>

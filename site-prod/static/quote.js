@@ -7,8 +7,8 @@
   var API = "https://idzkigmvovehjpapatxv.supabase.co/functions/v1/";
   var BASE = window.BP_BASE || "";
   var PROGRAMS = [
-    ["dscr", "DSCR rental loan", "Qualify on the rent, not your tax returns"],
     ["fixflip", "Fix & flip loan", "Purchase plus rehab funding"],
+    ["dscr", "DSCR rental loan", "Qualify on the rent, not your tax returns"],
     ["bridge", "Bridge loan", "Fast short-term financing"],
     ["ground", "Ground-up construction", "Build from the ground up"],
     ["portfolio", "Portfolio / blanket loan", "Several properties, one loan"]
