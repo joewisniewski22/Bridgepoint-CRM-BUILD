@@ -1,4 +1,4 @@
-﻿# Builds the bplending.com marketing site: site-src/**/*.html (front matter + body) -> site/**
+# Builds the bplending.com marketing site: site-src/**/*.html (front matter + body) -> site/**
 #   -Base ""      production: pages are served from the domain root (vercel.json rewrites bplending.com -> /site)
 #   -Base "/site" preview:    pages live under https://<crm-host>/site/ so every internal link is prefixed\n#   -OutName site-prod        output folder (production build is served for bplending.com via vercel.json)
 # Run:  powershell -File tools/build-site.ps1 -Base "/site"      (preview)
@@ -11,6 +11,11 @@ $root = Split-Path -Parent $PSScriptRoot
 $srcDir = Join-Path $root "site-src"
 $outDir = Join-Path $root $OutName
 $domain = "https://bplending.com"
+. (Join-Path $PSScriptRoot "states.ps1")
+$exAbbr = @((Get-Content (Join-Path $PSScriptRoot "excluded-states.txt") -Raw).Trim() -split "\s+" | Where-Object { $_ })
+$exList = @($AllStates | Where-Object { $exAbbr -contains $_.abbr } | ForEach-Object { $_.name })
+$exNames = if ($exList.Count -gt 1) { ($exList[0..($exList.Count-2)] -join ", ") + " or " + $exList[-1] } else { $exList -join "" }
+$stCount = @($AllStates | Where-Object { $exAbbr -notcontains $_.abbr -and $_.abbr -ne "DC" }).Count
 if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 New-Item -ItemType Directory -Path $outDir | Out-Null
 
@@ -108,7 +113,7 @@ Get-ChildItem $srcDir -Recurse -Filter *.html | ForEach-Object {
   if ($body.Contains("data-qw")) { $scripts += "`n" + '<script src="{{BASE}}/static/quote.js" defer></script>' }
   $html = $head + $body + "`n" + $foot
   $html = $html.Replace("{{SCRIPTS}}", $scripts).Replace("{{ROBOTS}}", $robots)
-  $html = $html.Replace("{{TITLE}}", $meta["title"]).Replace("{{DESC}}", $meta["description"]).Replace("{{CANON}}", $canon).Replace("{{DOMAIN}}", $domain).Replace("{{BASE}}", $Base)
+  $html = $html.Replace("{{TITLE}}", $meta["title"]).Replace("{{DESC}}", $meta["description"]).Replace("{{CANON}}", $canon).Replace("{{DOMAIN}}", $domain).Replace("{{BASE}}", $Base).Replace("{{EXCLUDED_NAMES}}", $exNames).Replace("{{STATE_COUNT}}", [string]$stCount)
   $dest = Join-Path $outDir $rel
   New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
   [IO.File]::WriteAllText($dest, $html, (New-Object Text.UTF8Encoding($false)))

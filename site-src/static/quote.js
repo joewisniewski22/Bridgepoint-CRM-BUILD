@@ -17,7 +17,7 @@
   var CREDIT = ["760+","720-759","680-719","640-679","Under 640"];
   var EXPERIENCE = [["First deal","First deal"],["1-2 deals","1–2"],["3-5 deals","3–5"],["6+ deals","6+"]];
   // States we do not lend in (Joe, 2026-10-04): NV, ND, SD (license-required). Remove more here as he confirms them.
-  var STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NH NJ NM NY NC OH OK OR PA RI SC TN TX UT VT VA WA WV WI WY".split(" ");
+  var STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NH NJ NM NY NC OH OK PA RI SC TN TX VA WA WV WI WY".split(" ");
 
   function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){ return { "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]; }); }
   function usd(n){ return "$" + Math.round(n).toLocaleString("en-US"); }
@@ -28,7 +28,7 @@
 
   function init(root){
     var fixed = root.getAttribute("data-program");
-    var S = { program: (fixed && fixed !== "auto") ? fixed : null, step: 0, goal: null, propertyType: null, credit: null, experience: null, estimate: null, estimateNote: "", timeline: "ASAP (under 30 days)" };
+    var S = { state: root.getAttribute("data-state") || null, program: (fixed && fixed !== "auto") ? fixed : null, step: 0, goal: null, propertyType: null, credit: null, experience: null, estimate: null, estimateNote: "", timeline: "ASAP (under 30 days)" };
     var title = root.getAttribute("data-title") || "Get your estimate";
     var sub = root.getAttribute("data-sub") || "Takes about a minute. See a ballpark, then get exact numbers from a loan officer.";
     var params = new URLSearchParams(location.search);
