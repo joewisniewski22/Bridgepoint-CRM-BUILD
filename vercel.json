@@ -2,6 +2,8 @@
   "routes": [
     { "src": "^/lp/(.*)$", "has": [{ "type": "host", "value": "((www\.)?bplending\.com|bplending-preview\.vercel\.app)" }], "dest": "/lp/$1" },
     { "src": "^/assets/(.*)$", "has": [{ "type": "host", "value": "((www\.)?bplending\.com|bplending-preview\.vercel\.app)" }], "dest": "/assets/$1" },
-    { "src": "^/(.*)$", "has": [{ "type": "host", "value": "((www\.)?bplending\.com|bplending-preview\.vercel\.app)" }], "dest": "/site-prod/$1" }
+    { "src": "^/$", "has": [{ "type": "host", "value": "((www\.)?bplending\.com|bplending-preview\.vercel\.app)" }], "dest": "/site-prod/index.html" },
+    { "src": "^/(.+\.[A-Za-z0-9]+)$", "has": [{ "type": "host", "value": "((www\.)?bplending\.com|bplending-preview\.vercel\.app)" }], "dest": "/site-prod/$1" },
+    { "src": "^/(.+?)/?$", "has": [{ "type": "host", "value": "((www\.)?bplending\.com|bplending-preview\.vercel\.app)" }], "dest": "/site-prod/$1/index.html" }
   ]
 }
