@@ -412,7 +412,7 @@
       var own = m !== "est";
       el("az-restbox").hidden = own;
       el("az-rm-own").classList.toggle("on", own); el("az-rm-est").classList.toggle("on", !own);
-      el("az-rhint").textContent = own ? "We’ll use the Rehab budget you entered above." : "Pick the scope of work and size. We’ll estimate the cost with real materials-cost data and fill it into the Rehab budget above. You can still change it.";
+      el("az-rhint").textContent = own ? "We'll use the Rehab budget you entered above." : "Pick the scope of work and size. We'll estimate the cost with real materials-cost data and fill it into the Rehab budget above. You can still change it.";
       if (!own) updateRehabOut();
     }
     function updateRehabOut(){
