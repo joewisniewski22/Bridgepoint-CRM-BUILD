@@ -283,6 +283,24 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, creativeId, result: adResult.data }), { headers: CORS_HEADERS });
     }
 
+    // ---- audiences (retargeting) -------------------------------------------------------------
+    if (action === "audiences") {
+      const acct = await graphFetch("/" + actAccount(), { fields: "name,account_status,tos_accepted,business" });
+      const auds = await graphFetch("/" + actAccount() + "/customaudiences", { fields: "id,name,subtype,approximate_count_lower_bound,approximate_count_upper_bound,delivery_status,operation_status", limit: "50" });
+      const px = await graphFetch("/" + actAccount() + "/adspixels", { fields: "id,name,last_fired_time" });
+      return new Response(JSON.stringify({ ok: true, account: acct.data, audiences: auds.data, pixels: px.data }), { headers: CORS_HEADERS });
+    }
+
+    if (action === "create-pixel-audience") {
+      // website visitors from the Meta Pixel in the last N days (no personal data is uploaded)
+      const pixelId: string = body.pixelId, name: string = body.name, days = Number(body.days || 30), contains: string = body.urlContains || "bplending.com";
+      if (!pixelId || !name) return new Response(JSON.stringify({ error: "missing_fields", detail: "pixelId and name are required" }), { status: 400, headers: CORS_HEADERS });
+      const rule = { inclusions: { operator: "or", rules: [{ event_sources: [{ id: pixelId, type: "pixel" }], retention_seconds: days * 86400, filter: { operator: "and", filters: [{ field: "url", operator: "i_contains", value: contains }] } }] } };
+      const r = await graphFetch("/" + actAccount() + "/customaudiences", { name, subtype: "WEBSITE", description: body.description || "", rule: JSON.stringify(rule), prefill: "1" }, "POST");
+      if (!r.ok) return new Response(JSON.stringify({ error: "meta_error", detail: r.data }), { status: 502, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ ok: true, result: r.data }), { headers: CORS_HEADERS });
+    }
+
     return new Response(JSON.stringify({ error: "unknown_action", detail: action }), { status: 400, headers: CORS_HEADERS });
   } catch (err) {
     return new Response(JSON.stringify({ error: "server_error", detail: String(err) }), { status: 500, headers: CORS_HEADERS });
