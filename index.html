@@ -2305,6 +2305,9 @@ try {
   } else if (qp.get("showcase")){
     ui.publicShowcase = { status:"loading", items:[] };
     loadPublicShowcase();
+  } else if (qp.get("borrower") && qp.get("b") && applyToken){
+    ui.publicBorrower = { leadId: qp.get("borrower"), bid: qp.get("b"), token: applyToken, status: "loading" };
+    loadPublicBorrower();
   } else if (applyId && applyToken){
     ui.publicApply = { leadId:applyId, token:applyToken, status:"loading" };
     loadPublicApplication(applyId, applyToken);
@@ -5010,7 +5013,7 @@ function ensureGlobalPolling(){
   // pattern already used for the lead-detail/team-chat/email polling.
   if (globalPollTimer || !sb) return;
   globalPollTimer = setInterval(function(){
-    if (!ui.loggedIn || ui.publicApply || ui.publicBooking || ui.publicShowcase) return;
+    if (!ui.loggedIn || ui.publicApply || ui.publicBorrower || ui.publicBooking || ui.publicShowcase) return;
     sb.from("leads").select("*").then(function(res){
       if (res.error || !res.data) return;
       var fresh = res.data.map(rowToLead);
@@ -8159,6 +8162,7 @@ function buildRtlApplicationPdfBlob(lead){
     w.row("Name", (r.coFirstName||"") + " " + (r.coLastName||""));
     w.twoCol("Phone", r.coPhone, "Email", r.coEmail);
   }
+  borrowersPdfSections(w, lead);
 
   w.heading("3) Entity Information");
   w.twoCol("Entity Name", lead.entityLegalName, "Entity Type", lead.entityType);
@@ -8244,6 +8248,7 @@ function buildDscrApplicationPdfBlob(lead){
     w.row("Name", (d.coFirstName||"") + " " + (d.coLastName||""));
     w.twoCol("Phone", d.coPhone, "Email", d.coEmail);
   }
+  borrowersPdfSections(w, lead);
 
   w.heading("3) Entity Information");
   w.twoCol("Entity Name", lead.entityLegalName, "Entity Type", lead.entityType);
@@ -8610,6 +8615,12 @@ function render(){
     initSignaturePads();
     return;
   }
+  if (ui.publicBorrower){
+    app.innerHTML = renderPublicBorrower();
+    var toastHostPBW = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+    app.insertAdjacentHTML("beforeend", toastHostPBW);
+    return;
+  }
   if (ui.publicBooking){
     app.innerHTML = renderPublicBooking();
     var toastHostPB = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
@@ -8725,7 +8736,7 @@ function syncHistory(){
   lastHistoryKey = key;
 }
 window.addEventListener("popstate", function(e){
-  if (!e.state || !ui.loggedIn || ui.publicApply || ui.publicBooking || ui.publicShowcase) return;
+  if (!e.state || !ui.loggedIn || ui.publicApply || ui.publicBorrower || ui.publicBooking || ui.publicShowcase) return;
   ui.view = e.state.view || "today";
   ui.selectedLeadId = e.state.leadId || null;
   ui.activeTab = e.state.tab || "overview";
@@ -14728,6 +14739,7 @@ function renderModal(){
   if (ui.modal.type === "emailDocument") return modalEmailDocument(ui.modal.leadId, ui.modal.kind);
   if (ui.modal.type === "pickTermSheet") return modalPickTermSheet(ui.modal.leadId);
   if (ui.modal.type === "addLead") return modalAddLead();
+  if (ui.modal.type === "addBorrower") return modalAddBorrower(ui.modal.leadId);
   if (ui.modal.type === "createLeadFromPricer") return modalCreateLeadFromPricer();
   if (ui.modal.type === "importLeads") return modalImportLeads();
   if (ui.modal.type === "importLendingWise") return modalImportLendingWise();
@@ -15432,9 +15444,263 @@ function coApplicantBlockHTML(lead, L){
       '<div class="form-row"><label>' + L("Liquidity / Reserves") + '</label><input class="input" type="number" name="coLiquidity" value="' + esc(v(lead.coLiquidity)) + '"></div>' +
     '</div>' +
     '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="coMaritalStatus">' + marOpts + '</select></div>' +
-    '</div>';
+    '</div>' + (ui.publicApply ? "" : additionalBorrowersHTML(lead));
 }
 function clearCoSsnIfAny(leadId){ var l = leadById(leadId); if (l && l.coSsnLast4) saveCoGuarantorSsn(leadId, ""); }
+/* ---- Additional borrowers ("Add another borrower") ----
+   Staff click "Add another borrower", enter a name + email, and that person is emailed a link to a short page where
+   they fill in their own section (name, DOB, SSN, address, credit, experience...). Everything lands on the SAME file:
+   rows live in lead_borrowers (SSN encrypted server-side, same Vault key as the guarantor), show up here under the
+   Co-Borrower block, and print on the application PDFs. The invited person only ever sees their own section. */
+var BORROWER_COLS = "id,lead_id,seq,first_name,middle_name,last_name,email,phone,birthday,ssn_last4,ownership_pct,address,citizenship_status,country_of_domicile,credit_score,experience_deals,liquidity,marital_status,invite_token,status,invited_at,invited_by,last_sent_at,submitted_at";
+var BORROWERS = {}; // leadId -> { loaded, loading, rows }
+function borrowersFor(leadId){ return (BORROWERS[leadId] && BORROWERS[leadId].rows) || []; }
+function ensureBorrowersLoaded(leadId, force){
+  if (!sb || ui.publicApply || ui.publicBorrower) return;
+  var b = BORROWERS[leadId];
+  if (b && (b.loading || (b.loaded && !force))) return;
+  BORROWERS[leadId] = { loading: true, rows: b ? b.rows : [] };
+  sb.from("lead_borrowers").select(BORROWER_COLS).eq("lead_id", leadId).order("seq", { ascending: true }).then(function(res){
+    BORROWERS[leadId] = { loaded: true, rows: (res.error || !res.data) ? [] : res.data };
+    render();
+  }).catch(function(){ BORROWERS[leadId] = { loaded: true, rows: [] }; });
+}
+function borrowerLink(lead, row){
+  return CRM_URL.replace(/\/$/, "") + "/?borrower=" + encodeURIComponent(lead.id) + "&b=" + encodeURIComponent(row.id) + "&t=" + encodeURIComponent(row.invite_token);
+}
+function borrowerDisplayName(row){ return [row.first_name, row.middle_name, row.last_name].filter(Boolean).join(" ") || row.email || "Borrower"; }
+function additionalBorrowersHTML(lead){
+  ensureBorrowersLoaded(lead.id);
+  var rows = borrowersFor(lead.id);
+  var dash = "—";
+  var list = rows.map(function(b){
+    var submitted = b.status === "submitted";
+    var pill = submitted ? '<span class="badge badge-forest">Completed</span>' : '<span class="badge badge-gold">Waiting on them</span>';
+    var revealKey = "bid:" + b.id, revealed = ui.ssnRevealed && ui.ssnRevealed[revealKey];
+    var ssn = "";
+    if (b.ssn_last4){
+      ssn = revealed === "loading" ? "Retrieving…" : (revealed ? ('<b style="font-family:monospace;letter-spacing:1px">' + esc(revealed) + '</b>') : ("•••-••-" + esc(b.ssn_last4) + (canRevealSsn(lead) ? ' <button type="button" class="link-btn" data-action="reveal-ssn" data-bid="' + esc(b.id) + '" data-lead="' + lead.id + '">Hold to Show</button>' : "")));
+    } else ssn = dash;
+    var detail = submitted
+      ? ('<div class="footnote" style="padding:2px 0">DOB ' + esc(b.birthday ? fmtDate(b.birthday) : dash) + ' · SSN ' + ssn + ' · Credit ' + esc(b.credit_score || dash) + ' · Ownership ' + esc(b.ownership_pct != null ? b.ownership_pct + "%" : dash) + '</div>' +
+         '<div class="footnote" style="padding:2px 0">' + esc(b.phone || dash) + ' · ' + esc(b.email || dash) + ' · ' + esc(b.address || dash) + '</div>' +
+         '<div class="footnote" style="padding:2px 0">Citizenship ' + esc(b.citizenship_status || dash) + ' · Experience ' + esc(b.experience_deals != null ? b.experience_deals + " deals" : dash) + ' · Liquidity ' + esc(b.liquidity != null ? fmtUSD(Number(b.liquidity)) : dash) + ' · ' + esc(b.marital_status || dash) + '</div>' +
+         '<div class="footnote" style="padding:2px 0">Completed ' + esc(fmtDate((b.submitted_at || "").slice(0, 10))) + '</div>')
+      : ('<div class="footnote" style="padding:2px 0">' + esc(b.email || "") + ' · Invited ' + esc(fmtDate((b.invited_at || "").slice(0, 10))) + (b.last_sent_at && b.last_sent_at.slice(0, 10) !== (b.invited_at || "").slice(0, 10) ? (' · Last sent ' + esc(fmtDate(b.last_sent_at.slice(0, 10)))) : "") + '</div>');
+    return '<div class="panel panel-pad" style="margin:8px 0">' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>' + esc(borrowerDisplayName(b)) + '</b> ' + pill +
+      '<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">' +
+        '<button type="button" class="btn btn-sm" data-action="resend-borrower" data-lead="' + lead.id + '" data-bid="' + esc(b.id) + '">' + (submitted ? "Send link again" : "Resend invite") + '</button>' +
+        '<button type="button" class="btn btn-sm" data-action="copy-borrower-link" data-lead="' + lead.id + '" data-bid="' + esc(b.id) + '">Copy link</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-action="remove-borrower" data-lead="' + lead.id + '" data-bid="' + esc(b.id) + '">Remove</button>' +
+      '</span></div>' + detail + '</div>';
+  }).join("");
+  return '<div class="hint" style="margin:16px 0 4px"><b>Additional borrowers</b> <span class="hint">— each one fills out their own section; it all stays on this one file</span></div>' +
+    (list || '<div class="footnote" style="padding:2px 0 6px">None yet.</div>') +
+    '<div style="margin:6px 0 4px"><button type="button" class="btn btn-sm btn-primary" data-action="open-modal" data-modal="addBorrower" data-lead="' + lead.id + '">+ Add another borrower</button></div>';
+}
+function modalAddBorrower(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return "";
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Add another borrower — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="add-borrower" data-lead="' + leadId + '">' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0 0 10px">We\'ll email them a link to complete their part of the application. Whatever they enter is added to this same file, so there is one application with everyone on it.</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>First name</label><input class="input" name="firstName" required autocomplete="off"></div>' +
+          '<div class="form-row"><label>Last name</label><input class="input" name="lastName" autocomplete="off"></div>' +
+        '</div>' +
+        '<div class="form-row"><label>Email address</label><input class="input" type="email" name="email" required autocomplete="off"></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Add &amp; email application</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+function sendBorrowerInvite(lead, row, isResend){
+  if (!sb) return Promise.resolve(false);
+  var lo = docLoanOfficer(lead);
+  var first = row.first_name || "there";
+  var prop = lead.propertyAddress ? (" for " + lead.propertyAddress) : "";
+  var text = "Hi " + first + ",\n\n" +
+    (lead.name || "Your partner") + " is applying for a loan with Bridgepoint Lending" + prop + " and you've been added as a borrower on the application.\n\n" +
+    "To keep everything in one file, please complete your part here. It takes about 5 minutes:\n" + borrowerLink(lead, row) + "\n\n" +
+    "Have ready: your date of birth, Social Security number, home address and phone number. Your information is encrypted and goes straight into the same application.\n\n" +
+    "Questions? Reply to this email" + (lo.phone ? " or call or text me at " + lo.phone : "") + ".\n\n" +
+    (lo.name || "Your loan officer") + "\nBridgepoint Lending";
+  return sb.functions.invoke("send-email", {
+    body: { leadId: lead.id, to: row.email, subject: (isResend ? "Reminder: " : "") + "Please complete your part of the loan application", text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl || null }
+  }).then(function(res){
+    var ok = !(res.error || !res.data || !res.data.ok);
+    if (ok){
+      var now = new Date().toISOString();
+      row.last_sent_at = now;
+      sb.from("lead_borrowers").update({ last_sent_at: now }).eq("id", row.id).then(function(){}, function(){});
+    }
+    return ok;
+  }).catch(function(){ return false; });
+}
+function addAdditionalBorrower(leadId, fd){
+  var lead = leadById(leadId);
+  if (!lead || !sb) return;
+  var first = (fd.get("firstName") || "").trim(), last = (fd.get("lastName") || "").trim(), email = (fd.get("email") || "").trim().toLowerCase();
+  if (!first){ showToast("Enter their first name", true); return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)){ showToast("Enter a valid email address", true); return; }
+  var rows = borrowersFor(leadId);
+  if (rows.some(function(r){ return (r.email || "").toLowerCase() === email; }) || (lead.coEmail || "").toLowerCase() === email){ showToast("That person is already on this file", true); return; }
+  var row = { id: "B" + randomToken().slice(0, 10), lead_id: leadId, seq: rows.length + 1, first_name: first, last_name: last || null, email: email,
+    invite_token: randomToken() + randomToken(), status: "invited", invited_by: currentUser().id };
+  ui.modal = null; render();
+  showToast("Adding " + first + "…");
+  sb.from("lead_borrowers").insert(row).then(function(res){
+    if (res.error){ showToast("Couldn't add the borrower — try again", true); return; }
+    row.invited_at = new Date().toISOString();
+    BORROWERS[leadId] = { loaded: true, rows: rows.concat([row]) };
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type: "system", text: "Added " + first + (last ? " " + last : "") + " (" + email + ") as an additional borrower and emailed their application link", author: currentUser().name });
+    persist();
+    render();
+    sendBorrowerInvite(lead, row, false).then(function(ok){
+      showToast(ok ? ("Application emailed to " + first + ". Their info will merge into this file.") : "Added, but the email didn't send. Use Resend invite.", !ok);
+    });
+  }).catch(function(){ showToast("Couldn't add the borrower — try again", true); });
+}
+function resendBorrower(leadId, bid){
+  var lead = leadById(leadId), row = borrowersFor(leadId).filter(function(r){ return r.id === bid; })[0];
+  if (!lead || !row) return;
+  showToast("Sending…");
+  sendBorrowerInvite(lead, row, true).then(function(ok){
+    if (ok){ lead.activity = lead.activity || []; lead.activity.push({ date: todayISO(), type: "system", text: "Re-sent the additional borrower application link to " + row.email, author: currentUser().name }); persist(); render(); }
+    showToast(ok ? ("Link sent to " + row.email) : "Couldn't send — try again", !ok);
+  });
+}
+function copyBorrowerLink(leadId, bid){
+  var lead = leadById(leadId), row = borrowersFor(leadId).filter(function(r){ return r.id === bid; })[0];
+  if (!lead || !row) return;
+  var link = borrowerLink(lead, row);
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(link).then(function(){ showToast("Link copied"); }, function(){ window.prompt("Copy this link:", link); });
+  } else window.prompt("Copy this link:", link);
+}
+function removeBorrower(leadId, bid){
+  var lead = leadById(leadId), row = borrowersFor(leadId).filter(function(r){ return r.id === bid; })[0];
+  if (!lead || !row || !sb) return;
+  if (!window.confirm("Remove " + borrowerDisplayName(row) + " from this file? Their information and link will be deleted.")) return;
+  sb.from("lead_borrowers").delete().eq("id", bid).then(function(res){
+    if (res.error){ showToast("Couldn't remove — try again", true); return; }
+    BORROWERS[leadId] = { loaded: true, rows: borrowersFor(leadId).filter(function(r){ return r.id !== bid; }) };
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type: "system", text: "Removed additional borrower " + borrowerDisplayName(row), author: currentUser().name });
+    persist(); render(); showToast("Removed");
+  });
+}
+function revealBorrowerSsn(leadId, bid){
+  var lead = leadById(leadId);
+  if (!sb || !lead || !canRevealSsn(lead)) return;
+  var key = "bid:" + bid;
+  ui.ssnRevealed = ui.ssnRevealed || {};
+  ui.ssnRevealed[key] = "loading";
+  render();
+  sb.rpc("get_borrower_ssn_full", { p_borrower_id: bid }).then(function(res){
+    if (res.error || !res.data){ delete ui.ssnRevealed[key]; showToast("Couldn't retrieve SSN", true); }
+    else {
+      ui.ssnRevealed[key] = res.data;
+      lead.activity = lead.activity || [];
+      lead.activity.push({ date: todayISO(), type: "system", text: "Additional borrower SSN viewed by " + currentUser().name, author: currentUser().name });
+      persist();
+    }
+    render();
+  }).catch(function(){ delete ui.ssnRevealed[key]; render(); });
+}
+function borrowersPdfSections(w, lead){
+  borrowersFor(lead.id).forEach(function(b, i){
+    w.heading("Additional Borrower " + (i + 1) + (b.status === "submitted" ? "" : " (invited, not yet completed)"));
+    w.row("Name", borrowerDisplayName(b));
+    w.twoCol("Date of Birth", b.birthday, "SSN", b.ssn_last4 ? ("•••-••-" + b.ssn_last4) : "—");
+    w.twoCol("Phone", b.phone, "Email", b.email);
+    w.row("Home Address", b.address);
+    w.twoCol("Citizenship", b.citizenship_status, "Credit Score", b.credit_score);
+    w.twoCol("Ownership %", b.ownership_pct, "Experience (deals)", b.experience_deals);
+  });
+}
+
+/* ---- The page the invited borrower sees: ?borrower=<fileId>&b=<borrowerId>&t=<token> ---- */
+function loadPublicBorrower(){
+  var pb = ui.publicBorrower;
+  if (!sb){ pb.status = "invalid"; render(); return; }
+  sb.rpc("public_get_borrower_invite", { p_lead_id: pb.leadId, p_borrower_id: pb.bid, p_token: pb.token }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){ pb.status = "invalid"; render(); return; }
+    pb.info = res.data;
+    pb.status = res.data.status === "submitted" ? "ready" : "ready";
+    render();
+  }).catch(function(){ pb.status = "invalid"; render(); });
+}
+function renderPublicBorrower(){
+  var pb = ui.publicBorrower;
+  var wrap = function(inner){ return '<div class="login-screen"><div class="login-card" style="max-width:640px;text-align:left">' + inner + '</div></div>'; };
+  if (pb.status === "loading") return wrap('<div class="empty">Loading…</div>');
+  if (pb.status === "invalid") return wrap('<div class="empty">This link isn\'t valid anymore. Please contact your loan officer at Bridgepoint Lending for a new one.</div>');
+  var info = pb.info || {}, pre = info.prefill || {};
+  var contact = (info.loName ? (esc(info.loName) + (info.loPhone ? " at " + esc(info.loPhone) : "")) : "your loan officer");
+  if (pb.status === "done"){
+    return wrap('<div class="rail-title" style="margin-bottom:8px">Thank you, ' + esc(info.firstName || "") + ' ✓</div>' +
+      '<div class="footnote" style="padding:0 0 10px">Your information was added to the application' + (info.property ? ' for ' + esc(info.property) : '') + '. ' + contact + ' will follow up if anything else is needed.</div>');
+  }
+  var v = function(x){ return x === null || x === undefined ? "" : x; };
+  var cit = ['<option value="">— Select —</option>'].concat(CITIZENSHIP_STATUSES.map(function(t){ return '<option value="' + t + '"' + (pre.citizenshipStatus === t ? " selected" : "") + '>' + t + '</option>'; })).join("");
+  var mar = ['<option value="">— Select —</option>'].concat(["Married", "Unmarried"].map(function(t){ return '<option value="' + t + '"' + (pre.maritalStatus === t ? " selected" : "") + '>' + t + '</option>'; })).join("");
+  return wrap(
+    '<div class="rail-title" style="margin-bottom:4px">Complete your part of the application</div>' +
+    '<div class="footnote" style="padding:0 0 12px">' + esc(info.primaryName || "Your partner") + ' is applying for a loan with Bridgepoint Lending' + (info.property ? ' for <b>' + esc(info.property) + '</b>' : '') + ', and you\'ve been added as a borrower. Your answers go into that same application. This takes about 5 minutes.' + (info.status === "submitted" ? ' <b>You already submitted this once; sending it again will update your information.</b>' : '') + '</div>' +
+    '<form data-form="submit-borrower-app">' +
+      '<div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
+        '<div><label>First name</label><input class="input" name="firstName" required value="' + esc(v(info.firstName)) + '"></div>' +
+        '<div><label>Middle name</label><input class="input" name="middleName" value="' + esc(v(pre.middleName)) + '"></div>' +
+        '<div><label>Last name</label><input class="input" name="lastName" required value="' + esc(v(info.lastName)) + '"></div></div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Date of birth</label><input class="input" type="date" name="birthday" required value="' + esc(v(pre.birthday)) + '"></div>' +
+        '<div class="form-row"><label>Social Security number</label><input class="input" type="password" autocomplete="off" name="ssn" inputmode="numeric" placeholder="' + (pre.ssnLast4 ? ("On file, ending " + esc(pre.ssnLast4)) : "XXX-XX-XXXX") + '"></div></div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Phone</label><input class="input" type="tel" name="phone" required value="' + esc(v(pre.phone)) + '"></div>' +
+        '<div class="form-row"><label>Email</label><input class="input" type="email" name="email" required value="' + esc(v(info.email)) + '"></div></div>' +
+      '<div class="form-row"><label>Home address (street, city, state, ZIP)</label><input class="input" name="address" required value="' + esc(v(pre.address)) + '"></div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Citizenship status</label><select class="select" name="citizenshipStatus">' + cit + '</select></div>' +
+        '<div class="form-row"><label>Country of citizenship <span class="hint">(if Foreign National)</span></label><input class="input" name="countryOfDomicile" value="' + esc(v(pre.countryOfDomicile)) + '"></div></div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Ownership % in the deal</label><input class="input" type="number" min="0" max="100" name="ownershipPct" value="' + esc(v(pre.ownershipPct)) + '"></div>' +
+        '<div class="form-row"><label>Credit score (estimate is fine)</label><input class="input" type="number" min="300" max="850" name="creditScore" value="' + esc(v(pre.creditScore)) + '"></div></div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Investing experience (deals completed)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + esc(v(pre.experienceDeals)) + '"></div>' +
+        '<div class="form-row"><label>Liquidity / reserves</label><input class="input" type="number" min="0" name="liquidity" value="' + esc(v(pre.liquidity)) + '"></div></div>' +
+      '<div class="form-row"><label>Marital status</label><select class="select" name="maritalStatus">' + mar + '</select></div>' +
+      '<label style="display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-size:13px"><input type="checkbox" name="certify" style="margin-top:3px"><span>I confirm this information is true and complete, and I authorize Bridgepoint Lending to verify it, including obtaining my credit report, in connection with this loan request.</span></label>' +
+      '<button class="btn btn-primary" type="submit">Submit my information</button>' +
+      '<div class="footnote" style="padding:10px 0 0">Your information is encrypted. Questions? Contact ' + contact + '.</div>' +
+    '</form>');
+}
+function submitBorrowerApp(form){
+  var pb = ui.publicBorrower;
+  if (!pb || !sb) return;
+  var fd = new FormData(form);
+  if (!fd.get("certify")){ showToast("Please check the box to confirm your information", true); return; }
+  var ssn = String(fd.get("ssn") || "").replace(/\D/g, "");
+  var hadSsn = !!(pb.info && pb.info.prefill && pb.info.prefill.ssnLast4);
+  if ((!hadSsn && ssn.length !== 9) || (ssn && ssn.length !== 9)){ showToast("Enter your 9-digit Social Security number", true); return; }
+  var payload = {};
+  ["firstName", "middleName", "lastName", "email", "phone", "birthday", "address", "citizenshipStatus", "countryOfDomicile", "ownershipPct", "creditScore", "experienceDeals", "liquidity", "maritalStatus"].forEach(function(k){ payload[k] = String(fd.get(k) || "").trim(); });
+  var btn = form.querySelector('button[type="submit"]'); if (btn){ btn.disabled = true; btn.textContent = "Submitting…"; }
+  sb.rpc("public_submit_borrower", { p_lead_id: pb.leadId, p_borrower_id: pb.bid, p_token: pb.token, p: payload, p_ssn: ssn || null }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){
+      if (btn){ btn.disabled = false; btn.textContent = "Submit my information"; }
+      showToast("Something went wrong — please try again or contact your loan officer", true);
+      return;
+    }
+    pb.status = "done"; render();
+  }).catch(function(){ if (btn){ btn.disabled = false; btn.textContent = "Submit my information"; } showToast("Something went wrong — please try again", true); });
+}
+
 function coPdfSection(w, lead, heading){
   w.heading(heading);
   w.row("Name", [lead.coFirstName, lead.coMiddleName, lead.coLastName].filter(Boolean).join(" "));
@@ -16982,6 +17248,9 @@ appEl.addEventListener("click", function(e){
     var textBox = document.getElementById("text-message-box");
     sendTextMessage(t.dataset.lead, textBox ? textBox.value : "");
   }
+  else if (action === "resend-borrower"){ resendBorrower(t.dataset.lead, t.dataset.bid); }
+  else if (action === "copy-borrower-link"){ copyBorrowerLink(t.dataset.lead, t.dataset.bid); }
+  else if (action === "remove-borrower"){ removeBorrower(t.dataset.lead, t.dataset.bid); }
   else if (action === "mark-notif-read"){ markNotificationRead(t.dataset.id); }
   else if (action === "send-application"){
     sendApplicationAction(t.dataset.lead, t.dataset.channel);
@@ -17349,7 +17618,7 @@ appEl.addEventListener("pointerdown", function(e){
   var btn = e.target.closest && e.target.closest('[data-action="reveal-ssn"]');
   if (!btn) return;
   e.preventDefault();
-  if (btn.dataset.co) revealCoSsn(btn.dataset.lead); else revealGuarantorSsn(btn.dataset.lead);
+  if (btn.dataset.bid) revealBorrowerSsn(btn.dataset.lead, btn.dataset.bid); else if (btn.dataset.co) revealCoSsn(btn.dataset.lead); else revealGuarantorSsn(btn.dataset.lead);
 });
 var hideAllRevealedSsns = function(){
   if (ui.ssnRevealed) Object.keys(ui.ssnRevealed).forEach(function(id){ hideGuarantorSsn(id); });
@@ -17819,6 +18088,10 @@ appEl.addEventListener("submit", function(e){
     saveCompanySettings(fd);
   } else if (type === "bulk-set-availability"){
     bulkSetAvailability(fd);
+  } else if (type === "add-borrower"){
+    addAdditionalBorrower(form.dataset.lead, fd);
+  } else if (type === "submit-borrower-app"){
+    submitBorrowerApp(form);
   } else if (type === "submit-booking"){
     submitBooking(fd);
   } else if (type === "save-signature"){
