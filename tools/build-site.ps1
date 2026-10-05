@@ -66,7 +66,7 @@ $head = @'
   <button class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="site-nav">☰</button>
   <nav class="nav" id="site-nav" aria-label="Main">
     <a href="{{BASE}}/loan-programs/">Loan Programs</a>
-    <a href="{{BASE}}/estimate/">Free Tools</a>
+    <a href="{{BASE}}/tools/">Free Tools</a>
     <a href="{{BASE}}/locations/">Locations</a>
     <a href="{{BASE}}/blog/">Resources</a>
     <a href="{{BASE}}/about/">About</a>
@@ -95,6 +95,7 @@ $foot = @'
       <li><a href="{{BASE}}/portfolio-loans/">Portfolio Loans</a></li>
       <li><a href="{{BASE}}/commercial-multifamily-loans/">Commercial &amp; Multifamily</a></li></ul></div>
     <div><h4>Tools</h4><ul>
+      <li><a href="{{BASE}}/deal-analyzer/">Deal Analyzer</a></li>
       <li><a href="{{BASE}}/estimate/">Rate &amp; Loan Estimator</a></li>
       <li><a href="{{BASE}}/dscr-calculator/">DSCR Calculator</a></li>
       <li><a href="{{BASE}}/fix-and-flip-calculator/">Fix &amp; Flip Calculator</a></li>
@@ -130,6 +131,7 @@ Get-ChildItem $srcDir -Recurse -Filter *.html | ForEach-Object {
   $canon = $meta["canon"]; if (-not $canon) { throw "Missing canon: $rel" }
   $robots = if ($meta["noindex"] -eq "true") { '<meta name="robots" content="noindex,follow">' } else { '' }
   $scripts = '<script src="{{BASE}}/static/site.js" defer></script>'
+  if ($body.Contains('id="analyzer"')) { $scripts += "`n" + '<script src="{{BASE}}/static/analyzer.js" defer></script>' }
   if ($body.Contains("data-qw")) { $scripts += "`n" + '<script src="{{BASE}}/static/quote.js" defer></script>' }
   $html = $head + $body + "`n" + $foot
   $html = $html.Replace("{{SCRIPTS}}", $scripts).Replace("{{ROBOTS}}", $robots)

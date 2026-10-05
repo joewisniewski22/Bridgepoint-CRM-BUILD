@@ -138,6 +138,10 @@ $qj = Join-Path $root "site-src\static\quote.js"
 $t = [IO.File]::ReadAllText($qj)
 $t = [regex]::Replace($t, 'var STATES = "[^"]*"\.split\(" "\);', 'var STATES = "' + $list + '".split(" ");')
 [IO.File]::WriteAllText($qj, $t, $utf8)
+$aj = Join-Path $root "site-src\static\analyzer.js"
+$t = [IO.File]::ReadAllText($aj)
+$t = [regex]::Replace($t, 'var STATES = "[^"]*"\.split\(" "\);', 'var STATES = "' + $list + '".split(" ");')
+[IO.File]::WriteAllText($aj, $t, $utf8)
 $pe = Join-Path $root "supabase\functions\public-estimate\index.ts"
 $t = [IO.File]::ReadAllText($pe)
 $arr = ($served | ForEach-Object { '"' + $_.abbr + '"' }) -join ","

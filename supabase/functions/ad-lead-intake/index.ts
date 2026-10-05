@@ -34,7 +34,7 @@ const ROUTE_TARGETS: Array<{ id: string; weight: number }> = [
 ];
 async function pickEnglishAdLO(client: ReturnType<typeof createClient>): Promise<string> {
   const { data } = await client.from("leads").select("assigned_to")
-    .gte("created_at", ROUTING_START).or("source.like.Meta Ads*,source.like.Website*Quote Form,source.like.Website*Application").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
+    .gte("created_at", ROUTING_START).or("source.like.Meta Ads*,source.like.Website*Quote Form,source.like.Website*Application,source.like.Website*Deal Analyzer").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
   const counts: Record<string, number> = {};
   (data || []).forEach((r: Record<string, unknown>) => { counts[r.assigned_to as string] = (counts[r.assigned_to as string] || 0) + 1; });
   const total = (data || []).length;
@@ -82,7 +82,8 @@ Deno.serve(async (req: Request) => {
     const program = LOAN_TYPES[String(b.program)] ? String(b.program) : "dscr";
     const loanType = LOAN_TYPES[program];
     const isSite = clean(b.src, 10) === "site";
-    const isApply = isSite && b.apply === true; // "Apply Now" on bplending.com: they get their application link on screen // bplending.com forms vs. the ad landing pages
+    const isApply = isSite && b.apply === true;
+    const isTool = isSite && clean(b.tool, 12) === "analyzer"; // the free Deal Analyzer on bplending.com // "Apply Now" on bplending.com: they get their application link on screen // bplending.com forms vs. the ad landing pages
     const channel = isSite ? "website" : "Meta-ad landing page";
     const stateCode = clean(b.state, 2).toUpperCase();
     const addressIn = clean(b.address, 160);
@@ -148,7 +149,7 @@ Deno.serve(async (req: Request) => {
       { date: today, type: "system", text: "TCPA consent recorded " + stamp + ": borrower checked the box agreeing to calls, texts and email from Bridgepoint Lending at " + phone + " / " + email + " (marketing, may be autodialed, not a condition of any loan; msg & data rates apply; reply STOP to opt out).", author: "System" },
     ];
     const row: Record<string, unknown> = {
-      id, name, email, phone, source: isSite ? ("Website — " + loanType + (isApply ? " Application" : " Quote Form")) : ("Meta Ads — " + loanType + " Landing Page"), loan_type: loanType, property_address: addressIn || null,
+      id, name, email, phone, source: isSite ? ("Website — " + loanType + (isApply ? " Application" : isTool ? " Deal Analyzer" : " Quote Form")) : ("Meta Ads — " + loanType + " Landing Page"), loan_type: loanType, property_address: addressIn || null,
       stage: isApply ? "app_sent" : "new", status: "active", application_sent_at: isApply ? today : null, assigned_to: ASSIGNEE, created_at: today, created_at_ts: stamp,
       property_type: propertyType, transaction_type: transactionType,
       credit_score: credit, experience_deals: experienceDeals,
@@ -194,7 +195,7 @@ Deno.serve(async (req: Request) => {
         if (rehab) known.push("Rehab budget: about $" + Math.round(rehab).toLocaleString());
         if (arv) known.push("After-repair value: about $" + Math.round(arv).toLocaleString());
         const prompt = "You are " + lo.name + ", a loan officer at Bridgepoint Lending (business-purpose real estate investor loans — not consumer mortgages). " +
-          "A real estate investor just filled out our " + loanType + " web form. Write a short first text message (max 3 sentences, plain, friendly, no emojis, no promises of approval, no rates). " +
+          "A real estate investor just filled out our " + loanType + " " + (isTool ? "Deal Analyzer on our website and downloaded their analysis" : "web form") + ". Write a short first text message (max 3 sentences, plain, friendly, no emojis, no promises of approval, no rates). " +
           "Thank them by first name, show you read their answers, and invite them to grab a quick call here: " + bookingLink + " — or just reply with the property address and you'll run numbers.\n\n" +
           "First name: " + name.split(/\s+/)[0] + "\nWhat they told us:\n- " + known.join("\n- ") + "\n\nReply with ONLY the message text.";
         const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
