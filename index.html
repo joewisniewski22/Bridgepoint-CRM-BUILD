@@ -734,6 +734,7 @@ var PREPAY_TERMS = [
 --------------------------------------------------------------------- */
 var ES_DICT = {
   "Co-Borrower / Co-Guarantor (leave blank if none)": "Co-prestatario / Co-garante (dejar en blanco si no hay)",
+  "Co-Borrower / Co-Guarantor": "Co-prestatario / Co-garante", "Is there a co-borrower?": "\u00bfHay un co-prestatario?",
   "Co-Borrower First Name": "Nombre del co-prestatario", "Co-Borrower Date of Birth": "Fecha de nacimiento del co-prestatario",
   "Co-Borrower Social Security Number": "N\u00famero de Seguro Social del co-prestatario", "Co-Borrower Ownership %": "% de propiedad del co-prestatario",
   "Co-Borrower Phone": "Tel\u00e9fono del co-prestatario", "Co-Borrower Email": "Correo del co-prestatario",
@@ -7075,7 +7076,7 @@ function quickEditGuarantor(leadId, fd){
   lead.guarantorPhone = fd.get("guarantorPhone") || null;
   lead.guarantorEmail = fd.get("guarantorEmail") || null;
   var coQuick = coPatchFromForm(fd); if (coQuick) Object.keys(coQuick).forEach(function(k){ lead[k] = coQuick[k]; });
-  var coSsnQuick = (fd.get("coSsn") || "").trim(); if (coSsnQuick) saveCoGuarantorSsn(leadId, coSsnQuick);
+  var coSsnQuick = (fd.get("coSsn") || "").trim(); if (coSsnQuick) saveCoGuarantorSsn(leadId, coSsnQuick); else if (fd.get("hasCoBorrower") === "No") clearCoSsnIfAny(leadId);
   lead.guarantorAddress = fd.get("guarantorAddress") || null;
   lead.entityLegalName = fd.get("entityLegalName") || null;
   var ownPct = fd.get("guarantorOwnershipPct");
@@ -15325,6 +15326,7 @@ function renderLoanGuidelineHint(lead){
    coPatchFromForm(), so nothing is entered twice. */
 function coNumOrNull(fd, k){ var x = fd.get(k); return (x === null || x === undefined || x === "") ? null : Number(x); }
 function coPatchFromForm(fd){
+  if (fd && fd.get("hasCoBorrower") === "No") return { coFirstName: null, coMiddleName: null, coLastName: null, coBirthday: null, coOwnershipPct: null, coPhone: null, coEmail: null, coAddress: null, coCitizenshipStatus: null, coCountryOfDomicile: null, coCreditScore: null, coExperienceDeals: null, coLiquidity: null, coMaritalStatus: null };
   if (!fd || fd.get("coFirstName") === null) return null; // this form has no co-borrower section: leave the saved values alone
   return {
     coFirstName: fd.get("coFirstName") || null, coMiddleName: fd.get("coMiddleName") || null, coLastName: fd.get("coLastName") || null,
@@ -15386,7 +15388,10 @@ function coApplicantBlockHTML(lead, L){
   var marOpts = ['<option value="">' + L("— Select —") + '</option>'].concat(["Married", "Unmarried"].map(function(o){
     return '<option value="' + o + '"' + (lead.coMaritalStatus === o ? " selected" : "") + '>' + L(o) + '</option>';
   })).join("");
-  return '<div class="hint" style="margin:14px 0 6px"><b>' + L("Co-Borrower / Co-Guarantor (leave blank if none)") + '</b></div>' +
+  var hasCo = !!(lead.coFirstName || lead.coLastName || lead.coEmail || lead.coPhone);
+  return '<div class="hint" style="margin:14px 0 6px"><b>' + L("Co-Borrower / Co-Guarantor") + '</b></div>' +
+    '<div class="form-row"><label>' + L("Is there a co-borrower?") + '</label><select class="select" name="hasCoBorrower"><option value="No"' + (hasCo ? "" : " selected") + '>' + L("No") + '</option><option value="Yes"' + (hasCo ? " selected" : "") + '>' + L("Yes") + '</option></select></div>' +
+    '<div data-co-fields style="' + (hasCo ? "" : "display:none") + '">' +
     '<div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
       '<div><label>' + L("Co-Borrower First Name") + '</label><input class="input" name="coFirstName" value="' + esc(v(lead.coFirstName)) + '"></div>' +
       '<div><label>' + L("Middle Name") + '</label><input class="input" name="coMiddleName" value="' + esc(v(lead.coMiddleName)) + '"></div>' +
@@ -15413,8 +15418,10 @@ function coApplicantBlockHTML(lead, L){
       '<div class="form-row"><label>' + L("Investing Experience (deals completed)") + '</label><input class="input" type="number" min="0" name="coExperienceDeals" value="' + esc(v(lead.coExperienceDeals)) + '"></div>' +
       '<div class="form-row"><label>' + L("Liquidity / Reserves") + '</label><input class="input" type="number" name="coLiquidity" value="' + esc(v(lead.coLiquidity)) + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="coMaritalStatus">' + marOpts + '</select></div>';
+    '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="coMaritalStatus">' + marOpts + '</select></div>' +
+    '</div>';
 }
+function clearCoSsnIfAny(leadId){ var l = leadById(leadId); if (l && l.coSsnLast4) saveCoGuarantorSsn(leadId, ""); }
 function coPdfSection(w, lead, heading){
   w.heading(heading);
   w.row("Name", [lead.coFirstName, lead.coMiddleName, lead.coLastName].filter(Boolean).join(" "));
@@ -15477,6 +15484,7 @@ function buildApplicationFieldsHTML(lead, lang, opts){
       '<div class="form-row"><label>' + L("Guarantor Phone") + '</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||lead.phone||"") + '"></div>' +
       '<div class="form-row"><label>' + L("Guarantor Email") + '</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||lead.email||"") + '"></div>' +
     '</div>' +
+    coApplicantBlockHTML(lead, L) +
     '<div class="form-row"><label>' + L("Entity Legal Name (if closing in an entity)") + '</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Entity Type") + '</label><select class="select" name="entityType">' + entityOptions + '</select></div>' +
@@ -15948,7 +15956,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (r.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>' +
 
-    coApplicantBlockHTML(lead, L) +
+
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Entity Details") + '</b></div>' +
     '<div class="form-two">' +
@@ -16198,7 +16206,7 @@ function buildDscrApplicationFieldsHTML(lead, lang){
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (d.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>' +
 
-    coApplicantBlockHTML(lead, L) +
+
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Entity Details") + '</b></div>' +
     '<div class="form-two">' +
@@ -17335,6 +17343,14 @@ var hideAllRevealedSsns = function(){
 };
 document.addEventListener("pointerup", hideAllRevealedSsns);
 document.addEventListener("pointercancel", hideAllRevealedSsns);
+// Co-borrower toggle: "Yes" opens the full co-borrower section, "No" hides it (and saving clears it).
+appEl.addEventListener("change", function(e){
+  var t = e.target;
+  if (!t || t.tagName !== "SELECT" || t.name !== "hasCoBorrower") return;
+  var f = t.closest("form");
+  var box = f && f.querySelector("[data-co-fields]");
+  if (box) box.style.display = t.value === "Yes" ? "" : "none";
+});
 // Shows the call-back date/time fields only while "Requested call back" is the chosen outcome.
 appEl.addEventListener("change", function(e){
   var t = e.target;
@@ -17469,7 +17485,7 @@ appEl.addEventListener("submit", function(e){
     var numOrNull = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
     var takeAppSsn = (fd.get("guarantorSsn") || "").trim();
     if (takeAppSsn) saveGuarantorSsn(form.dataset.lead, takeAppSsn);
-    var coSsnTake = (fd.get("coSsn") || "").trim(); if (coSsnTake) saveCoGuarantorSsn(form.dataset.lead, coSsnTake);
+    var coSsnTake = (fd.get("coSsn") || "").trim(); if (coSsnTake) saveCoGuarantorSsn(form.dataset.lead, coSsnTake); else if (fd.get("hasCoBorrower") === "No") clearCoSsnIfAny(form.dataset.lead);
     submitPhoneApplication(form.dataset.lead, {
       entityType: fd.get("entityType"),
       creditScore: numOrNull("creditScore"),
@@ -17528,7 +17544,7 @@ appEl.addEventListener("submit", function(e){
     var numOrNullEdit = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
     var editAppSsn = (fd.get("guarantorSsn") || "").trim();
     if (editAppSsn) saveGuarantorSsn(form.dataset.lead, editAppSsn);
-    var coSsnEdit = (fd.get("coSsn") || "").trim(); if (coSsnEdit) saveCoGuarantorSsn(form.dataset.lead, coSsnEdit);
+    var coSsnEdit = (fd.get("coSsn") || "").trim(); if (coSsnEdit) saveCoGuarantorSsn(form.dataset.lead, coSsnEdit); else if (fd.get("hasCoBorrower") === "No") clearCoSsnIfAny(form.dataset.lead);
     saveApplicationEdit(form.dataset.lead, {
       entityType: fd.get("entityType"),
       creditScore: numOrNullEdit("creditScore"),
@@ -17587,7 +17603,7 @@ appEl.addEventListener("submit", function(e){
     var numOrNullPub = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
     var pubSsn = (fd.get("guarantorSsn") || "").trim();
     if (pubSsn) saveGuarantorSsn(form.dataset.lead, pubSsn);
-    var coSsnPub = (fd.get("coSsn") || "").trim(); if (coSsnPub) saveCoGuarantorSsn(form.dataset.lead, coSsnPub);
+    var coSsnPub = (fd.get("coSsn") || "").trim(); if (coSsnPub) saveCoGuarantorSsn(form.dataset.lead, coSsnPub); else if (fd.get("hasCoBorrower") === "No") clearCoSsnIfAny(form.dataset.lead);
     var pubLead = leadById(form.dataset.lead);
     var pubAchData = extractAchFromForm(fd, signaturePadDataUrl("sig-ach-" + form.dataset.lead), pubLead && pubLead.achForm);
     var pubRtlData = extractRtlApplicationFromForm(fd, signaturePadDataUrl("sig-rtlapp-" + form.dataset.lead), pubLead && pubLead.rtlApp);
