@@ -121,7 +121,7 @@ Deno.serve(async (req: Request) => {
       (((l.phone as string) || "").replace(/\D/g, "").slice(-10) === phoneDigits) || (!!l.email && (l.email as string).toLowerCase() === email));
     if (existing) {
       const activity = (existing.activity as unknown[]) || [];
-      activity.push({ date: today, type: "note", text: "Filled out the " + loanType + " " + channel + " form again" + (utm ? " (" + utm + ")" : "") + " — already on file, no duplicate created", author: "System" });
+      activity.push({ date: today, type: "note", text: "Filled out the " + loanType + " " + (isTool ? "Deal Analyzer" : channel) + " form again" + (utm ? " (" + utm + ")" : "") + " — already on file, no duplicate created", author: "System" });
       await sb.from("leads").update({ activity }).eq("id", existing.id as string);
       if (existing.assigned_to) {
         await sb.from("notifications").insert({
@@ -129,7 +129,7 @@ Deno.serve(async (req: Request) => {
           text: (existing.name as string) + " just filled out the " + loanType + " " + (isSite ? "website" : "ad") + " form again — they're actively shopping", date: today, read: false,
         });
       }
-      return json({ ok: true, repeat: true, applyUrl: isApply && existing.application_token ? (CRM_URL + "?apply=" + existing.id + "&t=" + existing.application_token) : undefined });
+      return json({ ok: true, repeat: true, leadId: isTool ? (existing.id as string) : undefined, applyUrl: isApply && existing.application_token ? (CRM_URL + "?apply=" + existing.id + "&t=" + existing.application_token) : undefined });
     }
 
     // --- Build the file --------------------------------------------------

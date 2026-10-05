@@ -47,8 +47,11 @@ Deno.serve(async (req: Request) => {
 
     // gate: a real, recent analyzer lead
     const since = new Date(Date.now() - 2 * 86400000).toISOString();
-    const { data: lead } = await sb.from("leads").select("id,email,source,created_at_ts").eq("id", leadId).maybeSingle();
-    if (!lead || (lead.email || "").toLowerCase() !== email || !/Deal Analyzer/i.test(lead.source || "") || (lead.created_at_ts && lead.created_at_ts < since))
+    const { data: lead } = await sb.from("leads").select("id,email,source,created_at_ts,activity").eq("id", leadId).maybeSingle();
+    const day2 = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+    const recentNote = Array.isArray(lead && lead.activity) && (lead!.activity as Array<{ date?: string; text?: string }>).some((a) => /Deal Analyzer/i.test(a.text || "") && (a.date || "") >= day2);
+    const freshLead = !!lead && /Deal Analyzer/i.test(lead.source || "") && (!lead.created_at_ts || lead.created_at_ts >= since);
+    if (!lead || (lead.email || "").toLowerCase() !== email || !(freshLead || recentNote))
       return json({ error: "not_allowed", detail: "Please enter your contact information first." }, 403);
     const { count } = await sb.from("deal_data_hits").select("*", { count: "exact", head: true }).eq("lead_id", leadId);
     if ((count || 0) >= MAX_LOOKUPS_PER_LEAD) return json({ error: "limit", detail: "You've used your free property lookups. A loan officer can run more for you." }, 429);
@@ -77,18 +80,21 @@ Deno.serve(async (req: Request) => {
     if (rentR && rentR.ok) { const r = rentR.data as any; out.rentEstimate = { rent: r.rent, low: r.rentRangeLow, high: r.rentRangeHigh, comps: (r.comparables || []).slice(0, 5).map((c: any) => ({ address: c.formattedAddress, rent: c.price, sqft: c.squareFootage, beds: c.bedrooms, distance: c.distance })) }; }
 
     // closed sales (public records): nearby, similar size, last 12 months
-    if (need.indexOf("sold") !== -1 && num(subj.latitude) && num(subj.longitude)) {
+    if (need.indexOf("sold") !== -1 && Number.isFinite(Number(subj.latitude)) && Number.isFinite(Number(subj.longitude))) {
       const sqft = num(subj.squareFootage), beds = num(subj.bedrooms);
       const params: Record<string, string | number> = { latitude: subj.latitude, longitude: subj.longitude, radius: 1, saleDateRange: 365, propertyType: subj.propertyType || "Single Family", limit: 60 };
       if (beds) params.bedrooms = Math.max(1, beds - 1) + "-" + (beds + 1);
       if (sqft) params.squareFootage = Math.round(sqft * 0.75) + "-" + Math.round(sqft * 1.3);
       const sold = await rc("/properties", params);
       const rows = (Array.isArray(sold.data) ? sold.data : []) as any[];
-      const comps = rows.filter((p) => num(p.lastSalePrice) && num(p.squareFootage) && p.formattedAddress !== subj.formattedAddress && p.lastSaleDate).map((p) => ({
+      let comps = rows.filter((p) => num(p.lastSalePrice) && num(p.squareFootage) && p.formattedAddress !== subj.formattedAddress && p.lastSaleDate).map((p) => ({
         address: p.formattedAddress, soldDate: String(p.lastSaleDate).slice(0, 10), price: p.lastSalePrice, sqft: p.squareFootage, beds: p.bedrooms, baths: p.bathrooms, yearBuilt: p.yearBuilt,
         ppsf: Math.round(p.lastSalePrice / p.squareFootage), distance: Math.round(miles(subj.latitude, subj.longitude, p.latitude, p.longitude) * 100) / 100,
         score: Math.abs((p.squareFootage - (sqft || p.squareFootage)) / (sqft || p.squareFootage)) + (p.latitude ? miles(subj.latitude, subj.longitude, p.latitude, p.longitude) * 0.15 : 0),
-      })).sort((x, y) => x.score - y.score).slice(0, 12);
+      })).sort((x, y) => x.score - y.score);
+      // drop obvious non-market sales (partial interests, distressed transfers, data errors): far outside the typical $/sq ft
+      const med0 = median(comps.map((c) => c.ppsf)) || 0;
+      comps = comps.filter((c) => !med0 || (c.ppsf >= med0 * 0.55 && c.ppsf <= med0 * 1.8)).slice(0, 12);
       const ppsfs = comps.map((c) => c.ppsf), prices = comps.map((c) => c.price);
       out.soldComps = comps.map(({ score, ...c }) => c);
       out.compStats = { count: comps.length, medianPrice: median(prices), medianPpsf: median(ppsfs), lowPpsf: pct(ppsfs, 0.25), highPpsf: pct(ppsfs, 0.75),
