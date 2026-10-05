@@ -13,9 +13,9 @@
     ["ground", "Ground-up construction", "Build from the ground up"],
     ["portfolio", "Portfolio / blanket loan", "Several properties, one loan"]
   ];
-  var TYPES = [["SFR","Single-family"],["Duplex","Duplex"],["2-4 Unit","3–4 units"],["Multifamily 5+","5+ units"],["Condo","Condo"],["Mixed-Use","Mixed-use"]];
+  var TYPES = [["SFR","Single-family"],["Duplex","Duplex"],["2-4 Unit","3\u20134 units"],["Multifamily 5+","5+ units"],["Condo","Condo"],["Mixed-Use","Mixed-use"]];
   var CREDIT = ["760+","720-759","680-719","640-679","Under 640"];
-  var EXPERIENCE = [["First deal","First deal"],["1-2 deals","1–2"],["3-5 deals","3–5"],["6+ deals","6+"]];
+  var EXPERIENCE = [["First deal","First deal"],["1-2 deals","1\u20132"],["3-5 deals","3\u20135"],["6+ deals","6+"]];
   // States we do not lend in (Joe, 2026-10-04): NV, ND, SD (license-required). Remove more here as he confirms them.
   var STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NH NJ NM NY NC OH OK PA RI SC TN TX VA WA WV WI WY".split(" ");
 
@@ -87,7 +87,7 @@
           f += field("rehab", p === "ground" ? "Construction budget" : "Rehab budget", "60,000", true);
           f += field("arv", p === "ground" ? "Value when finished" : "After-repair value", "450,000", true);
         }
-        f += '<div><label class="f" for="qw-state">Property state</label><div class="in"><select id="qw-state" data-k="state"><option value="">Select…</option>' + STATES.map(function(s){ return '<option' + (S.state === s ? ' selected' : '') + '>' + s + '</option>'; }).join("") + '</select></div></div>';
+        f += '<div><label class="f" for="qw-state">Property state</label><div class="in"><select id="qw-state" data-k="state"><option value="">Select\u2026</option>' + STATES.map(function(s){ return '<option' + (S.state === s ? ' selected' : '') + '>' + s + '</option>'; }).join("") + '</select></div></div>';
         var extra = '';
         if (p !== "dscr" && p !== "portfolio") {
           extra += '<p class="q" style="margin-top:16px">Deals completed in the last 3 years</p><div class="choices two">' + EXPERIENCE.map(function(x){
@@ -97,19 +97,19 @@
         extra += '<p class="q" style="margin-top:16px">Estimated credit score</p><div class="choices two">' + CREDIT.map(function(x){
           return '<button type="button" class="choice' + (S.credit === x ? ' sel' : '') + '" data-act="credit" data-v="' + x + '">' + esc(x) + '</button>';
         }).join("") + '</div>';
-        return '<p class="q">The deal — rough numbers are fine</p><div class="fields two">' + f + '</div>' + extra +
+        return '<p class="q">The deal \u2014 rough numbers are fine</p><div class="fields two">' + f + '</div>' + extra +
           '<div class="nav2"><button type="button" class="btn ghostq" data-act="back">Back</button><button type="button" class="btn btn-navy" data-act="deal-next">' + (p === "portfolio" ? 'Continue' : 'See my estimate') + '</button></div>';
       }
       if (cur === "estimate") {
         var e = S.estimate;
-        if (!e) return '<div class="est"><div class="lbl">Checking live rates…</div><p style="margin:10px 0 0;color:var(--muted)">This takes a few seconds.</p></div>';
+        if (!e) return '<div class="est"><div class="lbl">Checking live rates\u2026</div><p style="margin:10px 0 0;color:var(--muted)">This takes a few seconds.</p></div>';
         var body;
         if (e.eligible) {
-          body = '<div class="lbl" style="margin-top:0">Estimated rate range</div><div class="big">' + pct(e.rateLow) + ' – ' + pct(e.rateHigh) + '</div>' +
+          body = '<div class="lbl" style="margin-top:0">Estimated rate range</div><div class="big">' + pct(e.rateLow) + ' \u2013 ' + pct(e.rateHigh) + '</div>' +
             (e.maxLoan ? '<div class="lbl">You could qualify for up to about</div><div class="big">' + usd(e.maxLoan) + '</div>' : '') +
-            '<small>This is an estimate to help you plan — not an offer, rate lock or commitment to lend. Your actual rate, loan amount and fees depend on the full file, underwriting and market conditions. A loan officer will confirm exact numbers.</small>';
+            '<small>This is an estimate to help you plan \u2014 not an offer, rate lock or commitment to lend. Your actual rate, loan amount and fees depend on the full file, underwriting and market conditions. A loan officer will confirm exact numbers.</small>';
         } else {
-          body = '<div class="big" style="font-size:24px">Let’s take a closer look</div><p style="margin:10px 0 0;color:var(--muted)">' + esc(e.message || 'Your scenario needs a loan officer’s eyes. We can often find a structure that works — send us your info and we’ll tell you what’s possible.') + '</p>';
+          body = '<div class="big" style="font-size:24px">Let\u2019s take a closer look</div><p style="margin:10px 0 0;color:var(--muted)">' + esc(e.message || 'Your scenario needs a loan officer\u2019s eyes. We can often find a structure that works \u2014 send us your info and we\u2019ll tell you what\u2019s possible.') + '</p>';
         }
         return '<div class="est">' + body + '</div><div class="nav2"><button type="button" class="btn ghostq" data-act="back">Back</button><button type="button" class="btn btn-gold" data-act="to-contact">Get my exact numbers</button></div>';
       }
@@ -165,11 +165,11 @@
 
     function validateDeal(){
       var p = S.program;
-      if (!S.value) { msg("Please enter the price or value — a rough number is fine."); return false; }
+      if (!S.value) { msg("Please enter the price or value \u2014 a rough number is fine."); return false; }
       if ((p === "dscr" || p === "portfolio") && !S.rent) { msg("Please enter the monthly rent."); return false; }
-      if ((p === "fixflip" || p === "ground") && (!S.rehab || !S.arv)) { msg("Please fill in the budget and finished value — rough is fine."); return false; }
-      if (!S.state) { msg("Please pick the property’s state."); return false; }
-      if (p !== "dscr" && p !== "portfolio" && !S.experience) { msg("Please pick how many deals you’ve done."); return false; }
+      if ((p === "fixflip" || p === "ground") && (!S.rehab || !S.arv)) { msg("Please fill in the budget and finished value \u2014 rough is fine."); return false; }
+      if (!S.state) { msg("Please pick the property\u2019s state."); return false; }
+      if (p !== "dscr" && p !== "portfolio" && !S.experience) { msg("Please pick how many deals you\u2019ve done."); return false; }
       if (!S.credit) { msg("Please pick your estimated credit score."); return false; }
       msg(""); return true;
     }
@@ -189,7 +189,7 @@
             S.estimateNote = "needs a closer look";
           }
           if (steps()[S.step] === "estimate") render();
-        }).catch(function(){ S.estimate = { eligible: false, message: "We couldn’t run that just now — leave your number and a loan officer will run it with you." }; if (steps()[S.step] === "estimate") render(); });
+        }).catch(function(){ S.estimate = { eligible: false, message: "We couldn\u2019t run that just now \u2014 leave your number and a loan officer will run it with you." }; if (steps()[S.step] === "estimate") render(); });
     }
 
     function submit(form){
@@ -199,7 +199,7 @@
       if (digits.length !== 10) return msg("Please enter a 10-digit mobile number.");
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return msg("Please enter a valid email.");
       if (!form.elements.consent.checked) return msg("Please check the box so we can contact you about your request.");
-      var btn = form.querySelector("[type=submit]"); btn.disabled = true; btn.textContent = "Sending…";
+      var btn = form.querySelector("[type=submit]"); btn.disabled = true; btn.textContent = "Sending\u2026";
       var body = Object.assign({}, utm, { src: "site", program: S.program, name: name, phone: phone, email: email, consent: true, website: form.elements.website.value,
         timeline: form.elements.timeline.value, goal: S.goal, propertyType: S.propertyType, value: S.value, rent: S.rent, rehab: S.rehab, arv: S.arv,
         credit: S.credit, experience: S.experience, state: S.state, estimate: S.estimateNote || "" });
@@ -210,7 +210,7 @@
           // The conversion event fires once, on the thank-you page (see site.js), so ads/analytics never double count.
           location.href = BASE + "/thank-you/?p=" + encodeURIComponent(S.program);
         })
-        .catch(function(err){ btn.disabled = false; btn.textContent = "Send me my numbers"; msg(err.message || "We couldn’t send that — please try again or call us."); });
+        .catch(function(err){ btn.disabled = false; btn.textContent = "Send me my numbers"; msg(err.message || "We couldn\u2019t send that \u2014 please try again or call us."); });
     }
 
     render();

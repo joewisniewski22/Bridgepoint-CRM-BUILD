@@ -8,16 +8,16 @@
   var API = "https://idzkigmvovehjpapatxv.supabase.co/functions/v1/";
   var STATES = "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NH NJ NM NY NC OH OK PA RI SC TN TX VA WA WV WI WY".split(" ");
   var CREDIT = ["760+","720-759","680-719","640-679","Under 640"];
-  var EXPERIENCE = [["First deal","First deal"],["1-2 deals","1–2 deals"],["3-5 deals","3–5 deals"],["6+ deals","6+ deals"]];
+  var EXPERIENCE = [["First deal","First deal"],["1-2 deals","1\u20132 deals"],["3-5 deals","3\u20135 deals"],["6+ deals","6+ deals"]];
 
   /* ---------- helpers ---------- */
   function usd(n, signed){
-    if (n === null || n === undefined || !isFinite(n)) return "—";
+    if (n === null || n === undefined || !isFinite(n)) return "\u2014";
     var s = "$" + Math.round(Math.abs(n)).toLocaleString("en-US");
     return n < 0 ? "-" + s : (signed && n > 0 ? "+" + s : s);
   }
-  function pct(n, d){ return (n === null || n === undefined || !isFinite(n)) ? "—" : (n * 100).toFixed(d === undefined ? 1 : d) + "%"; }
-  function mult(n){ return (!isFinite(n) || n <= 0) ? "—" : n.toFixed(1) + "x"; }
+  function pct(n, d){ return (n === null || n === undefined || !isFinite(n)) ? "\u2014" : (n * 100).toFixed(d === undefined ? 1 : d) + "%"; }
+  function mult(n){ return (!isFinite(n) || n <= 0) ? "\u2014" : n.toFixed(1) + "x"; }
   function pmt(loan, ratePct, months){
     var r = ratePct / 100 / 12;
     if (!loan || loan <= 0) return 0;
@@ -330,22 +330,22 @@
       '<div class="az-tabs" role="tablist">' + tabs + '</div>' +
       '<div class="az-grid"><div class="az-card"><h2 id="az-title"></h2><p class="az-blurb" id="az-blurb"></p>' +
         '<div class="az-fields" id="az-fields"></div>' +
-        '<details class="az-fin"><summary>Financing assumptions <span>(editable — we prefill a ballpark rate from our live estimator)</span></summary><div class="az-fields" id="az-fin"></div></details>' +
+        '<details class="az-fin"><summary>Financing assumptions <span>(editable \u2014 we prefill a ballpark rate from our live estimator)</span></summary><div class="az-fields" id="az-fin"></div></details>' +
         '<h3 class="az-h3">Your profile <span>(used for the ballpark rate)</span></h3><div class="az-fields two">' +
-          '<div class="az-f"><label for="az-state">Property state</label><div class="az-in"><select id="az-state"><option value="">Select…</option>' + STATES.map(function(s){ return '<option>' + s + '</option>'; }).join("") + '</select></div></div>' +
+          '<div class="az-f"><label for="az-state">Property state</label><div class="az-in"><select id="az-state"><option value="">Select\u2026</option>' + STATES.map(function(s){ return '<option>' + s + '</option>'; }).join("") + '</select></div></div>' +
           '<div class="az-f"><label for="az-credit">Credit score</label><div class="az-in"><select id="az-credit">' + CREDIT.map(function(c){ return '<option' + (c === "720-759" ? " selected" : "") + '>' + c + '</option>'; }).join("") + '</select></div></div>' +
           '<div class="az-f"><label for="az-exp">Experience</label><div class="az-in"><select id="az-exp">' + EXPERIENCE.map(function(c){ return '<option value="' + c[0] + '"' + (c[0] === "1-2 deals" ? " selected" : "") + '>' + c[1] + '</option>'; }).join("") + '</select></div></div>' +
         '</div>' +
         '<h3 class="az-h3">Property address <span>(optional: unlocks real recent sales, value range and market data)</span></h3>' +
         '<div class="az-f"><label for="az-addr">Street, city, state, ZIP</label><div class="az-in"><input id="az-addr" autocomplete="street-address" placeholder="e.g. 123 Main St, Tampa, FL 33602"></div></div>' +
         '<details class="az-fin" id="az-rehab"><summary>Estimate my rehab budget <span>(uses real materials-cost data)</span></summary><div class="az-fields two">' +
-          '<div class="az-f"><label for="az-scope">Scope of work</label><div class="az-in"><select id="az-scope"><option value="">Chooseâ€¦</option>' + Object.keys(SCOPES).map(function(k){ return '<option value="' + k + '">' + SCOPES[k].label + '</option>'; }).join("") + '</select></div></div>' +
+          '<div class="az-f"><label for="az-scope">Scope of work</label><div class="az-in"><select id="az-scope"><option value="">Choose\u2026</option>' + Object.keys(SCOPES).map(function(k){ return '<option value="' + k + '">' + SCOPES[k].label + '</option>'; }).join("") + '</select></div></div>' +
           '<div class="az-f"><label for="az-sqft">Living area (sq ft)</label><div class="az-in"><input id="az-sqft" inputmode="numeric" placeholder="auto-filled from the address"></div></div></div>' +
           '<div id="az-rehabout"></div></details>' +
         '<div class="az-err" id="az-err" role="alert" aria-live="polite"></div>' +
         '<button type="button" class="btn btn-gold az-go" id="az-go">Analyze my deal</button></div>' +
       '<div class="az-out" id="az-out"><div class="az-empty"><b>Your analysis appears here.</b><br>Enter your numbers and click <em>Analyze my deal</em>. You&rsquo;ll see profit, return on your cash, financed vs. all-cash, and a stress test, then you can download it as a PDF.</div></div></div>' +
-      '<div class="az-modal" id="az-modal" hidden><div class="az-box"><button type="button" class="az-x" id="az-x" aria-label="Close">×</button>' +
+      '<div class="az-modal" id="az-modal" hidden><div class="az-box"><button type="button" class="az-x" id="az-x" aria-label="Close">\u00d7</button>' +
         '<h3 id="az-mtitle">Where should we send your PDF?</h3><p id="az-mtext">Your analysis downloads right away. A loan officer may follow up with exact numbers for this deal.</p>' +
         '<form id="az-form" novalidate><div class="az-fields"><div class="az-f"><label for="az-name">Full name</label><div class="az-in"><input id="az-name" name="name" autocomplete="name" value="' + esc(saved.name || "") + '"></div></div>' +
         '<div class="az-fields two"><div class="az-f"><label for="az-phone">Mobile phone</label><div class="az-in"><input id="az-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" value="' + esc(saved.phone || "") + '"></div></div>' +
@@ -453,14 +453,14 @@
 
     function runAnalysis(){
       var err = el("az-err"), btn = el("az-go"), i = readGroup("i"), f = readGroup("f"), addr = currentAddress(), d = DEALS[type];
-      btn.disabled = true; btn.textContent = addr ? "Pulling recent sales and running the numbers…" : "Running the numbers…";
+      btn.disabled = true; btn.textContent = addr ? "Pulling recent sales and running the numbers\u2026" : "Running the numbers\u2026";
       var needs = type === "rental" ? ["value", "rent", "market"] : ["value", "sold", "market"];
       var proP = (addr.length >= 8 && contact && contact.leadId)
         ? fetch(API + "deal-data", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address: addr, leadId: contact.leadId, email: contact.email, need: needs }) }).then(function(r){ return r.json(); }).catch(function(){ return null; })
         : Promise.resolve(null);
       Promise.all([fetchBallpark(i), proP, getCostIndex()]).then(function(res){
         var bp = res[0], pd = res[1], idx = res[2], rateNote, pro = null, arvNote = null, rentNote = null, rehab = null;
-        if (bp && !touchedRate){ f.rate = bp.rateHigh; rateNote = "Interest rate " + bp.rateHigh + "% is the top of our live ballpark range (" + bp.rateLow + "%–" + bp.rateHigh + "%) for your profile. Your actual rate depends on the full loan file."; }
+        if (bp && !touchedRate){ f.rate = bp.rateHigh; rateNote = "Interest rate " + bp.rateHigh + "% is the top of our live ballpark range (" + bp.rateLow + "%\u2013" + bp.rateHigh + "%) for your profile. Your actual rate depends on the full loan file."; }
         else if (touchedRate){ rateNote = "Interest rate " + f.rate + "% was entered by you. Ask a loan officer for current pricing on your deal."; }
         else { rateNote = "Interest rate " + f.rate + "% is a typical assumption (a live ballpark was unavailable). Ask a loan officer for current pricing."; }
         f.maxLoan = (bp && bp.maxLoan) ? bp.maxLoan : null;
@@ -509,7 +509,7 @@
       if (phone.length !== 10) return err.textContent = "Please enter a 10-digit phone number.";
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err.textContent = "Please enter a valid email.";
       if (!f.elements.consent.checked) return err.textContent = "Please check the box so we can contact you about your request.";
-      var btn = el("az-dl"); btn.disabled = true; btn.textContent = "One moment…";
+      var btn = el("az-dl"); btn.disabled = true; btn.textContent = "One moment\u2026";
       submitLead({ name: name, phone: f.elements.phone.value, email: email, website: f.elements.website.value }).then(function(){
         btn.disabled = false; btn.textContent = "Continue"; el("az-modal").hidden = true;
         if (pendingRun){ pendingRun = false; runAnalysis(); }
@@ -538,12 +538,12 @@
 
     function proHTML(r){
       var p = r.pro; if (!p) return "";
-      var s = p.subject || {}, facts = [s.address, s.beds ? s.beds + " bd" : null, s.baths ? s.baths + " ba" : null, s.sqft ? Number(s.sqft).toLocaleString("en-US") + " sq ft" : null, s.yearBuilt ? "built " + s.yearBuilt : null, s.lastSalePrice ? "last sold " + usd(s.lastSalePrice) + (s.lastSaleDate ? " (" + String(s.lastSaleDate).slice(0, 4) + ")" : "") : null].filter(Boolean).join(" · ");
+      var s = p.subject || {}, facts = [s.address, s.beds ? s.beds + " bd" : null, s.baths ? s.baths + " ba" : null, s.sqft ? Number(s.sqft).toLocaleString("en-US") + " sq ft" : null, s.yearBuilt ? "built " + s.yearBuilt : null, s.lastSalePrice ? "last sold " + usd(s.lastSalePrice) + (s.lastSaleDate ? " (" + String(s.lastSaleDate).slice(0, 4) + ")" : "") : null].filter(Boolean).join(" \u00b7 ");
       var html = '<h3 class="az-h3">Property &amp; market data <span>real data for this address</span></h3><div class="az-pro"><p class="az-facts">' + esc(facts) + '</p>';
       if (p.verdict) html += '<div class="az-call ' + esc(p.verdict.tone) + '">' + esc(p.verdict.text) + '</div>';
       if (p.soldComps && p.soldComps.length){
         html += '<table class="az-table az-comps"><thead><tr><th>Closed sale nearby (last 12 months)</th><th class="r">Sold</th><th class="r">Price</th><th class="r">Sq ft</th><th class="r">$/sq ft</th><th class="r">Mi</th></tr></thead><tbody>' +
-          p.soldComps.slice(0, 8).map(function(c){ return '<tr><td>' + esc(c.address) + '</td><td class="r">' + esc(String(c.soldDate).slice(0, 7)) + '</td><td class="r">' + usd(c.price) + '</td><td class="r">' + Number(c.sqft).toLocaleString("en-US") + '</td><td class="r">' + usd(c.ppsf) + '</td><td class="r">' + (c.distance != null ? c.distance.toFixed(2) : "—") + '</td></tr>'; }).join("") + '</tbody></table>';
+          p.soldComps.slice(0, 8).map(function(c){ return '<tr><td>' + esc(c.address) + '</td><td class="r">' + esc(String(c.soldDate).slice(0, 7)) + '</td><td class="r">' + usd(c.price) + '</td><td class="r">' + Number(c.sqft).toLocaleString("en-US") + '</td><td class="r">' + usd(c.ppsf) + '</td><td class="r">' + (c.distance != null ? c.distance.toFixed(2) : "\u2014") + '</td></tr>'; }).join("") + '</tbody></table>';
       }
       if (p.valueEstimate && p.valueEstimate.price) html += '<p class="az-fine">Automated value estimate: ' + usd(p.valueEstimate.price) + ' (range ' + usd(p.valueEstimate.low) + ' to ' + usd(p.valueEstimate.high) + ').' + (p.rentEstimate && p.rentEstimate.rent ? ' Estimated market rent: ' + usd(p.rentEstimate.rent) + ' a month (' + usd(p.rentEstimate.low) + ' to ' + usd(p.rentEstimate.high) + ').' : '') + '</p>';
       if (p.market && p.market.medianPrice) html += '<p class="az-fine">Local market (' + esc(p.market.zip || "") + '): median sale price ' + usd(p.market.medianPrice) + (p.market.medianDaysOnMarket ? ', median ' + Math.round(p.market.medianDaysOnMarket) + ' days on market' : '') + '.</p>';
@@ -561,7 +561,7 @@
         var wa = Math.max(2, Math.max(r.chart.a[n], 0) / maxV * 100), wb = Math.max(2, Math.max(r.chart.b[n], 0) / maxV * 100);
         return '<div class="az-row"><div class="az-rl">' + esc(lab) + '</div><div class="az-bars"><div class="az-bar a" style="width:' + wa + '%"><span>All cash ' + esc(r.chart.fmt(r.chart.a[n])) + '</span></div><div class="az-bar b" style="width:' + wb + '%"><span>Financed ' + esc(r.chart.fmt(r.chart.b[n])) + '</span></div></div></div>';
       }).join("") + '</div>';
-      var stress = '<table class="az-table"><thead><tr><th>If this happens…</th>' + (r.stressKind === "rental" ? '<th class="r">Cash flow / mo</th><th class="r">DSCR</th>' : '<th class="r">Net profit</th><th class="r">Return on cash</th>') + '</tr></thead><tbody>' +
+      var stress = '<table class="az-table"><thead><tr><th>If this happens\u2026</th>' + (r.stressKind === "rental" ? '<th class="r">Cash flow / mo</th><th class="r">DSCR</th>' : '<th class="r">Net profit</th><th class="r">Return on cash</th>') + '</tr></thead><tbody>' +
         r.stress.map(function(s){ return r.stressKind === "rental" ? '<tr><td>' + esc(s.name) + '</td><td class="r ' + (s.cf < 0 ? "neg" : "") + '">' + usd(s.cf) + '</td><td class="r ' + (s.dscr < 1 ? "neg" : "") + '">' + s.dscr.toFixed(2) + '</td></tr>' : '<tr><td>' + esc(s.name) + '</td><td class="r ' + (s.profit < 0 ? "neg" : "") + '">' + usd(s.profit) + '</td><td class="r ' + (s.roi < 0 ? "neg" : "") + '">' + pct(s.roi, 0) + '</td></tr>'; }).join("") + '</tbody></table>';
       return '<div class="az-res"><div class="az-head">' + esc(r.label) + ' analysis</div><h2>' + esc(r.headline) + '</h2><div class="az-kpis">' + kp + '</div>' +
         proHTML(r) + '<h3 class="az-h3">Financed vs. all-cash</h3>' + tbl + chart +
@@ -684,8 +684,8 @@
         need(150); h2("Stress test");
         para(r.stressNote + ".", 8.5, MUTED, 0, 6);
         var srows = r.stressKind === "rental"
-          ? [["If this happens…", "Cash flow / month", "DSCR"]].concat(r.stress.map(function(s){ return [s.name, usd(s.cf), s.dscr.toFixed(2)]; }))
-          : [["If this happens…", "Net profit", "Return on cash"]].concat(r.stress.map(function(s){ return [s.name, usd(s.profit), pct(s.roi, 0)]; }));
+          ? [["If this happens\u2026", "Cash flow / month", "DSCR"]].concat(r.stress.map(function(s){ return [s.name, usd(s.cf), s.dscr.toFixed(2)]; }))
+          : [["If this happens\u2026", "Net profit", "Return on cash"]].concat(r.stress.map(function(s){ return [s.name, usd(s.profit), pct(s.roi, 0)]; }));
         table(srows, cw);
         h2("Your inputs & assumptions");
         r.inputs.forEach(function(row){ need(14); doc.setFont("helvetica", "normal"); doc.setFontSize(9); setC(MUTED); doc.text(row[0], M, y); setC(INK); doc.setFont("helvetica", "bold"); doc.text(row[1], M + 220, y); y += 14; });

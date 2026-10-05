@@ -26,13 +26,13 @@
       var pi = io ? loan * rate / 100 / 12 : monthlyPmt(loan, rate, 30);
       var pitia = pi + tax + ins + hoa;
       var ratio = pitia > 0 ? rent / pitia : 0;
-      document.getElementById("r-ratio").textContent = pitia > 0 ? ratio.toFixed(2) + "x" : "—";
+      document.getElementById("r-ratio").textContent = pitia > 0 ? ratio.toFixed(2) + "x" : "\u2014";
       document.getElementById("r-loan").textContent = usd(loan);
       document.getElementById("r-pi").textContent = usd(pi);
       document.getElementById("r-pitia").textContent = usd(pitia);
       document.getElementById("r-cash").textContent = usd(rent - pitia);
       var v = document.getElementById("r-verdict");
-      v.textContent = !pitia ? "Enter the numbers to see your ratio." : ratio >= 1.25 ? "Strong — this ratio is comfortable for most DSCR programs." : ratio >= 1.0 ? "Qualifies on many DSCR programs. Some lenders prefer a bit more cushion." : ratio >= 0.75 ? "Below 1.0 — some programs allow it, usually with a lower loan-to-value or higher rate." : "Rent does not cover the payment — a loan officer can show options (lower leverage, interest-only, or a different structure).";
+      v.textContent = !pitia ? "Enter the numbers to see your ratio." : ratio >= 1.25 ? "Strong \u2014 this ratio is comfortable for most DSCR programs." : ratio >= 1.0 ? "Qualifies on many DSCR programs. Some lenders prefer a bit more cushion." : ratio >= 0.75 ? "Below 1.0 \u2014 some programs allow it, usually with a lower loan-to-value or higher rate." : "Rent does not cover the payment \u2014 a loan officer can show options (lower leverage, interest-only, or a different structure).";
     };
     dscr.addEventListener("input", runDscr); runDscr();
   }
@@ -57,7 +57,7 @@
       document.getElementById("fr-sell").textContent = usd(selling);
       document.getElementById("fr-70").textContent = usd(arv * 0.7 - rehab);
       var v = document.getElementById("fr-verdict");
-      v.textContent = !arv ? "Enter the numbers to see your estimated profit." : (profit / Math.max(arv, 1) >= 0.1) ? "Healthy margin — over 10% of the resale price." : profit > 0 ? "Thin margin — small surprises could erase it." : "This deal loses money at these numbers.";
+      v.textContent = !arv ? "Enter the numbers to see your estimated profit." : (profit / Math.max(arv, 1) >= 0.1) ? "Healthy margin \u2014 over 10% of the resale price." : profit > 0 ? "Thin margin \u2014 small surprises could erase it." : "This deal loses money at these numbers.";
     };
     flip.addEventListener("input", runFlip); runFlip();
   }
@@ -81,7 +81,7 @@
         g.innerHTML = rows.map(function(d){
           var loc = [d.city, d.state].filter(Boolean).join(", ");
           return '<a class="fd-card" href="/funded/' + esc(d.slug) + '/">' + (d.imageUrl ? '<img class="fd-img" loading="lazy" alt="Funded property in ' + esc(loc) + '" src="' + esc(d.imageUrl) + '">' : '') +
-            '<div class="fd-body"><div class="cat">' + esc(d.loanType || "Loan") + '</div><h3>' + esc(d.headline || (d.loanType + " loan in " + loc)) + '</h3><p>' + esc(loc) + (d.propertyType ? " · " + esc(d.propertyType) : "") + '</p>' + (d.loanAmount ? '<span class="fd-amt">$' + Math.round(d.loanAmount).toLocaleString("en-US") + '</span>' : '') + '</div></a>';
+            '<div class="fd-body"><div class="cat">' + esc(d.loanType || "Loan") + '</div><h3>' + esc(d.headline || (d.loanType + " loan in " + loc)) + '</h3><p>' + esc(loc) + (d.propertyType ? " \u00b7 " + esc(d.propertyType) : "") + '</p>' + (d.loanAmount ? '<span class="fd-amt">$' + Math.round(d.loanAmount).toLocaleString("en-US") + '</span>' : '') + '</div></a>';
         }).join("");
         recent.hidden = false;
       }
@@ -94,9 +94,9 @@
         .then(function(r){ return r.ok ? r.json() : []; }).then(function(rows){
           if (!rows || !rows.length) return;
           rv.querySelector(".rv-grid").innerHTML = rows.map(function(x){
-            var stars = ""; for (var i = 0; i < 5; i++) stars += i < x.rating ? "★" : "☆";
+            var stars = ""; for (var i = 0; i < 5; i++) stars += i < x.rating ? "\u2605" : "\u2606";
             var loc = [x.city, x.state].filter(Boolean).join(", ");
-            return '<div class="rv"><div class="stars" aria-label="' + x.rating + ' out of 5 stars">' + stars + '</div><p>“' + esc(x.body) + '”</p><div class="who">' + esc(x.author) + (loc ? " · " + esc(loc) : "") + (x.source ? " · via " + esc(x.source) : "") + '</div></div>';
+            return '<div class="rv"><div class="stars" aria-label="' + x.rating + ' out of 5 stars">' + stars + '</div><p>\u201c' + esc(x.body) + '\u201d</p><div class="who">' + esc(x.author) + (loc ? " \u00b7 " + esc(loc) : "") + (x.source ? " \u00b7 via " + esc(x.source) : "") + '</div></div>';
           }).join("");
           rv.hidden = false;
         }).catch(function(){});
