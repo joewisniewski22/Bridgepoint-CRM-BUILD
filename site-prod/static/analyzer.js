@@ -419,6 +419,70 @@
     root.addEventListener("change", function(e){ if (e.target && (e.target.id === "az-scope" || e.target.id === "az-state")) updateRehabOut(); });
     getCostIndex();
 
+    /* ---------- address autocomplete (Google Places). If the key is not allowed on this site the box simply stays a plain input. ---------- */
+    (function(){
+      var PK = "AIzaSyDS6Qm6Rm2HJYRwo4GQrMMGMm487F8v-sQ", inp = el("az-addr"), list = document.createElement("ul"), items = [], active = -1, timer = null, token = "", dead = false, seq = 0;
+      if (!inp || !window.fetch) return;
+      list.className = "az-sug"; list.id = "az-sug"; list.setAttribute("role", "listbox"); list.hidden = true;
+      inp.parentNode.appendChild(list);
+      inp.setAttribute("role", "combobox"); inp.setAttribute("aria-expanded", "false"); inp.setAttribute("aria-controls", "az-sug"); inp.setAttribute("aria-autocomplete", "list");
+      inp.setAttribute("autocomplete", "off");
+      function newToken(){ token = Math.random().toString(36).slice(2) + Date.now().toString(36); }
+      function close(){ list.hidden = true; inp.setAttribute("aria-expanded", "false"); active = -1; }
+      function paint(){
+        if (!items.length){ close(); return; }
+        list.innerHTML = items.map(function(s, n){
+          return '<li role="option" id="az-sug' + n + '" data-n="' + n + '"' + (n === active ? ' class="on" aria-selected="true"' : '') + '><b>' + esc(s.main) + '</b> <span>' + esc(s.sec) + '</span></li>';
+        }).join("");
+        list.hidden = false; inp.setAttribute("aria-expanded", "true");
+      }
+      function ask(q){
+        var mine = ++seq;
+        fetch("https://places.googleapis.com/v1/places:autocomplete", { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": PK },
+          body: JSON.stringify({ input: q, sessionToken: token, includedRegionCodes: ["us"], includedPrimaryTypes: ["street_address", "premise", "subpremise"] }) })
+          .then(function(r){ if (!r.ok) { dead = true; return null; } return r.json(); })
+          .then(function(j){
+            if (mine !== seq || !j) return;
+            items = (j.suggestions || []).filter(function(s){ return s.placePrediction; }).slice(0, 5).map(function(s){
+              var p = s.placePrediction, sf = p.structuredFormat || {};
+              return { id: p.placeId, main: (sf.mainText && sf.mainText.text) || p.text.text, sec: ((sf.secondaryText && sf.secondaryText.text) || "").replace(/,\s*USA$/, ""), full: p.text.text };
+            });
+            active = -1; paint();
+          }).catch(function(){ dead = true; });
+      }
+      function pick(n){
+        var s = items[n]; if (!s) return;
+        inp.value = s.full.replace(/,\s*USA$/, ""); close();
+        fetch("https://places.googleapis.com/v1/places/" + encodeURIComponent(s.id) + "?sessionToken=" + encodeURIComponent(token), { headers: { "X-Goog-Api-Key": PK, "X-Goog-FieldMask": "formattedAddress,addressComponents" } })
+          .then(function(r){ return r.ok ? r.json() : null; })
+          .then(function(d){
+            newToken(); if (!d) return;
+            if (d.formattedAddress) inp.value = d.formattedAddress.replace(/,\s*USA$/, "");
+            (d.addressComponents || []).forEach(function(c){
+              if ((c.types || []).indexOf("administrative_area_level_1") !== -1 && c.shortText){
+                var sel = el("az-state"); if (sel && !sel.value){ for (var k = 0; k < sel.options.length; k++){ if (sel.options[k].value === c.shortText){ sel.value = c.shortText; updateRehabOut(); break; } } }
+              }
+            });
+          }).catch(function(){ newToken(); });
+      }
+      newToken();
+      inp.addEventListener("input", function(){
+        clearTimeout(timer);
+        var q = inp.value.trim();
+        if (dead || q.length < 4){ items = []; close(); return; }
+        timer = setTimeout(function(){ ask(q); }, 220);
+      });
+      inp.addEventListener("keydown", function(e){
+        if (list.hidden || !items.length) return;
+        if (e.key === "ArrowDown"){ e.preventDefault(); active = (active + 1) % items.length; paint(); }
+        else if (e.key === "ArrowUp"){ e.preventDefault(); active = (active - 1 + items.length) % items.length; paint(); }
+        else if (e.key === "Enter" && active >= 0){ e.preventDefault(); pick(active); }
+        else if (e.key === "Escape"){ close(); }
+      });
+      list.addEventListener("mousedown", function(e){ var li = e.target.closest ? e.target.closest("li") : null; if (li){ e.preventDefault(); pick(Number(li.getAttribute("data-n"))); } });
+      inp.addEventListener("blur", function(){ setTimeout(close, 120); });
+    })();
+
     function openContactModal(title, text){
       el("az-mtitle").textContent = title; el("az-mtext").textContent = text; el("az-ferr").textContent = ""; el("az-modal").hidden = false;
     }
@@ -453,7 +517,7 @@
 
     function runAnalysis(){
       var err = el("az-err"), btn = el("az-go"), i = readGroup("i"), f = readGroup("f"), addr = currentAddress(), d = DEALS[type];
-      btn.disabled = true; btn.textContent = addr ? "Pulling recent sales and running the numbers\u2026" : "Running the numbers\u2026";
+      btn.disabled = true; btn.textContent = "Putting together your deal analysis\u2026";
       var needs = type === "rental" ? ["value", "rent", "market"] : ["value", "sold", "market"];
       var proP = (addr.length >= 8 && contact && contact.leadId)
         ? fetch(API + "deal-data", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address: addr, leadId: contact.leadId, email: contact.email, need: needs }) }).then(function(r){ return r.json(); }).catch(function(){ return null; })
@@ -477,7 +541,7 @@
           }
           if (pd.subject && pd.subject.sqft && !el("az-sqft").value){ el("az-sqft").value = Number(pd.subject.sqft).toLocaleString("en-US"); }
         } else if (pd && pd.found === false){ err.textContent = pd.detail || "We couldn't find that address, so this analysis uses your numbers only."; }
-        else if (pd && pd.error){ err.textContent = pd.detail || ""; }
+        else if (pd && pd.error){ err.textContent = pd.error === "not_allowed" ? "We couldn't pull property data for this address, so this analysis uses your numbers. Call or text (850) 279-8588 and we'll run it for you." : (pd.detail || ""); }
         var scope = el("az-scope").value, sq = parseFloat(String(el("az-sqft").value).replace(/[^0-9.]/g, ""));
         if ((type === "flip" || type === "bridge") && scope && sq) rehab = rehabEstimate(scope, sq, el("az-state").value, idx);
         lastReport = buildReport(type, i, f, { rateNote: rateNote, pro: pro, arvNote: arvNote, rentNote: rentNote, rehab: rehab });
@@ -509,12 +573,17 @@
       if (phone.length !== 10) return err.textContent = "Please enter a 10-digit phone number.";
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err.textContent = "Please enter a valid email.";
       if (!f.elements.consent.checked) return err.textContent = "Please check the box so we can contact you about your request.";
-      var btn = el("az-dl"); btn.disabled = true; btn.textContent = "One moment\u2026";
+      var btn = el("az-dl"), running = pendingRun, gb = el("az-go");
+      btn.disabled = true; btn.textContent = "One moment\u2026";
+      if (running){ el("az-modal").hidden = true; gb.disabled = true; gb.textContent = "Putting together your deal analysis\u2026"; }
       submitLead({ name: name, phone: f.elements.phone.value, email: email, website: f.elements.website.value }).then(function(){
         btn.disabled = false; btn.textContent = "Continue"; el("az-modal").hidden = true;
         if (pendingRun){ pendingRun = false; runAnalysis(); }
         else if (pendingDownload){ pendingDownload = false; deliver({ download: true }); }
-      }).catch(function(){ btn.disabled = false; btn.textContent = "Continue"; err.textContent = "Something went wrong. Please try again or call (850) 279-8588."; });
+      }).catch(function(){
+        btn.disabled = false; btn.textContent = "Continue"; err.textContent = "Something went wrong. Please try again or call (850) 279-8588.";
+        if (running){ gb.disabled = false; gb.textContent = "Analyze my deal"; el("az-modal").hidden = false; }
+      });
     });
 
     function emailReport(rep, doc, fname){
