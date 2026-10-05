@@ -1,0 +1,12 @@
+bplending.com DNS before cutover to Vercel (NameBright), captured 2026-10-05.
+ROLLBACK = set these two records back; all other records (email, DKIM, SPF, Mailgun, Postmark) were NOT changed.
+
+A      @    162.159.140.166                 (TTL 1h)   -> changed to 216.150.1.1
+CNAME  www  vibe.ludicrous.cloud            (TTL 1h)   -> changed to 89d8ed1195d7d870.vercel-dns-017.com.
+
+Unchanged (do not touch):
+CNAME autodiscover -> autodiscover.outlook.com
+CNAME selector1._domainkey / selector2._domainkey -> Microsoft DKIM
+CNAME email.mail -> mailgun.org ; CNAME pm-bounces -> pm.mtasv.net
+MX @ -> bplending-com.mail.protection.outlook.com (0) ; MX mail -> mxa/mxb.mailgun.org (10)
+TXT @ SPF (Outlook), TXT mail SPF, smtp._domainkey.mail, _dmarc.mail, 20260828194010pm._domainkey (Postmark)
