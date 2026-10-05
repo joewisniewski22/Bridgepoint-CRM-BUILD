@@ -49,7 +49,7 @@ $head = @'
 <meta property="og:title" content="{{TITLE}}">
 <meta property="og:description" content="{{DESC}}">
 <meta property="og:url" content="{{DOMAIN}}{{CANON}}">
-<meta property="og:image" content="{{DOMAIN}}/static/logo-wide.png">
+<meta property="og:image" content="{{DOMAIN}}{{OGIMG}}">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="{{BASE}}/static/icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -135,7 +135,7 @@ Get-ChildItem $srcDir -Recurse -Filter *.html | ForEach-Object {
   if ($body.Contains("data-qw")) { $scripts += "`n" + '<script src="{{BASE}}/static/quote.js" defer></script>' }
   $html = $head + $body + "`n" + $foot
   $html = $html.Replace("{{SCRIPTS}}", $scripts).Replace("{{ROBOTS}}", $robots)
-  $html = $html.Replace("{{TITLE}}", $meta["title"]).Replace("{{DESC}}", $meta["description"]).Replace("{{CANON}}", $canon).Replace("{{DOMAIN}}", $domain).Replace("{{BASE}}", $Base).Replace("{{EXCLUDED_NAMES}}", $exNames).Replace("{{STATE_COUNT}}", [string]$stCount).Replace("{{TRACKING}}", $tracking)
+  $html = $html.Replace("{{TITLE}}", $meta["title"]).Replace("{{DESC}}", $meta["description"]).Replace("{{OGIMG}}", $(if ($meta["image"]) { $meta["image"] } else { "/static/logo-wide.png" })).Replace("{{CANON}}", $canon).Replace("{{DOMAIN}}", $domain).Replace("{{BASE}}", $Base).Replace("{{EXCLUDED_NAMES}}", $exNames).Replace("{{STATE_COUNT}}", [string]$stCount).Replace("{{TRACKING}}", $tracking)
   $dest = Join-Path $outDir $rel
   New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
   [IO.File]::WriteAllText($dest, $html, (New-Object Text.UTF8Encoding($false)))
