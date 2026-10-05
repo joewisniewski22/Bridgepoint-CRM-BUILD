@@ -338,10 +338,15 @@
         '</div>' +
         '<h3 class="az-h3">Property address <span>(optional: unlocks real recent sales, value range and market data)</span></h3>' +
         '<div class="az-f"><label for="az-addr">Street, city, state, ZIP</label><div class="az-in"><input id="az-addr" autocomplete="street-address" placeholder="e.g. 123 Main St, Tampa, FL 33602"></div></div>' +
-        '<details class="az-fin" id="az-rehab"><summary>Estimate my rehab budget <span>(uses real materials-cost data)</span></summary><div class="az-fields two">' +
-          '<div class="az-f"><label for="az-scope">Scope of work</label><div class="az-in"><select id="az-scope"><option value="">Choose\u2026</option>' + Object.keys(SCOPES).map(function(k){ return '<option value="' + k + '">' + SCOPES[k].label + '</option>'; }).join("") + '</select></div></div>' +
-          '<div class="az-f"><label for="az-sqft">Living area (sq ft)</label><div class="az-in"><input id="az-sqft" inputmode="numeric" placeholder="auto-filled from the address"></div></div></div>' +
-          '<div id="az-rehabout"></div></details>' +
+        '<div class="az-rehabbox" id="az-rehab"><h3 class="az-h3">Rehab budget <span>(how should we get your number?)</span></h3>' +
+          '<div class="az-seg" role="radiogroup" aria-label="Rehab budget source">' +
+            '<label class="on" id="az-rm-own"><input type="radio" name="az-rmode" value="own" checked><span>I have my own budget</span></label>' +
+            '<label id="az-rm-est"><input type="radio" name="az-rmode" value="est"><span>Estimate it with Bridgepoint</span></label></div>' +
+          '<p class="az-fine" id="az-rhint">We\u2019ll use the Rehab budget you entered above.</p>' +
+          '<div id="az-restbox" hidden><div class="az-fields two">' +
+            '<div class="az-f"><label for="az-scope">Scope of work</label><div class="az-in"><select id="az-scope"><option value="">Choose\u2026</option>' + Object.keys(SCOPES).map(function(k){ return '<option value="' + k + '">' + SCOPES[k].label + '</option>'; }).join("") + '</select></div></div>' +
+            '<div class="az-f"><label for="az-sqft">Living area (sq ft)</label><div class="az-in"><input id="az-sqft" inputmode="numeric" placeholder="auto-filled from the address"></div></div></div>' +
+            '<div id="az-rehabout"></div></div></div>' +
         '<div class="az-err" id="az-err" role="alert" aria-live="polite"></div>' +
         '<button type="button" class="btn btn-gold az-go" id="az-go">Analyze my deal</button></div>' +
       '<div class="az-out" id="az-out"><div class="az-empty"><b>Your analysis appears here.</b><br>Enter your numbers and click <em>Analyze my deal</em>. You&rsquo;ll see profit, return on your cash, financed vs. all-cash, and a stress test, then you can download it as a PDF.</div></div></div>' +
@@ -402,12 +407,21 @@
       var core = type === "build" ? (i.land > 0 && i.hard > 0 && i.arv > 0) : (type === "rental" ? (i.price > 0 && i.rent > 0) : (i.price > 0 && i.arv > 0));
       return core ? "" : "Fill in the main numbers (price, value and rent or ARV) to run the analysis.";
     }
+    function rehabMode(){ var r = root.querySelector('input[name="az-rmode"]:checked'); return r ? r.value : "own"; }
+    function setRehabMode(m){
+      var own = m !== "est";
+      el("az-restbox").hidden = own;
+      el("az-rm-own").classList.toggle("on", own); el("az-rm-est").classList.toggle("on", !own);
+      el("az-rhint").textContent = own ? "We’ll use the Rehab budget you entered above." : "Pick the scope of work and size. We’ll estimate the cost with real materials-cost data and fill it into the Rehab budget above. You can still change it.";
+      if (!own) updateRehabOut();
+    }
     function updateRehabOut(){
       var scope = el("az-scope").value, sqft = parseFloat(String(el("az-sqft").value).replace(/[^0-9.]/g, "")), out = el("az-rehabout");
-      if (!scope || !sqft || !isFinite(sqft)){ out.innerHTML = ""; return; }
+      if (rehabMode() !== "est" || !scope || !sqft || !isFinite(sqft)){ out.innerHTML = ""; return; }
       getCostIndex().then(function(idx){
         var e = rehabEstimate(scope, sqft, el("az-state").value, idx);
-        out.innerHTML = '<p class="az-rehabtxt"><b>' + usd(e.lo) + ' to ' + usd(e.hi) + '</b> (midpoint ' + usd(e.mid) + '). ' + esc(e.label) + ': ' + esc(e.desc) + '.</p><button type="button" class="btn btn-ghost az-smallbtn" id="az-userehab" data-mid="' + Math.round(e.mid) + '">Use the midpoint as my rehab budget</button><p class="az-fine">' + esc(rehabLine(e)) + '</p>';
+        setField("rehab", Math.round(e.mid)); touched.rehab = true;
+        out.innerHTML = '<p class="az-rehabtxt"><b>' + usd(e.lo) + ' to ' + usd(e.hi) + '</b> (midpoint ' + usd(e.mid) + '), filled into your Rehab budget above. ' + esc(e.label) + ': ' + esc(e.desc) + '.</p><p class="az-fine">' + esc(rehabLine(e)) + '</p>';
       });
     }
     root.addEventListener("input", function(e){
@@ -416,7 +430,11 @@
       if (k && t.getAttribute("data-g") === "i") touched[k] = true;
       if (t && (t.id === "az-sqft")) updateRehabOut();
     });
-    root.addEventListener("change", function(e){ if (e.target && (e.target.id === "az-scope" || e.target.id === "az-state")) updateRehabOut(); });
+    root.addEventListener("change", function(e){
+      if (!e.target) return;
+      if (e.target.name === "az-rmode"){ setRehabMode(e.target.value); return; }
+      if (e.target.id === "az-scope" || e.target.id === "az-state") updateRehabOut();
+    });
     getCostIndex();
 
     /* ---------- address autocomplete (Google Places). If the key is not allowed on this site the box simply stays a plain input. ---------- */
@@ -507,6 +525,11 @@
     el("az-go").addEventListener("click", function(){
       var err = el("az-err"); err.textContent = "";
       var msg = validate(readGroup("i")); if (msg){ err.textContent = msg; return; }
+      if ((type === "flip" || type === "bridge") && rehabMode() === "est"){
+        var sc = el("az-scope").value, sqv = parseFloat(String(el("az-sqft").value).replace(/[^0-9.]/g, ""));
+        if (!sc){ err.textContent = "Choose a scope of work for the rehab estimate, or switch to \"I have my own budget\"."; return; }
+        if (!sqv && currentAddress().length < 8){ err.textContent = "Enter the living area (sq ft) or the property address so we can estimate the rehab, or switch to \"I have my own budget\"."; return; }
+      }
       if (currentAddress().length >= 8 && !(contact && contact.leadId)){
         pendingRun = true;
         openContactModal("Run the pro analysis", "To pull recent sales, value and market data for this address, we need your contact info. We'll email you the finished analysis too.");
@@ -543,7 +566,10 @@
         } else if (pd && pd.found === false){ err.textContent = pd.detail || "We couldn't find that address, so this analysis uses your numbers only."; }
         else if (pd && pd.error){ err.textContent = pd.error === "not_allowed" ? "We couldn't pull property data for this address, so this analysis uses your numbers. Call or text (850) 279-8588 and we'll run it for you." : (pd.detail || ""); }
         var scope = el("az-scope").value, sq = parseFloat(String(el("az-sqft").value).replace(/[^0-9.]/g, ""));
-        if ((type === "flip" || type === "bridge") && scope && sq) rehab = rehabEstimate(scope, sq, el("az-state").value, idx);
+        if ((type === "flip" || type === "bridge") && rehabMode() === "est" && scope && sq){
+          rehab = rehabEstimate(scope, sq, el("az-state").value, idx);
+          i.rehab = Math.round(rehab.mid); setField("rehab", i.rehab); touched.rehab = true;
+        }
         lastReport = buildReport(type, i, f, { rateNote: rateNote, pro: pro, arvNote: arvNote, rentNote: rentNote, rehab: rehab });
         lastReport.state = el("az-state").value; lastReport.credit = el("az-credit").value; lastReport.experience = el("az-exp").value;
         el("az-out").innerHTML = renderReport(lastReport);
