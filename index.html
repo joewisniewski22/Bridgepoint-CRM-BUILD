@@ -733,6 +733,11 @@ var PREPAY_TERMS = [
    a lead's language preference.
 --------------------------------------------------------------------- */
 var ES_DICT = {
+  "Co-Borrower / Co-Guarantor (leave blank if none)": "Co-prestatario / Co-garante (dejar en blanco si no hay)",
+  "Co-Borrower First Name": "Nombre del co-prestatario", "Co-Borrower Date of Birth": "Fecha de nacimiento del co-prestatario",
+  "Co-Borrower Social Security Number": "N\u00famero de Seguro Social del co-prestatario", "Co-Borrower Ownership %": "% de propiedad del co-prestatario",
+  "Co-Borrower Phone": "Tel\u00e9fono del co-prestatario", "Co-Borrower Email": "Correo del co-prestatario",
+  "Co-Borrower Home Address (street, city, state, ZIP)": "Direcci\u00f3n del co-prestatario (calle, ciudad, estado, c\u00f3digo postal)",
   "Guarantor First Name":"Nombre del Garante", "Middle Name":"Segundo Nombre", "Last Name":"Apellido",
   "Guarantor Date of Birth":"Fecha de Nacimiento del Garante", "Guarantor Ownership %":"% de Propiedad del Garante",
   "Guarantor Social Security Number":"Número de Seguro Social del Garante",
@@ -4527,6 +4532,11 @@ function leadToRow(l){
     guarantor_first_name: l.guarantorFirstName || null, guarantor_middle_name: l.guarantorMiddleName || null, guarantor_last_name: l.guarantorLastName || null,
     guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null, guarantor_address: l.guarantorAddress || null,
     guarantor_ownership_pct: l.guarantorOwnershipPct || null, track_record: l.trackRecord || [],
+    co_first_name: l.coFirstName || null, co_middle_name: l.coMiddleName || null, co_last_name: l.coLastName || null, co_birthday: l.coBirthday || null,
+    co_ownership_pct: l.coOwnershipPct || null, co_phone: l.coPhone || null, co_email: l.coEmail || null, co_address: l.coAddress || null,
+    co_citizenship_status: l.coCitizenshipStatus || null, co_country_of_domicile: l.coCountryOfDomicile || null, co_credit_score: l.coCreditScore || null,
+    co_experience_deals: (l.coExperienceDeals === null || l.coExperienceDeals === undefined) ? null : l.coExperienceDeals,
+    co_liquidity: (l.coLiquidity === null || l.coLiquidity === undefined) ? null : l.coLiquidity, co_marital_status: l.coMaritalStatus || null,
     preferred_language: l.preferredLanguage || "en",
     citizenship_status: l.citizenshipStatus || null, country_of_domicile: l.countryOfDomicile || null, transaction_type: l.transactionType || null, prepay_term: l.prepayTerm || null,
     marital_status: l.maritalStatus || null,
@@ -4581,6 +4591,10 @@ function rowToLead(r){
     guarantorFirstName: r.guarantor_first_name || null, guarantorMiddleName: r.guarantor_middle_name || null, guarantorLastName: r.guarantor_last_name || null,
     guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null, guarantorAddress: r.guarantor_address || null, guarantorSsnLast4: r.guarantor_ssn_last4 || null,
     guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [],
+    coFirstName: r.co_first_name || null, coMiddleName: r.co_middle_name || null, coLastName: r.co_last_name || null, coBirthday: r.co_birthday || null,
+    coOwnershipPct: r.co_ownership_pct || null, coPhone: r.co_phone || null, coEmail: r.co_email || null, coAddress: r.co_address || null, coSsnLast4: r.co_ssn_last4 || null,
+    coCitizenshipStatus: r.co_citizenship_status || null, coCountryOfDomicile: r.co_country_of_domicile || null, coCreditScore: r.co_credit_score || null,
+    coExperienceDeals: r.co_experience_deals, coLiquidity: r.co_liquidity, coMaritalStatus: r.co_marital_status || null,
     preferredLanguage: r.preferred_language || "en",
     citizenshipStatus: r.citizenship_status || null, countryOfDomicile: r.country_of_domicile || null, transactionType: r.transaction_type || null, prepayTerm: r.prepay_term || null,
     maritalStatus: r.marital_status || null,
@@ -4758,7 +4772,7 @@ function submitPublicApplication(leadId, patch){
   var lead = leadById(leadId);
   if (!lead) return;
   var d = todayISO();
-  Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  Object.keys(flattenCoPatch(patch)).forEach(function(k){ lead[k] = patch[k]; });
   syncContactFromApplication(lead, patch);
   var ltvBasis = (patch.transactionType && patch.transactionType !== "purchase" && patch.currentValue) ? patch.currentValue : patch.purchasePrice;
   if (ltvBasis && patch.loanAmount){
@@ -4854,7 +4868,7 @@ function extractApplicationBaseFieldsFromForm(fd){
     leaseDetail: extractLeaseDetailFromForm(fd),
     transactionType: fd.get("transactionType"),
     prepayTerm: fd.get("prepayTerm"),
-    trackRecord: extractTrackRecordFromForm(fd)
+    trackRecord: extractTrackRecordFromForm(fd), __co: coPatchFromForm(fd)
   };
 }
 var applicationAutoSaveTimer = null;
@@ -4868,7 +4882,7 @@ function autoSaveApplicationDraft(form){
   if (!lead || !sb) return;
   var fd = new FormData(form);
   var patch = extractApplicationBaseFieldsFromForm(fd);
-  Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  Object.keys(flattenCoPatch(patch)).forEach(function(k){ lead[k] = patch[k]; });
   applyGuidelineLoanAmount(lead);
   scheduleSync();
 }
@@ -5557,7 +5571,7 @@ function submitPhoneApplication(leadId, patch){
   var lead = leadById(leadId);
   if (!lead) return;
   var d = todayISO();
-  Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  Object.keys(flattenCoPatch(patch)).forEach(function(k){ lead[k] = patch[k]; });
   // See syncContactFromApplication above -- same gap exists when staff
   // takes the application by phone instead of the borrower submitting it
   // themselves.
@@ -5586,7 +5600,7 @@ function saveApplicationEdit(leadId, patch){
   var lead = leadById(leadId);
   if (!lead) return;
   var d = todayISO();
-  Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  Object.keys(flattenCoPatch(patch)).forEach(function(k){ lead[k] = patch[k]; });
   syncContactFromApplication(lead, patch);
   var ltvBasis = (patch.transactionType && patch.transactionType !== "purchase" && patch.currentValue) ? patch.currentValue : patch.purchasePrice;
   if (ltvBasis && patch.loanAmount){
@@ -6890,7 +6904,7 @@ function runLwImport(fd){
 function updateLeadFields(leadId, patch){
   var lead = leadById(leadId);
   if (!lead) return;
-  Object.keys(patch).forEach(function(k){ lead[k] = patch[k]; });
+  Object.keys(flattenCoPatch(patch)).forEach(function(k){ lead[k] = patch[k]; });
   showToast("Saved");
   persist();
 }
@@ -7060,6 +7074,8 @@ function quickEditGuarantor(leadId, fd){
   if (newSsn) saveGuarantorSsn(leadId, newSsn); // never in the bulk sync -- encrypted server-side, see saveGuarantorSsn
   lead.guarantorPhone = fd.get("guarantorPhone") || null;
   lead.guarantorEmail = fd.get("guarantorEmail") || null;
+  var coQuick = coPatchFromForm(fd); if (coQuick) Object.keys(coQuick).forEach(function(k){ lead[k] = coQuick[k]; });
+  var coSsnQuick = (fd.get("coSsn") || "").trim(); if (coSsnQuick) saveCoGuarantorSsn(leadId, coSsnQuick);
   lead.guarantorAddress = fd.get("guarantorAddress") || null;
   lead.entityLegalName = fd.get("entityLegalName") || null;
   var ownPct = fd.get("guarantorOwnershipPct");
@@ -8124,7 +8140,7 @@ function buildRtlApplicationPdfBlob(lead){
   w.twoCol("Phone", lead.phone, "Email", lead.email);
   w.twoCol("Date of Birth", lead.birthday, "SSN", lead.guarantorSsnLast4 ? ("•••-••-" + lead.guarantorSsnLast4) : "—");
 
-  if (r.coFirstName || r.coLastName){
+  if (lead.coFirstName || lead.coLastName){ coPdfSection(w, lead, "2) Co-Applicant"); } else if (r.coFirstName || r.coLastName){
     w.heading("2) Co-Applicant");
     w.row("Name", (r.coFirstName||"") + " " + (r.coLastName||""));
     w.twoCol("Phone", r.coPhone, "Email", r.coEmail);
@@ -8209,7 +8225,7 @@ function buildDscrApplicationPdfBlob(lead){
   w.twoCol("Phone", lead.phone, "Email", lead.email);
   w.twoCol("Date of Birth", lead.birthday, "SSN", lead.guarantorSsnLast4 ? ("•••-••-" + lead.guarantorSsnLast4) : "—");
 
-  if (d.coFirstName || d.coLastName){
+  if (lead.coFirstName || lead.coLastName){ coPdfSection(w, lead, "2) Co-Applicant"); } else if (d.coFirstName || d.coLastName){
     w.heading("2) Co-Applicant");
     w.row("Name", (d.coFirstName||"") + " " + (d.coLastName||""));
     w.twoCol("Phone", d.coPhone, "Email", d.coEmail);
@@ -11501,6 +11517,7 @@ function renderTabOverview(lead){
     '</div>' +
     '<div class="field"><label>Guarantor Phone</label><input class="input" name="guarantorPhone" value="' + esc(lead.guarantorPhone||"") + '" placeholder="' + esc(lead.phone||"") + '"></div>' +
     '<div class="field"><label>Guarantor Email</label><input class="input" name="guarantorEmail" value="' + esc(lead.guarantorEmail||"") + '" placeholder="' + esc(lead.email||"") + '"></div>' +
+    '<div style="grid-column:1/-1">' + coApplicantBlockHTML(lead) + '</div>' +
     '<div class="field" style="grid-column:1/-1"><label>Guarantor Physical / Mailing Address</label><input class="input" name="guarantorAddress" value="' + esc(lead.guarantorAddress || (lead.rtlApp && lead.rtlApp.homeAddress) || (lead.dscrApp && lead.dscrApp.homeAddress) || "") + '" placeholder="Street Address, City, State, ZIP"></div>' +
     '<div class="field"><label>Entity Legal Name</label><input class="input" name="entityLegalName" value="' + esc(lead.entityLegalName||"") + '"></div>' +
     '<div class="field"><label>Guarantor Ownership %</label><input class="input" type="number" min="0" max="100" name="guarantorOwnershipPct" value="' + (lead.guarantorOwnershipPct!=null?lead.guarantorOwnershipPct:"") + '"></div>' +
@@ -15301,6 +15318,113 @@ function renderLoanGuidelineHint(lead){
 // release, for any reason, hides it immediately. Nothing is cached past
 // the hold: releasing clears ui.ssnRevealed so the next hold re-fetches
 // from get_guarantor_ssn_full() rather than reusing a stale value.
+/* ---- Co-Borrower / Co-Guarantor: same information we collect for the primary borrower ----
+   Stored on the lead as co* fields (SSN encrypted server-side exactly like the guarantor's -- see
+   set_co_guarantor_ssn / get_co_guarantor_ssn_full). One set of inputs, shown in the RTL and DSCR
+   applications and in the staff "Guarantor & Entity" editor; every submit path picks it up through
+   coPatchFromForm(), so nothing is entered twice. */
+function coNumOrNull(fd, k){ var x = fd.get(k); return (x === null || x === undefined || x === "") ? null : Number(x); }
+function coPatchFromForm(fd){
+  if (!fd || fd.get("coFirstName") === null) return null; // this form has no co-borrower section: leave the saved values alone
+  return {
+    coFirstName: fd.get("coFirstName") || null, coMiddleName: fd.get("coMiddleName") || null, coLastName: fd.get("coLastName") || null,
+    coBirthday: fd.get("coBirthday") || null, coOwnershipPct: coNumOrNull(fd, "coOwnershipPct"),
+    coPhone: fd.get("coPhone") || null, coEmail: fd.get("coEmail") || null, coAddress: fd.get("coAddress") || null,
+    coCitizenshipStatus: fd.get("coCitizenshipStatus") || null, coCountryOfDomicile: fd.get("coCountryOfDomicile") || null,
+    coCreditScore: coNumOrNull(fd, "coCreditScore"), coExperienceDeals: coNumOrNull(fd, "coExperienceDeals"),
+    coLiquidity: coNumOrNull(fd, "coLiquidity"), coMaritalStatus: fd.get("coMaritalStatus") || null
+  };
+}
+function flattenCoPatch(patch){
+  if (patch && Object.prototype.hasOwnProperty.call(patch, "__co")){
+    var co = patch.__co;
+    delete patch.__co;
+    if (co) Object.keys(co).forEach(function(k){ patch[k] = co[k]; });
+  }
+  return patch;
+}
+function saveCoGuarantorSsn(leadId, ssn){
+  if (!sb) return;
+  var lead = leadById(leadId);
+  sb.rpc("set_co_guarantor_ssn", { p_lead_id: leadId, p_ssn: ssn, p_token: (lead && lead.applicationToken) || null }).then(function(res){
+    if (res.error){ showToast("Couldn't save the co-borrower SSN — try again"); return; }
+    if (lead){ lead.coSsnLast4 = ssn.replace(/\D/g, "").slice(-4) || null; render(); }
+  }).catch(function(){ showToast("Couldn't save the co-borrower SSN — try again"); });
+}
+function revealCoSsn(leadId){
+  var lead = leadById(leadId);
+  if (!sb || !lead || !canRevealSsn(lead)) return;
+  var key = leadId + ":co";
+  ui.ssnRevealed = ui.ssnRevealed || {};
+  ui.ssnRevealed[key] = "loading";
+  render();
+  sb.rpc("get_co_guarantor_ssn_full", { p_lead_id: leadId }).then(function(res){
+    if (res.error || !res.data){ delete ui.ssnRevealed[key]; showToast("Couldn't retrieve SSN"); }
+    else {
+      ui.ssnRevealed[key] = res.data;
+      lead.activity = lead.activity || [];
+      lead.activity.push({ date: todayISO(), type:"system", text: "Co-borrower SSN viewed by " + currentUser().name, author: currentUser().name });
+      persist();
+    }
+    render();
+  }).catch(function(){ delete ui.ssnRevealed[key]; render(); });
+}
+function buildCoSsnRevealHTML(lead){
+  if (ui.publicApply || !lead.coSsnLast4) return "";
+  var revealed = ui.ssnRevealed && ui.ssnRevealed[lead.id + ":co"];
+  if (revealed === "loading") return '<div class="footnote" style="padding:4px 0 0">Retrieving…</div>';
+  if (revealed) return '<div class="footnote" style="padding:4px 0 0"><b style="font-family:monospace;letter-spacing:1px">' + esc(revealed) + '</b></div>';
+  if (!canRevealSsn(lead)) return "";
+  return '<div class="footnote" style="padding:4px 0 0"><button type="button" class="link-btn" data-action="reveal-ssn" data-co="1" data-lead="' + lead.id + '">Hold to Show</button></div>';
+}
+function coApplicantBlockHTML(lead, L){
+  L = L || function(s){ return esc(s); };
+  var v = function(x){ return x === null || x === undefined ? "" : x; };
+  var citOpts = ['<option value="">' + L("— Select —") + '</option>'].concat(CITIZENSHIP_STATUSES.map(function(t){
+    return '<option value="' + t + '"' + (lead.coCitizenshipStatus === t ? " selected" : "") + '>' + L(t) + '</option>';
+  })).join("");
+  var marOpts = ['<option value="">' + L("— Select —") + '</option>'].concat(["Married", "Unmarried"].map(function(o){
+    return '<option value="' + o + '"' + (lead.coMaritalStatus === o ? " selected" : "") + '>' + L(o) + '</option>';
+  })).join("");
+  return '<div class="hint" style="margin:14px 0 6px"><b>' + L("Co-Borrower / Co-Guarantor (leave blank if none)") + '</b></div>' +
+    '<div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
+      '<div><label>' + L("Co-Borrower First Name") + '</label><input class="input" name="coFirstName" value="' + esc(v(lead.coFirstName)) + '"></div>' +
+      '<div><label>' + L("Middle Name") + '</label><input class="input" name="coMiddleName" value="' + esc(v(lead.coMiddleName)) + '"></div>' +
+      '<div><label>' + L("Last Name") + '</label><input class="input" name="coLastName" value="' + esc(v(lead.coLastName)) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Co-Borrower Date of Birth") + '</label><input class="input" type="date" name="coBirthday" value="' + esc(v(lead.coBirthday)) + '"></div>' +
+      '<div class="form-row"><label>' + L("Co-Borrower Social Security Number") + '</label><input class="input" type="password" autocomplete="off" name="coSsn" value="" placeholder="' + (lead.coSsnLast4 ? (L("On file, ending") + " " + lead.coSsnLast4) : "XXX-XX-XXXX") + '">' + buildCoSsnRevealHTML(lead) + '</div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Co-Borrower Ownership %") + '</label><input class="input" type="number" min="0" max="100" name="coOwnershipPct" value="' + esc(v(lead.coOwnershipPct)) + '"></div>' +
+      '<div class="form-row"><label>' + L("Credit Score") + '</label><input class="input" type="number" min="300" max="850" name="coCreditScore" value="' + esc(v(lead.coCreditScore)) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Co-Borrower Phone") + '</label><input class="input" name="coPhone" value="' + esc(v(lead.coPhone)) + '"></div>' +
+      '<div class="form-row"><label>' + L("Co-Borrower Email") + '</label><input class="input" type="email" name="coEmail" value="' + esc(v(lead.coEmail)) + '"></div>' +
+    '</div>' +
+    '<div class="form-row"><label>' + L("Co-Borrower Home Address (street, city, state, ZIP)") + '</label><input class="input" name="coAddress" value="' + esc(v(lead.coAddress)) + '"></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Citizenship Status") + '</label><select class="select" name="coCitizenshipStatus">' + citOpts + '</select></div>' +
+      '<div class="form-row"><label>' + L("Country of Citizenship") + ' <span class="hint">(' + L("if Foreign National") + ')</span></label><input class="input" name="coCountryOfDomicile" value="' + esc(v(lead.coCountryOfDomicile)) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Investing Experience (deals completed)") + '</label><input class="input" type="number" min="0" name="coExperienceDeals" value="' + esc(v(lead.coExperienceDeals)) + '"></div>' +
+      '<div class="form-row"><label>' + L("Liquidity / Reserves") + '</label><input class="input" type="number" name="coLiquidity" value="' + esc(v(lead.coLiquidity)) + '"></div>' +
+    '</div>' +
+    '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="coMaritalStatus">' + marOpts + '</select></div>';
+}
+function coPdfSection(w, lead, heading){
+  w.heading(heading);
+  w.row("Name", [lead.coFirstName, lead.coMiddleName, lead.coLastName].filter(Boolean).join(" "));
+  w.twoCol("Date of Birth", lead.coBirthday, "SSN", lead.coSsnLast4 ? ("•••-••-" + lead.coSsnLast4) : "—");
+  w.twoCol("Phone", lead.coPhone, "Email", lead.coEmail);
+  w.row("Home Address", lead.coAddress);
+  w.twoCol("Citizenship", lead.coCitizenshipStatus, "Credit Score", lead.coCreditScore);
+  w.twoCol("Ownership %", lead.coOwnershipPct, "Experience (deals)", lead.coExperienceDeals);
+}
+
 function buildSsnRevealHTML(lead){
   if (ui.publicApply || !lead.guarantorSsnLast4) return "";
   var revealed = ui.ssnRevealed && ui.ssnRevealed[lead.id];
@@ -15824,15 +15948,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (r.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>' +
 
-    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Co-Applicant (leave blank if none)") + '</b></div>' +
-    '<div class="form-two">' +
-      '<div class="form-row"><label>' + L("First Name") + '</label><input class="input" name="rtlCoFirstName" value="' + esc(r.coFirstName||"") + '"></div>' +
-      '<div class="form-row"><label>' + L("Last Name") + '</label><input class="input" name="rtlCoLastName" value="' + esc(r.coLastName||"") + '"></div>' +
-    '</div>' +
-    '<div class="form-two">' +
-      '<div class="form-row"><label>' + L("Phone") + '</label><input class="input" name="rtlCoPhone" value="' + esc(r.coPhone||"") + '"></div>' +
-      '<div class="form-row"><label>' + L("Email") + '</label><input class="input" type="email" name="rtlCoEmail" value="' + esc(r.coEmail||"") + '"></div>' +
-    '</div>' +
+    coApplicantBlockHTML(lead, L) +
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Entity Details") + '</b></div>' +
     '<div class="form-two">' +
@@ -15929,10 +16045,10 @@ function extractRtlApplicationFromForm(fd, signatureDataUrl, existing){
     yearsAtAddress: fd.get("rtlYearsAtAddress") || "",
     homeAddress: fd.get("rtlHomeAddress") || "",
     maritalStatus: fd.get("rtlMaritalStatus") || "",
-    coFirstName: fd.get("rtlCoFirstName") || "",
-    coLastName: fd.get("rtlCoLastName") || "",
-    coPhone: fd.get("rtlCoPhone") || "",
-    coEmail: fd.get("rtlCoEmail") || "",
+    coFirstName: fd.get("coFirstName") || "",
+    coLastName: fd.get("coLastName") || "",
+    coPhone: fd.get("coPhone") || "",
+    coEmail: fd.get("coEmail") || "",
     entityDateEst: fd.get("rtlEntityDateEst") || "",
     entityEin: fd.get("rtlEntityEin") || "",
     entityBankName: fd.get("rtlEntityBankName") || "",
@@ -16082,15 +16198,7 @@ function buildDscrApplicationFieldsHTML(lead, lang){
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (d.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>' +
 
-    '<div class="hint" style="margin:14px 0 6px"><b>' + L("Co-Applicant (leave blank if none)") + '</b></div>' +
-    '<div class="form-two">' +
-      '<div class="form-row"><label>' + L("First Name") + '</label><input class="input" name="dscrCoFirstName" value="' + esc(d.coFirstName||"") + '"></div>' +
-      '<div class="form-row"><label>' + L("Last Name") + '</label><input class="input" name="dscrCoLastName" value="' + esc(d.coLastName||"") + '"></div>' +
-    '</div>' +
-    '<div class="form-two">' +
-      '<div class="form-row"><label>' + L("Phone") + '</label><input class="input" name="dscrCoPhone" value="' + esc(d.coPhone||"") + '"></div>' +
-      '<div class="form-row"><label>' + L("Email") + '</label><input class="input" type="email" name="dscrCoEmail" value="' + esc(d.coEmail||"") + '"></div>' +
-    '</div>' +
+    coApplicantBlockHTML(lead, L) +
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Entity Details") + '</b></div>' +
     '<div class="form-two">' +
@@ -16191,10 +16299,10 @@ function extractDscrApplicationFromForm(fd, signatureDataUrl, existing){
     yearsAtAddress: fd.get("dscrYearsAtAddress") || "",
     homeAddress: fd.get("dscrHomeAddress") || "",
     maritalStatus: fd.get("dscrMaritalStatus") || "",
-    coFirstName: fd.get("dscrCoFirstName") || "",
-    coLastName: fd.get("dscrCoLastName") || "",
-    coPhone: fd.get("dscrCoPhone") || "",
-    coEmail: fd.get("dscrCoEmail") || "",
+    coFirstName: fd.get("coFirstName") || "",
+    coLastName: fd.get("coLastName") || "",
+    coPhone: fd.get("coPhone") || "",
+    coEmail: fd.get("coEmail") || "",
     entityDateEst: fd.get("dscrEntityDateEst") || "",
     entityEin: fd.get("dscrEntityEin") || "",
     entityBankName: fd.get("dscrEntityBankName") || "",
@@ -17220,7 +17328,7 @@ appEl.addEventListener("pointerdown", function(e){
   var btn = e.target.closest && e.target.closest('[data-action="reveal-ssn"]');
   if (!btn) return;
   e.preventDefault();
-  revealGuarantorSsn(btn.dataset.lead);
+  if (btn.dataset.co) revealCoSsn(btn.dataset.lead); else revealGuarantorSsn(btn.dataset.lead);
 });
 var hideAllRevealedSsns = function(){
   if (ui.ssnRevealed) Object.keys(ui.ssnRevealed).forEach(function(id){ hideGuarantorSsn(id); });
@@ -17361,6 +17469,7 @@ appEl.addEventListener("submit", function(e){
     var numOrNull = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
     var takeAppSsn = (fd.get("guarantorSsn") || "").trim();
     if (takeAppSsn) saveGuarantorSsn(form.dataset.lead, takeAppSsn);
+    var coSsnTake = (fd.get("coSsn") || "").trim(); if (coSsnTake) saveCoGuarantorSsn(form.dataset.lead, coSsnTake);
     submitPhoneApplication(form.dataset.lead, {
       entityType: fd.get("entityType"),
       creditScore: numOrNull("creditScore"),
@@ -17404,7 +17513,7 @@ appEl.addEventListener("submit", function(e){
       leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
-      trackRecord: extractTrackRecordFromForm(fd)
+      trackRecord: extractTrackRecordFromForm(fd), __co: coPatchFromForm(fd)
     });
     var taLead = leadById(form.dataset.lead);
     var taAchData = extractAchFromForm(fd, signaturePadDataUrl("sig-ach-" + form.dataset.lead), taLead && taLead.achForm);
@@ -17419,6 +17528,7 @@ appEl.addEventListener("submit", function(e){
     var numOrNullEdit = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
     var editAppSsn = (fd.get("guarantorSsn") || "").trim();
     if (editAppSsn) saveGuarantorSsn(form.dataset.lead, editAppSsn);
+    var coSsnEdit = (fd.get("coSsn") || "").trim(); if (coSsnEdit) saveCoGuarantorSsn(form.dataset.lead, coSsnEdit);
     saveApplicationEdit(form.dataset.lead, {
       entityType: fd.get("entityType"),
       creditScore: numOrNullEdit("creditScore"),
@@ -17462,7 +17572,7 @@ appEl.addEventListener("submit", function(e){
       leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
-      trackRecord: extractTrackRecordFromForm(fd)
+      trackRecord: extractTrackRecordFromForm(fd), __co: coPatchFromForm(fd)
     });
     var eaLead = leadById(form.dataset.lead);
     var eaAchData = extractAchFromForm(fd, signaturePadDataUrl("sig-ach-" + form.dataset.lead), eaLead && eaLead.achForm);
@@ -17477,6 +17587,7 @@ appEl.addEventListener("submit", function(e){
     var numOrNullPub = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
     var pubSsn = (fd.get("guarantorSsn") || "").trim();
     if (pubSsn) saveGuarantorSsn(form.dataset.lead, pubSsn);
+    var coSsnPub = (fd.get("coSsn") || "").trim(); if (coSsnPub) saveCoGuarantorSsn(form.dataset.lead, coSsnPub);
     var pubLead = leadById(form.dataset.lead);
     var pubAchData = extractAchFromForm(fd, signaturePadDataUrl("sig-ach-" + form.dataset.lead), pubLead && pubLead.achForm);
     var pubRtlData = extractRtlApplicationFromForm(fd, signaturePadDataUrl("sig-rtlapp-" + form.dataset.lead), pubLead && pubLead.rtlApp);
@@ -17527,7 +17638,7 @@ appEl.addEventListener("submit", function(e){
       leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
-      trackRecord: extractTrackRecordFromForm(fd)
+      trackRecord: extractTrackRecordFromForm(fd), __co: coPatchFromForm(fd)
     });
     applyAchAndRtlAppPatch(form.dataset.lead, pubAchData, pubRtlData, pubDscrData);
     uploadAnyDeclarationFiles(form, form.dataset.lead);
