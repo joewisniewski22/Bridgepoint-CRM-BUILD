@@ -2125,7 +2125,20 @@ function evaluateNextresFit(lead){
     estMaxLoan: null, maxLtvPct: null
   };
 }
-var OUTSIDE_LENDER_FIT_EVALUATORS = { RCN: evaluateRcnFit, "Angel Oak": evaluateAngelOakFit, NextRes: evaluateNextresFit, Kiavi: null, RELIP: null };
+// Joe (2026-10-05): Kiavi's own pricer does not offer Mixed-Use properties, on any of their programs.
+// Same scope as NextRes above -- only the facts Joe has confirmed are modeled; no Kiavi rate sheet or
+// LTV grid is on file yet, so every other property type returns null (nothing shown).
+function evaluateKiaviFit(lead){
+  var mixedUse = lead.propertyType === "Mixed-Use" || lead.loanType === "Mixed-Use";
+  if (!mixedUse) return null;
+  return {
+    lender:"Kiavi", program:"Kiavi (any program)", eligible:false,
+    reasons:["Kiavi does not offer Mixed-Use properties — confirmed in their pricer"],
+    notes:["No Kiavi rate sheet on file yet — only their Mixed-Use exclusion is modeled here. Place Mixed-Use deals elsewhere."],
+    estMaxLoan:null, maxLtvPct:null
+  };
+}
+var OUTSIDE_LENDER_FIT_EVALUATORS = { RCN: evaluateRcnFit, "Angel Oak": evaluateAngelOakFit, NextRes: evaluateNextresFit, Kiavi: evaluateKiaviFit, RELIP: null };
 function rcnRecommendation(lead, fit){
   if (!fit) return null;
   if (!fit.eligible){
