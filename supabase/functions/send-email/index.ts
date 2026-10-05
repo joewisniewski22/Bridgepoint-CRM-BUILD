@@ -99,8 +99,9 @@ Deno.serve(async (req: Request) => {
       const { data: staff } = await mailAuthSb.from("users").select("email");
       allowed = !!(staff || []).some((s: { email: string | null }) => (s.email || "").trim().toLowerCase() === target);
       if (!allowed && leadId) {
-        const { data: lead } = await mailAuthSb.from("leads").select("email").eq("id", leadId).maybeSingle();
-        allowed = !!(lead && (lead.email || "").trim().toLowerCase() === target);
+        const { data: lead } = await mailAuthSb.from("leads").select("email,co_email").eq("id", leadId).maybeSingle();
+        // the file's own address, or its co-borrower's address, are valid recipients
+        allowed = !!(lead && ((lead.email || "").trim().toLowerCase() === target || (lead.co_email || "").trim().toLowerCase() === target));
       }
       if (!allowed) {
         return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: CORS_HEADERS });
