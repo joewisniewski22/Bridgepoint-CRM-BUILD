@@ -4136,6 +4136,11 @@ function rehabHoldbackForLead(lead){
   var holdback = Math.min(pt && pt.rehabHoldback != null ? pt.rehabHoldback : lead.rehabBudget, lead.loanAmount);
   return { holdback: holdback, initialAdvance: lead.loanAmount - holdback };
 }
+// The lender's own points on the applied terms (borrower pays them at closing).
+function lenderPointsForLead(lead){
+  var pt = pricerTermsFor(lead);
+  return pt && pt.lenderPointsPct > 0 && lead.loanAmount ? Math.round(lead.loanAmount * pt.lenderPointsPct / 100) : 0;
+}
 // A&D Borrower Paid: a price over par is a lender credit to the BORROWER (Joe 2026-10-06).
 function lenderCreditForLead(lead){
   var pt = pricerTermsFor(lead);
@@ -4151,7 +4156,7 @@ function lenderCreditForLead(lead){
 // figure the same way, so those return fees-only instead of guessing.
 function estimatedCashToClose(lead){
   var adExtras = adLenderExtras(lead);
-  var fees = pointsRevenue(lead) + lenderFeeForLead(lead) + (adExtras ? adExtras.total : 0) + processingFeeForLead(lead) + underwritingFeeForLead(lead) + commitmentFeeForLead(lead) - lenderCreditForLead(lead);
+  var fees = pointsRevenue(lead) + lenderFeeForLead(lead) + (adExtras ? adExtras.total : 0) + processingFeeForLead(lead) + underwritingFeeForLead(lead) + commitmentFeeForLead(lead) + lenderPointsForLead(lead) - lenderCreditForLead(lead);
   var txnType = lead.transactionType || "purchase";
   if (txnType !== "purchase") return { feesOnly:true, amount: fees };
   if (!lead.purchasePrice || !lead.loanAmount) return null;
@@ -4255,6 +4260,7 @@ function buildTermSheet(lead, langOverride){
       lines.push("Penalización por Pago Anticipado: " + prepayLabelEs);
     }
     lines.push("Originación: " + commission);
+    if (lenderPointsForLead(lead)) lines.push("Puntos del Prestamista: " + pricerTermsFor(lead).lenderPointsPct + "% (" + fmtUSD(lenderPointsForLead(lead)) + ")");
     lines.push((lead.underwritingFeeOverride == null ? "Cargo de Suscripción" : "Cargo del Prestamista") + ": " + fmtUSD(lenderFeeForLead(lead)));
     if (adLenderExtras(lead)) lines.push("Cargos del Prestamista (servicio de impuestos, certificación de inundación" + (adLenderExtras(lead).mers ? ", MERS" : "") + "): " + fmtUSD(adLenderExtras(lead).total));
     if (lead.underwritingFeeOverride != null) lines.push("Cargo de Suscripción: " + fmtUSD(underwritingFeeForLead(lead)));
@@ -4312,6 +4318,7 @@ function buildTermSheet(lead, langOverride){
       lines.push("Prepayment Penalty: " + prepayLabelEn);
     }
     lines.push("Origination: " + commission);
+    if (lenderPointsForLead(lead)) lines.push("Lender Points: " + pricerTermsFor(lead).lenderPointsPct + "% (" + fmtUSD(lenderPointsForLead(lead)) + ")");
     lines.push((lead.underwritingFeeOverride == null ? "Underwriting Fee" : "Lender Fee") + ": " + fmtUSD(lenderFeeForLead(lead)));
     if (adLenderExtras(lead)) lines.push("Lender Charges (tax service, flood certification" + (adLenderExtras(lead).mers ? ", MERS" : "") + "): " + fmtUSD(adLenderExtras(lead).total));
     if (lead.underwritingFeeOverride != null) lines.push("Underwriting Fee: " + fmtUSD(underwritingFeeForLead(lead)));
@@ -12999,6 +13006,9 @@ function lpSelectOption(key, ri, oi, spreadPts){
     rehabHoldback: r.rehabHoldback != null ? r.rehabHoldback : null,
     dscr: o.dscr != null ? Math.round(o.dscr * 100) / 100 : null,
     creditToBorrowerPct: o.creditToBorrower ? Math.round((o.price - 100) * 1000) / 1000 : 0,
+    // Points the LENDER charges the borrower on fix & flip / bridge / GUC (RCN 0.5-1 pt,
+    // Constructive's 0/0.5/1 tiers). Kiavi's 1% is already its lender fee, so not counted twice.
+    lenderPointsPct: (selRtl && o.price > 100 && !/Kiavi/i.test(r.lender)) ? Math.round((o.price - 100) * 1000) / 1000 : 0,
     lenderPaidPts: o.revenuePts != null ? o.revenuePts : null,
     appliedAt: todayISO(), appliedBy: currentUser().name
   } });
