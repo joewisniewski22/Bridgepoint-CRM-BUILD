@@ -1035,7 +1035,7 @@ var LENDER_DOC_PACKS = {
       { name:"Property access instructions + contact for Kiavi's inspection / appraisal", staffOnly:true },
       { name:"Hazard insurance agent contact (name, phone, email)", staffOnly:true },
       { name:"Closing agent contact (name, phone, email)", staffOnly:true },
-      { name:"Signed Borrowing Authorization form (Kiavi)" },
+      { name:"Signed Borrowing Authorization form" },
       { name:"Broker Disclosure form (Kiavi)", staffOnly:true },
       { name:"Title commitment, estimated fees and tax certification", staffOnly:true },
       { name:"Closing instructions + CPL (needed for clear to close)", staffOnly:true },
@@ -1048,7 +1048,7 @@ var LENDER_DOC_PACKS = {
       items.push({ name:"Appraisal payment (Kiavi rental)", staffOnly:true });
       items.push({ name:"Hazard insurance premium paid in full at closing (Kiavi escrows taxes + HOI)", staffOnly:true });
     } else {
-      items.push({ name:"Scope of Work entered in Kiavi's SOW format — line by line (feasibility reviews it)", note:"Detailed SOWs clear feasibility fastest." });
+      items.push({ name:"Detailed line-by-line Scope of Work", note:"Kiavi: enter it in Kiavi's SOW format — their feasibility team reviews it line by line." });
     }
     return items;
   },
@@ -1060,7 +1060,7 @@ var LENDER_DOC_PACKS = {
     var items = [
       { name:"Mortgagee Clause sent to Title & Insurance — pre-filled", autoKind:"mortgageeClause", staffOnly:true },
       { name:"Tri-merge credit report (Fannie/Freddie-approved agency, under 60 days old) — at submission", staffOnly:true },
-      { name:"Initial Disclosures signed by all parties (needed before A&D underwriting)", note:"Sent by donotreply@docmagic.com — have the borrower check spam." },
+      { name:"Initial Disclosures signed by all parties (needed before underwriting)", note:"A&D: sent by donotreply@docmagic.com — have the borrower check spam." },
       { name:"Proof of residential real estate ownership (current or within 36 months)" },
       { name:"Appraisal ordered in AIM after disclosures are signed", staffOnly:true },
       { name:"Reserves: 3 months (6 over $1M, 12 over $2M)" },
@@ -1081,8 +1081,10 @@ function lenderDocPack(lead){
   var fn = key && LENDER_DOC_PACKS[key];
   if (!fn) return [];
   var label = LENDER_DOC_LABEL[key];
+  // Clients only ever see Bridgepoint (Joe 2026-10-06): the lender label goes only on
+  // staff-only items; anything a borrower can be asked for keeps a lender-neutral name.
   return fn(lead).filter(function(d){ return d.autoKind !== "mortgageeClause" || mortgageeClauseFor(lead); }).map(function(d){
-    return Object.assign({}, d, { name: d.name + " (" + label + ")", lenderKey: key });
+    return Object.assign({}, d, { name: d.staffOnly ? (d.name + " (" + label + ")") : d.name, lenderKey: key });
   });
 }
 function lenderDocMeta(lead, name){
@@ -4121,8 +4123,15 @@ function setCommitmentFee(leadId, fee, refundable){
 function rehabHoldbackForLead(lead){
   if (RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) === -1) return null;
   if (!lead.rehabBudget || !lead.loanAmount) return null;
-  var holdback = Math.min(lead.rehabBudget, lead.loanAmount);
+  // The applied lender's own holdback (e.g. Kiavi funds only part of the rehab) wins.
+  var pt = pricerTermsFor(lead);
+  var holdback = Math.min(pt && pt.rehabHoldback != null ? pt.rehabHoldback : lead.rehabBudget, lead.loanAmount);
   return { holdback: holdback, initialAdvance: lead.loanAmount - holdback };
+}
+// A&D Borrower Paid: a price over par is a lender credit to the BORROWER (Joe 2026-10-06).
+function lenderCreditForLead(lead){
+  var pt = pricerTermsFor(lead);
+  return pt && pt.creditToBorrowerPct > 0 && lead.loanAmount ? Math.round(lead.loanAmount * pt.creditToBorrowerPct / 100) : 0;
 }
 // Gives the borrower "some sort of idea of how much they need to close"
 // (Joe's words) from the real figures on file -- purchase price, loan
@@ -4134,7 +4143,7 @@ function rehabHoldbackForLead(lead){
 // figure the same way, so those return fees-only instead of guessing.
 function estimatedCashToClose(lead){
   var adExtras = adLenderExtras(lead);
-  var fees = pointsRevenue(lead) + lenderFeeForLead(lead) + (adExtras ? adExtras.total : 0) + processingFeeForLead(lead) + underwritingFeeForLead(lead) + commitmentFeeForLead(lead);
+  var fees = pointsRevenue(lead) + lenderFeeForLead(lead) + (adExtras ? adExtras.total : 0) + processingFeeForLead(lead) + underwritingFeeForLead(lead) + commitmentFeeForLead(lead) - lenderCreditForLead(lead);
   var txnType = lead.transactionType || "purchase";
   if (txnType !== "purchase") return { feesOnly:true, amount: fees };
   if (!lead.purchasePrice || !lead.loanAmount) return null;
@@ -4206,7 +4215,9 @@ function buildTermSheet(lead, langOverride){
   var dscrRatioText = null;
   if (lead.loanType === "DSCR"){
     var dscrPricing = evaluatePricing(lead, {});
-    var dscrVal = (dscrPricing && !dscrPricing.ineligible) ? dscrPricing.dscr : null;
+    var appliedTerms = pricerTermsFor(lead);
+    // The applied lender's own DSCR at the applied rate wins over the in-house model.
+    var dscrVal = (appliedTerms && appliedTerms.dscr != null) ? appliedTerms.dscr : ((dscrPricing && !dscrPricing.ineligible) ? dscrPricing.dscr : null);
     dscrRatioText = dscrVal != null ? (Math.round(dscrVal*100)/100).toFixed(2) + "x" : null;
   }
   var lines = [];
@@ -4240,6 +4251,7 @@ function buildTermSheet(lead, langOverride){
     if (adLenderExtras(lead)) lines.push("Cargos del Prestamista (servicio de impuestos, certificación de inundación" + (adLenderExtras(lead).mers ? ", MERS" : "") + "): " + fmtUSD(adLenderExtras(lead).total));
     if (lead.underwritingFeeOverride != null) lines.push("Cargo de Suscripción: " + fmtUSD(underwritingFeeForLead(lead)));
     lines.push("Cargo de Procesamiento: " + fmtUSD(processingFeeForLead(lead)));
+    if (lenderCreditForLead(lead)) lines.push("Crédito del Prestamista (para sus costos de cierre): -" + fmtUSD(lenderCreditForLead(lead)));
     if (lead.commitmentFeeOverride != null) lines.push("Depósito de Compromiso: " + fmtUSD(commitmentFeeForLead(lead)) + (lead.commitmentFeeRefundable ? " (reembolsable al cierre)" : ""));
     lines.push("Cargos de Terceros (avalúo, título, registro, etc.): Por determinar — se confirman al cierre");
     var hbEs = rehabHoldbackForLead(lead);
@@ -4296,6 +4308,7 @@ function buildTermSheet(lead, langOverride){
     if (adLenderExtras(lead)) lines.push("Lender Charges (tax service, flood certification" + (adLenderExtras(lead).mers ? ", MERS" : "") + "): " + fmtUSD(adLenderExtras(lead).total));
     if (lead.underwritingFeeOverride != null) lines.push("Underwriting Fee: " + fmtUSD(underwritingFeeForLead(lead)));
     lines.push("Processing Fee: " + fmtUSD(processingFeeForLead(lead)));
+    if (lenderCreditForLead(lead)) lines.push("Lender Credit (toward your closing costs): -" + fmtUSD(lenderCreditForLead(lead)));
     if (lead.commitmentFeeOverride != null) lines.push("Commitment Fee: " + fmtUSD(commitmentFeeForLead(lead)) + (lead.commitmentFeeRefundable ? " (refunded to borrower at closing)" : ""));
     lines.push("Third-Party Fees (appraisal, title, recording, etc.): TBD — confirmed at closing");
     var hb = rehabHoldbackForLead(lead);
@@ -12940,6 +12953,8 @@ function lpSelectOption(key, ri, oi, spreadPts){
   lead.loanAmount = o.loanAmount || r.loanAmountUsed;
   lead.rate = Math.round((o.rate + selYsp * (selCaps.yspRatePerPoint != null ? selCaps.yspRatePerPoint : 1)) * 1000) / 1000;
   if (capYsp > 0) lead.pointsCharged = selCaps.maxBrokerPoints;
+  // A&D Lender Paid: A&D pays us through the rate; no origination may be charged to the borrower.
+  if (o.revenuePts != null) lead.pointsCharged = 0;
   lead.termMonths = sc.termMonths;
   lead.prepayTerm = sc.prepayTerm;
   var basis = lpBasis(sc);
@@ -12957,6 +12972,12 @@ function lpSelectOption(key, ri, oi, spreadPts){
     lender: r.lender, inHouse: isInHouse, program: o.program, loanAmount: lead.loanAmount, rate: lead.rate,
     price: sc.loanType === "DSCR" ? o.price : null, maxLoanAmount: r.maxLoanAmount || r.loanAmountUsed,
     yspPoints: selYsp || null, source: r.source || null,
+    // So client documents match the applied lender (Joe 2026-10-06): their holdback,
+    // their DSCR at this rate, and any A&D credit to the borrower / lender-paid comp.
+    rehabHoldback: r.rehabHoldback != null ? r.rehabHoldback : null,
+    dscr: o.dscr != null ? Math.round(o.dscr * 100) / 100 : null,
+    creditToBorrowerPct: o.creditToBorrower ? Math.round((o.price - 100) * 1000) / 1000 : 0,
+    lenderPaidPts: o.revenuePts != null ? o.revenuePts : null,
     appliedAt: todayISO(), appliedBy: currentUser().name
   } });
   refreshGuidelineCheck(lead);
