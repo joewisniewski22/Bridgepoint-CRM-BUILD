@@ -3589,7 +3589,10 @@ function dealAnalyzerLink(lead){
   var lt = lead.loanType || "";
   var type = /DSCR|Portfolio/i.test(lt) ? "rental" : /Bridge/i.test(lt) ? "bridge" : /Ground Up|Construction/i.test(lt) ? "build" : "flip";
   var lo = docLoanOfficer(lead);
+  // t = the file's application token: lets the analyzer prefill this deal's real
+  // numbers and quoted terms (analyzer-prefill). Without it the page is the blank public version.
   return "https://bplending.com/deal-analyzer/?type=" + type + "&ref=" + encodeURIComponent(lead.id) +
+    (lead.applicationToken ? "&t=" + encodeURIComponent(lead.applicationToken) : "") +
     "&utm_source=crm&utm_medium=lo-share&utm_campaign=deal-analyzer-share&utm_content=" + encodeURIComponent(lo.id || "");
 }
 function dealAnalyzerMessage(lead, lang){

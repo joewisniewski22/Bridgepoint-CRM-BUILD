@@ -396,7 +396,7 @@
         .catch(function(){ return null; });
     }
 
-    var costIdx = null, contact = null, pendingRun = false, pendingDownload = false, touched = {};
+    var costIdx = null, contact = null, pendingRun = false, pendingDownload = false, touched = {}, quotedTerms = null;
     try { var sc = JSON.parse(localStorage.getItem("bp_az_lead") || "null"); if (sc && sc.leadId && Date.now() - sc.ts < 40 * 3600000) contact = sc; } catch (x) {}
     function getCostIndex(){
       if (costIdx) return Promise.resolve(costIdx);
@@ -550,10 +550,12 @@
         : Promise.resolve(null);
       Promise.all([fetchBallpark(i), proP, getCostIndex()]).then(function(res){
         var bp = res[0], pd = res[1], idx = res[2], rateNote, pro = null, arvNote = null, rentNote = null, rehab = null;
-        if (bp && !touchedRate){ f.rate = bp.rateHigh; rateNote = "Interest rate " + bp.rateHigh + "% is the top of our live ballpark range (" + bp.rateLow + "%\u2013" + bp.rateHigh + "%) for your profile. Your actual rate depends on the full loan file."; }
+        if (quotedTerms && Math.abs((f.rate || 0) - quotedTerms.rate) < 0.0001){ rateNote = "Interest rate " + f.rate + "% and " + (quotedTerms.points != null ? quotedTerms.points + " points" : "the points shown") + " are the terms " + (quotedTerms.loName || "your loan officer") + " quoted on your loan" + (quotedTerms.loanAmount ? " (" + usd(quotedTerms.loanAmount) + ")" : "") + ". Final terms are subject to underwriting."; }
+        else if (bp && !touchedRate){ f.rate = bp.rateHigh; rateNote = "Interest rate " + bp.rateHigh + "% is the top of our live ballpark range (" + bp.rateLow + "%\u2013" + bp.rateHigh + "%) for your profile. Your actual rate depends on the full loan file."; }
         else if (touchedRate){ rateNote = "Interest rate " + f.rate + "% was entered by you. Ask a loan officer for current pricing on your deal."; }
         else { rateNote = "Interest rate " + f.rate + "% is a typical assumption (a live ballpark was unavailable). Ask a loan officer for current pricing."; }
-        f.maxLoan = (bp && bp.maxLoan) ? bp.maxLoan : null;
+        // A quoted loan amount is the real cap; the website ballpark max doesn't apply.
+        f.maxLoan = quotedTerms && quotedTerms.loanAmount ? quotedTerms.loanAmount : ((bp && bp.maxLoan) ? bp.maxLoan : null);
         if (type === "build") f.capPct = f.arvCapPct;
         if (pd && pd.ok && pd.configured !== false && pd.found){
           pro = pd;
@@ -802,6 +804,28 @@
     }
 
     renderFields();
+    // Sent from the CRM with the file's key (?ref=<file>&t=<token>): fill in the
+    // real deal and the terms the LO quoted (Joe 2026-10-06). Public visitors
+    // (no key) keep the blank marketing version.
+    (function(){
+      var qs; try { qs = new URLSearchParams(location.search); } catch (x) { return; }
+      var ref = qs.get("ref"), tk = qs.get("t");
+      if (!ref || !tk) return;
+      fetch(API + "analyzer-prefill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ref: ref, t: tk }) })
+        .then(function(r){ return r.json(); }).then(function(p){
+          if (!p || !p.ok) return;
+          if (DEALS[p.type] && p.type !== type){ type = p.type; renderFields(); }
+          Object.keys(p.fields || {}).forEach(function(k){ setField(k, p.fields[k]); touched[k] = true; });
+          Object.keys(p.fin || {}).forEach(function(k){ var nd = root.querySelector('input[data-g="f"][data-k="' + k + '"]'); if (nd) nd.value = p.fin[k]; });
+          var setSel = function(id, v){ var s = el(id); if (s && v){ for (var i = 0; i < s.options.length; i++){ if (s.options[i].value === v || s.options[i].text === v){ s.value = s.options[i].value; break; } } } };
+          setSel("az-state", p.state); setSel("az-credit", p.credit); setSel("az-exp", p.experience);
+          if (p.address) el("az-addr").value = p.address;
+          if (p.quoted && p.quoted.rate){ touchedRate = true; quotedTerms = p.quoted; }
+          var fin = root.querySelector(".az-fin"); if (fin) fin.open = true;
+          var b = el("az-blurb"); if (b) b.textContent = "Your deal is filled in" + (p.quoted && p.quoted.rate ? " with the terms " + (p.quoted.loName || "your loan officer") + " quoted you" : "") + ". Adjust anything, then click Analyze my deal.";
+          if (typeof updateRehabOut === "function") updateRehabOut();
+        }).catch(function(){});
+    })();
     window.BPAnalyzer = { calcFlip: calcFlip, calcRental: calcRental, calcBridge: calcBridge, calcBuild: calcBuild, buildReport: buildReport };
   }
 
