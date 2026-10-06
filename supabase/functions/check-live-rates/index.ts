@@ -777,6 +777,8 @@ async function checkNextresAt(s: Scenario): Promise<LenderResult> {
 const KIAVI_SNAPSHOT = "2026-10-06";
 const KIAVI_BROKER_NOT_APPROVED = ["AZ","CA","ID","MN","NC","ND","NE","NJ","NV","NY","OR","SD","UT","VT"];
 const KIAVI_MAX_BROKER_POINTS = 3;
+// Minimum loan on rental, bridge and fix & flip (Joe 2026-10-06: down from $100,000).
+const KIAVI_MIN_LOAN = 75000;
 const KIAVI_MAX_YSP = 2.5;
 // 12-month fix & flip rate by FICO tier x loan-to-cost tier (<=75, <=80, <=85, <=90).
 const KIAVI_HM_LTC_TIERS = [75, 80, 85, 90];
@@ -863,7 +865,7 @@ function kiaviHm(s, out, unit, st) {
   if (rehab <= 0) {
     // Bridge: one tier, 75% of as-is.
     const loan = Math.floor(basis * 0.75 / 100) * 100;
-    if (loan < 100000) { out.reason = "Kiavi's minimum loan is $100,000 (75% of value here is $" + Math.round(loan).toLocaleString("en-US") + ")."; return out; }
+    if (loan < KIAVI_MIN_LOAN) { out.reason = "Kiavi's minimum loan is $75,000 (75% of value here is $" + Math.round(loan).toLocaleString("en-US") + ")."; return out; }
     if (loan > 1000000) out.assumptions.push("Capped at Kiavi's $1,000,000 first-time-investor maximum.");
     const amt = Math.min(loan, 1000000);
     const rate = Math.round((KIAVI_BRIDGE_RATE[tier] + termAdj + stateAdj) * 100) / 100;
@@ -890,7 +892,7 @@ function kiaviHm(s, out, unit, st) {
       if (total > arvCap) { total = arvCap; initial = total - funded; }
       if (initial <= 0) continue;
       total = Math.min(Math.floor(total / 100) * 100, 1000000);
-      if (total < 100000) continue;
+      if (total < KIAVI_MIN_LOAN) continue;
       const ltc = (total - funded) / basis * 100;
       let idx = KIAVI_HM_LTC_TIERS.findIndex(function (x) { return ltc <= x + 0.0001; });
       if (idx < 0) continue;
@@ -898,7 +900,7 @@ function kiaviHm(s, out, unit, st) {
       if (opts.some(function (o) { return o.loanAmount === total; })) continue;
       opts.push({ program: term + "-mo · " + KIAVI_HM_LTC_TIERS[idx] + "% of " + (refi ? "value" : "purchase"), rate, price: 100 + kiaviHmFee(total) / total * 100, loanAmount: total });
     }
-    if (!opts.length) { out.reason = "Below Kiavi's $100,000 minimum or over 75% of ARV at every leverage tier."; return out; }
+    if (!opts.length) { out.reason = "Below Kiavi's $75,000 minimum or over 75% of ARV at every leverage tier."; return out; }
   }
   if (s.loanAmount) {
     // Caller asked for a specific amount: keep only the option at or under it.
@@ -907,6 +909,7 @@ function kiaviHm(s, out, unit, st) {
   }
   opts.sort(function (a, b) { return b.loanAmount - a.loanAmount; });
   out.eligible = true;
+  if (out.options && out.options.some(function (o: any) { return (o.loanAmount || out.loanAmountUsed || Infinity) < 100000; })) out.assumptions.push("Kiavi's minimum dropped to $75,000 (10/6); pricing under $100,000 is extended from the $100k+ data — confirm on Kiavi.");
   out.options = opts;
   out.loanAmountUsed = opts[0].loanAmount;
   out.maxLoanAmount = opts[0].loanAmount;
@@ -945,7 +948,7 @@ function kiaviRental(s, out, unit, st) {
     let loan = Math.floor(value * t / 100 / 500) * 500;
     if (s.loanAmount && loan > s.loanAmount) continue;
     if (loan > 1500000) loan = 1500000;
-    if (loan < 100000) continue;
+    if (loan < KIAVI_MIN_LOAN) continue;
     // DSCR depends on the rate and the rate (slightly) on DSCR: price at
     // DSCR 1.25 first, then reprice with the resulting DSCR.
     let rate = kiaviRentalRate(s.creditScore, t, ppp, unit, loan, 1.25);
@@ -965,6 +968,7 @@ function kiaviRental(s, out, unit, st) {
   }
   if (!opts.length) { out.reason = "No Kiavi rental tier fits: check credit (660+), DSCR (0.80+, 1.00+ above 65% LTV) and the $100k minimum loan."; return out; }
   out.eligible = true;
+  if (out.options && out.options.some(function (o: any) { return (o.loanAmount || out.loanAmountUsed || Infinity) < 100000; })) out.assumptions.push("Kiavi's minimum dropped to $75,000 (10/6); pricing under $100,000 is extended from the $100k+ data — confirm on Kiavi.");
   out.options = opts;
   out.loanAmountUsed = maxLoanFound;
   out.maxLoanAmount = maxLoanFound;
