@@ -61,7 +61,21 @@ type LenderResult = {
   // Bridgepoint's own estimate table and labels it "Estimated", never
   // silently presenting a guess as the lender's real number.
   fees?: { lenderFee?: number; closingCosts?: number; points?: number };
-  options?: Array<{ program: string; rate: number; price: number; dscr?: number | null }>;
+  // loanAmount on an option = that option was priced at a different amount
+  // than loanAmountUsed (Kiavi offers a rate per leverage tier, so a lower
+  // loan buys a lower rate). Absent = priced at loanAmountUsed.
+  // creditToBorrower: a price above 100 is a lender credit to the borrower
+  // (A&D Borrower Paid), not yield spread to us. revenuePts: our fixed comp
+  // on that option (A&D Lender Paid 2.75%), replacing points + YSP.
+  options?: Array<{ program: string; rate: number; price: number; dscr?: number | null; loanAmount?: number; note?: string; creditToBorrower?: boolean; revenuePts?: number }>;
+  // Lender's own cap on what the broker can earn, so the UI can steer extra
+  // compensation into yield spread when points alone hit the cap.
+  compCaps?: { maxBrokerPoints?: number; maxYsp?: number; yspRatePerPoint?: number };
+  // "live" = the lender's own pricer answered; "model" = Bridgepoint's
+  // researched copy of the lender's pricing (see Bridgepoint Pricing Research).
+  source?: "live" | "model";
+  // Set when the rate is only known to within +/- this much (Kiavi rental).
+  rateTolerance?: number;
   // Loan amount every option above was priced at. When the caller doesn't
   // supply a loan amount, this is the highest amount the lender will do on
   // this scenario (maxLoanAmount === loanAmountUsed); when they do supply
@@ -743,11 +757,632 @@ async function checkNextresAt(s: Scenario): Promise<LenderResult> {
 }
 
 // ---------------------------------------------------------------------
+// Kiavi -- researched MODEL, not a live call. Joe (2026-10-06): no automated
+// logins at Kiavi. Every number below was pulled from Kiavi's own broker
+// pricer on 2026-10-06 with the TBD placeholder entity/guarantor (a
+// first-time, non-"pro" profile); raw data and notes live in
+// Documents\Bridgepoint Pricing Research\kiavi. Kiavi prices experience off
+// the guarantor profile, not an input, so these are first-time-investor
+// terms: an experienced borrower prices the same or better.
+// Fix & flip / bridge is a fixed grid (stable). Rental (DSCR) behaves like
+// a daily rate sheet, so KIAVI_RENTAL_* needs re-pulling when rates move.
+// The block between the BEGIN/END markers is plain JS on purpose so the
+// accuracy test can run this exact code in a browser against Kiavi's pricer.
+// ---------------------------------------------------------------------
+// BEGIN KIAVI MODEL
+const KIAVI_SNAPSHOT = "2026-10-06";
+const KIAVI_BROKER_NOT_APPROVED = ["AZ","CA","ID","MN","NC","ND","NE","NJ","NV","NY","OR","SD","UT","VT"];
+const KIAVI_MAX_BROKER_POINTS = 3;
+const KIAVI_MAX_YSP = 2.5;
+// 12-month fix & flip rate by FICO tier x loan-to-cost tier (<=75, <=80, <=85, <=90).
+const KIAVI_HM_LTC_TIERS = [75, 80, 85, 90];
+const KIAVI_HM_GRID = {
+  "760": [9.24, 10.00, 11.00, 11.50],
+  "700": [9.70, 10.50, 11.50, 12.24],
+  "680": [10.00, 11.00, 12.00, 13.24],
+};
+const KIAVI_HM_TERM_ADDER = { 12: 0, 18: 0.75, 24: 1.00 };
+// Bridge (no rehab) only ever measured at 700-759 / 75% of as-is (11.50);
+// other tiers assume the same FICO spread as the rehab grid's 75% column.
+const KIAVI_BRIDGE_RATE = { "760": 11.04, "700": 11.50, "680": 11.80 };
+// Rental 30-yr fixed: Kiavi prices in points and rounds the rate UP to the
+// next 1/8, so this is a fitted "pre-rounding" rate. Rate = ceil8(B[fico|ltv]
+// + prepay + property + loan size + DSCR, the last four by LTV band
+// lo<=60 / m1<=65 / mid<=70 / hi<=75). Fitted 2026-10-06 on 400 live Kiavi
+// quotes; on 40 untouched quotes: 98% within 1/8, 50% exact -> shown as an
+// estimate (+/-0.125%).
+const KIAVI_RENTAL_FIT = {"B":{"660|50":7.5,"660|55":7.595,"660|60":7.575,"660|65":7.625,"680|50":7.445,"680|55":7.5,"680|60":7.475,"680|65":7.625,"680|70":7.85,"700|50":7.28,"700|55":7.345,"700|60":7.345,"700|65":7.45,"700|70":7.53,"700|75":7.75,"720|50":7.185,"720|55":7.25,"720|60":7.345,"720|65":7.345,"720|70":7.405,"720|75":7.625,"740|50":7.26,"740|55":7.25,"740|60":7.25,"740|65":7.325,"740|70":7.4,"740|75":7.6,"760|50":7.25,"760|55":7.25,"760|60":7.25,"760|65":7.26,"760|70":7.375,"760|75":7.54,"780|50":7.22,"780|55":7.22,"780|60":7.25,"780|65":7.25,"780|70":7.325,"780|75":7.56,"800|50":7.19,"800|55":7.19,"800|60":7.27,"800|65":7.36,"800|70":7.35,"800|75":7.54},"ppp":{"none":{"lo":0.18,"m1":0.18,"mid":0.18,"hi":0.18},"1yr":{"lo":0.15,"m1":0.15,"mid":0.1,"hi":0.15},"2yr":{"lo":0.07,"m1":0.085,"mid":0.07,"hi":0.07},"3yr":{"lo":0,"m1":0,"mid":0,"hi":0},"5yr":{"lo":-0.1,"m1":-0.12,"mid":-0.1,"hi":-0.125}},"pt":{"single-family":{"lo":0,"m1":0,"mid":0,"hi":0},"condo":{"lo":0.05,"m1":0.01,"mid":0.025,"hi":0.05},"2-4plex":{"lo":0.15,"m1":0.15,"mid":0.15,"hi":0.155}},"z":{"z1":{"lo":0.2,"m1":0.155,"mid":0.2,"hi":0.2},"z2":{"lo":0.1,"m1":0.1,"mid":0.08,"hi":0.13},"z3":{"lo":0,"m1":0,"mid":0,"hi":0},"z4":{"lo":0,"m1":0,"mid":-0.045,"hi":0},"z5":{"lo":-0.04,"m1":0,"mid":-0.05,"hi":-0.05},"z6":{"lo":-0.1,"m1":-0.1,"mid":-0.1,"hi":-0.125}},"d":{"d1":{"lo":0.05,"m1":0.08,"mid":0.05,"hi":0.05},"d2":{"lo":0.04,"m1":0.04,"mid":0.04,"hi":0.04},"d3":{"lo":0.02,"m1":0.02,"mid":0.02,"hi":0.02},"d4":{"lo":0,"m1":0,"mid":0,"hi":0}}};
+const KIAVI_RENTAL_LTV_TIERS = [50, 55, 60, 65, 70, 75];
+function kiaviRentalRate(fico, ltvTier, ppp, unit, loan, dscr) {
+  const ft = String(Math.min(800, Math.max(660, Math.floor(fico / 20) * 20)));
+  const b = KIAVI_RENTAL_FIT.B[ft + "|" + ltvTier];
+  if (b == null) return null;
+  const band = ltvTier <= 60 ? "lo" : ltvTier <= 65 ? "m1" : ltvTier <= 70 ? "mid" : "hi";
+  const z = loan < 125000 ? "z1" : loan < 200000 ? "z2" : loan < 350000 ? "z3" : loan < 500000 ? "z4" : loan < 1000000 ? "z5" : "z6";
+  const d = dscr < 1.05 ? "d1" : dscr < 1.1 ? "d2" : dscr < 1.15 ? "d3" : "d4";
+  const pt = unit === "condo" ? "condo" : unit === "2-4plex" ? "2-4plex" : "single-family";
+  const v = b + KIAVI_RENTAL_FIT.ppp[ppp][band] + KIAVI_RENTAL_FIT.pt[pt][band] + KIAVI_RENTAL_FIT.z[z][band] + KIAVI_RENTAL_FIT.d[d][band];
+  return Math.ceil(v * 8 - 1e-6) / 8;
+}
+const KIAVI_STATE_ADJ_HM = { TX: -0.5 };
+
+function kiaviUnit(pt) {
+  if (pt === "SFR") return "single-family";
+  if (pt === "Duplex" || pt === "2-4 Unit") return "2-4plex";
+  if (pt === "Condo") return "condo";
+  if (pt === "Multifamily 5+") return "multifamily";
+  return null; // Mixed-Use, Land: Kiavi doesn't lend on these
+}
+function kiaviTerm(months) {
+  const m = months || 12;
+  if (m <= 12) return 12;
+  if (m <= 18) return 18;
+  if (m <= 24) return 24;
+  return null;
+}
+function kiaviHmFee(loan) { return loan < 150000 ? 3500 : Math.round(loan * 0.01); }
+function kiaviHmFicoTier(f) { return f >= 760 ? "760" : f >= 700 ? "700" : f >= 680 ? "680" : null; }
+function kiaviRentalFicoTier(f) { return f >= 760 ? "760" : f >= 740 ? "740" : f >= 720 ? "720" : f >= 700 ? "700" : f >= 680 ? "680" : f >= 660 ? "660" : null; }
+function kiaviRound8(r) { return Math.round(r * 8) / 8; }
+
+// Plain-object version used by the edge function and the accuracy test.
+// Returns { eligible, reason, options:[{program, rate, price, loanAmount}], maxLoanAmount, fees, assumptions }.
+function kiaviPrice(s) {
+  const L = "Kiavi";
+  const out = { lender: L, eligible: false, source: "model", assumptions: [], compCaps: { maxBrokerPoints: KIAVI_MAX_BROKER_POINTS, maxYsp: KIAVI_MAX_YSP } };
+  const st = (s.propertyState || "").toUpperCase();
+  if (!st) { out.reason = "Needs the property state."; return out; }
+  if (KIAVI_BROKER_NOT_APPROVED.indexOf(st) !== -1) { out.reason = "Bridgepoint isn't approved with Kiavi in " + st + "."; return out; }
+  if (s.citizenshipStatus === "Foreign National" || s.citizenshipStatus === "ITIN") { out.reason = s.citizenshipStatus + " borrowers aren't modeled for Kiavi — price directly with Kiavi."; return out; }
+  const unit = kiaviUnit(s.propertyType);
+  if (!unit) { out.reason = "Kiavi doesn't lend on " + s.propertyType + " properties."; return out; }
+  if (!s.creditScore) { out.reason = "Needs a credit score."; return out; }
+  if (s.loanType === "Ground Up Construction") { out.reason = "Kiavi new construction isn't modeled yet — price it on Kiavi directly."; return out; }
+  if (s.loanType === "DSCR") return kiaviRental(s, out, unit, st);
+  return kiaviHm(s, out, unit, st);
+}
+
+function kiaviHm(s, out, unit, st) {
+  const tier = kiaviHmFicoTier(s.creditScore);
+  if (!tier) { out.reason = "Kiavi needs at least a 680 credit score on fix & flip/bridge (first-time investor)."; return out; }
+  if (unit === "condo" && st === "FL") { out.reason = "Kiavi doesn't finance condos in Florida."; return out; }
+  const term = kiaviTerm(s.termMonths);
+  if (!term) { out.reason = "Kiavi's bridge terms are 12, 18 or 24 months."; return out; }
+  const refi = s.transactionType !== "purchase";
+  if (refi) out.assumptions.push("Priced as an unseasoned refinance (Kiavi has paused brokered seasoned refis).");
+  const basis = refi ? (s.currentValue || s.purchasePrice) : s.purchasePrice;
+  if (!basis) { out.reason = refi ? "Needs the current (as-is) value." : "Needs the purchase price."; return out; }
+  const stateAdj = KIAVI_STATE_ADJ_HM[st] || 0;
+  const termAdj = KIAVI_HM_TERM_ADDER[term];
+  const rehab = s.loanType === "Bridge" ? 0 : (s.rehabBudget || 0);
+  const opts = [];
+  if (rehab <= 0) {
+    // Bridge: one tier, 75% of as-is.
+    const loan = Math.floor(basis * 0.75 / 100) * 100;
+    if (loan < 100000) { out.reason = "Kiavi's minimum loan is $100,000 (75% of value here is $" + Math.round(loan).toLocaleString("en-US") + ")."; return out; }
+    if (loan > 1000000) out.assumptions.push("Capped at Kiavi's $1,000,000 first-time-investor maximum.");
+    const amt = Math.min(loan, 1000000);
+    const rate = Math.round((KIAVI_BRIDGE_RATE[tier] + termAdj + stateAdj) * 100) / 100;
+    opts.push({ program: term + "-mo bridge · 75% of value", rate, price: 100 + kiaviHmFee(amt) / amt * 100, loanAmount: amt });
+    out.assumptions.push("Bridge (no rehab) pricing measured at one tier only; other credit tiers estimated.");
+  } else {
+    if (!s.arv) { out.reason = "Needs the after-repair value."; return out; }
+    // Rehab Kiavi will fund: $300k max, and 35% of the purchase price under a
+    // 720 FICO (accuracy test 2026-10-06: "Loan Holdback Amount ... must be no
+    // more than" exactly 35% of purchase at 685-705; 725+ funded 40-55%).
+    // Under 720 the cap is also $200,000 (test #2: "Rehab Cost ... must be no more than $200,000" at 698).
+    let funded = Math.min(rehab, s.creditScore < 720 ? 200000 : 300000);
+    if (s.creditScore < 720) funded = Math.min(funded, basis * 0.35);
+    if (funded < rehab) out.assumptions.push("Kiavi funds $" + Math.round(funded).toLocaleString("en-US") + " of the $" + Math.round(rehab).toLocaleString("en-US") + " rehab" + (s.creditScore < 720 ? " (35% of purchase / $200k max under a 720 credit score)" : " ($300k max)") + "; the borrower covers the rest.");
+    // 2-4 units: 85% max at 700+, 80% under 700.
+    const capTier = unit === "2-4plex" ? (s.creditScore >= 700 ? 85 : 80) : 90;
+    const arvCap = s.arv * 0.75;
+    for (let i = KIAVI_HM_LTC_TIERS.length - 1; i >= 0; i--) {
+      const t = KIAVI_HM_LTC_TIERS[i];
+      if (t > capTier) continue;
+      let initial = basis * t / 100;
+      let total = initial + funded;
+      if (total > arvCap) { total = arvCap; initial = total - funded; }
+      if (initial <= 0) continue;
+      total = Math.min(Math.floor(total / 100) * 100, 1000000);
+      if (total < 100000) continue;
+      const ltc = (total - funded) / basis * 100;
+      let idx = KIAVI_HM_LTC_TIERS.findIndex(function (x) { return ltc <= x + 0.0001; });
+      if (idx < 0) continue;
+      const rate = Math.round((KIAVI_HM_GRID[tier][idx] + termAdj + stateAdj) * 100) / 100;
+      if (opts.some(function (o) { return o.loanAmount === total; })) continue;
+      opts.push({ program: term + "-mo · " + KIAVI_HM_LTC_TIERS[idx] + "% of " + (refi ? "value" : "purchase"), rate, price: 100 + kiaviHmFee(total) / total * 100, loanAmount: total });
+    }
+    if (!opts.length) { out.reason = "Below Kiavi's $100,000 minimum or over 75% of ARV at every leverage tier."; return out; }
+  }
+  if (s.loanAmount) {
+    // Caller asked for a specific amount: keep only the option at or under it.
+    const fit = opts.filter(function (o) { return o.loanAmount <= s.loanAmount + 1; });
+    if (fit.length) { opts.length = 0; Array.prototype.push.apply(opts, fit); }
+  }
+  opts.sort(function (a, b) { return b.loanAmount - a.loanAmount; });
+  out.eligible = true;
+  out.options = opts;
+  out.loanAmountUsed = opts[0].loanAmount;
+  out.maxLoanAmount = opts[0].loanAmount;
+  out.fees = { lenderFee: kiaviHmFee(opts[0].loanAmount) };
+  out.compCaps.yspRatePerPoint = 1; // fix & flip YSP is 1:1 (+1.00% rate pays 1 point)
+  out.assumptions.push("Kiavi model " + KIAVI_SNAPSHOT + " (first-time-investor profile; experienced borrowers price the same or better). Lower leverage = lower rate.");
+  return out;
+}
+
+function kiaviRentalDscr(loan, rate, s, io) {
+  const r = rate / 100 / 12;
+  const pi = io ? loan * r : loan * r / (1 - Math.pow(1 + r, -360));
+  const pitia = pi + (s.monthlyTaxes || 0) + (s.monthlyInsurance || 0) + (s.monthlyHoa || 0);
+  return pitia > 0 ? (s.rentEstimate || 0) / pitia : 0;
+}
+function kiaviRental(s, out, unit, st) {
+  if (unit === "multifamily") { out.reason = "Kiavi's rental program doesn't take 5+ unit multifamily."; return out; }
+  const tier = kiaviRentalFicoTier(s.creditScore);
+  if (!tier) { out.reason = "Kiavi rentals need at least a 660 credit score."; return out; }
+  const refi = s.transactionType !== "purchase";
+  const value = refi ? (s.currentValue || s.purchasePrice) : Math.min(s.purchasePrice || Infinity, s.currentValue || Infinity);
+  if (!value || !isFinite(value)) { out.reason = refi ? "Needs the current value." : "Needs the purchase price."; return out; }
+  if (!s.rentEstimate) { out.reason = "Needs the monthly rent to size a Kiavi rental."; return out; }
+  // Accuracy test 2026-10-06: every 80% request came back "we can authorize
+  // up to" exactly 75% of value, so 75% is the real purchase ceiling.
+  let maxLtv = tier === "660" ? 65 : tier === "680" ? 70 : 75;
+  if (s.transactionType === "cashout") { maxLtv = Math.min(maxLtv, 75); out.assumptions.push("Cash-out assumed 75% max LTV and 90+ days of ownership (Kiavi requires 90 days seasoning)."); }
+  let ppp = s.prepayTerm || "5yr";
+  if (ppp === "4yr") { ppp = "3yr"; out.assumptions.push("Kiavi doesn't offer a 4-year prepay; priced at 3 years."); }
+  if (!KIAVI_RENTAL_FIT.ppp[ppp]) ppp = "3yr";
+  const opts = [];
+  let maxLoanFound = 0;
+  for (let i = KIAVI_RENTAL_LTV_TIERS.length - 1; i >= 0; i--) {
+    const t = KIAVI_RENTAL_LTV_TIERS[i];
+    if (t > maxLtv) continue;
+    let loan = Math.floor(value * t / 100 / 500) * 500;
+    if (s.loanAmount && loan > s.loanAmount) continue;
+    if (loan > 1500000) loan = 1500000;
+    if (loan < 100000) continue;
+    // DSCR depends on the rate and the rate (slightly) on DSCR: price at
+    // DSCR 1.25 first, then reprice with the resulting DSCR.
+    let rate = kiaviRentalRate(s.creditScore, t, ppp, unit, loan, 1.25);
+    if (rate == null) continue;
+    if (refi) rate = kiaviRound8(rate + 0.125);
+    let dscr = kiaviRentalDscr(loan, rate, s, false);
+    if (dscr < 0.8) continue;
+    if (dscr < 1.0 && t > 65) continue; // DSCR under 1.00 caps Kiavi at 65%
+    const r2 = kiaviRentalRate(s.creditScore, t, ppp, unit, loan, dscr);
+    if (r2 != null) { rate = refi ? kiaviRound8(r2 + 0.125) : r2; dscr = kiaviRentalDscr(loan, rate, s, false); }
+    maxLoanFound = Math.max(maxLoanFound, loan);
+    opts.push({ program: "30-yr fixed · " + t + "% LTV", rate, price: 100, dscr: Math.round(dscr * 100) / 100, loanAmount: loan });
+    if (t <= 75) {
+      const ioRate = kiaviRound8(rate + (t > 65 ? 0.125 : 0));
+      opts.push({ program: "30-yr fixed IO · " + t + "% LTV (IO)", rate: ioRate, price: 100, dscr: Math.round(kiaviRentalDscr(loan, ioRate, s, true) * 100) / 100, loanAmount: loan });
+    }
+  }
+  if (!opts.length) { out.reason = "No Kiavi rental tier fits: check credit (660+), DSCR (0.80+, 1.00+ above 65% LTV) and the $100k minimum loan."; return out; }
+  out.eligible = true;
+  out.options = opts;
+  out.loanAmountUsed = maxLoanFound;
+  out.maxLoanAmount = maxLoanFound;
+  out.fees = { lenderFee: 0 };
+  out.compCaps.yspRatePerPoint = 0.25; // rental YSP is price-based: about +0.125-0.25% rate per point
+  out.rateTolerance = 0.125;
+  out.assumptions.push("Kiavi rental rate is an ESTIMATE, accurate to within 0.125% (tested 98%); confirm on Kiavi before quoting exact. Rates as of " + KIAVI_SNAPSHOT + " (rate sheet moves). 5/1 and 7/1 ARMs are typically 0.125% lower. No Kiavi origination fee on rentals.");
+  return out;
+}
+// END KIAVI MODEL
+
+// ---------------------------------------------------------------------
+// A&D Mortgage DSCR -- researched MODEL (2026-10-06, Quick Pricer Pro via
+// Joe's AIM login; raw data in Documents\Bridgepoint Pricing Research\ad).
+// A&D prices off one base ladder: discount(rate) = AD_BASE[rate] - total
+// adjustments, floored at a 2.5-point credit. Adjustments are additive in
+// points by CLTV bucket (fitted on ~300 live quotes). Tested on 100 fresh
+// quotes: US citizens/residents 93% eligibility, 94% exact par rate;
+// foreign national / ITIN only 50% -> flagged as estimates.
+// Compensation: Borrower Paid = broker charges points, any credit goes to
+// the BORROWER. Lender Paid = A&D pays the broker 2.75% through the rate
+// (every rate costs exactly 2.75 points more), no points on top.
+// ---------------------------------------------------------------------
+const AD_SNAPSHOT = "A&D rate sheet 10/06/26 09:04 AM ET";
+const AD_LPC = 2.75;
+const AD_MAX_CREDIT = 2.5;
+const AD_FIT = {"fico":{"620":{"50":-3.5,"55":-3.5,"60":-4,"65":-4.25,"70":null,"75":null,"80":null},"640":{"50":-2.25,"55":-2.25,"60":-2.375,"65":-2.75,"70":-3.75,"75":null,"80":null},"660":{"50":-0.625,"55":-0.625,"60":-1.125,"65":-1.5,"70":-2.5,"75":-3.375,"80":null},"680":{"50":0,"55":0,"60":-0.125,"65":-0.875,"70":-1.5,"75":-2.5,"80":-4.5},"700":{"50":0.375,"55":0.375,"60":0.25,"65":0,"70":-0.5,"75":-1.125,"80":-2.875},"720":{"50":0.625,"55":0.625,"60":0.5,"65":0.25,"70":-0.125,"75":-0.5,"80":-1.625},"740":{"50":0.75,"55":0.75,"60":0.625,"65":0.5,"70":0.125,"75":-0.375,"80":-1.125},"760":{"50":0.875,"55":0.875,"60":0.75,"65":0.625,"70":0.375,"75":-0.125,"80":-0.875},"780":{"50":1,"55":1,"60":0.875,"65":0.75,"70":0.5,"75":0,"80":-0.625}},"B":{"6.75":1.75,"6.875":1,"6.99":0.375,"7.125":-0.375,"7.25":-1.125,"7.375":-1.75,"7.49":-2.375,"7.625":-2.75,"7.75":-3,"7.875":-3.25,"7.99":-3.5,"8.125":-3.625,"8.25":-3.75,"8.375":-3.875,"8.49":-4,"8.625":-4.125,"8.75":-4.25,"8.875":-4.375,"8.99":-4.5,"9.125":-4.625,"9.25":-4.75,"9.375":-4.875,"9.49":-5,"9.625":-5.125,"9.75":-5.25,"9.875":-5.375,"9.99":-5.5,"10.125":-5.625,"10.25":-5.75,"10.375":-5.875,"10.49":-6,"10.625":-6.125,"10.75":-6.25,"10.875":-6.375,"10.99":-6.5,"11.125":-6.625,"11.25":-6.75,"11.375":-6.875}};
+// Eligibility (null = A&D doesn't offer that combination), measured in single-factor sweeps.
+const AD_NOT_OFFERED: Record<string, number[]> = { // factor -> CLTV buckets not offered
+  "d4": [80], "d5": [75, 80], "co": [80], "pt_condotel": [80], "c_fn": [80], "c_itin": [75, 80],
+};
+const AD_NO_STATES = ["HI"];
+function adCltvBucket(c: number): number { return Math.min(80, Math.max(50, Math.ceil(c / 5) * 5)); }
+function adFicoBucket(f: number): string { return String(Math.min(780, Math.max(620, Math.floor(f / 20) * 20))); }
+function adAmtBand(a: number): string { return a < 100000 ? "a0" : a <= 1000000 ? "a1" : a <= 1500000 ? "a2" : a <= 2000000 ? "a3" : "a4"; }
+function adDscrBand(d: number): string { return d >= 1.25 ? "d1" : d >= 1.10 ? "d2" : d >= 1.0 ? "d3" : d >= 0.75 ? "d4" : "d5"; }
+type AdIn = { fico: number; cltv: number; dscr: number; ppp: string; purpose: string; pt: string; cit: string; amt: number; st: string };
+function adKeys(s: AdIn): string[] {
+  const c = adCltvBucket(s.cltv), k: string[] = [];
+  const db = adDscrBand(s.dscr); if (db !== "d1") k.push(db + "|" + c);
+  k.push("ppp_" + s.ppp);
+  if (s.purpose === "cashout") k.push("co|" + c);
+  if (s.pt !== "sfr") k.push("pt_" + s.pt + "|" + c);
+  if (s.cit !== "us") k.push("c_" + s.cit + "|" + c);
+  const ab = adAmtBand(s.amt); if (ab !== "a1") k.push(ab + "|" + c);
+  if (s.st === "NY") k.push("ny|" + c);
+  if (s.cit === "fn" && s.pt !== "sfr") k.push("fnpt|" + c);
+  if (s.cit === "fn" && s.purpose !== "purchase") k.push("fnpu|" + c);
+  return k;
+}
+// Daily snapshot written by the "ad-rate-refresh" scheduled task (Joe's
+// logged-in A&D session in the Claude app). It replaces the base ladder (B)
+// and the credit x CLTV grid (fico) when present; everything else stays the
+// measured structure above. Cached per function instance for 10 minutes.
+let adSnapCache: { at: number; B: any; fico: any; asOf: string | null; captured: string | null } | null = null;
+async function adSnapshot() {
+  if (adSnapCache && Date.now() - adSnapCache.at < 600000) return adSnapCache;
+  let row: any = null;
+  if (SUPABASE_URL_RCN && SERVICE_KEY_RCN) {
+    const r = await fetch(SUPABASE_URL_RCN + "/rest/v1/lender_pricing_snapshots?lender=eq.ad&select=data,sheet_as_of,captured_at", { headers: { apikey: SERVICE_KEY_RCN, Authorization: "Bearer " + SERVICE_KEY_RCN } }).catch(() => null);
+    if (r && r.ok) { const rows = await r.json().catch(() => []); row = rows && rows[0]; }
+  }
+  adSnapCache = { at: Date.now(), B: (row && row.data && row.data.B) || AD_FIT.B, fico: (row && row.data && row.data.fico) || AD_FIT.fico, asOf: row ? row.sheet_as_of : AD_SNAPSHOT, captured: row ? row.captured_at : null };
+  return adSnapCache;
+}
+// Returns total adjustment in points, or null when A&D doesn't offer the scenario.
+function adAdjust(s: AdIn, ficoGrid: any = AD_FIT.fico): number | null {
+  const c = adCltvBucket(s.cltv);
+  if (AD_NO_STATES.indexOf(s.st) !== -1) return null;
+  const fb = ficoGrid[adFicoBucket(s.fico)];
+  const base = fb ? fb[String(c)] : null;
+  if (base == null) return null;
+  const db = adDscrBand(s.dscr);
+  if ((AD_NOT_OFFERED[db] || []).indexOf(c) !== -1) return null;
+  if (s.purpose === "cashout" && AD_NOT_OFFERED.co.indexOf(c) !== -1) return null;
+  if (s.cit !== "us" && (AD_NOT_OFFERED["c_" + s.cit] || []).indexOf(c) !== -1) return null;
+  if (s.amt > 2500000 || (s.amt > 2000000 && c >= 75) || (s.amt > 1500000 && c >= 80)) return null;
+  // Layered guideline "no"s found in testing (never contradicted in ~340 quotes).
+  if (s.fico < 680 && (s.dscr < 1.0 || (s.purpose === "cashout" && s.cltv > 67) || s.pt === "rural")) return null;
+  if (s.cit === "itin" && (s.cltv > 65 || s.fico < 700 || s.purpose === "cashout")) return null;
+  if (s.pt === "condo" && s.dscr < 1.0) return null;
+  let adj = base;
+  for (const k of adKeys(s)) adj += adMain(k, s);
+  if (s.fico < 680 && s.purpose === "cashout") adj -= 0.125;
+  return Math.round(adj * 1000) / 1000;
+}
+// Every main adjustment was measured directly in single-factor sweeps
+// (locked; the fitter is NOT allowed to move these). Only the foreign-
+// national interaction terms (fnpt/fnpu) come from fitting. Condo pricing
+// is worse in Florida (the sweeps ran in Tampa): FL condo -0.5/-0.75/-1,
+// elsewhere -0.25/-0.5/-0.5 (fresh-quote test: US borrowers 96% exact).
+function adMain(k: string, s: AdIn): number {
+  const [a, cs] = k.split("|"); const c = Number(cs);
+  if (a.startsWith("ppp_")) return ({ none: -1.5, "6m": -1.25, "1yr": -1, "2yr": -0.5, "3yr": 0, "4yr": 0.25, "5yr": 0.375 } as Record<string, number>)[a.slice(4)] || 0;
+  if (a === "pt_condo") return s.st === "FL" ? (c <= 70 ? -0.5 : c <= 75 ? -0.75 : -1) : (c <= 70 ? -0.25 : -0.5);
+  if (a === "fnpt" || a === "fnpu") { const v = (AD_FN_INTERACT as any)[k]; return v != null ? v : 0; }
+  const t: Record<string, (c: number) => number> = {
+    d2: () => -0.25, d3: () => -0.25, d4: (c) => c <= 60 ? -1.25 : c <= 65 ? -1.5 : c <= 70 ? -1.625 : -1.75, d5: (c) => c <= 55 ? -1.75 : c <= 60 ? -2 : c <= 65 ? -2.125 : -2.25,
+    co: (c) => c <= 60 ? -0.375 : c <= 65 ? -0.5 : c <= 70 ? -0.75 : -0.875,
+    "pt_2-4": (c) => c <= 55 ? -0.375 : c <= 75 ? -0.5 : -0.75, "pt_rural": (c) => c <= 70 ? -0.5 : c <= 75 ? -0.625 : -0.75, "pt_pud": () => 0,
+    c_np: () => -1, c_fn: (c) => c <= 65 ? -2.125 : c <= 70 ? -2 : -2.75, c_itin: () => -2,
+    a0: () => -0.25, a2: () => 0, a3: (c) => c >= 75 ? -0.25 : 0, a4: () => -0.25, ny: (c) => c >= 75 ? -0.25 : 0,
+  };
+  return t[a] ? t[a](c) : 0;
+}
+const AD_FN_INTERACT = { "fnpu|50": 0.125, "fnpt|75": -0.25, "fnpt|50": 0.125, "fnpu|70": 0.25, "fnpt|55": 0.125 };
+function adLadder(adj: number, lenderPaid: boolean, B: any = AD_FIT.B): Array<[number, number]> {
+  return Object.entries(B).map(([r, b]) => [Number(r), Math.max(-AD_MAX_CREDIT, Math.round(((b as number) - adj) * 1000) / 1000) + (lenderPaid ? AD_LPC : 0)] as [number, number]).sort((a, b) => a[0] - b[0]);
+}
+function adMonthlyPI(loan: number, rate: number): number { const r = rate / 100 / 12; return loan * r / (1 - Math.pow(1 + r, -360)); }
+
+async function checkAD(s: Scenario): Promise<LenderResult> {
+  const L = "A&D Mortgage";
+  if (s.loanType !== "DSCR") return { lender: L, eligible: false, reason: "A&D is only set up for DSCR rentals in this pricer." };
+  const pt = s.propertyType === "SFR" ? "sfr" : s.propertyType === "Condo" ? "condo" : (s.propertyType === "2-4 Unit" || s.propertyType === "Duplex") ? "2-4" : null;
+  if (!pt) return { lender: L, eligible: false, source: "model", reason: "A&D's DSCR program doesn't take " + s.propertyType + " properties." };
+  const cit = s.citizenshipStatus === "Foreign National" ? "fn" : s.citizenshipStatus === "ITIN" ? "itin" : "us";
+  if (!s.creditScore || s.creditScore < 620) return { lender: L, eligible: false, source: "model", reason: "A&D needs at least a 620 credit score." };
+  const refi = s.transactionType !== "purchase";
+  const value = refi ? (s.currentValue || s.purchasePrice) : Math.min(s.purchasePrice || Infinity, s.currentValue || Infinity);
+  if (!value || !isFinite(value)) return { lender: L, eligible: false, source: "model", reason: refi ? "Needs the current value." : "Needs the purchase price." };
+  if (!s.rentEstimate) return { lender: L, eligible: false, source: "model", reason: "Needs the monthly rent to size an A&D DSCR loan." };
+  const ppp = ({ "5yr": "5yr", "3yr": "3yr", "2yr": "2yr", "1yr": "1yr", none: "none" } as Record<string, string>)[s.prepayTerm || "5yr"] || "5yr";
+  const purpose = s.transactionType === "cashout" ? "cashout" : s.transactionType === "ratetermrefi" ? "rt" : "purchase";
+  const st = (s.propertyState || "").toUpperCase();
+  const escrow = (s.monthlyTaxes || 0) + (s.monthlyInsurance || 0) + (s.monthlyHoa || 0);
+  const snap = await adSnapshot();
+  const ageDays = snap.captured ? (Date.now() - new Date(snap.captured).getTime()) / 86400000 : null;
+  // Highest CLTV A&D will do on this deal: try 80 down to 50; DSCR depends on
+  // the par rate, which depends on the DSCR band -- iterate twice.
+  const tiers = s.loanAmount ? [Math.min(80, s.loanAmount / value * 100)] : [80, 75, 70, 65, 60, 55, 50];
+  for (const cltv of tiers) {
+    const loan = s.loanAmount || Math.floor(value * cltv / 100 / 500) * 500;
+    if (loan < 75000) continue;
+    let dscr = 1.3, adj: number | null = null, par = 0;
+    for (let i = 0; i < 3; i++) {
+      adj = adAdjust({ fico: s.creditScore, cltv, dscr, ppp, purpose, pt, cit, amt: loan, st }, snap.fico);
+      if (adj == null) break;
+      const lad = adLadder(adj, false, snap.B);
+      par = (lad.find((x) => x[1] <= 0) || lad[lad.length - 1])[0];
+      dscr = (s.rentEstimate || 0) / (adMonthlyPI(loan, par) + escrow);
+    }
+    if (adj == null) continue;
+    const bp = adLadder(adj, false, snap.B).filter((x) => x[1] <= 2.0 && x[1] >= -AD_MAX_CREDIT).slice(0, 7);
+    const lp = adLadder(adj, true, snap.B).filter((x) => x[1] <= 2.0).slice(0, 5);
+    const pmtD = (rate: number) => Math.round((s.rentEstimate || 0) / (adMonthlyPI(loan, rate) + escrow) * 100) / 100;
+    const options = bp.map(([rate, d]) => ({ program: "30-yr fixed · Borrower Paid", rate, price: 100 - d, dscr: pmtD(rate), creditToBorrower: d < 0 }))
+      .concat(lp.map(([rate, d]) => ({ program: "30-yr fixed · Lender Paid (A&D pays " + AD_LPC + "%)", rate, price: 100 - d, dscr: pmtD(rate), revenuePts: AD_LPC })));
+    const assumptions = [
+      "A&D model, rate sheet " + (snap.asOf || AD_SNAPSHOT) + (ageDays != null ? " (refreshed " + (ageDays < 1 ? "today" : Math.floor(ageDays) + " day(s) ago") + ")" : " (built-in snapshot)") + ". Long-term rental, no interest-only, 30-yr fixed (40-yr and 5/6 or 7/6 ARMs also available).",
+      "Borrower Paid: your origination is on top, and any negative price is a lender credit to the BORROWER, not yield spread to us. Lender Paid: A&D pays Bridgepoint " + AD_LPC + "% through the rate; no origination points can be added.",
+    ];
+    const res: LenderResult = { lender: L, eligible: true, source: "model", options: options as any, loanAmountUsed: loan, maxLoanAmount: loan, assumptions };
+    if (cit !== "us") { res.rateTolerance = 0.25; assumptions.unshift("Foreign national / ITIN pricing at A&D is only accurate to about 0.25% here — confirm with A&D."); }
+    // Older than 3 days (or never refreshed): rates may have moved.
+    if (ageDays == null || ageDays > 3) { res.rateTolerance = Math.max(res.rateTolerance || 0, 0.25); assumptions.unshift("A&D rates haven't been refreshed in " + (ageDays == null ? "a while" : Math.floor(ageDays) + " days") + " — confirm before quoting."); }
+    return res;
+  }
+  return { lender: L, eligible: false, source: "model", reason: "No A&D DSCR tier fits (credit, leverage, DSCR, loan size, or a layered guideline like low credit with DSCR under 1.00)." };
+}
+
+async function checkKiavi(s: Scenario): Promise<LenderResult> {
+  return kiaviPrice(s) as LenderResult;
+}
+
+// ---------------------------------------------------------------------
+// RCN Capital -- LIVE, through RCN's own broker pricing tool (BLN Software,
+// broker.commerciallendingservicesllc.com). Joe approved a server-side
+// session for RCN (2026-10-06). Credentials come from the RCN_USERNAME /
+// RCN_PASSWORD function secrets, which Joe enters himself. The session is
+// cached in lender_sessions so we log in once, not per quote. Request and
+// response formats are documented in
+// Documents\Bridgepoint Pricing Research\rcn\request_templates.md.
+// If the secrets aren't set or RCN can't be reached, this falls back to the
+// researched RTL model below and says so.
+// ---------------------------------------------------------------------
+const RCN_BROKER = "https://broker.commerciallendingservicesllc.com";
+const RCN_SECURE = "https://secure.commerciallendingservicesllc.com";
+const RCN_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36";
+const SUPABASE_URL_RCN = Deno.env.get("SUPABASE_URL") || "";
+const SERVICE_KEY_RCN = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+
+type RcnSession = { cookies: Record<string, string>; csrf: string };
+let rcnSessionMemo: RcnSession | null = null;
+
+function cookieHeader(jar: Record<string, string>): string {
+  return Object.entries(jar).map(([k, v]) => k + "=" + v).join("; ");
+}
+function absorbCookies(jar: Record<string, string>, res: Response) {
+  const raw: string[] = (res.headers as any).getSetCookie ? (res.headers as any).getSetCookie() : [];
+  raw.forEach((c) => {
+    const [pair] = c.split(";");
+    const i = pair.indexOf("=");
+    if (i < 0) return;
+    const k = pair.slice(0, i).trim(), v = pair.slice(i + 1).trim();
+    if (/expires=Thu, 01-Jan-1970/i.test(c) || v === "deleted") delete jar[k]; else jar[k] = v;
+  });
+}
+async function rcnFetch(jar: Record<string, string>, url: string, init: RequestInit = {}, hops = 8): Promise<{ res: Response; body: string; url: string }> {
+  let cur = url;
+  let opts: RequestInit = init;
+  for (let i = 0; i < hops; i++) {
+    const res = await fetch(cur, { ...opts, redirect: "manual", headers: { "User-Agent": RCN_UA, "Accept": "text/html,application/json,*/*", ...(opts.headers || {}), "Cookie": cookieHeader(jar) } });
+    absorbCookies(jar, res);
+    const loc = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && loc) {
+      cur = new URL(loc, cur).toString();
+      opts = { method: "GET" };
+      continue;
+    }
+    return { res, body: await res.text(), url: cur };
+  }
+  throw new Error("RCN redirect loop");
+}
+async function rcnLoadStoredSession(): Promise<RcnSession | null> {
+  if (!SUPABASE_URL_RCN || !SERVICE_KEY_RCN) return null;
+  const r = await fetch(SUPABASE_URL_RCN + "/rest/v1/lender_sessions?lender=eq.rcn&select=session", { headers: { apikey: SERVICE_KEY_RCN, Authorization: "Bearer " + SERVICE_KEY_RCN } }).catch(() => null);
+  if (!r || !r.ok) return null;
+  const rows = await r.json().catch(() => []);
+  return rows && rows[0] && rows[0].session ? rows[0].session as RcnSession : null;
+}
+async function rcnStoreSession(sess: RcnSession) {
+  if (!SUPABASE_URL_RCN || !SERVICE_KEY_RCN) return;
+  await fetch(SUPABASE_URL_RCN + "/rest/v1/lender_sessions", { method: "POST", headers: { apikey: SERVICE_KEY_RCN, Authorization: "Bearer " + SERVICE_KEY_RCN, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ lender: "rcn", session: sess, updated_at: new Date().toISOString() }) }).catch(() => null);
+}
+function rcnCsrfFrom(html: string): string | null {
+  const m = /_csrfToken\s*=\s*['"]([^'"]+)['"]/.exec(html);
+  return m ? m[1] : null;
+}
+async function rcnLogin(): Promise<RcnSession> {
+  const user = Deno.env.get("RCN_USERNAME"), pass = Deno.env.get("RCN_PASSWORD");
+  if (!user || !pass) throw new Error("not_configured");
+  const jar: Record<string, string> = {};
+  const page = await rcnFetch(jar, RCN_SECURE + "/members/login");
+  const field = (name: string) => { const re = new RegExp('name="' + name.replace(/[\[\]]/g, "\\$&") + '"[^>]*value="([^"]*)"'); const m = re.exec(page.body); return m ? m[1] : ""; };
+  const form = new URLSearchParams();
+  form.set("_method", "POST");
+  form.set("data[_Token][key]", field("data[_Token][key]"));
+  form.set("data[Member][login]", user);
+  form.set("data[Member][password]", pass);
+  form.set("data[Member][rurl]", "");
+  form.set("data[_Token][fields]", field("data[_Token][fields]"));
+  form.set("data[_Token][unlocked]", field("data[_Token][unlocked]"));
+  await rcnFetch(jar, RCN_SECURE + "/members/login/", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "Referer": RCN_SECURE + "/members/login" }, body: form.toString() });
+  const calc = await rcnFetch(jar, RCN_BROKER + "/pricing-tool/loan-calculator");
+  const csrf = rcnCsrfFrom(calc.body);
+  if (!csrf) throw new Error("login_failed");
+  const sess = { cookies: jar, csrf };
+  await rcnStoreSession(sess);
+  return sess;
+}
+async function rcnSession(fresh = false): Promise<RcnSession> {
+  if (!fresh && rcnSessionMemo) return rcnSessionMemo;
+  if (!fresh) { const stored = await rcnLoadStoredSession(); if (stored) { rcnSessionMemo = stored; return stored; } }
+  rcnSessionMemo = await rcnLogin();
+  return rcnSessionMemo;
+}
+function formEncode(obj: Record<string, unknown>, prefix = "", out = new URLSearchParams()): URLSearchParams {
+  Object.entries(obj).forEach(([k, v]) => {
+    const key = prefix ? prefix + "[" + k + "]" : k;
+    if (v !== null && typeof v === "object") formEncode(v as Record<string, unknown>, key, out);
+    else out.append(key, v == null ? "" : String(v));
+  });
+  return out;
+}
+async function rcnCalculate(data: Record<string, unknown>): Promise<any> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const sess = await rcnSession(attempt > 0);
+    const r = await rcnFetch(sess.cookies, RCN_BROKER + "/pricing-tool/loan-calculator/calculate-loan?_=" + Math.random(), {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": sess.csrf, "Accept": "application/json", "Referer": RCN_BROKER + "/pricing-tool/loan-calculator" },
+      body: formEncode(data).toString(),
+    }, 2);
+    let j: any = null;
+    try { j = JSON.parse(r.body); } catch (_) { j = null; }
+    if (j && j.status) return j;
+    rcnSessionMemo = null; // got a login page instead of JSON: session expired, log in again
+  }
+  throw new Error("session_expired");
+}
+
+const RCN_PROPERTY_TYPE: Record<string, string> = { "SFR": "6", "Duplex": "14", "2-4 Unit": "14", "Condo": "2", "Multifamily 5+": "9", "Mixed-Use": "8" };
+const RCN_CITIZENSHIP: Record<string, string> = { "US Citizen": "0", "Foreign National": "1", "Permanent Resident": "2", "ITIN": "4" };
+const RCN_PREPAY: Record<string, string> = { "5yr": "60", "3yr": "36", "2yr": "24", "1yr": "12", "none": "0" };
+// RCN's overlays are zip-based; when the address has no zip, use the state's
+// largest metro so at least the state rules apply (and say so).
+const STATE_DEFAULT_ZIP: Record<string, string> = { AL:"35203",AK:"99501",AZ:"85004",AR:"72201",CA:"90012",CO:"80202",CT:"06103",DE:"19801",DC:"20001",FL:"33610",GA:"30303",HI:"96813",ID:"83702",IL:"60601",IN:"46204",IA:"50309",KS:"67202",KY:"40202",LA:"70112",ME:"04101",MD:"21202",MA:"02108",MI:"48226",MN:"55401",MS:"39201",MO:"64106",MT:"59101",NE:"68102",NV:"89101",NH:"03101",NJ:"07102",NM:"87102",NY:"10007",NC:"28202",ND:"58102",OH:"43215",OK:"73102",OR:"97204",PA:"19107",RI:"02903",SC:"29201",SD:"57104",TN:"37203",TX:"75201",UT:"84101",VT:"05401",VA:"23219",WA:"98104",WV:"25301",WI:"53202",WY:"82001" };
+function zipFromAddress(a: string | null): string | null {
+  const m = /\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(a || "");
+  return m ? m[1] : null;
+}
+function rcnFlips(d: number | null): string { const n = d || 0; return n >= 10 ? "10" : n >= 5 ? "5" : n >= 3 ? "3" : n >= 1 ? "1" : "0"; }
+
+function rcnBuildRequest(s: Scenario, assumptions: string[]): Record<string, unknown> | string {
+  const isRtl = RTL_AUTO_LOAN_TYPES.includes(s.loanType);
+  const program = s.loanType === "Fix & Flip" ? "1" : s.loanType === "Bridge" ? "2" : s.loanType === "Ground Up Construction" ? "5" : "3";
+  const loanTypeId = s.transactionType === "cashout" ? "3" : s.transactionType === "ratetermrefi" ? "2" : "1";
+  const pt = RCN_PROPERTY_TYPE[s.propertyType];
+  if (!pt) return "RCN doesn't price " + s.propertyType + " in this tool.";
+  let zip = zipFromAddress(s.propertyAddress);
+  if (!zip) { zip = STATE_DEFAULT_ZIP[s.propertyState] || null; if (zip) assumptions.push("No zip on the address; priced with " + s.propertyState + " default zip " + zip + " (RCN has city-level overlays)."); }
+  if (!zip) return "Needs the property zip code or state.";
+  const asis = (s.transactionType !== "purchase" ? s.currentValue : (s.currentValue || s.purchasePrice)) || s.purchasePrice || 0;
+  const base: Record<string, unknown> = {
+    lender_pricing_program_id: program, lender_pricing_loan_type_id: loanTypeId, property_type_id: pt,
+    mhv_exception: "0", rate_lock_type: "0", heavy_rehab_experience: "0", guc_experience: "0", commercial_experience: "0", residential_experience: "0",
+    outstanding_mtg: "0", foreign_national: RCN_CITIZENSHIP[s.citizenshipStatus || "US Citizen"] || "0", credit_score: String(s.creditScore || ""), zipcode: zip,
+    asis_value: asis.toFixed(2), as_stabilized_value: "0.00", purchase_price: (s.purchasePrice || asis).toFixed(2),
+    estimated_payoff: (s.currentLoanBalance || 0).toFixed(2), interest_rate: "", loan_stage: "", property_expenses: "0.00",
+    amount_requested: (s.loanAmount || 0).toFixed(2), exit_strategy: "", lender_a_points: 0, rehab_needed: "0",
+    broker_points: String(s.pointsCharged || 0),
+  };
+  if (isRtl) {
+    Object.assign(base, {
+      loan_term: String([9, 12, 18].reduce((a, b) => Math.abs(b - (s.termMonths || 12)) < Math.abs(a - (s.termMonths || 12)) ? b : a, 12)),
+      completed_flips: rcnFlips(s.experienceDeals), interest_type: "UPB", ir_selection: "", completed_rehab: "", soft_costs: "0.00", rehab_costs: "0.00",
+      hard_costs: (s.loanType === "Bridge" ? 0 : (s.rehabBudget || 0)).toFixed(2), unit_count: s.propertyType === "2-4 Unit" || s.propertyType === "Duplex" ? "2" : "1",
+      estimated_taxes: "0.00", flood_insurance: "0.00", hoa_dues: "0.00", sdira_loan: "0", tear_down: "0", construction_completion: "0", change_property: "0", property_alteration: "0",
+      gross_rent: 0, gr_period: "M", markupIncluded: "1",
+    });
+    if (s.loanType === "Ground Up Construction") Object.assign(base, { acv: (s.arv || 0).toFixed(2), zero_ia: "0", entitlements: "1", full_plans: "1", approved_permits: "1" });
+    else base.arv = (s.arv || asis).toFixed(2);
+  } else {
+    if (!s.rentEstimate) return "Needs the monthly rent.";
+    Object.assign(base, {
+      loan_term: "", completed_flips: "", interest_type: "", ir_selection: "", amortization_type: "FRM", prepayment_period: RCN_PREPAY[s.prepayTerm || "5yr"] || "60", io_period: "NOIO",
+      completed_rehab: "0.00", hard_costs: "0.00", soft_costs: "0.00", rehab_costs: "0.00", unit_count: 1, broker_rebate: "0",
+      estimated_taxes: String(Math.round((s.monthlyTaxes || 0) * 12)), insurance_premium: String(Math.round((s.monthlyInsurance || 0) * 12)), flood_insurance: "0", hoa_dues: String(Math.round((s.monthlyHoa || 0) * 12)),
+      portfolio_properties: { units: { units: [{ leasing_status: "Leased (LTR)", actual_rent: s.rentEstimate, market_rent: s.rentEstimate }] } },
+      vacant_units: 0, lease_type: "LTR", gross_rent: s.rentEstimate, gr_period: "M",
+    });
+  }
+  return base;
+}
+
+function rcnParse(s: Scenario, j: any, assumptions: string[]): LenderResult {
+  const L = "RCN Capital";
+  const R = (j && j.results) || {};
+  const caps = { maxBrokerPoints: undefined, maxYsp: undefined, yspRatePerPoint: 1 };
+  if (Array.isArray(R.pricings)) {
+    // Rental: one entry per lender-points option.
+    const opts = R.pricings.filter((p: any) => p && p.o_interest_rate).map((p: any) => ({
+      program: "30-yr fixed · " + (Number(p.o_lender_points) * 100).toFixed(2) + " pts to RCN",
+      rate: Math.round(p.o_interest_rate * 100000) / 1000,
+      price: 100 - Number(p.o_lender_points) * 100,
+      dscr: p.o_dscr != null ? Math.round(p.o_dscr * 100) / 100 : null,
+    }));
+    if (!opts.length) return { lender: L, eligible: false, source: "live", reason: (j && j.message && j.message !== "o" ? j.message : "RCN returned no rental pricing for this scenario."), assumptions };
+    const max = R.pricings[0].o_max_loan_amount;
+    return { lender: L, eligible: true, source: "live", options: opts, loanAmountUsed: s.loanAmount || max, maxLoanAmount: max, assumptions, compCaps: caps };
+  }
+  if (!R.o_max_loan_amount || !R.o_interest_rate) {
+    const why = (j && j.message) || ((j && j.minimum && j.minimum.length) ? JSON.stringify(j.minimum) : "") || "RCN's pricer returned no terms (common reasons: credit under 650, or leverage/ARV limits).";
+    return { lender: L, eligible: false, source: "live", reason: why, assumptions };
+  }
+  const ladder = (R.suggested_rates || []).map((x: any) => ({ program: "RCN " + (x.points * 100).toFixed(2) + " pts", rate: Math.round(x.rate * 100000) / 1000, price: 100 + x.points * 100 }));
+  const adj = Object.values(R.ltv_adjustments || {}).flatMap((g: any) => Object.entries(g || {}).filter(([, v]) => v).map(([k, v]) => k + " " + v + "%"));
+  if (adj.length) assumptions.push("RCN leverage adjustments applied: " + adj.join(", "));
+  return {
+    lender: L, eligible: true, source: "live", options: ladder.length ? ladder : [{ program: "RCN", rate: R.o_interest_rate * 100, price: 100 + (R.o_lender_points || 0) * 100 }],
+    loanAmountUsed: R.o_loan_amount || R.o_max_loan_amount, maxLoanAmount: R.o_max_loan_amount,
+    fees: { lenderFee: (R.o_closing_fees || []).reduce((a: number, f: any) => a + Number(f.amount || 0), 0) || undefined },
+    assumptions, compCaps: caps,
+  };
+}
+
+// Fallback when the live session isn't available: the RTL rules measured
+// 2026-10-06 (Documents\Bridgepoint Pricing Research\rcn\01-02). Rentals and
+// ground-up have no fallback model.
+function rcnRtlModel(s: Scenario, assumptions: string[]): LenderResult {
+  const L = "RCN Capital";
+  const f = s.creditScore || 0;
+  if (f < 650) return { lender: L, eligible: false, source: "model", reason: "RCN needs at least a 650 credit score.", assumptions };
+  if (!s.purchasePrice) return { lender: L, eligible: false, source: "model", reason: "Needs the purchase price.", assumptions };
+  const ft = f >= 700 ? 2 : f >= 680 ? 1 : 0;
+  const e = s.experienceDeals || 0;
+  const et = e >= 10 ? 3 : e >= 5 ? 2 : e >= 1 ? 1 : 0;
+  const rates = [[11.49, 10.89, 10.39, 10.39], [11.14, 10.64, 10.14, 10.14], [10.89, 10.39, 9.89, 9.89]];
+  const ltvs = [[75, 80, 85, 85], [80, 85, 90, 90], [85, 90, 95, f >= 720 ? 100 : 95]];
+  const rehab = s.loanType === "Bridge" ? 0 : (s.rehabBudget || 0);
+  let rate = rates[ft][et];
+  let ltv = ltvs[ft][et];
+  const ratio = rehab / s.purchasePrice;
+  if (rehab <= 0) { ltv = 75; rate += 0.6; assumptions.push("RCN bridge (no rehab) estimated at 75% of value."); }
+  else if (ratio <= 0.1) rate += 0.1;
+  else if (ratio >= 0.9) { rate += 0.2; ltv = Math.min(ltv, et >= 3 ? 75 : 70); }
+  else if (ratio >= 0.5) rate -= 0.05;
+  if (s.arv && s.arv > 2 * s.purchasePrice) ltv -= 10;
+  let initial = s.purchasePrice * ltv / 100;
+  let total = initial + rehab;
+  if (s.arv && total > s.arv * 0.75) total = s.arv * 0.75;
+  total = Math.floor(total / 500) * 500;
+  const pts = Math.max(0.5, 1500 / total * 100);
+  rate = Math.round(rate * 100) / 100;
+  assumptions.push("RCN live connection isn't set up yet — this is Bridgepoint's estimate of RCN's rehab pricing (" + "measured 2026-10-06" + "), 12-month term.");
+  return { lender: L, eligible: true, source: "model", options: [{ program: "RCN " + pts.toFixed(2) + " pts (est.)", rate, price: 100 + pts }, { program: "RCN 1.00 pt (est.)", rate: Math.round((rate - (et === 0 ? 0.5 : 0.75)) * 100) / 100, price: 101 }], loanAmountUsed: total, maxLoanAmount: total, assumptions };
+}
+
+async function checkRcn(s: Scenario): Promise<LenderResult> {
+  const assumptions: string[] = [];
+  const req = rcnBuildRequest(s, assumptions);
+  if (typeof req === "string") return { lender: "RCN Capital", eligible: false, reason: req };
+  try {
+    const j = await rcnCalculate(req);
+    return rcnParse(s, j, assumptions);
+  } catch (err) {
+    const why = String((err as Error).message || err);
+    if (RTL_AUTO_LOAN_TYPES.includes(s.loanType) && s.loanType !== "Ground Up Construction") {
+      return rcnRtlModel(s, assumptions.concat(why === "not_configured" ? [] : ["RCN live pricing failed (" + why + ")."]));
+    }
+    return { lender: "RCN Capital", eligible: false, unavailable: true, reason: why === "not_configured" ? "RCN live pricing isn't connected yet (Joe needs to add the RCN login to the server)." : "RCN's pricer couldn't be reached (" + why + ").", assumptions };
+  }
+}
+
+// ---------------------------------------------------------------------
 // Lender registry -- add a new lender by adding one entry here.
 // ---------------------------------------------------------------------
 const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult> }> = [
   { key: "constructive", check: checkConstructive },
   { key: "nextres", check: checkNextres },
+  { key: "kiavi", check: checkKiavi },
+  { key: "rcn", check: checkRcn },
+  { key: "ad", check: checkAD },
 ];
 
 Deno.serve(async (req: Request) => {
