@@ -1350,9 +1350,10 @@ function dscrParRate(lead, inputs){
     notes.push("Loans over $1.5MM are effectively capped at 65% LTV on this sheet (no >$1.5MM/>65% LTV pricing cell exists) — confirm with underwriting before quoting at this leverage.");
   }
 
+  // Not a rate add-on: per Constructive's DSCR guidelines (7-1-26) these states
+  // carry a minimum-DSCR rule instead (1.00x at 680+ FICO). Removed 2026-10-06.
   if (propState && DSCR_GEO_ADJ_STATES.indexOf(propState) !== -1){
-    rate += DSCR_GEO_ADJ;
-    notes.push(propState + " state pricing add-on: +" + DSCR_GEO_ADJ.toFixed(3) + "%");
+    notes.push(propState + ": Constructive requires at least a 1.00x DSCR in this state.");
   }
 
   var prepayKey = (inputs && inputs.prepayTerm) || "5yr";

@@ -119,8 +119,18 @@ function pricingPropertyType(pt: string | null): string | null {
 }
 const DSCR_BASE_PAR_RATE = 6.625;
 const DSCR_MIN_NOTE_RATE = 6.875;
-const DSCR_GEO_ADJ_STATES = ["AL","GA","KS","ME","MO","MS","NE","SD","WI","WY"];
-const DSCR_GEO_ADJ = 0.375;
+// Per DSCR Underwriting Guidelines v1-08 (7-1-26) "Additional State DSCR
+// Restrictions": in these states min DSCR is 1.00 (680+ FICO) / 1.10 (<680) --
+// a qualifying rule, NOT a rate add-on (the old +0.375 was wrong; not on the 9-29-26 sheet).
+const DSCR_MIN_DSCR_STATES = ["AL","GA","KS","ME","MO","MS","NE","SD","WI","WY"];
+// Max price by prepay (C3 Surge Rate Sheet 9-29-2026).
+const DSCR_MAX_PRICE_BY_PPP: Record<string, number> = { "5yr": 102.125, "3yr": 101.0, "2yr": 100.375, "1yr": 100.375, "none": 100.0 };
+// Minimum DSCR: rate sheet 9-29-26 (FICO <720 = 1.20x) + matrix 7-1-26 (720+: 1.00x; 0.75x at <=65 LTV with loan >= 150k).
+function constructiveMinDscr(fico: number, ltv: number, loan: number, state: string | null, rural: boolean): number {
+  if (rural || fico < 720) return 1.2;
+  if (state && DSCR_MIN_DSCR_STATES.includes(state)) return 1.0;
+  return ltv <= 65 && loan >= 150000 ? 0.75 : 1.0;
+}
 const DSCR_INELIGIBLE_STATES = ["ND","NV","SD"];
 const DSCR_LTV_BANDS = [55, 60, 65, 70, 75, 80];
 function dscrLtvCol(ltv: number): number {
@@ -153,7 +163,7 @@ const DSCR_TXN_ADJ: Record<string, Array<number | null>> = {
   cashoutLarge: [0.250,0.250,0.250,0.250,0.375,null],
 };
 const DSCR_LOAN_AMT_ADJ: Array<{ min: number; max: number; adj: number[] }> = [
-  { min:1500000, max:Infinity, adj:[0.500,0.500,0.500,0.000,0.000,0.000] },
+  { min:1500000, max:Infinity, adj:[0.500,0.500,0.500,NaN,NaN,NaN] }, // NaN = over 65% LTV not allowed above $1.5M
   { min:1000000, max:1499999.99, adj:[0,0,0,0,0,0] },
   { min:350000, max:999999.99, adj:[-0.125,-0.125,-0.125,-0.125,-0.125,-0.125] },
   { min:150000, max:349999.99, adj:[0,0,0,0,0,0] },
@@ -277,7 +287,7 @@ const GROUNDUP_TIERS: Record<string, RtlLimits | null> = {
 const DSCR_LTV_BY_FICO = [
   { minFico: 720, purchase: 80, rateTerm: 80, cashOut: 75 },
   { minFico: 700, purchase: 80, rateTerm: 80, cashOut: 75 },
-  { minFico: 680, purchase: 80, rateTerm: 80, cashOut: 75 },
+  { minFico: 680, purchase: 75, rateTerm: 75, cashOut: 70 }, // 9-29-26 sheet: FICO <700 = 75% / cash-out 70%
   { minFico: 660, purchase: 70, rateTerm: 70, cashOut: 70 },
 ];
 const MAX_LOAN_SANITY_CEILING = 2000000;
@@ -384,16 +394,23 @@ async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?
     const ltvCap = basis * (maxLtv / 100);
     let dscrCap = Infinity;
     if (s.rentEstimate) {
-      const minDscr = rural ? 1.20 : 1.0;
-      const trial = await checkConstructiveAt({ ...s, loanAmount: Math.min(ltvCap, MAX_LOAN_SANITY_CEILING) });
-      const rate = trial.eligible && trial.options && trial.options.length ? trial.options[0].rate : 7.0;
+      const minDscr = constructiveMinDscr(s.creditScore, maxLtv, ltvCap, stateFromAddress(s.propertyAddress), rural);
+      const trial = await checkConstructiveAt({ ...s, loanAmount: Math.min(ltvCap, MAX_LOAN_SANITY_CEILING), rentEstimate: null });
+      const rate = trial.eligible && trial.options && trial.options.length ? trial.options[0].rate : 7.5;
       const r = rate / 100 / 12;
       const termM = s.termMonths || 360;
       const factor = r / (1 - Math.pow(1 + r, -termM));
-      const targetPi = (s.rentEstimate / minDscr) / 1.2;
-      dscrCap = targetPi / factor;
+      const hasExp = s.monthlyTaxes != null || s.monthlyInsurance != null;
+      const targetPi = hasExp ? s.rentEstimate / minDscr - ((s.monthlyTaxes || 0) + (s.monthlyInsurance || 0) + (s.monthlyHoa || 0)) : (s.rentEstimate / minDscr) / 1.2;
+      dscrCap = Math.max(0, targetPi / factor);
     }
-    const capped = Math.min(ltvCap, dscrCap, MAX_LOAN_SANITY_CEILING);
+    let capped = Math.min(ltvCap, dscrCap, MAX_LOAN_SANITY_CEILING);
+    // The note rate moves with the amount (LTV band), so step down until the sheet's own DSCR check passes.
+    for (let i = 0; i < 12 && s.rentEstimate && capped > 50000; i++) {
+      const chk = await checkConstructiveAt({ ...s, loanAmount: Math.floor(capped) });
+      if (chk.eligible || !/DSCR/.test(chk.reason || "")) break;
+      capped *= 0.98;
+    }
     return { amount: Math.floor(Math.max(0, capped)), note: "Max " + maxLtv + "% LTV of " + (s.transactionType !== "purchase" && s.currentValue ? "current value" : "purchase price") + (dscrCap < ltvCap ? " — limited by rental income (DSCR)." : ".") };
   }
   return null;
@@ -480,12 +497,24 @@ async function checkConstructiveAt(s: Scenario): Promise<LenderResult> {
   if (txnAdj[col] == null) return { lender: "Constructive Capital", eligible: false, reason: "This transaction type/LTV combination isn't priced on this sheet." };
   rate += txnAdj[col] as number;
   const amtBand = DSCR_LOAN_AMT_ADJ.find((b) => s.loanAmount! >= b.min && s.loanAmount! <= b.max);
+  if (amtBand && isNaN(amtBand.adj[col])) return { lender: "Constructive Capital", eligible: false, reason: "Loans over $1.5M are capped at 65% LTV at Constructive." };
   if (amtBand) rate += amtBand.adj[col];
-  if (propState && DSCR_GEO_ADJ_STATES.includes(propState)) rate += DSCR_GEO_ADJ;
   const prepayKey = s.prepayTerm || "5yr";
   rate += DSCR_PREPAY_ADJ[prepayKey][col];
   rate = Math.round(rate * 1000) / 1000;
   if (rate < DSCR_MIN_NOTE_RATE) rate = DSCR_MIN_NOTE_RATE;
+  // Qualifying rules (matrix 7-1-26 + rate sheet 9-29-26): rural = 65% LTV / 720 FICO / DSCR 1.20+;
+  // min DSCR by FICO / LTV / state, measured at the note rate.
+  const rural = s.ruralStatus === "rural";
+  if (rural && (ltv > 65 || (s.creditScore as number) < 720)) return { lender: "Constructive Capital", eligible: false, reason: "Rural rentals at Constructive need 720+ FICO and 65% LTV or less." };
+  if (s.rentEstimate) {
+    const r = rate / 100 / 12, n = s.termMonths || 360;
+    const notePi = s.loanAmount * (r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+    const hasExp = s.monthlyTaxes != null || s.monthlyInsurance != null;
+    const noteDscr = s.rentEstimate / (hasExp ? notePi + (s.monthlyTaxes || 0) + (s.monthlyInsurance || 0) + (s.monthlyHoa || 0) : notePi * 1.2);
+    const minD = constructiveMinDscr(s.creditScore as number, ltv, s.loanAmount, propState, rural);
+    if (noteDscr < minD - 0.005) return { lender: "Constructive Capital", eligible: false, reason: "DSCR " + noteDscr.toFixed(2) + "x is under Constructive's " + minD.toFixed(2) + "x minimum here" + ((s.creditScore as number) < 720 ? " (1.20x under a 720 FICO)" : "") + " — lower the loan amount or raise the rent." };
+  }
 
   const fee = DSCR_FEE_BY_PROPERTY[propertyType] || DSCR_FEE_BY_PROPERTY.SFR;
   const noYspAllowed = prepayKey === "none" || propertyType === "Multifamily 5+";
@@ -498,6 +527,7 @@ async function checkConstructiveAt(s: Scenario): Promise<LenderResult> {
     if (noYspAllowed && delta > 0) break;
     const priceRow = dscrPriceForDelta(Math.round(delta * 1000) / 1000);
     if (!priceRow) continue;
+    if (priceRow.price > (DSCR_MAX_PRICE_BY_PPP[prepayKey] ?? 102.125) + 0.0005) break;
     const stepRate = Math.round((rate + delta) * 1000) / 1000;
     const stepMonthlyRate = stepRate / 100 / 12;
     const stepPi = stepMonthlyRate ? s.loanAmount * (stepMonthlyRate * Math.pow(1 + stepMonthlyRate, termMonths)) / (Math.pow(1 + stepMonthlyRate, termMonths) - 1) : s.loanAmount / termMonths;
