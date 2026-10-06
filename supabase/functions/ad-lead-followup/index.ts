@@ -30,6 +30,10 @@ const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 const LAUNCH_DATE = "2026-10-03";
+// Spanish Facebook-ad leads arrive through HighLevel tagged source "Facebook". Joe (2026-10-05):
+// include them in job 1 (speed-to-lead nagging + Joe escalation) ONLY -- not the English nurture,
+// digests or scoreboard. Start date keeps older Spanish leads from all firing at once.
+const SPANISH_SLA_START = "2026-10-06";
 const GOAL_DEALS = 7;
 const NURTURE_STAGES = ["new", "attempting", "qualifying"];
 const MIN_GAP_MS = 20 * 3600 * 1000; // between automated borrower touches
@@ -186,8 +190,14 @@ Deno.serve(async (req: Request) => {
     if (error) throw new Error(error.message);
     const all: Row[] = leadsData || [];
     const active = all.filter((l) => l.status === "active");
+    const { data: spanishData, error: spErr } = await sb.from("leads")
+      .select("id,name,phone,loan_type,assigned_to,stage,status,source,created_at_ts,first_attempt_at,call_attempts")
+      .eq("source", "Facebook").eq("status", "active").gte("created_at_ts", SPANISH_SLA_START);
+    if (spErr) throw new Error(spErr.message);
+    const spanish: Row[] = spanishData || [];
+    const nagPool = active.concat(spanish);
 
-    const ids = all.map((l) => l.id as string);
+    const ids = all.concat(spanish).map((l) => l.id as string);
     const logged: Record<string, Record<string, string>> = {};
     if (ids.length) {
       const { data: logRows } = await sb.from("ad_followup_log").select("lead_id,step,sent_at").in("lead_id", ids);
@@ -197,7 +207,7 @@ Deno.serve(async (req: Request) => {
 
     // ---------------- 1. Speed-to-lead nagging ----------------
     if (staffWindow) {
-      for (const l of active) {
+      for (const l of nagPool) {
         if (isContacted(l)) continue;
         const loId = (l.assigned_to as string) || "owner";
         const lo = users[loId];
