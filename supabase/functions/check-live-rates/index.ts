@@ -1298,7 +1298,9 @@ function rcnBuildRequest(s: Scenario, assumptions: string[]): Record<string, unk
 function rcnParse(s: Scenario, j: any, assumptions: string[]): LenderResult {
   const L = "RCN Capital";
   const R = (j && j.results) || {};
-  const caps = { maxBrokerPoints: undefined, maxYsp: undefined, yspRatePerPoint: 1 };
+  // No yield spread at RCN (Joe 2026-10-06: on fix & flip only Kiavi pays YSP;
+  // RCN rental prices are all at or below par).
+  const caps = { maxBrokerPoints: undefined, maxYsp: undefined };
   if (Array.isArray(R.pricings)) {
     // Rental: one entry per lender-points option.
     const opts = R.pricings.filter((p: any) => p && p.o_interest_rate).map((p: any) => ({
@@ -1355,7 +1357,7 @@ function rcnRtlModel(s: Scenario, assumptions: string[]): LenderResult {
   const pts = Math.max(0.5, 1500 / total * 100);
   rate = Math.round(rate * 100) / 100;
   assumptions.push("RCN live connection isn't set up yet — this is Bridgepoint's estimate of RCN's rehab pricing (" + "measured 2026-10-06" + "), 12-month term.");
-  return { lender: L, eligible: true, source: "model", options: [{ program: "RCN " + pts.toFixed(2) + " pts (est.)", rate, price: 100 + pts }, { program: "RCN 1.00 pt (est.)", rate: Math.round((rate - (et === 0 ? 0.5 : 0.75)) * 100) / 100, price: 101 }], loanAmountUsed: total, maxLoanAmount: total, assumptions, compCaps: { yspRatePerPoint: 1 } };
+  return { lender: L, eligible: true, source: "model", options: [{ program: "RCN " + pts.toFixed(2) + " pts (est.)", rate, price: 100 + pts }, { program: "RCN 1.00 pt (est.)", rate: Math.round((rate - (et === 0 ? 0.5 : 0.75)) * 100) / 100, price: 101 }], loanAmountUsed: total, maxLoanAmount: total, assumptions };
 }
 
 async function checkRcn(s: Scenario): Promise<LenderResult> {

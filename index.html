@@ -12427,7 +12427,8 @@ function lpHandleField(key, field, raw){
 // it's OK to add a little yield spread -- but the borrower's rate must stay at
 // least 1/8 (plus any estimate tolerance) under the next-best lender's rate.
 // DSCR: move up the winning lender's own price ladder (max +0.5% rate).
-// RTL: rate markup on lenders that pay YSP (Kiavi, RCN; max 1 extra point).
+// RTL: rate markup only where the lender pays YSP -- Kiavi is the only one
+// (Joe 2026-10-06); max 1 extra point.
 var LP_SPREAD_MAX_DSCR_RATE = 0.5, LP_SPREAD_MAX_RTL_PTS = 1;
 function lpCapOver(r, points, rtl){
   var c = r.compCaps || {};
