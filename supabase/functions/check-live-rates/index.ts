@@ -427,7 +427,18 @@ async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?
   return null;
 }
 
+// Constructive "State by State Licensing Matrix" (effective 9/1/2026, bplhub.com):
+// broker license required in AZ, CA, MN, UT, and ID for DSCR on 1-4 units.
+// Bridgepoint holds no licenses (Joe 2026-10-06), so those are out.
+function constructiveLicenseBlock(s: Scenario): string | null {
+  const st = stateFromAddress(s.propertyAddress);
+  if (!st) return null;
+  if (["AZ", "CA", "MN", "UT"].includes(st) || (st === "ID" && s.loanType === "DSCR")) return "Constructive requires a broker license in " + st + (st === "ID" ? " for DSCR" : "") + " — Bridgepoint can't place this loan there.";
+  return null;
+}
 async function checkConstructive(s: Scenario): Promise<LenderResult> {
+  const lic = constructiveLicenseBlock(s);
+  if (lic) return { lender: "Constructive Capital", eligible: false, reason: lic };
   if (s.loanAmount) {
     const max = await constructiveMaxLoan(s);
     if (max && max.reason) return { lender: "Constructive Capital", eligible: false, reason: max.reason };
@@ -1212,6 +1223,11 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
   // A&D DSCR UW Requirements (9/11/2026): Philadelphia County is ineligible.
   const zip = (/\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(s.propertyAddress || "") || [])[1] || "";
   if (st === "PA" && /^191/.test(zip)) return { lender: L, eligible: false, source: "model", reason: "A&D doesn't lend in Philadelphia County." };
+  // Bridgepoint holds no state licenses (Joe 2026-10-06: business-purpose only, most states
+  // don't require one), so only A&D's "Eligible States Inv (No License Required)" list applies.
+  const AD_NO_LICENSE_STATES = ["AK","AL","AR","CO","CT","DE","FL","GA","IA","IL","IN","KS","KY","LA","MA","MD","ME","MO","MS","MT","NC","NE","NH","NJ","NM","NY","OH","OK","PA","RI","SC","TN","TX","WA","WI","WV","WY"];
+  if (st && !AD_NO_LICENSE_STATES.includes(st)) return { lender: L, eligible: false, source: "model", reason: "A&D requires a broker license in " + st + " — Bridgepoint can't place A&D loans there." };
+  if (st === "MD" && /\bBaltimore\b/i.test(s.propertyAddress || "")) return { lender: L, eligible: false, source: "model", reason: "A&D excludes Baltimore City and Baltimore County for unlicensed brokers." };
   // A&D state prepay rules (same document): no prepay (buydown required) in some states / below
   // some loan sizes; shorter caps in others. Returns the prepay A&D will actually allow.
   const yrs: Record<string, number> = { "5yr": 5, "3yr": 3, "2yr": 2, "1yr": 1, none: 0 };
@@ -1524,7 +1540,24 @@ function rcnRtlModel(s: Scenario, assumptions: string[]): LenderResult {
 // RCN's zip overlays (from RCN's Loan Sizer -- see rcn_geo.ts). RCN's online
 // calculator ignores them, RCN underwriting doesn't (Joe 2026-10-06: quote what
 // actually closes). Fix & flip / bridge / ground-up only (rentals use a separate sheet).
+// RCN rental rules from RCN's Product Summary (Lender Documents, read 2026-10-06):
+// 680 FICO min; property value $115k+ ($125k FN); min DSCR 1.00 at 720+, 1.10 at
+// 700+, 1.20 at 680+, 1.30 foreign national. Options under the DSCR floor are dropped.
+function rcnRentalRules(s: Scenario, r: LenderResult): LenderResult {
+  if (!r.eligible || !/DSCR|Portfolio/i.test(s.loanType)) return r;
+  const fn = s.citizenshipStatus === "Foreign National";
+  const f = s.creditScore || 0;
+  const no = (reason: string): LenderResult => ({ lender: r.lender, eligible: false, source: r.source, reason });
+  if (f && f < 680 && !fn) return no("RCN rentals need a 680+ credit score.");
+  const value = (s.transactionType !== "purchase" && s.currentValue) ? s.currentValue : s.purchasePrice;
+  if (value && value < (fn ? 125000 : 115000)) return no("RCN rentals need a property value of at least " + fmtMoney(fn ? 125000 : 115000) + ".");
+  const minD = fn ? 1.3 : f >= 720 ? 1.0 : f >= 700 ? 1.1 : 1.2;
+  const opts = (r.options || []).filter((o) => o.dscr == null || o.dscr >= minD - 0.005);
+  if (!opts.length) return no("DSCR is under RCN's " + minD.toFixed(2) + "x minimum for this credit score — lower the loan amount or raise the rent.");
+  return { ...r, options: opts };
+}
 function rcnApplyGeo(s: Scenario, r: LenderResult): LenderResult {
+  r = rcnRentalRules(s, r);
   if (!RTL_AUTO_LOAN_TYPES.includes(s.loanType) || !r.eligible) return r;
   const zip = (/\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(s.propertyAddress || "") || [])[1];
   if (!zip) return { ...r, assumptions: (r.assumptions || []).concat(["No zip code on the address — RCN's zip-level market rules (do-not-lend zips, reduced leverage) couldn't be checked."]) };
