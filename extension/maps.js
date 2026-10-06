@@ -109,9 +109,106 @@
     ],
   };
 
+  // ---------------- Kiavi (app.kiavi.com broker app) ----------------
+  // Mapped 2026-10-06 by walking a TEST draft (6abfaa41e3bf) up to the soft-credit-pull
+  // screen. One question per screen; React widgets, so every page uses run().
+  // Uses the FILE's own LLC + guarantor (Joe): an existing Kiavi entity profile with
+  // the same name is reused, otherwise a new one is created.
+  // Left for the person on purpose: the 3 eligibility attestations (citizenship,
+  // non-occupancy, broker AML training) and the credit/background consent boxes.
+  const kvPath = (re) => () => re.test(location.pathname);
+  const KV_ENTITY_TYPE = { LLC: "Limited Liability Company", Corporation: "Corporation", Individual: "Sole Proprietor / Natural Person", "Limited Partnership": "Limited Partnership", Trust: "Statutory Trust" };
+  const kvExp = (n) => (n == null ? null : n >= 5 ? "5" : n >= 3 ? "3" : n >= 1 ? "1" : "0");
+  const kvFicoBand = (score) => (t) => {
+    const m = /(\d{3})\s*-\s*(\d{3})/.exec(t); if (m) return score >= +m[1] && score <= +m[2];
+    const p = /(\d{3})\s*\+/.exec(t); if (p) return score >= +p[1];
+    const b = /(below|under|<)\s*(\d{3})/i.exec(t); if (b) return score < +b[2];
+    return false;
+  };
+  const kvAddress = async (p, H, res, street, city, state, zip) => {
+    const ok = await H.typeaheadPick(document.querySelector('[name="inputLine1"]'), street, city);
+    if (!ok) { // fall back to typing each part
+      H.setNative(document.querySelector('[name="inputLine1"]'), street);
+      H.setNative(document.querySelector('[name="inputCity"]'), city || "");
+      H.setNative(document.querySelector('[name="inputZip"]'), zip || "");
+      const st = Array.from(document.querySelectorAll('input[id^="bedrock-select-input"]')).pop();
+      await H.comboPick(st, stateName(state));
+    }
+    res.filled.push("address " + street + ", " + city);
+  };
+  const KIAVI_PAGES = [
+    { name: "Kiavi: choose program", match: kvPath(/\/start\/choose-program/), run: async (p, H, res) => {
+      const prog = /DSCR|Portfolio/i.test(p.loan.loanType || "") ? "rental" : /Ground Up|Construction/i.test(p.loan.loanType || "") ? "hard_money_infill" : "hard_money";
+      const r = document.getElementById("program-" + prog); if (r) { H.realClick(r); r.click(); res.filled.push("program " + prog); } else res.missing.push("program");
+    } },
+    { name: "Kiavi: entity + guarantor", match: kvPath(/\/new-loan-application/), run: async (p, H, res) => {
+      const g = p.borrower.guarantor || {}, ent = p.borrower.entityName || "";
+      const sel = document.querySelector('input[id^="bedrock-select-input"]');
+      const existing = ent && await H.comboPick(sel, (t) => H.norm(t).startsWith(H.norm(ent + " (Entity)")));
+      if (existing) { res.filled.push("existing Kiavi entity: " + ent); }
+      else {
+        await H.comboPick(sel, "-- Create New Entity --");
+        await H.sleep(800);
+        H.setNative(document.querySelector('[name="borrower.entityName"]'), ent || [g.firstName, g.lastName].filter(Boolean).join(" "));
+        await H.comboPick(H.inputAfterLabel("Entity Type"), KV_ENTITY_TYPE[p.borrower.entityType] || "Limited Liability Company");
+        res.filled.push("new entity " + ent);
+      }
+      const ex = kvExp(g.experienceDeals); const rr = ex && document.querySelector('input[name="exitsLast24"][value="' + ex + '"]'); if (rr) { H.realClick(rr); res.filled.push("experience"); }
+      const fn = document.querySelector('[name="borrower.firstName"]'); if (fn && !fn.value) { H.setNative(fn, g.firstName || ""); H.setNative(document.querySelector('[name="borrower.lastName"]'), g.lastName || ""); res.filled.push("guarantor"); }
+      if (await H.clickNav("Next")) res.filled.push("→ Next");
+    } },
+    { name: "Kiavi: property address", match: kvPath(/\/(pre-calc-)?property-address$/), run: async (p, H, res) => {
+      const l1 = document.querySelector('[name="inputLine1"]');
+      if (!l1 || !l1.value) await kvAddress(p, H, res, p.property.street, p.property.city, p.property.state, p.property.zip);
+      if (await H.clickNav("Next")) res.filled.push("→ Next");
+    } },
+    { name: "Kiavi: rate calculator", match: kvPath(/\/rate-calculator\/[^/]+\/hard-money/), run: async (p, H, res) => {
+      const L = p.loan, P = p.property, g = p.borrower.guarantor || {};
+      const refi = L.transactionType && L.transactionType !== "purchase";
+      const set = (label, v) => { const i = H.inputAfterLabel(label); if (i && v != null && v !== "") { H.setNative(i, String(Math.round(Number(v)))); res.filled.push(label); } else res.missing.push(label); };
+      await H.comboPick(H.inputAfterLabel("Property Type"), ({ "SFR": "Single Family", "Condo": "Condo", "Townhome": "Townhome", "2-4 Unit": "2-4", "Duplex": "2-4" })[P.propertyType] || "Single Family");
+      if (g.creditScore) await H.comboPick(H.inputAfterLabel("Est. FICO Score"), kvFicoBand(Number(g.creditScore)));
+      await H.comboPick(H.inputAfterLabel("Refinance"), refi ? "Yes" : "No");
+      if (refi) { res.missing.push("refinance fields — check by hand"); }
+      else {
+        const rehab = Number(L.rehabBudget || 0);
+        set("Purchase Price", L.purchasePrice);
+        set("Purchase Loan Amount", L.loanAmount ? Math.max(0, Number(L.loanAmount) - rehab) : null); // day-one amount
+        await H.comboPick(H.inputAfterLabel("Property Rehab"), rehab > 0 ? "Yes" : "No");
+        if (rehab > 0) { set("Estimated Cost of Rehab", rehab); await H.comboPick(H.inputAfterLabel("Rehab Funds"), "Yes"); }
+        set("After Repair Value (ARV)", L.arv || L.purchasePrice);
+      }
+      const bp = document.querySelector('[name="brokerOriginationPoints"]'); if (bp && L.pointsCharged != null) { H.setNative(bp, String(Math.min(3, Number(L.pointsCharged)))); res.filled.push("broker points"); }
+      await H.sleep(2500);
+      // Pick the loan row for the file's term (12/18/24 months).
+      const term = (L.termMonths && [12, 18, 24].includes(Number(L.termMonths))) ? L.termMonths : 12;
+      const btn = Array.from(document.querySelectorAll("button")).filter((b) => b.offsetParent !== null && /^Choose$/i.test(b.innerText.trim())).find((b) => { let c = b; for (let i = 0; i < 6 && c; i++) { c = c.parentElement; if (c && new RegExp("\\b" + term + " Months").test(c.innerText) && (c.innerText.match(/Months/g) || []).length === 1) return true; } return false; });
+      if (btn) { H.realClick(btn); res.filled.push("chose " + term + "-month option"); } else res.missing.push("loan option for " + term + " months — pick it by hand");
+    } },
+    { name: "Kiavi: eligibility confirmations", match: kvPath(/\/eligibility-confirmations$/), run: async (p, H, res) => {
+      res.missing.push("Check the 3 confirmations yourself (citizenship, non-occupancy, AML training), then Next");
+    } },
+    { name: "Kiavi: signing date", match: kvPath(/\/preferred-signing-date$/), run: async (p, H, res) => {
+      const d = document.querySelector('[name="borrowerRequestedDateSigning"]');
+      const iso = p.loan.closeDate; if (d && iso) { const [y, m, dd] = String(iso).slice(0, 10).split("-"); H.setNative(d, m + "/" + dd + "/" + y); res.filled.push("signing date"); if (await H.clickNav("Next")) res.filled.push("→ Next"); }
+      else res.missing.push("signing date (no target close date on the file)");
+    } },
+    { name: "Kiavi: primary contact", match: kvPath(/\/broker-primary-contact$/), run: async (p, H, res) => {
+      const y = document.querySelector('input[name="basic"][value="yes"]'); if (y) { H.realClick(y); res.filled.push("broker is primary contact"); }
+      if (await H.clickNav("Next")) res.filled.push("→ Next");
+    } },
+    { name: "Kiavi: credit pull info", match: kvPath(/\/combined-confirmations$/), run: async (p, H, res) => {
+      const g = p.borrower.guarantor || {};
+      const em = document.querySelector('[name="inputEmail"]'); if (em && g.email) { H.setNative(em, g.email); res.filled.push("email"); }
+      const dob = document.querySelector('[name="inputDateOfBirth"]'); if (dob && g.dateOfBirth) { const [y, m, d] = String(g.dateOfBirth).slice(0, 10).split("-"); H.setNative(dob, m + "/" + d + "/" + y); res.filled.push("date of birth"); }
+      const a = splitAddr(g.address); if (a.street) await kvAddress(p, H, res, a.street, a.city, a.state, a.zip);
+      res.missing.push("Check the credit + background consent boxes (borrower signed our credit authorization), then Next — this runs Kiavi's soft pull");
+    } },
+  ];
+
   window.BP_MAPS = {
     RCN: { host: /commerciallendingservicesllc\.com$/, pages: [RCN_PAGE] },
-    Kiavi: { host: /kiavi\.com$/, pages: [] },
+    Kiavi: { host: /kiavi\.com$/, pages: KIAVI_PAGES },
     "A&D": { host: /admortgage\.com$/, pages: [] },
     Constructive: { host: /bplhub\.com$/, pages: [] }, // portal side panel (copy + attach); full map built on the next real Constructive file
     NextRes: { host: null, pages: [] },

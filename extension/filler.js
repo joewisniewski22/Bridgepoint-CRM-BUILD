@@ -108,8 +108,60 @@
   // Field entries run in order; besides fields they can be
   //   { click: "css", index?: n, when?: (pkg)=>bool }  -- reveal-only UI buttons (e.g. "Can't find address")
   //   { wait: ms }                                      -- let the lender's page react
+  // ---- helpers for React-style portals (Kiavi): native value setter, real mouse
+  // sequence, dropdown widgets, address type-aheads, label-adjacent inputs ----
+  function setNative(el, v) {
+    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
+    ["input", "change", "blur", "focusout"].forEach((t) => el.dispatchEvent(new Event(t, { bubbles: true })));
+  }
+  function realClick(el) {
+    ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((t) => el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window, buttons: 1 })));
+  }
+  function inputAfterLabel(text) {
+    const l = Array.from(document.querySelectorAll("label")).find((x) => x.offsetParent !== null && norm(x.innerText) === norm(text));
+    if (!l) return null;
+    if (l.getAttribute("for")) return document.getElementById(l.getAttribute("for"));
+    return Array.from(document.querySelectorAll("input")).find((i) => l.compareDocumentPosition(i) & Node.DOCUMENT_POSITION_FOLLOWING) || null;
+  }
+  const visibleOptions = () => Array.from(document.querySelectorAll('[role="option"]')).filter((o) => o.offsetParent !== null);
+  // Open a dropdown widget and pick the option chosen by `want` (text, or a function of the option texts).
+  async function comboPick(input, want, typed) {
+    if (!input) return false;
+    input.focus();
+    if (typed) setNative(input, typed);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    await sleep(600);
+    const opts = visibleOptions();
+    const o = typeof want === "function" ? opts.find((x) => want(x.innerText.trim())) : (opts.find((x) => norm(x.innerText) === norm(want)) || opts.find((x) => norm(x.innerText).startsWith(norm(want))));
+    if (!o) { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return false; }
+    realClick(o); o.click(); await sleep(500);
+    return true;
+  }
+  // Type a street into an address type-ahead and pick the suggestion in the right city.
+  async function typeaheadPick(input, street, city) {
+    if (!input) return false;
+    input.focus(); setNative(input, ""); await sleep(200);
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, street);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await sleep(1800);
+    const o = visibleOptions().find((x) => !city || norm(x.innerText).includes(norm(city)));
+    if (o) { realClick(o); o.click(); await sleep(1500); return true; }
+    return false;
+  }
+  // Click a navigation button (Next/Continue/Choose) -- never anything that submits.
+  async function clickNav(text, within) {
+    const b = Array.from((within || document).querySelectorAll("button")).find((x) => x.offsetParent !== null && norm(x.innerText) === norm(text));
+    if (!b || FORBIDDEN.test(b.innerText)) return false;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    await sleep(400); realClick(b); return true;
+  }
+  const H = { setNative, realClick, inputAfterLabel, comboPick, typeaheadPick, clickNav, sleep, norm, pick };
+
   async function runPage(page, pkg, fetchDoc) {
     const res = { filled: [], missing: [], skipped: [], uploaded: [], uploadMissing: [] };
+    // Pages with their own logic (multi-widget wizard screens) run a custom function.
+    if (page.run) { try { await page.run(pkg, H, res); } catch (e) { res.missing.push("error: " + (e && e.message)); } return res; }
     for (const f of page.fields || []) {
       if (f.when && !f.when(pkg)) continue;
       if (f.wait) { await sleep(f.wait); continue; }
@@ -144,5 +196,5 @@
     return res;
   }
 
-  window.BPFill = { pick, FMT, findField, setValue, pickRadio, findUpload, uploadToInput, runPage, norm };
+  window.BPFill = { pick, FMT, findField, setValue, pickRadio, findUpload, uploadToInput, runPage, norm, H };
 })();
