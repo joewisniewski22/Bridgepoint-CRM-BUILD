@@ -154,7 +154,16 @@
     const b = Array.from((within || document).querySelectorAll("button")).find((x) => x.offsetParent !== null && norm(x.innerText) === norm(text));
     if (!b || FORBIDDEN.test(b.innerText)) return false;
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    await sleep(400); realClick(b); return true;
+    await sleep(400);
+    // Kiavi keeps Next "disabled" until its own async validation settles; wait, then
+    // fall back to submitting the step's form with that same Next button.
+    for (let i = 0; i < 8 && b.disabled; i++) await sleep(400);
+    const before = location.href;
+    realClick(b);
+    await sleep(1500);
+    const f = b.closest("form");
+    if (location.href === before && f && b.type === "submit" && f.requestSubmit) { try { f.requestSubmit(b); } catch (_) { try { f.requestSubmit(); } catch (__) {} } }
+    return true;
   }
   const H = { setNative, realClick, inputAfterLabel, comboPick, typeaheadPick, clickNav, sleep, norm, pick };
 
