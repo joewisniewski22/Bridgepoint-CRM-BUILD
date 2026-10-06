@@ -941,7 +941,102 @@ function requiredDocsForLead(lead){
   if (lead.citizenshipStatus === "Foreign National" && RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1){
     list = list.concat(FOREIGN_NATIONAL_DOCS);
   }
-  return list;
+  // Joe 2026-10-06: the lender the file is placed with adds its own submission items.
+  return list.concat(lenderDocPack(lead).map(function(d){ return d.name; }));
+}
+/* ---------------------------------------------------------------------
+   Lender-specific submission documents (Joe 2026-10-06): when a file is
+   placed with a lender, that lender's required items land on the file's
+   checklist automatically (and come off again if the lender changes).
+   Sources, read from each lender's portal 2026-10-06:
+     Constructive/BPL: "Submission Checklist – RTL & GUC Loans" (v9.1.26),
+       "Submission Checklist – Rental Property (DSCR)" (4/26), V7 engine Doc Submission.
+     RCN: "12 Month Fix and Flip / Bridge No Rehab / LTR Purchase / LTR Cashout
+       Refi / 5+ Multi Mixed Use" checklists + Arm's Length Affidavit + PMQ.
+   Kiavi / A&D: added once their portal checklists are read (needs Joe logged in).
+   Items ending in "(Lender)" are lender-specific so they can be swapped cleanly.
+   autoKind = we generate it pre-filled (see docKindMeta).
+--------------------------------------------------------------------- */
+function lenderKeyForLead(lead){
+  var ol = String(lead.outsideLender || "");
+  if (!ol) return "constructive";
+  if (/RCN/i.test(ol)) return "rcn";
+  if (/Kiavi/i.test(ol)) return "kiavi";
+  if (/A&D/i.test(ol)) return "ad";
+  if (/NextRes/i.test(ol)) return "nextres";
+  return null;
+}
+var LENDER_DOC_LABEL = { constructive:"Constructive", rcn:"RCN", kiavi:"Kiavi", ad:"A&D", nextres:"NextRes" };
+var LENDER_DOC_PACKS = {
+  constructive: function(lead){
+    var rtl = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
+    var st = stateFromAddress(lead.propertyAddress);
+    var refi = lead.transactionType && lead.transactionType !== "purchase";
+    var items = [
+      { name:"Mortgagee Clause sent to Title & Insurance — pre-filled", autoKind:"mortgageeClause", staffOnly:true },
+      { name:"Title / Closing Agent Secure Insight registration + wire instructions", staffOnly:true, note:"BPL won't disburse until the closing agent's branch is registered at secureinsight.com/agent-registration." },
+      { name:"24-Month Chain of Title & Tax Certificate (with title commitment, insured: BPL Mortgage, LLC ISAOA/ATIMA)", staffOnly:true },
+      { name:"Preliminary Title / Closing / Recording Fees", staffOnly:true },
+      { name:"CPL referencing the borrowing entity and loan #", staffOnly:true },
+      { name:"Certificate of Foreign Qualification (if the entity was formed outside the property's state)" }
+    ];
+    if (rtl){
+      items.push({ name:"Tiering Desk Determination Email", staffOnly:true });
+      items.push({ name:"Track Record Worksheet support — HUDs / leases for each listed project" });
+      items.push({ name:"Hazard insurance = loan amount (or GRRC) + $300,000 liability per occurrence", staffOnly:true });
+      if ((lead.rehabBudget || 0) > 0 && lead.purchasePrice && lead.rehabBudget >= Math.max(50000, lead.purchasePrice / 2)){
+        items.push({ name:"Plans & Specifications (heavy rehab)" }, { name:"Building Permits (heavy rehab)" }, { name:"$1,000,000 Commercial General Liability (heavy rehab)" });
+      }
+    } else {
+      items.push({ name:"Hazard insurance: replacement cost ≥ loan amount + 6 months rent loss (HO6 if condo)", staffOnly:true });
+      if (lead.entityType === "Individual") items.push({ name:"GMI Addendum (not closing in an entity)" });
+      if (refi) items.push({ name:"Scope of Work (if owned under 12 months and improved)" });
+    }
+    if (st && ["CO","NY","FL","GA","OR","VA"].indexOf(st) !== -1 && lead.entityType === "Individual"){
+      items.push({ name:"Entity formation docs — " + st + " loans must close in an entity" });
+    }
+    return items;
+  },
+  rcn: function(lead){
+    var rental = /DSCR|Portfolio/i.test(lead.loanType || "");
+    var purchase = !lead.transactionType || lead.transactionType === "purchase";
+    var items = [
+      { name:"Mortgagee Clause sent to Title & Insurance — pre-filled", autoKind:"mortgageeClause", staffOnly:true },
+      { name:"Signed loan application with authorization to run credit", note:"RCN pulls credit off the signed application." },
+      { name:"Point of contact for appraisal access (name, phone, email)", staffOnly:true },
+      { name:"Borrower's attorney / title agent for title order (name, phone, email)", staffOnly:true, note:"NY: include whoever is acting as settlement agent." },
+      { name:"Bank statement showing the liquidity needed for this deal" }
+    ];
+    if (purchase) items.push({ name:"Arm's Length Affidavit — pre-filled", autoKind:"armsLength", note:"Buyer and seller sign; seller name and contract date are filled in by hand." });
+    if (!rental){
+      items.push({ name:"Rehab budget with line-item amounts (no unexplained expansions / conversions / foundation work)" });
+    } else {
+      if (purchase) items.push({ name:"Pro-forma statement — projected rents, taxes and insurance" });
+      else items.push({ name:"Leases for occupied units (no tenant purchase option)" });
+      items.push({ name:"Tax Cert & Flood Cert (order with the appraisal)", staffOnly:true });
+      items.push({ name:"Property Management Questionnaire (if a property manager is used)" });
+    }
+    if (/Multifamily 5\+|Mixed-Use/i.test(lead.propertyType || "") || lead.loanType === "Mixed-Use"){
+      items.push({ name:"Rent Roll" }, { name:"Environmental Screening Report", staffOnly:true }, { name:"Floor-plan drawings + per-unit rehab breakdown (if converting/expanding)" });
+    }
+    return items;
+  },
+  kiavi: function(lead){ return [{ name:"Mortgagee Clause sent to Title & Insurance — pre-filled", autoKind:"mortgageeClause", staffOnly:true }]; },
+  ad: function(lead){ return [{ name:"Mortgagee Clause sent to Title & Insurance — pre-filled", autoKind:"mortgageeClause", staffOnly:true }]; },
+  nextres: function(lead){ return []; }
+};
+function lenderDocPack(lead){
+  var key = lenderKeyForLead(lead);
+  var fn = key && LENDER_DOC_PACKS[key];
+  if (!fn) return [];
+  var label = LENDER_DOC_LABEL[key];
+  return fn(lead).filter(function(d){ return d.autoKind !== "mortgageeClause" || mortgageeClauseFor(lead); }).map(function(d){
+    return Object.assign({}, d, { name: d.name + " (" + label + ")", lenderKey: key });
+  });
+}
+function lenderDocMeta(lead, name){
+  var hit = lenderDocPack(lead).filter(function(d){ return d.name === name; })[0];
+  return hit || null;
 }
 // ACH form is deliberately NOT in the general document checklist below --
 // it's collected as its own e-signed step inside the application itself
@@ -4457,7 +4552,57 @@ function buildMortgageeClause(lead){
     c.note ? ("Note: " + c.note) : ""
   ].join("\n").trim();
 }
+// RCN's "Affidavit of Arm's Length Transaction" (RCN Lender Documents), wording
+// kept as RCN wrote it; blanks we know are filled from the file. Seller and
+// contract date are left for the parties to complete.
+function buildArmsLengthAffidavit(lead){
+  var c = mortgageeClauseFor(lead);
+  var lender = c ? c.lender.replace(/ \(.*\)$/, "") : (lead.outsideLender || "the Lender");
+  if (/RCN/i.test(lender)) lender = "RCN Capital, LLC";
+  var buyer = lead.entityLegalName || lead.name || "____________";
+  var addr = (lead.propertyAddress || "______________________________").replace(/,\s*USA$/, "");
+  var amt = lead.loanAmount ? fmtUSD(lead.loanAmount) : "$________";
+  var price = lead.purchasePrice ? fmtUSD(lead.purchasePrice) : "$________";
+  var signer = lead.name || "";
+  return [
+    "AFFIDAVIT OF ARM'S LENGTH TRANSACTION",
+    "",
+    "THIS AFFIDAVIT OF ARM'S LENGTH TRANSACTION (this \"Affidavit\") is being made to induce " + lender + " (the \"Lender\") to make a certain " + amt + " loan (the \"Loan\") to " + buyer + ", which Loan is secured by, among other things, a first priority lien encumbering the real property commonly known as " + addr + " (the \"Property\"), knowing Lender will place reliance hereon.",
+    "",
+    "The party/parties identified below as \"Buyer\" is/are the buyer(s) of the Property, and the party/parties identified below as \"Seller\" is/are the seller(s) of the Property under a certain real estate purchase contract signed on _______________ (the \"Contract\").",
+    "",
+    "The transaction reflected in the Contract is a bona fide, arm's length transaction, meaning that the transaction has been negotiated by unrelated parties, each of whom is acting in his or her own self-interest.",
+    "",
+    "The total consideration paid by Buyer(s) to Seller(s) for the purchase of the property is " + price + ".",
+    "",
+    "No Seller, or agent of Seller(s), is a family member or business associate of Buyer(s), or of any agent of Buyer(s).",
+    "",
+    "There are no undisclosed terms or undisclosed agreements or special understandings between Seller(s) and Buyer(s) or among their respective agents which are not reflected in the Contract.",
+    "",
+    "Buyer(s) and Seller(s) understand that the Lender, its successors, are relying upon the statements made in this Affidavit and will indemnify Lender, its successors, for any and all loss resulting from any negligent or intentional misrepresentation made in this Affidavit.",
+    "",
+    "Buyer(s) and Seller(s) understand that any misrepresentation may subject the responsible party to civil and/or criminal liability.",
+    "",
+    "This Affidavit will survive the closing of the Loan.",
+    "",
+    "The undersigned declare under penalty of perjury that all statements made in this Affidavit are true and correct.",
+    "",
+    "Buyer: " + buyer,
+    "By: _________________________________",
+    "Name: " + signer,
+    "Title: " + (lead.entityLegalName ? "Authorized Member" : ""),
+    "",
+    "The undersigned declare under penalty of perjury that all statements made in this Affidavit are true and correct.",
+    "",
+    "Seller(s): _______________________________",
+    "By: _________________________________",
+    "Name: ______________________________",
+    "By: _________________________________",
+    "Name: ______________________________"
+  ].join("\n");
+}
 function docKindMeta(lead, kind){
+  if (kind === "armsLength") return { label:"Arm's Length Affidavit", body: buildArmsLengthAffidavit(lead) };
   if (kind === "mortgageeClause"){ var mc = buildMortgageeClause(lead); return mc ? { label:"Mortgagee Clause", body: mc } : null; }
   if (kind === "termSheet") return { label:"Term Sheet", body: buildTermSheet(lead, "en") };
   if (kind === "preApproval") return { label:"Pre-Approval Letter", body: buildPreApprovalLetter(lead, "en") };
@@ -4465,7 +4610,7 @@ function docKindMeta(lead, kind){
   return null;
 }
 // Title/insurance docs (mortgagee clause) are for Erika AND the file's LO; lender-shopping docs stay Joe/Erika/Fiore.
-function canEmailDocKind(lead, kind){ return canManageOutsideLender() || (kind === "mortgageeClause" && lead && canEditApplication(lead)); }
+function canEmailDocKind(lead, kind){ return canManageOutsideLender() || ((kind === "mortgageeClause" || kind === "armsLength") && lead && canEditApplication(lead)); }
 function openEmailDocumentModal(leadId, kind){
   if (!canEmailDocKind(leadById(leadId), kind)) return;
   ui.modal = { type:"emailDocument", leadId: leadId, kind: kind };
@@ -4492,7 +4637,7 @@ function modalEmailDocument(leadId, kind){
     '<div class="modal" data-stop="1">' +
       '<div class="modal-head"><h3>Email ' + esc(meta.label) + ' — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
       '<div class="modal-body">' +
-        '<div class="footnote" style="padding:0 0 10px">' + (kind === "mortgageeClause" ? 'Check it first, then send it to the title company and the insurance agent (send it twice for both).' : 'Check it first, then send it to whoever you\'re shopping this deal to — a lender, not the borrower.') + '</div>' +
+        '<div class="footnote" style="padding:0 0 10px">' + (kind === "mortgageeClause" ? 'Check it first, then send it to the title company and the insurance agent (send it twice for both).' : kind === "armsLength" ? 'Check it first, then send it to the buyer and the seller (or their agents) to complete the contract date and seller name and sign.' : 'Check it first, then send it to whoever you\'re shopping this deal to — a lender, not the borrower.') + '</div>' +
         '<div class="form-row"><button class="btn btn-sm" type="button" data-action="preview-generated-document" data-lead="' + lead.id + '" data-kind="' + kind + '">👁️ Preview PDF</button></div>' +
         '<form data-form="email-generated-document" data-lead="' + lead.id + '" data-kind="' + kind + '">' +
           '<div class="form-row"><label>Send to</label><input class="input" type="email" name="toEmail" placeholder="lender@example.com" list="email-contact-suggest" required autofocus>' +
@@ -7789,11 +7934,19 @@ function applyRequiredDocs(leadId, opts){
   var list = requiredDocsForLead(lead);
   if (!list || !list.length) return [];
   lead.documents = lead.documents || [];
+  // Lender moved: drop the old lender's items that were never requested or touched.
+  var wanted = list.map(function(n){ return n.toLowerCase(); });
+  lead.documents = lead.documents.filter(function(d){
+    return !(d.lenderKey && d.status === "suggested" && !d.storagePath && wanted.indexOf((d.name||"").toLowerCase()) === -1);
+  });
   var existing = lead.documents.map(function(d){ return (d.name||"").toLowerCase(); });
   var added = [];
   list.forEach(function(name){
     if (existing.indexOf(name.toLowerCase()) === -1){
-      lead.documents.push({ name:name, status:"suggested" });
+      var meta = lenderDocMeta(lead, name);
+      var doc = { name:name, status:"suggested" };
+      if (meta){ doc.lenderKey = meta.lenderKey; if (meta.staffOnly) doc.staffOnly = true; if (meta.autoKind) doc.autoKind = meta.autoKind; if (meta.note) doc.lenderNote = meta.note; }
+      lead.documents.push(doc);
       added.push(name);
     }
   });
@@ -11848,7 +12001,8 @@ function setOutsideLender(leadId, lender){
   var lead = leadById(leadId);
   if (!lead || !canManageOutsideLender()) return;
   lead.outsideLender = lender || null;
-  showToast(lender ? ("Routed to " + lender) : "Set back to in-house / needs manual placement");
+  var lenderDocsAdded = applyRequiredDocs(lead.id, { silent:true }) || [];
+  showToast((lender ? ("Routed to " + lender) : "Set back to in-house / needs manual placement") + (lenderDocsAdded.length ? (" — " + lenderDocsAdded.length + " lender document" + (lenderDocsAdded.length === 1 ? "" : "s") + " added to the checklist") : ""));
   persist();
 }
 // Joe's ask (2026-09-27): when it lands on him, Erika, or Fiore, the file
@@ -12702,6 +12856,7 @@ function lpSelectOption(key, ri, oi, spreadPts){
   if (r.fees && r.fees.lenderFee != null) lead.lenderFeeOverride = r.fees.lenderFee;
   var isInHouse = String(r.lender).indexOf("Constructive") === 0;
   if (canManageOutsideLender()) lead.outsideLender = isInHouse ? null : r.lender;
+  applyRequiredDocs(lead.id, { silent:true }); // the placed lender's own submission docs
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"note", text: "Pricer: applied " + fmtUSD(lead.loanAmount) + " at " + fmtPct(o.rate) + (canManageOutsideLender() ? (" with " + r.lender) : "") + (isInHouse || !canManageOutsideLender() ? "" : " (placed with outside lender)"), author: currentUser().name });
   lead.guidelineCheck = Object.assign({}, lead.guidelineCheck || {}, { pricerTerms: {
@@ -13006,16 +13161,24 @@ function renderTabDocuments(lead){
         (canManage ? ('<button class="btn btn-sm btn-ghost" type="button" style="color:var(--c-rust)" data-action="delete-extra-document-file" data-lead="' + lead.id + '" data-idx="' + i + '" data-fileidx="' + fi + '">Remove</button>') : "") +
       '</div>';
     }).join("");
+    // Lender docs we can fill ourselves: preview / email the pre-filled PDF.
+    var autoBtn = "";
+    if (d.autoKind && d.status !== "waived" && docKindMeta(lead, d.autoKind) && (canEmailDocKind(lead, d.autoKind) || canManage)){
+      autoBtn = '<button class="btn btn-sm" type="button" data-action="preview-generated-document" data-lead="' + lead.id + '" data-kind="' + esc(d.autoKind) + '" title="Pre-filled from this file">📝 Pre-filled</button>' +
+        '<button class="btn btn-sm btn-ghost" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="' + esc(d.autoKind) + '">✉️ Email</button>';
+    }
+    var lenderNote = d.lenderNote ? '<div class="cell-sub" style="margin-top:2px;color:var(--c-gold-ink,#8a6d1f)">' + esc(d.lenderNote) + '</div>' : '';
     var rowIsDropzone = d.status==="suggested" || d.status==="requested";
     return '<div class="doc-row"' + (rowIsDropzone ? (' data-dropzone="checklist-doc-file" data-lead="' + lead.id + '" data-idx="' + i + '"') : '') + ' style="align-items:flex-start"><div><div>' + esc(d.name) + '</div>' +
       '<div class="cell-sub">' + (d.status==="received" ? ("Received " + fmtDate(d.receivedAt) + (d.fileName?(" · " + esc(d.fileName)):""))
         : d.status==="waived" ? ("Marked N/A " + fmtDate(d.waivedAt) + " by " + esc(d.waivedBy||""))
         : d.status==="suggested" ? "Not yet requested — the borrower can't see this until you click Request. Upload/Mark Received directly if you already have it, or drag a blank form in to attach it as an example."
         : "A client may have emailed this directly — upload it here if so. Drag a file in to attach it as a reference/example for the borrower.") + '</div>' +
+      lenderNote +
       extraFiles +
       aiNote +
       '</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + refBtn + viewBtn + aiRecheckBtn + requestBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + autoBtn + refBtn + viewBtn + aiRecheckBtn + requestBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
   }).join("");
   var uwRows = (lead.uwConditions||[]).map(function(c){
     var statusBadge = c.status==="received" ? '<span class="badge badge-forest">Response Received</span>' : '<span class="badge badge-slate">Open</span>';
