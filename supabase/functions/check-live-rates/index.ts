@@ -282,24 +282,80 @@ const DSCR_LTV_BY_FICO = [
 ];
 const MAX_LOAN_SANITY_CEILING = 2000000;
 
-async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?: string } | null> {
+// Constructive (BPL Mortgage) RTL leverage -- straight from "BPL RTL Guidelines
+// External 9-15-26", Appendix I (RTL Matrix) and Appendix J (Ground-Up Matrix),
+// read from bplhub.com Documents Library 2026-10-06. Tiers by completed+exited
+// projects in 3 yrs: Silver 0-2, Gold 3-4, Platinum 5+. Rehab class by rehab ÷
+// lower of purchase price / as-is: Light <25%, Standard 25-50%, Super 50-250%.
+// ltc = initial LTC, totalLtc = total LTC, ltarv = loan / ARV.
+const BPL_RTL_MATRIX: Record<string, Record<string, RtlLimits | null>> = {
+  silver:   { bridge: { ltc: 75 }, light: { iltc: 85, totalLtc: 90, ltarv: 75 }, standard: { iltc: 80, totalLtc: 85, ltarv: 75 }, super: null },
+  gold:     { bridge: { ltc: 75 }, light: { iltc: 85, totalLtc: 90, ltarv: 75 }, standard: { iltc: 85, totalLtc: 90, ltarv: 75 }, super: { iltc: 75, totalLtc: 85, ltarv: 70 } },
+  // Platinum light/standard is 90/95 only on a purchase of an SFR with 720+ FICO; otherwise 85/90.
+  platinum: { bridge: { ltc: 75 }, light: { iltc: 85, totalLtc: 90, ltarv: 75 }, standard: { iltc: 85, totalLtc: 90, ltarv: 75 }, super: { iltc: 80, totalLtc: 85, ltarv: 75 } },
+};
+const BPL_GUC_MATRIX: Record<string, RtlLimits | null> = {
+  silver: null,
+  // Initial 65%/70% needs a clear exit, detailed scope, and plans & permits imminent; otherwise 50%.
+  gold: { iltc: 65, totalLtc: 85, ltarv: 70 },
+  platinum: { iltc: 70, totalLtc: 90, ltarv: 70 },
+};
+function bplLevTier(d: number | null): "silver" | "gold" | "platinum" { const n = d || 0; return n >= 5 ? "platinum" : n >= 3 ? "gold" : "silver"; }
+function bplRehabClass(s: Scenario): "bridge" | "light" | "standard" | "super" | "guc" {
+  if (s.loanType === "Bridge" || !s.rehabBudget) return "bridge";
+  const base = Math.min(s.purchasePrice || Infinity, s.currentValue || Infinity);
+  const r = isFinite(base) && base > 0 ? s.rehabBudget / base : 0;
+  return r < 0.25 ? "light" : r < 0.5 ? "standard" : r <= 2.5 ? "super" : "guc";
+}
+// Non-cumulative leverage hits (lowest single one applies): NYC 5 boroughs -15,
+// Suffolk/Nassau -5, FL/TX -5, cash-out -5, foreign national -5.
+function bplNyZone(s: Scenario): "nyc" | "li" | null {
+  const z = (/\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(s.propertyAddress || "") || [])[1];
+  if (!z) return null;
+  const p = Number(z.slice(0, 3));
+  if ((p >= 100 && p <= 104) || (p >= 110 && p <= 114) || p === 116) return "nyc";
+  if (p === 115 || (p >= 117 && p <= 119)) return "li";
+  return null;
+}
+
+async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?: string; reason?: string } | null> {
   if (RTL_AUTO_LOAN_TYPES.includes(s.loanType)) {
     const isGuc = s.loanType === "Ground Up Construction";
     if (s.purchasePrice == null || (s.purchasePrice === 0 && !isGuc)) return null;
-    const tier = experienceTier(s.experienceDeals);
-    const limitsRaw = isGuc ? GROUNDUP_TIERS[tier] : RTL_TIERS[tier][s.loanType === "Bridge" ? "bridge" : (rehabClass(s) as "light" | "heavy")];
+    const tier = bplLevTier(s.experienceDeals);
+    const cls = isGuc ? "guc" : bplRehabClass(s);
+    const state = stateFromAddress(s.propertyAddress);
+    const no = (reason: string) => ({ amount: 0, reason });
+    if (state && ["ND", "SD", "NV"].includes(state)) return no("Constructive doesn't do fix & flip / bridge / ground-up in " + state + ".");
+    if (state === "MD" && /\bBaltimore,\s*MD\b/i.test(s.propertyAddress || "") && !/county/i.test(s.propertyAddress || "")) return no("Baltimore City is ineligible for Constructive RTL.");
+    if (s.creditScore != null && s.creditScore < (isGuc ? 700 : 680)) return no("Constructive needs a " + (isGuc ? "700" : "680") + "+ representative FICO on " + (isGuc ? "ground-up" : "fix & flip / bridge") + ".");
+    if (cls === "guc" && !isGuc) return no("A rehab over 250% of the purchase price / as-is value is ground-up construction at Constructive — price it as Ground Up.");
+    if (isGuc && s.citizenshipStatus === "Foreign National") return no("Foreign nationals aren't eligible for Constructive ground-up.");
+    if (isGuc && tier === "silver") return no("Constructive ground-up needs 3+ completed projects in the last 3 years.");
+    if (cls === "super" && tier === "silver") return no("Super rehab (rehab 50%+ of price) needs 3+ completed projects at Constructive.");
+    if (s.transactionType === "cashout" && (tier === "silver" || isGuc)) return no(isGuc ? "No cash-out on Constructive ground-up." : "Cash-out isn't allowed at Constructive with 0-2 completed projects.");
+    if (!isGuc && cls !== "bridge" && s.arv && s.arv < 1.15 * ((s.purchasePrice || 0) + (s.rehabBudget || 0))) return no("Constructive needs the ARV to be at least 115% of purchase + rehab (" + fmtMoney(1.15 * ((s.purchasePrice || 0) + (s.rehabBudget || 0))) + ").");
+    const limitsRaw = isGuc ? BPL_GUC_MATRIX[tier] : BPL_RTL_MATRIX[tier][cls];
     if (!limitsRaw) return null;
     const limits: RtlLimits = { ...limitsRaw };
-    const state = stateFromAddress(s.propertyAddress);
-    const candidates = [0];
-    if (state === "NY") candidates.push(-15);
-    if (s.transactionType === "cashout") candidates.push(-5);
-    if (s.citizenshipStatus === "Foreign National") candidates.push(-5);
-    const adj = Math.min(...candidates);
+    const notes: string[] = [];
+    if (!isGuc && tier === "platinum" && (cls === "light" || cls === "standard")) {
+      if (s.transactionType === "purchase" && (s.propertyType || "SFR") === "SFR" && (s.creditScore || 0) >= 720) { limits.iltc = 90; limits.totalLtc = 95; notes.push("90% / 95% tier: purchase + SFR + 720 FICO."); }
+    }
+    if (isGuc) notes.push("Initial " + limits.iltc + "% of land assumes a clear exit, detailed scope, and plans & permits imminent — otherwise 50%.");
+    const candidates: Array<[number, string]> = [[0, ""]];
+    const ny = state === "NY" ? bplNyZone(s) : null;
+    if (ny === "nyc") candidates.push([-15, "NYC borough"]);
+    if (ny === "li") candidates.push([-5, "Suffolk/Nassau"]);
+    if (state === "FL" || state === "TX") candidates.push([-5, state]);
+    if (s.transactionType === "cashout") candidates.push([-5, "cash-out"]);
+    if (s.citizenshipStatus === "Foreign National") candidates.push([-5, "foreign national"]);
+    const [adj, why] = candidates.reduce((a, b) => (b[0] < a[0] ? b : a));
     if (adj) {
       for (const k of ["ltc", "iltc", "ltarv", "totalLtc"] as const) if (limits[k] != null) limits[k] = (limits[k] as number) + adj;
+      notes.push("Leverage " + adj + "% (" + why + "; Constructive's adjustments don't stack).");
     }
-    const pp = s.purchasePrice, rehab = s.rehabBudget || 0;
+    const pp = (s.transactionType !== "purchase" && s.currentValue) ? s.currentValue : s.purchasePrice, rehab = s.rehabBudget || 0;
     const caps: number[] = [];
     if (s.loanType === "Bridge") {
       if (limits.ltc != null) caps.push(limits.ltc / 100 * pp);
@@ -309,11 +365,14 @@ async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?
       if (limits.ltarv != null && s.arv) caps.push(limits.ltarv / 100 * s.arv);
     } else {
       if (limits.iltc != null) caps.push(limits.iltc / 100 * pp + rehab);
-      if (limits.ltc != null) caps.push(limits.ltc / 100 * (pp + rehab));
+      if (limits.totalLtc != null) caps.push(limits.totalLtc / 100 * (pp + rehab));
       if (limits.ltarv != null && s.arv) caps.push(limits.ltarv / 100 * s.arv);
     }
     if (!caps.length) return null;
-    return { amount: Math.floor(Math.max(0, Math.min(MAX_LOAN_SANITY_CEILING, ...caps))), note: adj ? "Leverage reduced " + Math.abs(adj) + "% (state / cash-out / foreign national adjustment)." : undefined };
+    const amt = Math.floor(Math.max(0, Math.min(MAX_LOAN_SANITY_CEILING, ...caps)));
+    if (amt < 75000) return no("Below Constructive's $75,000 minimum (max here is " + fmtMoney(amt) + ").");
+    notes.unshift("Constructive " + tier + " tier (" + (isGuc ? "ground-up" : cls === "bridge" ? "bridge" : cls + " rehab") + ") per BPL RTL Guidelines 9-15-26.");
+    return { amount: amt, note: notes.join(" ") };
   }
   if (s.loanType === "DSCR") {
     const basis = s.transactionType !== "purchase" && s.currentValue ? s.currentValue : s.purchasePrice;
@@ -342,11 +401,14 @@ async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?
 
 async function checkConstructive(s: Scenario): Promise<LenderResult> {
   if (s.loanAmount) {
-    const r = await checkConstructiveAt(s);
     const max = await constructiveMaxLoan(s);
+    if (max && max.reason) return { lender: "Constructive Capital", eligible: false, reason: max.reason };
+    if (max && max.amount && s.loanAmount > max.amount + 1) return { lender: "Constructive Capital", eligible: false, reason: "Over Constructive's max of " + fmtMoney(max.amount) + " on this deal. " + (max.note || "") };
+    const r = await checkConstructiveAt(s);
     return { ...r, loanAmountUsed: s.loanAmount, maxLoanAmount: max ? max.amount : undefined, rehabHoldback: constructiveHoldback(s, s.loanAmount) };
   }
   const max = await constructiveMaxLoan(s);
+  if (max && max.reason) return { lender: "Constructive Capital", eligible: false, reason: max.reason };
   if (!max || !max.amount) {
     return { lender: "Constructive Capital", eligible: false, reason: "Not enough information to size the loan yet (needs credit score, property value, and for rentals the monthly rent; for fix & flip/bridge/ground-up the purchase price, rehab, ARV, and experience)." };
   }
