@@ -98,6 +98,14 @@ async function buildPackage(leadId: string, lender: string) {
       if (s && s.signedUrl) docs.push({ name: d.name, category: docCategory(d.name), fileName: f.fileName || (d.name + ".pdf"), url: s.signedUrl });
     }
   }
+  // A&D starts a loan from a MISMO 3.4 upload ("just upload your 3.4!" -- A&D wholesale
+  // checklist). Generated server-side with the service key, which never includes the SSN.
+  let mismo: { fileName: string; xml: string } | null = null;
+  if (lender === "A&D") {
+    const r = await fetch(SUPABASE_URL + "/functions/v1/generate-mismo-export", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify({ leadId }) }).catch(() => null);
+    const j = r ? await r.json().catch(() => null) : null;
+    if (j && j.ok && j.xml) mismo = { fileName: "Bridgepoint-" + leadId + "-MISMO34.xml", xml: j.xml };
+  }
   const tr = Array.isArray(l.track_record) ? l.track_record : [];
   // The file's loan officer: lender portals ask which broker officer owns the loan.
   const { data: lo } = l.assigned_to ? await sb.from("users").select("name,email").eq("id", l.assigned_to).maybeSingle() : { data: null as any };
@@ -130,6 +138,7 @@ async function buildPackage(leadId: string, lender: string) {
     },
     trackRecord: tr.map((t: any) => ({ address: t.address, purchaseDate: t.purchaseDate, purchasePrice: t.purchasePrice, rehabBudget: t.rehabBudget, exitDate: t.exitDate, exitValue: t.exitValue, exitType: t.exitType })),
     documents: docs,
+    mismo,
   };
 }
 
