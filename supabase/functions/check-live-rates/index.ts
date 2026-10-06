@@ -64,13 +64,18 @@ type LenderResult = {
   // loanAmount on an option = that option was priced at a different amount
   // than loanAmountUsed (Kiavi offers a rate per leverage tier, so a lower
   // loan buys a lower rate). Absent = priced at loanAmountUsed.
-  options?: Array<{ program: string; rate: number; price: number; dscr?: number | null; loanAmount?: number; note?: string }>;
+  // creditToBorrower: a price above 100 is a lender credit to the borrower
+  // (A&D Borrower Paid), not yield spread to us. revenuePts: our fixed comp
+  // on that option (A&D Lender Paid 2.75%), replacing points + YSP.
+  options?: Array<{ program: string; rate: number; price: number; dscr?: number | null; loanAmount?: number; note?: string; creditToBorrower?: boolean; revenuePts?: number }>;
   // Lender's own cap on what the broker can earn, so the UI can steer extra
   // compensation into yield spread when points alone hit the cap.
   compCaps?: { maxBrokerPoints?: number; maxYsp?: number; yspRatePerPoint?: number };
   // "live" = the lender's own pricer answered; "model" = Bridgepoint's
   // researched copy of the lender's pricing (see Bridgepoint Pricing Research).
   source?: "live" | "model";
+  // Set when the rate is only known to within +/- this much (Kiavi rental).
+  rateTolerance?: number;
   // Loan amount every option above was priced at. When the caller doesn't
   // supply a loan amount, this is the highest amount the lender will do on
   // this scenario (maxLoanAmount === loanAmountUsed); when they do supply
@@ -780,17 +785,25 @@ const KIAVI_HM_TERM_ADDER = { 12: 0, 18: 0.75, 24: 1.00 };
 // Bridge (no rehab) only ever measured at 700-759 / 75% of as-is (11.50);
 // other tiers assume the same FICO spread as the rehab grid's 75% column.
 const KIAVI_BRIDGE_RATE = { "760": 11.04, "700": 11.50, "680": 11.80 };
-// Rental 30-yr fixed, 3-yr prepay, DSCR >= 1.15, SFR purchase, $150k-$350k,
-// by FICO tier x LTV tier (<=55, <=60, <=65, <=70, <=75, <=80). null = not offered.
-const KIAVI_RENTAL_LTV_TIERS = [55, 60, 65, 70, 75, 80];
-const KIAVI_RENTAL_GRID = {
-  "760": [7.375, 7.375, 7.375, 7.375, 7.625, 7.75],
-  "740": [7.375, 7.375, 7.375, 7.5, 7.625, 7.75],
-  "720": [7.375, 7.375, 7.5, 7.5, 7.625, 8.0],
-  "700": [7.5, 7.5, 7.5, 7.625, 7.75, 8.375],
-  "680": [7.625, 7.625, 7.625, 7.875, null, null],
-  "660": [7.625, 7.625, 7.75, null, null, null],
-};
+// Rental 30-yr fixed: Kiavi prices in points and rounds the rate UP to the
+// next 1/8, so this is a fitted "pre-rounding" rate. Rate = ceil8(B[fico|ltv]
+// + prepay + property + loan size + DSCR, the last four by LTV band
+// lo<=60 / m1<=65 / mid<=70 / hi<=75). Fitted 2026-10-06 on 400 live Kiavi
+// quotes; on 40 untouched quotes: 98% within 1/8, 50% exact -> shown as an
+// estimate (+/-0.125%).
+const KIAVI_RENTAL_FIT = {"B":{"660|50":7.5,"660|55":7.595,"660|60":7.575,"660|65":7.625,"680|50":7.445,"680|55":7.5,"680|60":7.475,"680|65":7.625,"680|70":7.85,"700|50":7.28,"700|55":7.345,"700|60":7.345,"700|65":7.45,"700|70":7.53,"700|75":7.75,"720|50":7.185,"720|55":7.25,"720|60":7.345,"720|65":7.345,"720|70":7.405,"720|75":7.625,"740|50":7.26,"740|55":7.25,"740|60":7.25,"740|65":7.325,"740|70":7.4,"740|75":7.6,"760|50":7.25,"760|55":7.25,"760|60":7.25,"760|65":7.26,"760|70":7.375,"760|75":7.54,"780|50":7.22,"780|55":7.22,"780|60":7.25,"780|65":7.25,"780|70":7.325,"780|75":7.56,"800|50":7.19,"800|55":7.19,"800|60":7.27,"800|65":7.36,"800|70":7.35,"800|75":7.54},"ppp":{"none":{"lo":0.18,"m1":0.18,"mid":0.18,"hi":0.18},"1yr":{"lo":0.15,"m1":0.15,"mid":0.1,"hi":0.15},"2yr":{"lo":0.07,"m1":0.085,"mid":0.07,"hi":0.07},"3yr":{"lo":0,"m1":0,"mid":0,"hi":0},"5yr":{"lo":-0.1,"m1":-0.12,"mid":-0.1,"hi":-0.125}},"pt":{"single-family":{"lo":0,"m1":0,"mid":0,"hi":0},"condo":{"lo":0.05,"m1":0.01,"mid":0.025,"hi":0.05},"2-4plex":{"lo":0.15,"m1":0.15,"mid":0.15,"hi":0.155}},"z":{"z1":{"lo":0.2,"m1":0.155,"mid":0.2,"hi":0.2},"z2":{"lo":0.1,"m1":0.1,"mid":0.08,"hi":0.13},"z3":{"lo":0,"m1":0,"mid":0,"hi":0},"z4":{"lo":0,"m1":0,"mid":-0.045,"hi":0},"z5":{"lo":-0.04,"m1":0,"mid":-0.05,"hi":-0.05},"z6":{"lo":-0.1,"m1":-0.1,"mid":-0.1,"hi":-0.125}},"d":{"d1":{"lo":0.05,"m1":0.08,"mid":0.05,"hi":0.05},"d2":{"lo":0.04,"m1":0.04,"mid":0.04,"hi":0.04},"d3":{"lo":0.02,"m1":0.02,"mid":0.02,"hi":0.02},"d4":{"lo":0,"m1":0,"mid":0,"hi":0}}};
+const KIAVI_RENTAL_LTV_TIERS = [50, 55, 60, 65, 70, 75];
+function kiaviRentalRate(fico, ltvTier, ppp, unit, loan, dscr) {
+  const ft = String(Math.min(800, Math.max(660, Math.floor(fico / 20) * 20)));
+  const b = KIAVI_RENTAL_FIT.B[ft + "|" + ltvTier];
+  if (b == null) return null;
+  const band = ltvTier <= 60 ? "lo" : ltvTier <= 65 ? "m1" : ltvTier <= 70 ? "mid" : "hi";
+  const z = loan < 125000 ? "z1" : loan < 200000 ? "z2" : loan < 350000 ? "z3" : loan < 500000 ? "z4" : loan < 1000000 ? "z5" : "z6";
+  const d = dscr < 1.05 ? "d1" : dscr < 1.1 ? "d2" : dscr < 1.15 ? "d3" : "d4";
+  const pt = unit === "condo" ? "condo" : unit === "2-4plex" ? "2-4plex" : "single-family";
+  const v = b + KIAVI_RENTAL_FIT.ppp[ppp][band] + KIAVI_RENTAL_FIT.pt[pt][band] + KIAVI_RENTAL_FIT.z[z][band] + KIAVI_RENTAL_FIT.d[d][band];
+  return Math.ceil(v * 8 - 1e-6) / 8;
+}
 const KIAVI_STATE_ADJ_HM = { TX: -0.5 };
 
 function kiaviUnit(pt) {
@@ -916,30 +929,28 @@ function kiaviRental(s, out, unit, st) {
   // up to" exactly 75% of value, so 75% is the real purchase ceiling.
   let maxLtv = tier === "660" ? 65 : tier === "680" ? 70 : 75;
   if (s.transactionType === "cashout") { maxLtv = Math.min(maxLtv, 75); out.assumptions.push("Cash-out assumed 75% max LTV and 90+ days of ownership (Kiavi requires 90 days seasoning)."); }
-  const ppp = s.prepayTerm || "5yr";
-  const pppAdj = function (ltv) { return ppp === "none" ? (ltv > 70 ? 0.25 : 0.125) : ppp === "1yr" ? 0.125 : ppp === "5yr" ? -0.125 : 0; };
-  if (ppp === "4yr") out.assumptions.push("Kiavi doesn't offer a 4-year prepay; priced at 3 years.");
+  let ppp = s.prepayTerm || "5yr";
+  if (ppp === "4yr") { ppp = "3yr"; out.assumptions.push("Kiavi doesn't offer a 4-year prepay; priced at 3 years."); }
+  if (!KIAVI_RENTAL_FIT.ppp[ppp]) ppp = "3yr";
   const opts = [];
   let maxLoanFound = 0;
   for (let i = KIAVI_RENTAL_LTV_TIERS.length - 1; i >= 0; i--) {
     const t = KIAVI_RENTAL_LTV_TIERS[i];
     if (t > maxLtv) continue;
-    const base = KIAVI_RENTAL_GRID[tier][i];
-    if (base == null) continue;
     let loan = Math.floor(value * t / 100 / 500) * 500;
     if (s.loanAmount && loan > s.loanAmount) continue;
     if (loan > 1500000) loan = 1500000;
     if (loan < 100000) continue;
-    let adj = pppAdj(t);
-    if (unit === "2-4plex") adj += t > 70 ? 0.25 : 0.125;
-    if (refi) adj += 0.125;
-    if (loan < 150000) adj += 0.125;
-    else if (loan >= 350000) adj -= 0.125;
-    let rate = kiaviRound8(base + adj);
+    // DSCR depends on the rate and the rate (slightly) on DSCR: price at
+    // DSCR 1.25 first, then reprice with the resulting DSCR.
+    let rate = kiaviRentalRate(s.creditScore, t, ppp, unit, loan, 1.25);
+    if (rate == null) continue;
+    if (refi) rate = kiaviRound8(rate + 0.125);
     let dscr = kiaviRentalDscr(loan, rate, s, false);
     if (dscr < 0.8) continue;
     if (dscr < 1.0 && t > 65) continue; // DSCR under 1.00 caps Kiavi at 65%
-    if (dscr < 1.15 && t > 70) { rate = kiaviRound8(rate + 0.125); dscr = kiaviRentalDscr(loan, rate, s, false); }
+    const r2 = kiaviRentalRate(s.creditScore, t, ppp, unit, loan, dscr);
+    if (r2 != null) { rate = refi ? kiaviRound8(r2 + 0.125) : r2; dscr = kiaviRentalDscr(loan, rate, s, false); }
     maxLoanFound = Math.max(maxLoanFound, loan);
     opts.push({ program: "30-yr fixed · " + t + "% LTV", rate, price: 100, dscr: Math.round(dscr * 100) / 100, loanAmount: loan });
     if (t <= 75) {
@@ -954,10 +965,141 @@ function kiaviRental(s, out, unit, st) {
   out.maxLoanAmount = maxLoanFound;
   out.fees = { lenderFee: 0 };
   out.compCaps.yspRatePerPoint = 0.25; // rental YSP is price-based: about +0.125-0.25% rate per point
-  out.assumptions.push("Kiavi rental rates as of " + KIAVI_SNAPSHOT + " (rate sheet moves daily). 5/1 and 7/1 ARMs are typically 0.125% lower. No Kiavi origination fee on rentals.");
+  out.rateTolerance = 0.125;
+  out.assumptions.push("Kiavi rental rate is an ESTIMATE, accurate to within 0.125% (tested 98%); confirm on Kiavi before quoting exact. Rates as of " + KIAVI_SNAPSHOT + " (rate sheet moves). 5/1 and 7/1 ARMs are typically 0.125% lower. No Kiavi origination fee on rentals.");
   return out;
 }
 // END KIAVI MODEL
+
+// ---------------------------------------------------------------------
+// A&D Mortgage DSCR -- researched MODEL (2026-10-06, Quick Pricer Pro via
+// Joe's AIM login; raw data in Documents\Bridgepoint Pricing Research\ad).
+// A&D prices off one base ladder: discount(rate) = AD_BASE[rate] - total
+// adjustments, floored at a 2.5-point credit. Adjustments are additive in
+// points by CLTV bucket (fitted on ~300 live quotes). Tested on 100 fresh
+// quotes: US citizens/residents 93% eligibility, 94% exact par rate;
+// foreign national / ITIN only 50% -> flagged as estimates.
+// Compensation: Borrower Paid = broker charges points, any credit goes to
+// the BORROWER. Lender Paid = A&D pays the broker 2.75% through the rate
+// (every rate costs exactly 2.75 points more), no points on top.
+// ---------------------------------------------------------------------
+const AD_SNAPSHOT = "A&D rate sheet 10/06/26 09:04 AM ET";
+const AD_LPC = 2.75;
+const AD_MAX_CREDIT = 2.5;
+const AD_FIT = {"fico":{"620":{"50":-3.5,"55":-3.5,"60":-4,"65":-4.25,"70":null,"75":null,"80":null},"640":{"50":-2.25,"55":-2.25,"60":-2.375,"65":-2.75,"70":-3.75,"75":null,"80":null},"660":{"50":-0.625,"55":-0.625,"60":-1.125,"65":-1.5,"70":-2.75,"75":-3.375,"80":null},"680":{"50":0,"55":0,"60":-0.125,"65":-0.875,"70":-1.5,"75":-2.5,"80":-4.5},"700":{"50":0.375,"55":0.375,"60":0.25,"65":0,"70":-0.5,"75":-1.125,"80":-2.875},"720":{"50":0.625,"55":0.625,"60":0.5,"65":0.25,"70":-0.125,"75":-0.5,"80":-1.625},"740":{"50":0.75,"55":0.75,"60":0.625,"65":0.5,"70":0.125,"75":-0.375,"80":-1.125},"760":{"50":0.875,"55":0.875,"60":0.75,"65":0.625,"70":0.375,"75":-0.125,"80":-0.875},"780":{"50":1,"55":1,"60":0.875,"65":0.75,"70":0.5,"75":0,"80":-0.625}},"B":{"6.75":1.75,"6.875":1,"6.99":0.375,"7.125":-0.375,"7.25":-1.125,"7.375":-1.75,"7.49":-2.375,"7.625":-2.75,"7.75":-3,"7.875":-3.25,"7.99":-3.5,"8.125":-3.625,"8.25":-3.75,"8.375":-3.875,"8.49":-4,"8.625":-4.125,"8.75":-4.25,"8.875":-4.375,"8.99":-4.5,"9.125":-4.625,"9.25":-4.75,"9.375":-4.875,"9.49":-5,"9.625":-5.125,"9.75":-5.25,"9.875":-5.375,"9.99":-5.5,"10.125":-5.625,"10.25":-5.75,"10.375":-5.875,"10.49":-6,"10.625":-6.125,"10.75":-6.25,"10.875":-6.375,"10.99":-6.5,"11.125":-6.625,"11.25":-6.75,"11.375":-6.875}};
+// Eligibility (null = A&D doesn't offer that combination), measured in single-factor sweeps.
+const AD_NOT_OFFERED: Record<string, number[]> = { // factor -> CLTV buckets not offered
+  "d4": [80], "d5": [75, 80], "co": [80], "pt_condotel": [80], "c_fn": [80], "c_itin": [75, 80],
+};
+const AD_NO_STATES = ["HI"];
+function adCltvBucket(c: number): number { return Math.min(80, Math.max(50, Math.ceil(c / 5) * 5)); }
+function adFicoBucket(f: number): string { return String(Math.min(780, Math.max(620, Math.floor(f / 20) * 20))); }
+function adAmtBand(a: number): string { return a < 100000 ? "a0" : a <= 1000000 ? "a1" : a <= 1500000 ? "a2" : a <= 2000000 ? "a3" : "a4"; }
+function adDscrBand(d: number): string { return d >= 1.25 ? "d1" : d >= 1.10 ? "d2" : d >= 1.0 ? "d3" : d >= 0.75 ? "d4" : "d5"; }
+type AdIn = { fico: number; cltv: number; dscr: number; ppp: string; purpose: string; pt: string; cit: string; amt: number; st: string };
+function adKeys(s: AdIn): string[] {
+  const c = adCltvBucket(s.cltv), k: string[] = [];
+  const db = adDscrBand(s.dscr); if (db !== "d1") k.push(db + "|" + c);
+  k.push("ppp_" + s.ppp);
+  if (s.purpose === "cashout") k.push("co|" + c);
+  if (s.pt !== "sfr") k.push("pt_" + s.pt + "|" + c);
+  if (s.cit !== "us") k.push("c_" + s.cit + "|" + c);
+  const ab = adAmtBand(s.amt); if (ab !== "a1") k.push(ab + "|" + c);
+  if (s.st === "NY") k.push("ny|" + c);
+  if (s.cit === "fn" && s.pt !== "sfr") k.push("fnpt|" + c);
+  if (s.cit === "fn" && s.purpose !== "purchase") k.push("fnpu|" + c);
+  return k;
+}
+// Returns total adjustment in points, or null when A&D doesn't offer the scenario.
+function adAdjust(s: AdIn): number | null {
+  const c = adCltvBucket(s.cltv);
+  if (AD_NO_STATES.indexOf(s.st) !== -1) return null;
+  const base = (AD_FIT.fico as any)[adFicoBucket(s.fico)][String(c)];
+  if (base == null) return null;
+  const db = adDscrBand(s.dscr);
+  if ((AD_NOT_OFFERED[db] || []).indexOf(c) !== -1) return null;
+  if (s.purpose === "cashout" && AD_NOT_OFFERED.co.indexOf(c) !== -1) return null;
+  if (s.cit !== "us" && (AD_NOT_OFFERED["c_" + s.cit] || []).indexOf(c) !== -1) return null;
+  if (s.amt > 2500000 || (s.amt > 2000000 && c >= 75) || (s.amt > 1500000 && c >= 80)) return null;
+  // Layered guideline "no"s found in testing (never contradicted in ~340 quotes).
+  if (s.fico < 680 && (s.dscr < 1.0 || (s.purpose === "cashout" && s.cltv > 67) || s.pt === "rural")) return null;
+  if (s.cit === "itin" && (s.cltv > 65 || s.fico < 700 || s.purpose === "cashout")) return null;
+  if (s.pt === "condo" && s.dscr < 1.0) return null;
+  let adj = base;
+  for (const k of adKeys(s)) adj += adMain(k, s);
+  if (s.fico < 680 && s.purpose === "cashout") adj -= 0.125;
+  return Math.round(adj * 1000) / 1000;
+}
+// Every main adjustment was measured directly in single-factor sweeps
+// (locked; the fitter is NOT allowed to move these). Only the foreign-
+// national interaction terms (fnpt/fnpu) come from fitting. Condo pricing
+// is worse in Florida (the sweeps ran in Tampa): FL condo -0.5/-0.75/-1,
+// elsewhere -0.25/-0.5/-0.5 (fresh-quote test: US borrowers 96% exact).
+function adMain(k: string, s: AdIn): number {
+  const [a, cs] = k.split("|"); const c = Number(cs);
+  if (a.startsWith("ppp_")) return ({ none: -1.5, "6m": -1.25, "1yr": -1, "2yr": -0.5, "3yr": 0, "4yr": 0.25, "5yr": 0.375 } as Record<string, number>)[a.slice(4)] || 0;
+  if (a === "pt_condo") return s.st === "FL" ? (c <= 70 ? -0.5 : c <= 75 ? -0.75 : -1) : (c <= 70 ? -0.25 : -0.5);
+  if (a === "fnpt" || a === "fnpu") { const v = (AD_FN_INTERACT as any)[k]; return v != null ? v : 0; }
+  const t: Record<string, (c: number) => number> = {
+    d2: () => -0.25, d3: () => -0.25, d4: (c) => c <= 60 ? -1.25 : c <= 65 ? -1.5 : c <= 70 ? -1.625 : -1.75, d5: (c) => c <= 55 ? -1.75 : c <= 60 ? -2 : c <= 65 ? -2.125 : -2.25,
+    co: (c) => c <= 60 ? -0.375 : c <= 65 ? -0.5 : c <= 70 ? -0.75 : -0.875,
+    "pt_2-4": (c) => c <= 55 ? -0.375 : c <= 75 ? -0.5 : -0.75, "pt_rural": (c) => c <= 70 ? -0.5 : c <= 75 ? -0.625 : -0.75, "pt_pud": () => 0,
+    c_np: () => -1, c_fn: (c) => c <= 65 ? -2.125 : c <= 70 ? -2 : -2.75, c_itin: () => -2,
+    a0: () => -0.25, a2: () => 0, a3: (c) => c >= 75 ? -0.25 : 0, a4: () => -0.25, ny: (c) => c >= 75 ? -0.25 : 0,
+  };
+  return t[a] ? t[a](c) : 0;
+}
+const AD_FN_INTERACT = { "fnpu|50": 0.125, "fnpt|75": -0.25, "fnpt|50": 0.125, "fnpu|70": 0.25, "fnpt|55": 0.125 };
+function adLadder(adj: number, lenderPaid: boolean): Array<[number, number]> {
+  return Object.entries(AD_FIT.B).map(([r, b]) => [Number(r), Math.max(-AD_MAX_CREDIT, Math.round(((b as number) - adj) * 1000) / 1000) + (lenderPaid ? AD_LPC : 0)] as [number, number]).sort((a, b) => a[0] - b[0]);
+}
+function adMonthlyPI(loan: number, rate: number): number { const r = rate / 100 / 12; return loan * r / (1 - Math.pow(1 + r, -360)); }
+
+async function checkAD(s: Scenario): Promise<LenderResult> {
+  const L = "A&D Mortgage";
+  if (s.loanType !== "DSCR") return { lender: L, eligible: false, reason: "A&D is only set up for DSCR rentals in this pricer." };
+  const pt = s.propertyType === "SFR" ? "sfr" : s.propertyType === "Condo" ? "condo" : (s.propertyType === "2-4 Unit" || s.propertyType === "Duplex") ? "2-4" : null;
+  if (!pt) return { lender: L, eligible: false, source: "model", reason: "A&D's DSCR program doesn't take " + s.propertyType + " properties." };
+  const cit = s.citizenshipStatus === "Foreign National" ? "fn" : s.citizenshipStatus === "ITIN" ? "itin" : "us";
+  if (!s.creditScore || s.creditScore < 620) return { lender: L, eligible: false, source: "model", reason: "A&D needs at least a 620 credit score." };
+  const refi = s.transactionType !== "purchase";
+  const value = refi ? (s.currentValue || s.purchasePrice) : Math.min(s.purchasePrice || Infinity, s.currentValue || Infinity);
+  if (!value || !isFinite(value)) return { lender: L, eligible: false, source: "model", reason: refi ? "Needs the current value." : "Needs the purchase price." };
+  if (!s.rentEstimate) return { lender: L, eligible: false, source: "model", reason: "Needs the monthly rent to size an A&D DSCR loan." };
+  const ppp = ({ "5yr": "5yr", "3yr": "3yr", "2yr": "2yr", "1yr": "1yr", none: "none" } as Record<string, string>)[s.prepayTerm || "5yr"] || "5yr";
+  const purpose = s.transactionType === "cashout" ? "cashout" : s.transactionType === "ratetermrefi" ? "rt" : "purchase";
+  const st = (s.propertyState || "").toUpperCase();
+  const escrow = (s.monthlyTaxes || 0) + (s.monthlyInsurance || 0) + (s.monthlyHoa || 0);
+  // Highest CLTV A&D will do on this deal: try 80 down to 50; DSCR depends on
+  // the par rate, which depends on the DSCR band -- iterate twice.
+  const tiers = s.loanAmount ? [Math.min(80, s.loanAmount / value * 100)] : [80, 75, 70, 65, 60, 55, 50];
+  for (const cltv of tiers) {
+    const loan = s.loanAmount || Math.floor(value * cltv / 100 / 500) * 500;
+    if (loan < 75000) continue;
+    let dscr = 1.3, adj: number | null = null, par = 0;
+    for (let i = 0; i < 3; i++) {
+      adj = adAdjust({ fico: s.creditScore, cltv, dscr, ppp, purpose, pt, cit, amt: loan, st });
+      if (adj == null) break;
+      const lad = adLadder(adj, false);
+      par = (lad.find((x) => x[1] <= 0) || lad[lad.length - 1])[0];
+      dscr = (s.rentEstimate || 0) / (adMonthlyPI(loan, par) + escrow);
+    }
+    if (adj == null) continue;
+    const bp = adLadder(adj, false).filter((x) => x[1] <= 2.0 && x[1] >= -AD_MAX_CREDIT).slice(0, 7);
+    const lp = adLadder(adj, true).filter((x) => x[1] <= 2.0).slice(0, 5);
+    const pmtD = (rate: number) => Math.round((s.rentEstimate || 0) / (adMonthlyPI(loan, rate) + escrow) * 100) / 100;
+    const options = bp.map(([rate, d]) => ({ program: "30-yr fixed · Borrower Paid", rate, price: 100 - d, dscr: pmtD(rate), creditToBorrower: d < 0 }))
+      .concat(lp.map(([rate, d]) => ({ program: "30-yr fixed · Lender Paid (A&D pays " + AD_LPC + "%)", rate, price: 100 - d, dscr: pmtD(rate), revenuePts: AD_LPC })));
+    const assumptions = [
+      "A&D model, " + AD_SNAPSHOT + ". Long-term rental, no interest-only, 30-yr fixed (40-yr and 5/6 or 7/6 ARMs also available).",
+      "Borrower Paid: your origination is on top, and any negative price is a lender credit to the BORROWER, not yield spread to us. Lender Paid: A&D pays Bridgepoint " + AD_LPC + "% through the rate; no origination points can be added.",
+    ];
+    const res: LenderResult = { lender: L, eligible: true, source: "model", options: options as any, loanAmountUsed: loan, maxLoanAmount: loan, assumptions };
+    if (cit !== "us") { res.rateTolerance = 0.25; assumptions.unshift("Foreign national / ITIN pricing at A&D is only accurate to about 0.25% here — confirm with A&D."); }
+    return res;
+  }
+  return { lender: L, eligible: false, source: "model", reason: "No A&D DSCR tier fits (credit, leverage, DSCR, loan size, or a layered guideline like low credit with DSCR under 1.00)." };
+}
 
 async function checkKiavi(s: Scenario): Promise<LenderResult> {
   return kiaviPrice(s) as LenderResult;
@@ -1220,6 +1362,7 @@ const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult
   { key: "nextres", check: checkNextres },
   { key: "kiavi", check: checkKiavi },
   { key: "rcn", check: checkRcn },
+  { key: "ad", check: checkAD },
 ];
 
 Deno.serve(async (req: Request) => {

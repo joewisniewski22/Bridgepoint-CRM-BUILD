@@ -12186,7 +12186,10 @@ function lpRenderResults(key){
     var capLost = (rtl && caps.maxBrokerPoints != null && points > caps.maxBrokerPoints) ? Math.max(0, points - caps.maxBrokerPoints - capOver) : 0;
     var yspRateAdd = capOver * (caps.yspRatePerPoint != null ? caps.yspRatePerPoint : 1);
     var best = -1;
-    if (r.eligible && !rtl) (r.options || []).forEach(function(o, oi){ if (best === -1 || o.price > r.options[best].price) best = oi; });
+    // "Best for us" = most revenue: lender comp where fixed (A&D Lender Paid),
+    // otherwise yield spread -- but never a credit that goes to the borrower.
+    var ourPts = function(o){ return o.revenuePts != null ? o.revenuePts : (o.creditToBorrower ? 0 : (o.price - 100)) + points; };
+    if (r.eligible && !rtl) (r.options || []).forEach(function(o, oi){ if (best === -1 || ourPts(o) > ourPts(r.options[best])) best = oi; });
     var head = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div class="rail-title" style="margin:0">' + esc(label) + '</div>' +
       (r.eligible ? '<span class="badge badge-forest">Eligible</span>' : (r.unavailable ? '<span class="badge badge-neutral">Unavailable</span>' : '<span class="badge badge-rust">Not eligible</span>')) + '</div>';
     if (!r.eligible){
@@ -12203,7 +12206,7 @@ function lpRenderResults(key){
       var io = rtl || /\(IO\)$/.test(o.program);
       var pmt = io ? interestOnlyPayment(oAmt, oRate) : monthlyPayment(oAmt, oRate, sc.termMonths);
       var applied = en.selected && en.selected.ri === ri && en.selected.oi === oi;
-      var cells = (perOptionAmounts ? '<td class="num mono">' + fmtUSD(oAmt) + '</td>' : '') + '<td class="num">' + oRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%</td><td class="num">' + (pmt ? fmtUSD(Math.round(pmt)) : "—") + '</td>';
+      var cells = (perOptionAmounts ? '<td class="num mono">' + fmtUSD(oAmt) + '</td>' : '') + '<td class="num">' + oRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%' + (r.rateTolerance ? '<span class="footnote" title="Estimate: the lender\'s exact rate may be up to ' + r.rateTolerance + '% higher or lower — confirm before quoting"> ±' + (r.rateTolerance === 0.125 ? '⅛' : r.rateTolerance) + '</span>' : '') + '</td><td class="num">' + (pmt ? fmtUSD(Math.round(pmt)) : "—") + '</td>';
       if (rtl){
         var lenderPts = Math.round((o.price - 100) * 1000) / 1000;
         var yourPts = points - capLost;
@@ -12211,8 +12214,16 @@ function lpRenderResults(key){
       } else {
         var ysp = Math.round((o.price - 100) * 1000) / 1000;
         var yspDollar = Math.round(ysp / 100 * oAmt);
-        cells += '<td class="num">' + o.price.toFixed(3) + '</td><td class="num" style="color:' + (ysp < 0 ? 'var(--c-rust)' : 'inherit') + '">' + (ysp > 0 ? "+" : "") + ysp.toFixed(3) + ' (' + fmtUSD(yspDollar) + ')</td>' +
-          '<td class="num">' + (o.dscr != null ? o.dscr.toFixed(2) + "x" : "—") + '</td><td class="num">' + fmtUSD(Math.round(oAmt * points / 100) + yspDollar) + '</td>';
+        // A&D Borrower Paid: a price over 100 is a credit to the BORROWER, not
+        // our yield spread. A&D Lender Paid: our comp is a fixed % (revenuePts)
+        // and no origination can be added.
+        var yspCell = o.creditToBorrower
+          ? '<span title="Lender credit toward the borrower\'s closing costs — not paid to Bridgepoint">' + ysp.toFixed(3) + ' credit to borrower (' + fmtUSD(yspDollar) + ')</span>'
+          : ((ysp > 0 ? "+" : "") + ysp.toFixed(3) + ' (' + fmtUSD(yspDollar) + ')');
+        var revenue = o.revenuePts != null ? Math.round(oAmt * o.revenuePts / 100)
+          : (Math.round(oAmt * points / 100) + (o.creditToBorrower ? 0 : yspDollar));
+        cells += '<td class="num">' + o.price.toFixed(3) + '</td><td class="num" style="color:' + (ysp < 0 ? 'var(--c-rust)' : 'inherit') + '">' + yspCell + '</td>' +
+          '<td class="num">' + (o.dscr != null ? o.dscr.toFixed(2) + "x" : "—") + '</td><td class="num">' + fmtUSD(revenue) + (o.revenuePts != null ? '<span class="footnote"> (' + o.revenuePts + '% from lender)</span>' : '') + '</td>';
       }
       var pickBtn = (lpIsStandalone(key) || canEditApplication(leadOrNull(key)))
         ? '<button class="btn btn-sm' + (applied ? '' : ' btn-primary') + '" type="button" data-action="lp-select" data-lp="' + esc(key) + '" data-r="' + ri + '" data-o="' + oi + '">' + (applied ? "Applied ✓" : (lpIsStandalone(key) ? "Use this" : "Apply to file")) + '</button>' : '';
@@ -12256,14 +12267,18 @@ function leadOrNull(key){ return lpIsStandalone(key) ? null : leadById(key); }
 // lenders' own reasons plus the obvious levers (credit, leverage, rehab size).
 function lpViabilityTips(sc, results){
   var tips = [];
-  var all = results.map(function(r){ return String(r.reason || ""); }).join(" | ").toLowerCase();
+  var rtl = LP_RTL.indexOf(sc.loanType) !== -1;
+  // Only real "no" answers count -- "not enough information" and
+  // unavailable lenders aren't reasons the deal fails.
+  var all = results.filter(function(r){ return !r.unavailable && !/not enough information/i.test(r.reason || ""); })
+    .map(function(r){ return String(r.reason || ""); }).join(" | ").toLowerCase();
   if (sc.creditScore && sc.creditScore < 680 && /credit|fico/.test(all)) tips.push("Credit is the main blocker — most of our lenders need 650–680+ (" + sc.creditScore + " entered). A co-guarantor with stronger credit, or credit repair first.");
-  if (/ltc|loan-to-cost|leverage|ltv|arv/.test(all)) tips.push("Ask for less leverage — a bigger down payment (lower loan-to-cost) or a higher, supportable ARV.");
-  if (/rehab|holdback/.test(all)) tips.push("Scale the rehab budget down or have the borrower fund part of it.");
-  if (/minimum|100,000|\$100k/.test(all)) tips.push("The loan is under the $100,000 minimum most of our lenders have.");
-  if (/dscr|rent/.test(all)) tips.push("The rent doesn't cover the payment — a lower loan amount, a longer prepay, or interest-only can raise the DSCR.");
-  if (/not approved|doesn't lend|don't lend|isn't approved|state/.test(all)) tips.push("This state or property type is outside what our lenders cover.");
-  if (/experience|tier/.test(all)) tips.push("More completed projects would open more programs — or pair the borrower with an experienced partner on the entity.");
+  if (/ltc|loan-to-cost|leverage|ltv|over 75% of arv|arv ltv/.test(all)) tips.push("Ask for less leverage — a bigger down payment (lower loan-to-cost)" + (rtl ? " or a higher, supportable ARV." : "."));
+  if (rtl && /rehab|holdback/.test(all)) tips.push("Scale the rehab budget down or have the borrower fund part of it.");
+  if (/minimum|100,000/.test(all)) tips.push("The loan is under the $100,000 minimum most of our lenders have.");
+  if (!rtl && /dscr|cover/.test(all)) tips.push("The rent doesn't cover the payment well enough — a lower loan amount, a longer prepay, or interest-only can raise the DSCR.");
+  if (/not approved|doesn't lend|don't lend|isn't approved|doesn't finance|ineligible-states/.test(all)) tips.push("This state or property type is outside what some of our lenders cover.");
+  if (rtl && /experience tier|needs at least the/.test(all)) tips.push("More completed projects would open more programs — or add an experienced partner to the entity.");
   if (!tips.length) tips.push("Check the inputs above — each lender's reason is listed below.");
   return tips;
 }
