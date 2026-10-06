@@ -38,6 +38,9 @@
     fields: [
       { radioName: "haveSizer", value: () => "0" },
       { radioName: "havePricingID", value: () => "0" },
+      // Broker officer = the file's LO (when RCN has them); processor = Erika.
+      { name: "Broker officer", selector: '[name="brokerage[employee_id]"]', value: (p) => { const n = String(p.meta.loanOfficerName || "").toLowerCase(); const el = document.querySelector('[name="brokerage[employee_id]"]'); const o = el && n ? Array.from(el.options).find((x) => x.value && n.split(" ").every((w) => x.text.toLowerCase().includes(w.replace(/[^a-z]/g, "")))) : null; return o ? o.value : null; } },
+      { name: "Broker processor", selector: '[name="brokerage[broker_processor_entity_id]"]', value: () => "Erika Trafny" },
       { radioName: "isPortfolio", value: (p) => (/Portfolio/i.test(p.loan.loanType || "") ? "yes" : "no") },
       { radioName: "loanProgram", value: (p) => (/Portfolio/i.test(p.loan.loanType || "") ? "LTRP" : isRental(p) ? "LTR" : /Bridge/i.test(p.loan.loanType || "") ? "STB" : isGuc(p) ? "GUC" : "RTL") },
       { wait: 400 },
@@ -71,6 +74,9 @@
       { name: "As-is value", selector: '[name="propertyAsIsValue"]', value: (p) => p.loan.currentValue || p.loan.purchasePrice, fmt: "money" },
       { name: "Amount requested", selector: '[name="loanInfoAmountRequested"]', value: "loan.loanAmount", fmt: "money" },
       { name: "Loan term", selector: '[name="loanTerm"]', value: (p) => (isRental(p) ? "9" : ({ 9: "15", 12: "1", 18: "2" })[p.loan.termMonths] || "1") },
+      { radioName: "renovationRadio", value: (p) => (isRental(p) ? null : (p.loan.rehabBudget > 0 ? "yes" : "no")) },
+      { wait: 300 },
+      { radioName: "nearbyExperience", value: (p) => (p.borrower.guarantor.experienceDeals > 0 ? "1" : (p.borrower.guarantor.experienceDeals === 0 ? "0" : null)) },
       { name: "Experience (sold/held)", selector: '[name="borrowerExperience"]', value: (p) => RCN_EXP(p.borrower.guarantor.experienceDeals) },
       { name: "Renovation experience", selector: '[name="borrowerRenovationExperience"]', value: (p) => RCN_EXP(p.borrower.guarantor.experienceDeals) },
       { name: "Target closing date", selector: '[name="targetClosingDate"]', value: "loan.closeDate", fmt: "ymd" },
@@ -78,9 +84,9 @@
       { radioPrefix: "currentOccupancy_", value: (p) => (isRental(p) ? (/leased|occupied|yes/i.test(String(p.property.leaseStatus || p.property.occupied || "")) ? "leased" : "vacant") : null) },
       { radioPrefix: "leasingStrategy_", value: (p) => (isRental(p) ? "longTerm" : null) },
       { name: "Est. market rent", selector: '[name^="rentInfoEstimatedMonthlyRent_"]', value: (p) => (isRental(p) ? p.property.monthlyRent : null), fmt: "money" },
-      { name: "Annual property tax", selector: '[name^="propertyAnnualTax_"]', value: (p) => (isRental(p) ? yr(p.property.monthlyTaxes) : null), fmt: "money" },
-      { name: "Annual insurance", selector: '[name^="propertyAnnualInsurancePremium_"]', value: (p) => (isRental(p) ? yr(p.property.monthlyInsurance) : null), fmt: "money" },
-      { name: "Annual HOA", selector: '[name^="rentInfoHOAorPUD_"]', value: (p) => (isRental(p) && p.property.monthlyHoa ? yr(p.property.monthlyHoa) : null), fmt: "money" },
+      { name: "Annual property tax", selector: '[name^="propertyAnnualTax_"]', value: (p) => yr(p.property.monthlyTaxes), fmt: "money" },
+      { name: "Annual insurance", selector: '[name^="propertyAnnualInsurancePremium_"]', value: (p) => yr(p.property.monthlyInsurance), fmt: "money" },
+      { name: "Annual HOA", selector: '[name^="rentInfoHOAorPUD_"]', value: (p) => (p.property.monthlyHoa ? yr(p.property.monthlyHoa) : null), fmt: "money" },
       // Fix & flip
       { name: "Hard cost", selector: '[name="renovationHardCost"]', value: (p) => (isRtl(p) ? p.loan.rehabBudget : null), fmt: "money" },
       { name: "Renovation budget", selector: '[name="renovationBudget"]', value: (p) => (isRtl(p) ? p.loan.rehabBudget : null), fmt: "money" },

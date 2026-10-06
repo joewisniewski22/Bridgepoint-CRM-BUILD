@@ -99,9 +99,11 @@ async function buildPackage(leadId: string, lender: string) {
     }
   }
   const tr = Array.isArray(l.track_record) ? l.track_record : [];
+  // The file's loan officer: lender portals ask which broker officer owns the loan.
+  const { data: lo } = l.assigned_to ? await sb.from("users").select("name,email").eq("id", l.assigned_to).maybeSingle() : { data: null as any };
   const prop = splitAddress(l.property_address);
   return {
-    meta: { leadId: l.id, lender, generatedAt: new Date().toISOString(), note: "SSNs and bank account numbers are intentionally not included." },
+    meta: { leadId: l.id, lender, generatedAt: new Date().toISOString(), note: "SSNs and bank account numbers are intentionally not included.", loanOfficerName: lo ? lo.name : null, loanOfficerEmail: lo ? lo.email : null },
     loan: {
       loanType: l.loan_type, transactionType: l.transaction_type || "purchase", loanAmount: l.loan_amount, rate: l.rate, termMonths: l.term_months,
       ltv: l.ltv, purchasePrice: l.purchase_price, currentValue: l.current_value, arv: l.arv, rehabBudget: l.rehab_budget,
