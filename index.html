@@ -1052,7 +1052,28 @@ var LENDER_DOC_PACKS = {
     }
     return items;
   },
-  ad: function(lead){ return [{ name:"Mortgagee Clause sent to Title & Insurance — pre-filled", autoKind:"mortgageeClause", staffOnly:true }]; },
+  // A&D: DSCR Program checklist (rev 8/14/2026), Wholesale Loan Submission
+  // Checklist (4/13/2026) and DSCR UW Requirements (9/11/2026), admortgage.com.
+  ad: function(lead){
+    var purchase = !lead.transactionType || lead.transactionType === "purchase";
+    var st = stateFromAddress(lead.propertyAddress);
+    var items = [
+      { name:"Mortgagee Clause sent to Title & Insurance — pre-filled", autoKind:"mortgageeClause", staffOnly:true },
+      { name:"Tri-merge credit report (Fannie/Freddie-approved agency, under 60 days old) — at submission", staffOnly:true },
+      { name:"Initial Disclosures signed by all parties (needed before A&D underwriting)", note:"Sent by donotreply@docmagic.com — have the borrower check spam." },
+      { name:"Proof of residential real estate ownership (current or within 36 months)" },
+      { name:"Appraisal ordered in AIM after disclosures are signed", staffOnly:true },
+      { name:"Reserves: 3 months (6 over $1M, 12 over $2M)" },
+      { name:"Title commitment under 90 days old", staffOnly:true }
+    ];
+    if (purchase) items.push({ name:"Fully executed purchase contract with all addenda" });
+    if (lead.citizenshipStatus && lead.citizenshipStatus !== "US Citizen"){
+      items.push({ name:"Passport + valid visa (and work authorization if not employer-sponsored), or ITIN letter + photo ID; certified English translations" });
+    }
+    if (lead.entityType && lead.entityType !== "Individual") items.push({ name:"Entity has 4 or fewer owners — all are borrowers and guarantors", staffOnly:true });
+    if (st && ["AK","AR","KS","MI","MN","NM","RI"].indexOf(st) !== -1) items.push({ name:"No prepay allowed in " + st + " — buydown required (price it with no prepay)", staffOnly:true });
+    return items;
+  },
   nextres: function(lead){ return []; }
 };
 function lenderDocPack(lead){
@@ -4549,10 +4570,18 @@ var MORTGAGEE_CLAUSES = {
       note: (tx ? "Texas title/CPL wording applied. " : "") + "Insurance covers HOI, general liability, flood and wind." };
   }
 };
+// A&D: "Mortgagee Clause" PDF, admortgage.com Documents & Forms (read 2026-10-06).
+MORTGAGEE_CLAUSES.ad = function(lead){
+  return { lender: "A&D Mortgage LLC",
+    insurance: ["A&D MORTGAGE LLC ISAOA/ATIMA", "PO Box 2807", "Daytona Beach, FL 32120-2807"],
+    title: ["A&D MORTGAGE LLC ISAOA/ATIMA", "899 W Cypress Creek Rd", "Fort Lauderdale, FL 33309"],
+    note: "Insurance clause covers hazard, flood, windstorm, fire and liability." };
+};
 function mortgageeClauseFor(lead){
   var ol = String(lead.outsideLender || "");
   if (!ol) return MORTGAGEE_CLAUSES.constructive(lead);
   if (/RCN/i.test(ol)) return MORTGAGEE_CLAUSES.rcn(lead);
+  if (/A&D/i.test(ol)) return MORTGAGEE_CLAUSES.ad(lead);
   return null; // Kiavi / A&D / NextRes: clause not on file yet
 }
 function buildMortgageeClause(lead){

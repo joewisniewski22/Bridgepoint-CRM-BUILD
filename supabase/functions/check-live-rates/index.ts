@@ -1206,9 +1206,27 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
   const value = refi ? (s.currentValue || s.purchasePrice) : Math.min(s.purchasePrice || Infinity, s.currentValue || Infinity);
   if (!value || !isFinite(value)) return { lender: L, eligible: false, source: "model", reason: refi ? "Needs the current value." : "Needs the purchase price." };
   if (!s.rentEstimate) return { lender: L, eligible: false, source: "model", reason: "Needs the monthly rent to size an A&D DSCR loan." };
-  const ppp = ({ "5yr": "5yr", "3yr": "3yr", "2yr": "2yr", "1yr": "1yr", none: "none" } as Record<string, string>)[s.prepayTerm || "5yr"] || "5yr";
+  const pppAsked = ({ "5yr": "5yr", "3yr": "3yr", "2yr": "2yr", "1yr": "1yr", none: "none" } as Record<string, string>)[s.prepayTerm || "5yr"] || "5yr";
   const purpose = s.transactionType === "cashout" ? "cashout" : s.transactionType === "ratetermrefi" ? "rt" : "purchase";
-  const st = (s.propertyState || "").toUpperCase();
+  const st = (s.propertyState || stateFromAddress(s.propertyAddress) || "").toUpperCase();
+  // A&D DSCR UW Requirements (9/11/2026): Philadelphia County is ineligible.
+  const zip = (/\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(s.propertyAddress || "") || [])[1] || "";
+  if (st === "PA" && /^191/.test(zip)) return { lender: L, eligible: false, source: "model", reason: "A&D doesn't lend in Philadelphia County." };
+  // A&D state prepay rules (same document): no prepay (buydown required) in some states / below
+  // some loan sizes; shorter caps in others. Returns the prepay A&D will actually allow.
+  const yrs: Record<string, number> = { "5yr": 5, "3yr": 3, "2yr": 2, "1yr": 1, none: 0 };
+  const units12 = s.propertyType !== "2-4 Unit" || (s as any).units == null || (s as any).units <= 2;
+  const pppFor = (loan: number): string => {
+    const individual = s.entityType === "Individual";
+    if (["AK","AR","KS","MI","MN","NM","RI"].includes(st)) return "none";
+    if ((st === "MD" || st === "VA") && loan < 75000) return "none";
+    if (st === "OH" && units12 && loan < 116356) return "none";
+    if (st === "PA" && units12 && loan < 329411) return "none";
+    if (individual && ["IL","NJ","VT"].includes(st)) return "none";
+    const cap = ["ID","MA","DC","MD"].includes(st) || (st === "IL") ? 3 : st === "MS" ? 2 : 5;
+    if (yrs[pppAsked] > cap) return cap === 3 ? "3yr" : "2yr";
+    return pppAsked;
+  };
   const escrow = (s.monthlyTaxes || 0) + (s.monthlyInsurance || 0) + (s.monthlyHoa || 0);
   const snap = await adSnapshot();
   const ageDays = snap.captured ? (Date.now() - new Date(snap.captured).getTime()) / 86400000 : null;
@@ -1219,6 +1237,7 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
     const loan = s.loanAmount || Math.floor(value * cltv / 100 / 500) * 500;
     if (loan < 75000) continue;
     let dscr = 1.3, adj: number | null = null, par = 0;
+    const ppp = pppFor(loan);
     for (let i = 0; i < 3; i++) {
       adj = adAdjust({ fico: s.creditScore, cltv, dscr, ppp, purpose, pt, cit, amt: loan, st }, snap.fico);
       if (adj == null) break;
@@ -1236,6 +1255,7 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
       "A&D model, rate sheet " + (snap.asOf || AD_SNAPSHOT) + (ageDays != null ? " (refreshed " + (ageDays < 1 ? "today" : Math.floor(ageDays) + " day(s) ago") + ")" : " (built-in snapshot)") + ". Long-term rental, no interest-only, 30-yr fixed (40-yr and 5/6 or 7/6 ARMs also available).",
       "Borrower Paid: your origination is on top, and any negative price is a lender credit to the BORROWER, not yield spread to us. Lender Paid: A&D pays Bridgepoint " + AD_LPC + "% through the rate; no origination points can be added.",
     ];
+    if (ppp !== pppAsked) assumptions.unshift(ppp === "none" ? "A&D doesn't allow a prepay penalty here (" + st + (st === "OH" || st === "PA" || st === "MD" || st === "VA" ? " at this loan size" : "") + ") — priced with no prepay (buydown required)." : "A&D caps the prepay at " + ppp.replace("yr", " years") + " in " + st + " — priced that way.");
     const res: LenderResult = { lender: L, eligible: true, source: "model", options: options as any, loanAmountUsed: loan, maxLoanAmount: loan, assumptions };
     if (cit !== "us") { res.rateTolerance = 0.25; assumptions.unshift("Foreign national / ITIN pricing at A&D is only accurate to about 0.25% here — confirm with A&D."); }
     // Older than 3 days (or never refreshed): rates may have moved.
