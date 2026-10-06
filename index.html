@@ -12061,15 +12061,29 @@ function canViewOutsideLender(){ return canManageOutsideLender(); }
    the package side panel (copy fields, download each document).
 --------------------------------------------------------------------- */
 var LENDER_EXPORT_TARGETS = [
-  { key:"Constructive", label:"Constructive Capital", portal:null },
+  { key:"Constructive", label:"Constructive Capital", portal:"https://www.bplhub.com/Loans/Register" },
   { key:"RCN", label:"RCN Capital", portal:"https://broker.commerciallendingservicesllc.com/loans/loan-requests/referral_intake_broker", mapped:true },
   { key:"Kiavi", label:"Kiavi", portal:"https://app.kiavi.com/loans/new" },
   { key:"A&D", label:"A&D Mortgage", portal:"https://aim.admortgage.com/home" },
   { key:"NextRes", label:"NextRes", portal:null }
 ];
+// The file's placement -> its Export to Lender target (Joe 2026-10-06: one click
+// exports to the assigned lender).
+function exportKeyForLead(lead){
+  var ol = String(lead.outsideLender || "");
+  if (!ol) return "Constructive";
+  if (/RCN/i.test(ol)) return "RCN";
+  if (/Kiavi/i.test(ol)) return "Kiavi";
+  if (/A&D/i.test(ol)) return "A&D";
+  if (/NextRes/i.test(ol)) return "NextRes";
+  return null;
+}
+var LENDER_EXTENSION_ZIP = "https://bridgepoint-crm-build.vercel.app/bridgepoint-lender-export.zip";
 function renderLenderExportPanel(lead){
   ui.lenderExport = ui.lenderExport || {};
   var st = ui.lenderExport[lead.id];
+  // Status line for a one-click export started from the main button.
+  if (st && !st.open && st.msg) return '<div class="footnote" style="margin:-4px 0 12px">' + st.msg + '</div>';
   if (!st || !st.open) return '';
   var btns = LENDER_EXPORT_TARGETS.map(function(t){
     return '<button class="btn btn-sm" type="button" data-action="lender-export-go" data-lead="' + lead.id + '" data-lender="' + esc(t.key) + '"' + (st.busy ? ' disabled' : '') + ' title="' + (t.mapped ? 'Auto-fills the application and uploads documents' : 'Not auto-filled yet — the side panel lists every value to copy and each document to attach') + '">' + esc(t.label) + (t.mapped ? ' ⚡' : '') + '</button>';
@@ -12104,7 +12118,7 @@ function lenderExportGo(leadId, lenderKey){
     setTimeout(function(){
       if (acked) return;
       window.removeEventListener("message", onAck);
-      st.msg = '<span style="color:var(--c-rust)">The Bridgepoint Lender Export extension isn\'t installed in this browser.</span> Install it once (ask Joe for the extension folder: Chrome → ⋮ → Extensions → turn on Developer mode → Load unpacked), refresh this page, and click again. Meanwhile, “⬇ Complete File (PDF)” above has everything for a manual upload.';
+      st.msg = '<span style="color:var(--c-rust)">The Bridgepoint Lender Export extension isn\'t installed in this browser (use Chrome).</span> One-time setup: <a href="' + LENDER_EXTENSION_ZIP + '">download it here</a>, unzip it, open chrome://extensions, turn on Developer mode (top right), click Load unpacked and pick the unzipped folder. Then refresh this page and click again. Meanwhile, “⬇ Complete File (PDF)” above has everything for a manual upload.';
       render();
     }, 1500);
   }).catch(function(){ st.busy = false; st.msg = '<span style="color:var(--c-rust)">Couldn\'t reach the server — try again.</span>'; render(); });
@@ -13204,7 +13218,14 @@ function renderTabDocuments(lead){
     '<button class="btn btn-sm btn-ghost" type="button" data-action="export-all-documents" data-lead="' + lead.id + '" title="Downloads every uploaded document on this file as one ZIP, to save internally">⬇ Export All Documents (ZIP)' + (receivedCount ? (' — ' + receivedCount) : '') + '</button>' +
     (canExportMismo ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="download-complete-file" data-lead="' + lead.id + '" title="One PDF with the loan summary on top and every uploaded document merged in behind it — for sending to an Account Executive">⬇ Complete File (PDF)</button>') : '') +
     (canManageOutsideLender() ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-modal" data-modal="emailCompleteFile" data-lead="' + lead.id + '" title="Emails the complete file PDF (summary plus every uploaded document) to your Account Executive or anyone you choose">✉ Email Complete File</button>') : '') +
-    (canManageOutsideLender() ? ('<button class="btn btn-sm btn-primary" type="button" data-action="lender-export-toggle" data-lead="' + lead.id + '" title="Opens the lender\'s portal; you log in and the Bridgepoint extension fills the application and uploads the documents. You review and submit.">🚀 Export to Lender</button>') : '') +
+    (canManageOutsideLender() ? (function(){
+      var ek = exportKeyForLead(lead);
+      var tgt = LENDER_EXPORT_TARGETS.filter(function(t){ return t.key === ek; })[0];
+      return (tgt
+        ? '<button class="btn btn-sm btn-primary" type="button" data-action="lender-export-go" data-lead="' + lead.id + '" data-lender="' + esc(tgt.key) + '" title="Opens ' + esc(tgt.label) + '\'s portal (this file\'s assigned lender). Log in and the Bridgepoint extension fills the application and uploads the documents. You review and submit.">🚀 Export to ' + esc(tgt.label) + (tgt.mapped ? ' ⚡' : '') + '</button>'
+        : '') +
+        '<button class="btn btn-sm btn-ghost" type="button" data-action="lender-export-toggle" data-lead="' + lead.id + '" title="Export to a different lender">' + (tgt ? 'Other lender…' : '🚀 Export to Lender') + '</button>';
+    })()) : '') +
     (canExportMismo ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="download-mismo-export" data-lead="' + lead.id + '" title="Exports the loan file as a MISMO 3.4 XML document for investors, title, or outside lenders">⬇ Export MISMO 3.4</button>') : '') +
     (canManage ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-modal" data-modal="addInternalDocument" data-lead="' + lead.id + '" title="A staff-only file — a completed Constructive Capital sizer, a lender summary, anything the borrower never sees">+ Internal Document</button>') : '') +
   '</div>' + (canManageOutsideLender() ? renderLenderExportPanel(lead) : '');

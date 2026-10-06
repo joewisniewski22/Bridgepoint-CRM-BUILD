@@ -113,7 +113,7 @@
     RCN: { host: /commerciallendingservicesllc\.com$/, pages: [RCN_PAGE] },
     Kiavi: { host: /kiavi\.com$/, pages: [] },
     "A&D": { host: /admortgage\.com$/, pages: [] },
-    Constructive: { host: null, pages: [] },
+    Constructive: { host: /bplhub\.com$/, pages: [] }, // portal side panel (copy + attach); full map built on the next real Constructive file
     NextRes: { host: null, pages: [] },
   };
 })();

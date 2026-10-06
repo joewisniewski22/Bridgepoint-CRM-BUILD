@@ -84,6 +84,17 @@
   new MutationObserver(() => { clearTimeout(window.__bpDocT); window.__bpDocT = setTimeout(renderDocs, 800); }).observe(document.body, { childList: true, subtree: true });
 
   // ---- fill the current page from the lender map ----
+  // Joe 2026-10-06: "hit export and everything goes in" -- fill automatically once
+  // the lender's application page is recognized (once per page; never submits).
+  const autoFilled = new Set();
+  const tryAutoFill = () => {
+    const ready = map.pages.filter((p) => { try { return p.match(); } catch (_) { return false; } });
+    const key = location.pathname + "|" + ready.map((p) => p.name).join(",");
+    if (!ready.length || autoFilled.has(key)) return;
+    autoFilled.add(key);
+    $("res").textContent = "Application page found — filling it in…";
+    setTimeout(() => $("fill").click(), 1200);
+  };
   $("fill").onclick = async () => {
     const pages = map.pages.filter((p) => { try { return p.match(); } catch (_) { return false; } });
     if (!pages.length) { $("res").innerHTML = '<span class="bad">This page isn\'t mapped for ' + esc(exp.lenderLabel) + ' yet.</span> Use the copy list and document buttons below.'; return; }
@@ -96,4 +107,7 @@
       (all.skipped.length ? `<br>Not on the file: ${esc(all.skipped.join(", "))}` : "") + "<br>Review the page, then continue on the lender's site.";
     send({ kind: "log", events: ["filled " + all.filled.length + " fields on " + pages.map((p) => p.name).join(", "), ...all.uploaded.map((u) => "uploaded " + u), ...(all.missing.length ? ["missing fields: " + all.missing.join(", ")] : [])] });
   };
+  tryAutoFill();
+  // Single-page portals change screens without reloading -- keep watching (e.g. after login).
+  new MutationObserver(() => { clearTimeout(window.__bpAutoT); window.__bpAutoT = setTimeout(tryAutoFill, 1000); }).observe(document.body, { childList: true, subtree: true });
 })();
