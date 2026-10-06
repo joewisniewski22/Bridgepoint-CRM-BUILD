@@ -4786,6 +4786,14 @@ function sendStoredTermSheetOption(leadId, idx){
   if (!lead || !doc || !sb) return;
   if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
   var optionLabel = (doc.name || "Alternate option").replace(/^Term Sheet Option:\s*/,"");
+  // Sending a lender's term sheet = choosing those terms: route the file there (Joe 2026-10-06).
+  var tsRoute = lenderRoutingValue(doc.lender || optionLabel);
+  if (tsRoute !== undefined && tsRoute !== (lead.outsideLender || null)){
+    lead.outsideLender = tsRoute;
+    applyRequiredDocs(lead.id, { silent:true });
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"note", text: "Placement updated to match the term sheet sent" + (canManageOutsideLender() ? " (" + (tsRoute || "Constructive") + ")" : ""), author: currentUser().name });
+  }
   ui.modal = null;
   render();
   showToast("Sending term sheet…");
@@ -11581,6 +11589,10 @@ function renderLoanPlacementBanner(lead){
     '<div class="hint" style="margin-bottom:2px">📍 LOAN PLACEMENT</div>' +
     '<div style="font-size:1.4rem;font-weight:800;line-height:1.2">' + esc(displayValue) + '</div>' +
     editor +
+    (function(){
+      var mm = routingMismatch(lead);
+      return mm ? '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">⚠ The terms applied to this file are <b>' + esc(mm.termsLender) + '</b>\'s, but it\'s placed with <b>' + esc(mm.routedTo) + '</b>. Re-apply the right lender\'s terms in the Pricer (that also fixes the placement automatically).</div>' : '';
+    })() +
   '</div>';
 }
 // Joe's real report (2026-09-14): a borrower booked a time via a
@@ -11995,6 +12007,26 @@ function renderOutsideLenderFitBox(lead){
 // upload their real term sheets via the existing Upload Outside Term Sheet
 // flow (no dedicated rate sheet/pricer built in yet, unlike Constructive).
 var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes"];
+// Pricer lender name -> the routing value the rest of the CRM uses ("RCN Capital"
+// -> "RCN", Constructive -> null = in-house). undefined = unknown lender, leave routing alone.
+function lenderRoutingValue(name){
+  var n = String(name || "");
+  if (/Constructive|in-?house/i.test(n)) return null;
+  if (/RCN/i.test(n)) return "RCN";
+  if (/Kiavi/i.test(n)) return "Kiavi";
+  if (/A&D/i.test(n)) return "A&D Mortgage";
+  if (/NextRes/i.test(n)) return "NextRes";
+  return undefined;
+}
+// Routing vs. the terms actually applied to the file (pricer) -- flags files like
+// Carole Singh's (10/6) where they point at different lenders.
+function routingMismatch(lead){
+  var pt = lead.guidelineCheck && lead.guidelineCheck.pricerTerms;
+  if (!pt || !pt.lender) return null;
+  var termsRoute = lenderRoutingValue(pt.lender);
+  if (termsRoute === undefined || termsRoute === (lead.outsideLender || null)) return null;
+  return { termsLender: pt.lender, routedTo: lead.outsideLender || "Constructive (in-house)" };
+}
 function canManageOutsideLender(){ return ui.viewAs==="owner" || ui.viewAs==="lo-fiore" || ui.viewAs==="proc-erika"; }
 function canViewOutsideLender(){ return canManageOutsideLender(); }
 /* ---------------------------------------------------------------------
@@ -12914,10 +12946,13 @@ function lpSelectOption(key, ri, oi, spreadPts){
   if (basis) lead.ltv = Math.round((lead.loanAmount / basis) * 1000) / 10;
   if (r.fees && r.fees.lenderFee != null) lead.lenderFeeOverride = r.fees.lenderFee;
   var isInHouse = String(r.lender).indexOf("Constructive") === 0;
-  if (canManageOutsideLender()) lead.outsideLender = isInHouse ? null : r.lender;
+  // Joe 2026-10-06: choosing terms routes the file to that lender, system-wide
+  // and for anyone who applies them (LOs still never see the lender's name).
+  var route = lenderRoutingValue(r.lender);
+  if (route !== undefined) lead.outsideLender = route;
   applyRequiredDocs(lead.id, { silent:true }); // the placed lender's own submission docs
   lead.activity = lead.activity || [];
-  lead.activity.push({ date: todayISO(), type:"note", text: "Pricer: applied " + fmtUSD(lead.loanAmount) + " at " + fmtPct(o.rate) + (canManageOutsideLender() ? (" with " + r.lender) : "") + (isInHouse || !canManageOutsideLender() ? "" : " (placed with outside lender)"), author: currentUser().name });
+  lead.activity.push({ date: todayISO(), type:"note", text: "Pricer: applied " + fmtUSD(lead.loanAmount) + " at " + fmtPct(o.rate) + (canManageOutsideLender() ? (" with " + r.lender + " — placement set to " + (route === undefined ? "(unchanged)" : (route || "Constructive (in-house)"))) : " — placement updated to match"), author: currentUser().name });
   lead.guidelineCheck = Object.assign({}, lead.guidelineCheck || {}, { pricerTerms: {
     lender: r.lender, inHouse: isInHouse, program: o.program, loanAmount: lead.loanAmount, rate: lead.rate,
     price: sc.loanType === "DSCR" ? o.price : null, maxLoanAmount: r.maxLoanAmount || r.loanAmountUsed,
