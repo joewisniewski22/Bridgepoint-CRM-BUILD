@@ -4394,14 +4394,74 @@ function confirmPricingWithAE(leadId){
 // modalSendPreview) only ever send to the LEAD's own on-file email/phone,
 // which doesn't fit a lender summary at all and isn't what's wanted for
 // term sheets / pre-approvals either when the destination isn't the client.
+// Mortgagee / loss-payee clauses, straight from each lender's own document
+// (read 2026-10-06): RCN "Mortgagee Clauses" (RCN Lender Documents) and
+// Constructive/BPL "Mortgagee Clauses - Revised 4/24/2025" (bplhub.com library).
+// Joe 2026-10-06: auto-filled with loan amount + property so Erika or the LO can
+// send it straight to title and insurance. Add a lender here when we get theirs.
+var MORTGAGEE_CLAUSES = {
+  rcn: function(lead){
+    var longTerm = /DSCR|Portfolio/i.test(lead.loanType || "");
+    var ins = longTerm
+      ? ["Fay Servicing", "ISAOA/ATIMA", "PO Box 7047", "Troy, MI 48007-7047"]
+      : ["RCN Capital, LLC, ISAOA ATIMA", "c/o Elite Commercial Servicing", "PO Box 15126", "Richmond, VA 23227-0526"];
+    return { lender: "RCN Capital", insurance: ins, title: ins,
+      note: longTerm ? "30-year rental clause (RCN's servicer is Fay Servicing)." : "12-month clause. If RCN closes this loan in its Commercial Lender LLC name, use \"Commercial Lender LLC, ISAOA ATIMA\" with the same c/o Elite Commercial Servicing address." };
+  },
+  constructive: function(lead){
+    var tx = (stateFromAddress(lead.propertyAddress) === "TX");
+    return { lender: "Constructive Capital (BPL Mortgage, LLC)",
+      insurance: ["BPL Mortgage, LLC ISAOA/ATIMA", "C/O Fay Servicing, LLC", "P.O. Box 7047", "Troy, MI 48007-7047"],
+      title: tx
+        ? ["CPL: BPL Mortgage, LLC", "Commitment: BPL Mortgage, LLC, and each successor in ownership of the indebtedness secured by the insured mortgage, except a successor who is an obligor under the provisions of Section 12(c) of the Conditions", "1801 S. Meyers Road, Suite 400", "Oakbrook Terrace, IL 60181"]
+        : ["BPL Mortgage, LLC ISAOA/ATIMA", "1801 S. Meyers Road, Suite 400", "Oakbrook Terrace, IL 60181"],
+      note: (tx ? "Texas title/CPL wording applied. " : "") + "Insurance covers HOI, general liability, flood and wind." };
+  }
+};
+function mortgageeClauseFor(lead){
+  var ol = String(lead.outsideLender || "");
+  if (!ol) return MORTGAGEE_CLAUSES.constructive(lead);
+  if (/RCN/i.test(ol)) return MORTGAGEE_CLAUSES.rcn(lead);
+  return null; // Kiavi / A&D / NextRes: clause not on file yet
+}
+function buildMortgageeClause(lead){
+  var c = mortgageeClauseFor(lead);
+  if (!c) return null;
+  var lo = docLoanOfficer(lead);
+  var borrower = lead.entityLegalName || lead.name || "";
+  return [
+    "MORTGAGEE CLAUSE / LOSS PAYEE & INSURED LENDER INSTRUCTIONS",
+    "",
+    "Date: " + fmtDate(todayISO()),
+    "Lender: " + c.lender,
+    "Borrower: " + borrower + (lead.entityLegalName && lead.name ? " (guarantor: " + lead.name + ")" : ""),
+    "Property: " + (lead.propertyAddress || "—"),
+    "Loan amount: " + (lead.loanAmount ? fmtUSD(lead.loanAmount) : "—"),
+    "Loan type: " + (lead.loanType || "—") + (lead.transactionType ? " (" + lead.transactionType + ")" : ""),
+    "",
+    "INSURANCE — list as Mortgagee / Loss Payee on the policy and binder:",
+    c.insurance.join("\n"),
+    "",
+    "TITLE / CPL — insured lender:",
+    c.title.join("\n"),
+    "",
+    "Please send the updated binder / evidence of insurance and the title commitment & CPL showing the above, with the loan amount of " + (lead.loanAmount ? fmtUSD(lead.loanAmount) : "the amount above") + ", to:",
+    (lo.name || "") + " — Bridgepoint Lending" + (lo.email ? "\n" + lo.email : "") + (lo.phone ? "\n" + lo.phone : ""),
+    "",
+    c.note ? ("Note: " + c.note) : ""
+  ].join("\n").trim();
+}
 function docKindMeta(lead, kind){
+  if (kind === "mortgageeClause"){ var mc = buildMortgageeClause(lead); return mc ? { label:"Mortgagee Clause", body: mc } : null; }
   if (kind === "termSheet") return { label:"Term Sheet", body: buildTermSheet(lead, "en") };
   if (kind === "preApproval") return { label:"Pre-Approval Letter", body: buildPreApprovalLetter(lead, "en") };
   if (kind === "lenderSummary") return { label:"Lender Summary", body: buildLenderSummary(lead) };
   return null;
 }
+// Title/insurance docs (mortgagee clause) are for Erika AND the file's LO; lender-shopping docs stay Joe/Erika/Fiore.
+function canEmailDocKind(lead, kind){ return canManageOutsideLender() || (kind === "mortgageeClause" && lead && canEditApplication(lead)); }
 function openEmailDocumentModal(leadId, kind){
-  if (!canManageOutsideLender()) return;
+  if (!canEmailDocKind(leadById(leadId), kind)) return;
   ui.modal = { type:"emailDocument", leadId: leadId, kind: kind };
   render();
 }
@@ -4426,7 +4486,7 @@ function modalEmailDocument(leadId, kind){
     '<div class="modal" data-stop="1">' +
       '<div class="modal-head"><h3>Email ' + esc(meta.label) + ' — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
       '<div class="modal-body">' +
-        '<div class="footnote" style="padding:0 0 10px">Check it first, then send it to whoever you\'re shopping this deal to — a lender, not the borrower.</div>' +
+        '<div class="footnote" style="padding:0 0 10px">' + (kind === "mortgageeClause" ? 'Check it first, then send it to the title company and the insurance agent (send it twice for both).' : 'Check it first, then send it to whoever you\'re shopping this deal to — a lender, not the borrower.') + '</div>' +
         '<div class="form-row"><button class="btn btn-sm" type="button" data-action="preview-generated-document" data-lead="' + lead.id + '" data-kind="' + kind + '">👁️ Preview PDF</button></div>' +
         '<form data-form="email-generated-document" data-lead="' + lead.id + '" data-kind="' + kind + '">' +
           '<div class="form-row"><label>Send to</label><input class="input" type="email" name="toEmail" placeholder="lender@example.com" list="email-contact-suggest" required autofocus>' +
@@ -4439,8 +4499,8 @@ function modalEmailDocument(leadId, kind){
     '</div></div>';
 }
 function sendGeneratedDocumentTo(leadId, kind, toEmail, note){
-  if (!canManageOutsideLender()) return;
   var lead = leadById(leadId);
+  if (!canEmailDocKind(lead, kind)) return;
   var meta = lead ? docKindMeta(lead, kind) : null;
   if (!lead || !meta || !sb || !toEmail) return;
   var lo = docLoanOfficer(lead);
@@ -4449,7 +4509,7 @@ function sendGeneratedDocumentTo(leadId, kind, toEmail, note){
     var pdfBase64 = (pdfRes && pdfRes.data && pdfRes.data.ok) ? pdfRes.data.pdfBase64 : null;
     if (!pdfBase64){ showToast("Couldn't generate PDF"); return null; }
     var filename = docPdfFilename(lead, meta.label);
-    var subject = "Bridgepoint Lending — " + meta.label + " — " + lead.name;
+    var subject = "Bridgepoint Lending — " + meta.label + " — " + (kind === "mortgageeClause" && lead.propertyAddress ? lead.propertyAddress.replace(/,\s*USA$/, "") : lead.name);
     var emailBody = (note ? (note.trim() + "\n\n") : "") + "Please see the attached " + meta.label.toLowerCase() + " for " + lead.name + ".";
     return sb.functions.invoke("send-email", { body: { leadId: lead.id, to: toEmail, subject: subject, text: emailBody, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null, attachmentBase64: pdfBase64, attachmentName: filename } });
   }).then(function(res){
@@ -13229,6 +13289,19 @@ function renderRail(lead){
       (lead.preapprovalSentAt ? ('<div class="footnote" style="padding:6px 0 0">Pre-approval sent ' + fmtDate(lead.preapprovalSentAt) + '</div>') : '') +
       (lead.termsheetSentAt ? ('<div class="footnote" style="padding:2px 0 0">Term sheet sent ' + fmtDate(lead.termsheetSentAt) + '</div>') : '') +
     '</div>') +
+    ((canManageOutsideLender() || canEditApplication(lead)) ? (function(){
+      var mc = mortgageeClauseFor(lead);
+      return '<div class="rail-block">' +
+        '<div class="rail-title">Title &amp; Insurance</div>' +
+        (mc
+          ? '<div class="footnote" style="padding-bottom:6px">Mortgagee clause for <b>' + esc(mc.lender) + '</b> — auto-filled with this file\'s loan amount and property. Send it to title and to the insurance agent.</div>' +
+            '<div style="display:flex;gap:6px">' +
+              '<button class="btn btn-sm" style="flex:1" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="mortgageeClause">✉️ Email Mortgagee Clause</button>' +
+              '<button class="btn btn-sm btn-ghost" type="button" data-action="preview-generated-document" data-lead="' + lead.id + '" data-kind="mortgageeClause" title="Preview PDF">👁️</button>' +
+            '</div>'
+          : '<div class="footnote">We don\'t have ' + esc(lead.outsideLender || "this lender") + '\'s mortgagee clause on file yet.</div>') +
+      '</div>';
+    })() : '') +
     (canManageOutsideLender() ?
     '<div class="rail-block">' +
       '<div class="rail-title">Email to a Lender</div>' +
