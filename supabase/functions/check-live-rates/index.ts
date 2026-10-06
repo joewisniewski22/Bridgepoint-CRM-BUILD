@@ -1272,7 +1272,9 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
       "Borrower Paid: your origination is on top, and any negative price is a lender credit to the BORROWER, not yield spread to us. Lender Paid: A&D pays Bridgepoint " + AD_LPC + "% through the rate; no origination points can be added.",
     ];
     if (ppp !== pppAsked) assumptions.unshift(ppp === "none" ? "A&D doesn't allow a prepay penalty here (" + st + (st === "OH" || st === "PA" || st === "MD" || st === "VA" ? " at this loan size" : "") + ") — priced with no prepay (buydown required)." : "A&D caps the prepay at " + ppp.replace("yr", " years") + " in " + st + " — priced that way.");
-    const res: LenderResult = { lender: L, eligible: true, source: "model", options: options as any, loanAmountUsed: loan, maxLoanAmount: loan, assumptions };
+    // A&D "Fees Information" (wholesale, effective 12/26): Non-QM underwriting fee $1,595; plus
+    // $80 tax service, $6.95 flood cert, $24.95 MERS (the CRM adds those as lender charges).
+    const res: LenderResult = { lender: L, eligible: true, source: "model", options: options as any, loanAmountUsed: loan, maxLoanAmount: loan, assumptions, fees: { lenderFee: 1595 } };
     if (cit !== "us") { res.rateTolerance = 0.25; assumptions.unshift("Foreign national / ITIN pricing at A&D is only accurate to about 0.25% here — confirm with A&D."); }
     // Older than 3 days (or never refreshed): rates may have moved.
     if (ageDays == null || ageDays > 3) { res.rateTolerance = Math.max(res.rateTolerance || 0, 0.25); assumptions.unshift("A&D rates haven't been refreshed in " + (ageDays == null ? "a while" : Math.floor(ageDays) + " days") + " — confirm before quoting."); }
@@ -1487,7 +1489,10 @@ function rcnParse(s: Scenario, j: any, assumptions: string[]): LenderResult {
     }));
     if (!opts.length) return { lender: L, eligible: false, source: "live", reason: (j && j.message && j.message !== "o" ? j.message : "RCN returned no rental pricing for this scenario."), assumptions };
     const max = R.pricings[0].o_max_loan_amount;
-    return { lender: L, eligible: true, source: "live", options: opts, loanAmountUsed: s.loanAmount || max, maxLoanAmount: max, assumptions, compCaps: caps };
+    // RCN "Product Fee Sheet – Long Term Rental" (Lender Documents): $1,995 closing fee (not NY),
+    // plus $129 desktop review + $60 tax cert + $15 flood cert paid in processing.
+    assumptions.push("RCN fees: $1,995 closing fee" + ((s.propertyState || "").toUpperCase() === "NY" ? " (NY differs — confirm)" : "") + "; $204 paid in processing (desktop review, tax and flood certs).");
+    return { lender: L, eligible: true, source: "live", options: opts, loanAmountUsed: s.loanAmount || max, maxLoanAmount: max, assumptions, compCaps: caps, fees: { lenderFee: 1995 } };
   }
   if (!R.o_max_loan_amount || !R.o_interest_rate) {
     const why = (j && j.message) || ((j && j.minimum && j.minimum.length) ? JSON.stringify(j.minimum) : "") || "RCN's pricer returned no terms (common reasons: credit under 650, or leverage/ARV limits).";
@@ -1500,7 +1505,8 @@ function rcnParse(s: Scenario, j: any, assumptions: string[]): LenderResult {
     lender: L, eligible: true, source: "live", options: ladder.length ? ladder : [{ program: "RCN", rate: R.o_interest_rate * 100, price: 100 + (R.o_lender_points || 0) * 100 }],
     loanAmountUsed: R.o_loan_amount || R.o_max_loan_amount, maxLoanAmount: R.o_max_loan_amount,
     rehabHoldback: R.o_rehab_lender_fund != null && isFinite(Number(R.o_rehab_lender_fund)) ? Math.round(Number(R.o_rehab_lender_fund)) : undefined,
-    fees: { lenderFee: (R.o_closing_fees || []).reduce((a: number, f: any) => a + Number(f.amount || 0), 0) || undefined },
+    // RCN "Product Fee Sheet – RTL": $1,995 closing fee when the calculator doesn't itemize it.
+    fees: { lenderFee: (R.o_closing_fees || []).reduce((a: number, f: any) => a + Number(f.amount || 0), 0) || 1995 },
     assumptions, compCaps: caps,
   };
 }
@@ -1534,7 +1540,7 @@ function rcnRtlModel(s: Scenario, assumptions: string[]): LenderResult {
   const pts = Math.max(0.5, 1500 / total * 100);
   rate = Math.round(rate * 100) / 100;
   assumptions.push("RCN live connection isn't set up yet — this is Bridgepoint's estimate of RCN's rehab pricing (" + "measured 2026-10-06" + "), 12-month term.");
-  return { lender: L, eligible: true, source: "model", options: [{ program: "RCN " + pts.toFixed(2) + " pts (est.)", rate, price: 100 + pts }, { program: "RCN 1.00 pt (est.)", rate: Math.round((rate - (et === 0 ? 0.5 : 0.75)) * 100) / 100, price: 101 }], loanAmountUsed: total, maxLoanAmount: total, assumptions };
+  return { lender: L, eligible: true, source: "model", options: [{ program: "RCN " + pts.toFixed(2) + " pts (est.)", rate, price: 100 + pts }, { program: "RCN 1.00 pt (est.)", rate: Math.round((rate - (et === 0 ? 0.5 : 0.75)) * 100) / 100, price: 101 }], loanAmountUsed: total, maxLoanAmount: total, assumptions, fees: { lenderFee: 1995 } };
 }
 
 // RCN's zip overlays (from RCN's Loan Sizer -- see rcn_geo.ts). RCN's online
