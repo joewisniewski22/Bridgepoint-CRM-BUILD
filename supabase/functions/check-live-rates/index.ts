@@ -126,12 +126,19 @@ const DSCR_MIN_NOTE_RATE = 6.875;
 const DSCR_MIN_DSCR_STATES = ["AL","GA","KS","ME","MO","MS","NE","SD","WI","WY"];
 // Max price by prepay (C3 Surge Rate Sheet 9-29-2026).
 const DSCR_MAX_PRICE_BY_PPP: Record<string, number> = { "5yr": 102.125, "3yr": 101.0, "2yr": 100.375, "1yr": 100.375, "none": 100.0 };
-// Minimum DSCR: rate sheet 9-29-26 (FICO <720 = 1.20x) + matrix 7-1-26 (720+: 1.00x; 0.75x at <=65 LTV with loan >= 150k).
+// Minimum DSCR for a single-asset loan, per Constructive's V7 engine (DSCR_Loan
+// Sizer H84, Expanded program): in the 10 "geography" states 1.10x under 680 FICO
+// / 1.00x at 680+; otherwise 1.00x above 75% LTV, 0.75x at/below (sub-1.00 also
+// needs 720+ FICO and $150k+ per the 7-1-26 matrix). Rural = 1.20x (matrix).
+// (The rate sheet's "FICO <720 = 1.20x" line is the CROSS-COLLATERAL column.)
 function constructiveMinDscr(fico: number, ltv: number, loan: number, state: string | null, rural: boolean): number {
-  if (rural || fico < 720) return 1.2;
-  if (state && DSCR_MIN_DSCR_STATES.includes(state)) return 1.0;
-  return ltv <= 65 && loan >= 150000 ? 0.75 : 1.0;
+  if (rural) return 1.2;
+  if (state && DSCR_MIN_DSCR_STATES.includes(state)) return fico < 680 ? 1.1 : 1.0;
+  if (ltv > 75) return 1.0;
+  return fico >= 720 && loan >= 150000 ? 0.75 : 1.0;
 }
+// V7 "Expanded Geography" rate add: +0.375 only when the state is on the list AND FICO < 680.
+const DSCR_GEO_ADJ_SUB680 = 0.375;
 const DSCR_INELIGIBLE_STATES = ["ND","NV","SD"];
 const DSCR_LTV_BANDS = [55, 60, 65, 70, 75, 80];
 function dscrLtvCol(ltv: number): number {
@@ -291,7 +298,7 @@ const GROUNDUP_TIERS: Record<string, RtlLimits | null> = {
 const DSCR_LTV_BY_FICO = [
   { minFico: 720, purchase: 80, rateTerm: 80, cashOut: 75 },
   { minFico: 700, purchase: 80, rateTerm: 80, cashOut: 75 },
-  { minFico: 680, purchase: 75, rateTerm: 75, cashOut: 70 }, // 9-29-26 sheet: FICO <700 = 75% / cash-out 70%
+  { minFico: 680, purchase: 80, rateTerm: 80, cashOut: 75 }, // single asset (the sheet's 75/70 under 700 is cross-collateral)
   { minFico: 660, purchase: 70, rateTerm: 70, cashOut: 70 },
 ];
 const MAX_LOAN_SANITY_CEILING = 2000000;
@@ -503,6 +510,7 @@ async function checkConstructiveAt(s: Scenario): Promise<LenderResult> {
   const amtBand = DSCR_LOAN_AMT_ADJ.find((b) => s.loanAmount! >= b.min && s.loanAmount! <= b.max);
   if (amtBand && isNaN(amtBand.adj[col])) return { lender: "Constructive Capital", eligible: false, reason: "Loans over $1.5M are capped at 65% LTV at Constructive." };
   if (amtBand) rate += amtBand.adj[col];
+  if (propState && DSCR_MIN_DSCR_STATES.includes(propState) && (s.creditScore as number) < 680) rate += DSCR_GEO_ADJ_SUB680;
   const prepayKey = s.prepayTerm || "5yr";
   rate += DSCR_PREPAY_ADJ[prepayKey][col];
   rate = Math.round(rate * 1000) / 1000;
@@ -518,6 +526,7 @@ async function checkConstructiveAt(s: Scenario): Promise<LenderResult> {
     const noteDscr = s.rentEstimate / (hasExp ? notePi + (s.monthlyTaxes || 0) + (s.monthlyInsurance || 0) + (s.monthlyHoa || 0) : notePi * 1.2);
     const minD = constructiveMinDscr(s.creditScore as number, ltv, s.loanAmount, propState, rural);
     if (noteDscr < minD - 0.005) return { lender: "Constructive Capital", eligible: false, reason: "DSCR " + noteDscr.toFixed(2) + "x is under Constructive's " + minD.toFixed(2) + "x minimum here" + ((s.creditScore as number) < 720 ? " (1.20x under a 720 FICO)" : "") + " — lower the loan amount or raise the rent." };
+    if (noteDscr < 1.0 && ((s.creditScore as number) < 720 || s.loanAmount < 150000)) return { lender: "Constructive Capital", eligible: false, reason: "DSCR under 1.00x needs 720+ FICO and a $150k+ loan at Constructive." };
   }
 
   const fee = DSCR_FEE_BY_PROPERTY[propertyType] || DSCR_FEE_BY_PROPERTY.SFR;
