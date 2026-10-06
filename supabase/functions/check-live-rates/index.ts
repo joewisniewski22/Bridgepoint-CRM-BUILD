@@ -986,7 +986,7 @@ function kiaviRental(s, out, unit, st) {
 const AD_SNAPSHOT = "A&D rate sheet 10/06/26 09:04 AM ET";
 const AD_LPC = 2.75;
 const AD_MAX_CREDIT = 2.5;
-const AD_FIT = {"fico":{"620":{"50":-3.5,"55":-3.5,"60":-4,"65":-4.25,"70":null,"75":null,"80":null},"640":{"50":-2.25,"55":-2.25,"60":-2.375,"65":-2.75,"70":-3.75,"75":null,"80":null},"660":{"50":-0.625,"55":-0.625,"60":-1.125,"65":-1.5,"70":-2.75,"75":-3.375,"80":null},"680":{"50":0,"55":0,"60":-0.125,"65":-0.875,"70":-1.5,"75":-2.5,"80":-4.5},"700":{"50":0.375,"55":0.375,"60":0.25,"65":0,"70":-0.5,"75":-1.125,"80":-2.875},"720":{"50":0.625,"55":0.625,"60":0.5,"65":0.25,"70":-0.125,"75":-0.5,"80":-1.625},"740":{"50":0.75,"55":0.75,"60":0.625,"65":0.5,"70":0.125,"75":-0.375,"80":-1.125},"760":{"50":0.875,"55":0.875,"60":0.75,"65":0.625,"70":0.375,"75":-0.125,"80":-0.875},"780":{"50":1,"55":1,"60":0.875,"65":0.75,"70":0.5,"75":0,"80":-0.625}},"B":{"6.75":1.75,"6.875":1,"6.99":0.375,"7.125":-0.375,"7.25":-1.125,"7.375":-1.75,"7.49":-2.375,"7.625":-2.75,"7.75":-3,"7.875":-3.25,"7.99":-3.5,"8.125":-3.625,"8.25":-3.75,"8.375":-3.875,"8.49":-4,"8.625":-4.125,"8.75":-4.25,"8.875":-4.375,"8.99":-4.5,"9.125":-4.625,"9.25":-4.75,"9.375":-4.875,"9.49":-5,"9.625":-5.125,"9.75":-5.25,"9.875":-5.375,"9.99":-5.5,"10.125":-5.625,"10.25":-5.75,"10.375":-5.875,"10.49":-6,"10.625":-6.125,"10.75":-6.25,"10.875":-6.375,"10.99":-6.5,"11.125":-6.625,"11.25":-6.75,"11.375":-6.875}};
+const AD_FIT = {"fico":{"620":{"50":-3.5,"55":-3.5,"60":-4,"65":-4.25,"70":null,"75":null,"80":null},"640":{"50":-2.25,"55":-2.25,"60":-2.375,"65":-2.75,"70":-3.75,"75":null,"80":null},"660":{"50":-0.625,"55":-0.625,"60":-1.125,"65":-1.5,"70":-2.5,"75":-3.375,"80":null},"680":{"50":0,"55":0,"60":-0.125,"65":-0.875,"70":-1.5,"75":-2.5,"80":-4.5},"700":{"50":0.375,"55":0.375,"60":0.25,"65":0,"70":-0.5,"75":-1.125,"80":-2.875},"720":{"50":0.625,"55":0.625,"60":0.5,"65":0.25,"70":-0.125,"75":-0.5,"80":-1.625},"740":{"50":0.75,"55":0.75,"60":0.625,"65":0.5,"70":0.125,"75":-0.375,"80":-1.125},"760":{"50":0.875,"55":0.875,"60":0.75,"65":0.625,"70":0.375,"75":-0.125,"80":-0.875},"780":{"50":1,"55":1,"60":0.875,"65":0.75,"70":0.5,"75":0,"80":-0.625}},"B":{"6.75":1.75,"6.875":1,"6.99":0.375,"7.125":-0.375,"7.25":-1.125,"7.375":-1.75,"7.49":-2.375,"7.625":-2.75,"7.75":-3,"7.875":-3.25,"7.99":-3.5,"8.125":-3.625,"8.25":-3.75,"8.375":-3.875,"8.49":-4,"8.625":-4.125,"8.75":-4.25,"8.875":-4.375,"8.99":-4.5,"9.125":-4.625,"9.25":-4.75,"9.375":-4.875,"9.49":-5,"9.625":-5.125,"9.75":-5.25,"9.875":-5.375,"9.99":-5.5,"10.125":-5.625,"10.25":-5.75,"10.375":-5.875,"10.49":-6,"10.625":-6.125,"10.75":-6.25,"10.875":-6.375,"10.99":-6.5,"11.125":-6.625,"11.25":-6.75,"11.375":-6.875}};
 // Eligibility (null = A&D doesn't offer that combination), measured in single-factor sweeps.
 const AD_NOT_OFFERED: Record<string, number[]> = { // factor -> CLTV buckets not offered
   "d4": [80], "d5": [75, 80], "co": [80], "pt_condotel": [80], "c_fn": [80], "c_itin": [75, 80],
@@ -1010,11 +1010,27 @@ function adKeys(s: AdIn): string[] {
   if (s.cit === "fn" && s.purpose !== "purchase") k.push("fnpu|" + c);
   return k;
 }
+// Daily snapshot written by the "ad-rate-refresh" scheduled task (Joe's
+// logged-in A&D session in the Claude app). It replaces the base ladder (B)
+// and the credit x CLTV grid (fico) when present; everything else stays the
+// measured structure above. Cached per function instance for 10 minutes.
+let adSnapCache: { at: number; B: any; fico: any; asOf: string | null; captured: string | null } | null = null;
+async function adSnapshot() {
+  if (adSnapCache && Date.now() - adSnapCache.at < 600000) return adSnapCache;
+  let row: any = null;
+  if (SUPABASE_URL_RCN && SERVICE_KEY_RCN) {
+    const r = await fetch(SUPABASE_URL_RCN + "/rest/v1/lender_pricing_snapshots?lender=eq.ad&select=data,sheet_as_of,captured_at", { headers: { apikey: SERVICE_KEY_RCN, Authorization: "Bearer " + SERVICE_KEY_RCN } }).catch(() => null);
+    if (r && r.ok) { const rows = await r.json().catch(() => []); row = rows && rows[0]; }
+  }
+  adSnapCache = { at: Date.now(), B: (row && row.data && row.data.B) || AD_FIT.B, fico: (row && row.data && row.data.fico) || AD_FIT.fico, asOf: row ? row.sheet_as_of : AD_SNAPSHOT, captured: row ? row.captured_at : null };
+  return adSnapCache;
+}
 // Returns total adjustment in points, or null when A&D doesn't offer the scenario.
-function adAdjust(s: AdIn): number | null {
+function adAdjust(s: AdIn, ficoGrid: any = AD_FIT.fico): number | null {
   const c = adCltvBucket(s.cltv);
   if (AD_NO_STATES.indexOf(s.st) !== -1) return null;
-  const base = (AD_FIT.fico as any)[adFicoBucket(s.fico)][String(c)];
+  const fb = ficoGrid[adFicoBucket(s.fico)];
+  const base = fb ? fb[String(c)] : null;
   if (base == null) return null;
   const db = adDscrBand(s.dscr);
   if ((AD_NOT_OFFERED[db] || []).indexOf(c) !== -1) return null;
@@ -1050,8 +1066,8 @@ function adMain(k: string, s: AdIn): number {
   return t[a] ? t[a](c) : 0;
 }
 const AD_FN_INTERACT = { "fnpu|50": 0.125, "fnpt|75": -0.25, "fnpt|50": 0.125, "fnpu|70": 0.25, "fnpt|55": 0.125 };
-function adLadder(adj: number, lenderPaid: boolean): Array<[number, number]> {
-  return Object.entries(AD_FIT.B).map(([r, b]) => [Number(r), Math.max(-AD_MAX_CREDIT, Math.round(((b as number) - adj) * 1000) / 1000) + (lenderPaid ? AD_LPC : 0)] as [number, number]).sort((a, b) => a[0] - b[0]);
+function adLadder(adj: number, lenderPaid: boolean, B: any = AD_FIT.B): Array<[number, number]> {
+  return Object.entries(B).map(([r, b]) => [Number(r), Math.max(-AD_MAX_CREDIT, Math.round(((b as number) - adj) * 1000) / 1000) + (lenderPaid ? AD_LPC : 0)] as [number, number]).sort((a, b) => a[0] - b[0]);
 }
 function adMonthlyPI(loan: number, rate: number): number { const r = rate / 100 / 12; return loan * r / (1 - Math.pow(1 + r, -360)); }
 
@@ -1070,6 +1086,8 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
   const purpose = s.transactionType === "cashout" ? "cashout" : s.transactionType === "ratetermrefi" ? "rt" : "purchase";
   const st = (s.propertyState || "").toUpperCase();
   const escrow = (s.monthlyTaxes || 0) + (s.monthlyInsurance || 0) + (s.monthlyHoa || 0);
+  const snap = await adSnapshot();
+  const ageDays = snap.captured ? (Date.now() - new Date(snap.captured).getTime()) / 86400000 : null;
   // Highest CLTV A&D will do on this deal: try 80 down to 50; DSCR depends on
   // the par rate, which depends on the DSCR band -- iterate twice.
   const tiers = s.loanAmount ? [Math.min(80, s.loanAmount / value * 100)] : [80, 75, 70, 65, 60, 55, 50];
@@ -1078,24 +1096,26 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
     if (loan < 75000) continue;
     let dscr = 1.3, adj: number | null = null, par = 0;
     for (let i = 0; i < 3; i++) {
-      adj = adAdjust({ fico: s.creditScore, cltv, dscr, ppp, purpose, pt, cit, amt: loan, st });
+      adj = adAdjust({ fico: s.creditScore, cltv, dscr, ppp, purpose, pt, cit, amt: loan, st }, snap.fico);
       if (adj == null) break;
-      const lad = adLadder(adj, false);
+      const lad = adLadder(adj, false, snap.B);
       par = (lad.find((x) => x[1] <= 0) || lad[lad.length - 1])[0];
       dscr = (s.rentEstimate || 0) / (adMonthlyPI(loan, par) + escrow);
     }
     if (adj == null) continue;
-    const bp = adLadder(adj, false).filter((x) => x[1] <= 2.0 && x[1] >= -AD_MAX_CREDIT).slice(0, 7);
-    const lp = adLadder(adj, true).filter((x) => x[1] <= 2.0).slice(0, 5);
+    const bp = adLadder(adj, false, snap.B).filter((x) => x[1] <= 2.0 && x[1] >= -AD_MAX_CREDIT).slice(0, 7);
+    const lp = adLadder(adj, true, snap.B).filter((x) => x[1] <= 2.0).slice(0, 5);
     const pmtD = (rate: number) => Math.round((s.rentEstimate || 0) / (adMonthlyPI(loan, rate) + escrow) * 100) / 100;
     const options = bp.map(([rate, d]) => ({ program: "30-yr fixed · Borrower Paid", rate, price: 100 - d, dscr: pmtD(rate), creditToBorrower: d < 0 }))
       .concat(lp.map(([rate, d]) => ({ program: "30-yr fixed · Lender Paid (A&D pays " + AD_LPC + "%)", rate, price: 100 - d, dscr: pmtD(rate), revenuePts: AD_LPC })));
     const assumptions = [
-      "A&D model, " + AD_SNAPSHOT + ". Long-term rental, no interest-only, 30-yr fixed (40-yr and 5/6 or 7/6 ARMs also available).",
+      "A&D model, rate sheet " + (snap.asOf || AD_SNAPSHOT) + (ageDays != null ? " (refreshed " + (ageDays < 1 ? "today" : Math.floor(ageDays) + " day(s) ago") + ")" : " (built-in snapshot)") + ". Long-term rental, no interest-only, 30-yr fixed (40-yr and 5/6 or 7/6 ARMs also available).",
       "Borrower Paid: your origination is on top, and any negative price is a lender credit to the BORROWER, not yield spread to us. Lender Paid: A&D pays Bridgepoint " + AD_LPC + "% through the rate; no origination points can be added.",
     ];
     const res: LenderResult = { lender: L, eligible: true, source: "model", options: options as any, loanAmountUsed: loan, maxLoanAmount: loan, assumptions };
     if (cit !== "us") { res.rateTolerance = 0.25; assumptions.unshift("Foreign national / ITIN pricing at A&D is only accurate to about 0.25% here — confirm with A&D."); }
+    // Older than 3 days (or never refreshed): rates may have moved.
+    if (ageDays == null || ageDays > 3) { res.rateTolerance = Math.max(res.rateTolerance || 0, 0.25); assumptions.unshift("A&D rates haven't been refreshed in " + (ageDays == null ? "a while" : Math.floor(ageDays) + " days") + " — confirm before quoting."); }
     return res;
   }
   return { lender: L, eligible: false, source: "model", reason: "No A&D DSCR tier fits (credit, leverage, DSCR, loan size, or a layered guideline like low credit with DSCR under 1.00)." };
