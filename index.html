@@ -11730,7 +11730,7 @@ function canViewOutsideLender(){ return canManageOutsideLender(); }
 --------------------------------------------------------------------- */
 var LENDER_EXPORT_TARGETS = [
   { key:"Constructive", label:"Constructive Capital", portal:null },
-  { key:"RCN", label:"RCN Capital", portal:"https://broker.commerciallendingservicesllc.com/loans/loan-applications" },
+  { key:"RCN", label:"RCN Capital", portal:"https://broker.commerciallendingservicesllc.com/loans/loan-requests/referral_intake_broker", mapped:true },
   { key:"Kiavi", label:"Kiavi", portal:"https://app.kiavi.com/loans/new" },
   { key:"A&D", label:"A&D Mortgage", portal:"https://aim.admortgage.com/home" },
   { key:"NextRes", label:"NextRes", portal:null }
@@ -11740,7 +11740,7 @@ function renderLenderExportPanel(lead){
   var st = ui.lenderExport[lead.id];
   if (!st || !st.open) return '';
   var btns = LENDER_EXPORT_TARGETS.map(function(t){
-    return '<button class="btn btn-sm" type="button" data-action="lender-export-go" data-lead="' + lead.id + '" data-lender="' + esc(t.key) + '"' + (st.busy ? ' disabled' : '') + '>' + esc(t.label) + '</button>';
+    return '<button class="btn btn-sm" type="button" data-action="lender-export-go" data-lead="' + lead.id + '" data-lender="' + esc(t.key) + '"' + (st.busy ? ' disabled' : '') + ' title="' + (t.mapped ? 'Auto-fills the application and uploads documents' : 'Not auto-filled yet — the side panel lists every value to copy and each document to attach') + '">' + esc(t.label) + (t.mapped ? ' ⚡' : '') + '</button>';
   }).join("");
   var msg = st.msg ? '<div class="footnote" style="padding-top:6px">' + st.msg + '</div>' : '';
   return '<div class="panel panel-pad" style="margin:-4px 0 12px;background:var(--c-forest-bg)">' +
