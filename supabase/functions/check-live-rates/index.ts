@@ -1185,9 +1185,19 @@ async function rcnStoreSession(sess: RcnSession) {
   if (!SUPABASE_URL_RCN || !SERVICE_KEY_RCN) return;
   await fetch(SUPABASE_URL_RCN + "/rest/v1/lender_sessions", { method: "POST", headers: { apikey: SERVICE_KEY_RCN, Authorization: "Bearer " + SERVICE_KEY_RCN, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ lender: "rcn", session: sess, updated_at: new Date().toISOString() }) }).catch(() => null);
 }
-function rcnCsrfFrom(html: string): string | null {
-  const m = /_csrfToken\s*=\s*['"]([^'"]+)['"]/.exec(html);
-  return m ? m[1] : null;
+function rcnCsrfFrom(html: string, jar?: Record<string, string>): string | null {
+  const pats = [
+    // RCN's server-side sessions get an EMPTY token (var _csrfToken = '';) -- still valid.
+    /_csrfToken\s*[=:]\s*['"]([^'"]*)['"]/,
+    /name=["']_csrfToken["'][^>]*value=["']([^"']+)["']/,
+    /value=["']([^"']+)["'][^>]*name=["']_csrfToken["']/,
+    /<meta[^>]*name=["']csrf(?:-t|T)oken["'][^>]*content=["']([^"']+)["']/,
+    /csrfToken["']?\s*[=:]\s*['"]([^'"]+)['"]/,
+  ];
+  for (const re of pats) { const m = re.exec(html); if (m) return m[1]; }
+  // CakePHP also keeps the token in the csrfToken cookie.
+  if (jar && jar.csrfToken) return decodeURIComponent(jar.csrfToken);
+  return null;
 }
 async function rcnLogin(): Promise<RcnSession> {
   const user = Deno.env.get("RCN_USERNAME"), pass = Deno.env.get("RCN_PASSWORD");
@@ -1203,10 +1213,16 @@ async function rcnLogin(): Promise<RcnSession> {
   form.set("data[Member][rurl]", "");
   form.set("data[_Token][fields]", field("data[_Token][fields]"));
   form.set("data[_Token][unlocked]", field("data[_Token][unlocked]"));
-  await rcnFetch(jar, RCN_SECURE + "/members/login/", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "Referer": RCN_SECURE + "/members/login" }, body: form.toString() });
+  const post = await rcnFetch(jar, RCN_SECURE + "/members/login/", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "Referer": RCN_SECURE + "/members/login" }, body: form.toString() });
+  // Still on the login form = RCN rejected the username/password; surface RCN's own message.
+  if (/MemberIndexForm/.test(post.body)) {
+    const flash = /<div[^>]*(?:flash|alert|error|message)[^>]*>([\s\S]{0,300}?)<\/div>/i.exec(post.body);
+    const msg = flash ? flash[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 140) : "";
+    throw new Error("login_rejected" + (msg ? ": " + msg : ""));
+  }
   const calc = await rcnFetch(jar, RCN_BROKER + "/pricing-tool/loan-calculator");
-  const csrf = rcnCsrfFrom(calc.body);
-  if (!csrf) throw new Error("login_failed");
+  const csrf = rcnCsrfFrom(calc.body, jar);
+  if (csrf == null) throw new Error("login_failed (signed in, but no pricing-tool token; ended at " + new URL(calc.url).pathname + ", status " + calc.res.status + ", cookies: " + Object.keys(jar).join("/") + (/MemberIndexForm/.test(calc.body) ? ", page is a login form" : "") + ")");
   const sess = { cookies: jar, csrf };
   await rcnStoreSession(sess);
   return sess;
