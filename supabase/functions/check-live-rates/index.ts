@@ -344,7 +344,7 @@ async function checkConstructive(s: Scenario): Promise<LenderResult> {
   if (s.loanAmount) {
     const r = await checkConstructiveAt(s);
     const max = await constructiveMaxLoan(s);
-    return { ...r, loanAmountUsed: s.loanAmount, maxLoanAmount: max ? max.amount : undefined };
+    return { ...r, loanAmountUsed: s.loanAmount, maxLoanAmount: max ? max.amount : undefined, rehabHoldback: constructiveHoldback(s, s.loanAmount) };
   }
   const max = await constructiveMaxLoan(s);
   if (!max || !max.amount) {
@@ -352,7 +352,13 @@ async function checkConstructive(s: Scenario): Promise<LenderResult> {
   }
   const r = await checkConstructiveAt({ ...s, loanAmount: max.amount });
   const assumptions = (r.assumptions || []).concat(max.note ? [max.note] : []);
-  return { ...r, assumptions, loanAmountUsed: max.amount, maxLoanAmount: max.amount };
+  return { ...r, assumptions, loanAmountUsed: max.amount, maxLoanAmount: max.amount, rehabHoldback: constructiveHoldback(s, max.amount) };
+}
+// Constructive's RTL sizing (constructiveMaxLoan) always funds 100% of the
+// rehab/construction budget; any leverage cap comes off the day-one advance.
+function constructiveHoldback(s: Scenario, amount: number): number | undefined {
+  if (!RTL_AUTO_LOAN_TYPES.includes(s.loanType) || s.loanType === "Bridge") return RTL_AUTO_LOAN_TYPES.includes(s.loanType) ? 0 : undefined;
+  return Math.min(s.rehabBudget || 0, amount);
 }
 
 async function checkConstructiveAt(s: Scenario): Promise<LenderResult> {

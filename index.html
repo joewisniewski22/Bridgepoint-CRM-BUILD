@@ -12324,16 +12324,14 @@ function lpRenderResults(key){
     var srcBadge = r.source === "model" ? ' <span class="badge badge-neutral" title="Bridgepoint\'s researched copy of this lender\'s pricing, not a live quote">Estimate</span>' : (r.source === "live" ? ' <span class="badge badge-forest">Live</span>' : '');
     var summary = '<div style="padding:10px 0 4px"><span style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-muted)">' + (r.maxLoanAmount && r.maxLoanAmount === amt ? "Maximum loan" : "Priced at") + '</span> <b class="mono" style="font-size:20px">' + fmtUSD(amt) + '</b>' + srcBadge + '<span class="footnote">' + ltvTxt + (r.fees && r.fees.lenderFee != null ? " · lender fee " + fmtUSD(r.fees.lenderFee) : "") + '</span></div>' +
       (capOver > 0 || capLost > 0 ? '<div class="footnote" style="padding:2px 0 6px;color:var(--c-gold-ink, #8a6d1f)">' + esc(label) + ' caps broker points at ' + caps.maxBrokerPoints + '% — ' + (capOver > 0 ? ('the other ' + (Math.round(capOver * 1000) / 1000) + ' pt' + (capOver === 1 ? '' : 's') + ' of your fee ' + (capOver === 1 ? 'is' : 'are') + ' earned as yield spread, so the borrower\'s rate below includes +' + (Math.round(yspRateAdd * 1000) / 1000) + '%.') : '') + (capLost > 0 ? (' ' + (Math.round(capLost * 1000) / 1000) + ' pts can\'t be earned here (yield spread maxes out at ' + caps.maxYsp + '%).') : '') + (yspToCompany && capOver > 0 ? ' Yield spread on this file goes to the company.' : '') + '</div>' : '');
-    // Day-one advance on fix & flip / bridge / GUC (Joe 2026-10-06): loan minus
-    // the rehab holdback. Lenders that report their holdback (Kiavi, RCN) use
-    // theirs; otherwise the full rehab budget is assumed held back.
+    // Day-one advance on fix & flip / bridge / GUC (Joe 2026-10-06): what the
+    // lender puts toward the PURCHASE at closing = loan minus rehab holdback.
     var rehabIn = sc.loanType === "Bridge" ? 0 : (sc.rehabBudget || 0);
-    var dayBasis = (sc.transactionType !== "purchase" && sc.currentValue) ? sc.currentValue : sc.purchasePrice;
-    var holdFor = function(a){ return Math.max(0, Math.min(r.rehabHoldback != null ? r.rehabHoldback : rehabIn, a || 0)); };
-    var dayOne = function(a){ return Math.max(0, (a || 0) - holdFor(a)); };
-    var dayPct = function(a){ return dayBasis ? (Math.round(dayOne(a) / dayBasis * 1000) / 10) + "% of " + (sc.transactionType !== "purchase" && sc.currentValue ? "as-is value" : "purchase") : ""; };
-    if (rtl && amt) summary += '<div class="footnote" style="padding:0 0 6px"><b>Day one: ' + fmtUSD(Math.round(dayOne(amt))) + '</b>' + (dayBasis ? ' (' + dayPct(amt) + ')' : '') +
-      (holdFor(amt) > 0 ? ' + ' + fmtUSD(Math.round(holdFor(amt))) + ' rehab holdback' + (r.rehabHoldback == null ? ' (assumes 100% of rehab funded)' : (r.rehabHoldback < rehabIn ? ' — lender funds only part of the ' + fmtUSD(rehabIn) + ' rehab' : '')) : '') + '</div>';
+    var holdFor = function(a){ return lpHoldback(r, a, sc); };
+    var dayOne = function(a){ return lpDayOne(r, a, sc); };
+    var dayPct = function(a){ return lpDayOnePct(r, a, sc); };
+    if (rtl && amt) summary += '<div style="padding:0 0 8px"><span style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-muted)">Day one toward ' + (sc.transactionType !== "purchase" && sc.currentValue ? "as-is value" : "purchase") + '</span> <b class="mono" style="font-size:18px">' + fmtUSD(Math.round(dayOne(amt))) + '</b>' + (dayPct(amt) != null ? ' <b>(' + dayPct(amt) + '%)</b>' : '') +
+      '<span class="footnote">' + (holdFor(amt) > 0 ? ' + ' + fmtUSD(Math.round(holdFor(amt))) + ' rehab holdback' + (r.rehabHoldback == null ? ' (assumes 100% of rehab funded — confirm with lender)' : (r.rehabHoldback < rehabIn ? ' — lender funds only part of the ' + fmtUSD(rehabIn) + ' rehab' : '')) : '') + '</span></div>';
     var perOptionAmounts = (r.options || []).some(function(o){ return o.loanAmount && o.loanAmount !== amt; });
     var rows = (r.options || []).map(function(o, oi){
       var oAmt = o.loanAmount || amt;
@@ -12341,7 +12339,7 @@ function lpRenderResults(key){
       var io = rtl || /\(IO\)$/.test(o.program);
       var pmt = io ? interestOnlyPayment(oAmt, oRate) : monthlyPayment(oAmt, oRate, sc.termMonths);
       var applied = en.selected && en.selected.ri === ri && en.selected.oi === oi;
-      var cells = (perOptionAmounts ? '<td class="num mono">' + fmtUSD(oAmt) + '</td>' + (rtl ? '<td class="num mono" title="' + esc(dayPct(oAmt)) + '">' + fmtUSD(Math.round(dayOne(oAmt))) + '</td>' : '') : '') + '<td class="num">' + oRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%' + (r.rateTolerance ? '<span class="footnote" title="Estimate: the lender\'s exact rate may be up to ' + r.rateTolerance + '% higher or lower — confirm before quoting"> ±' + (r.rateTolerance === 0.125 ? '⅛' : r.rateTolerance) + '</span>' : '') + '</td><td class="num">' + (pmt ? fmtUSD(Math.round(pmt)) : "—") + '</td>';
+      var cells = (perOptionAmounts ? '<td class="num mono">' + fmtUSD(oAmt) + '</td>' + (rtl ? '<td class="num mono">' + fmtUSD(Math.round(dayOne(oAmt))) + (dayPct(oAmt) != null ? '<span class="footnote"> (' + dayPct(oAmt) + '%)</span>' : '') + '</td>' : '') : '') + '<td class="num">' + oRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%' + (r.rateTolerance ? '<span class="footnote" title="Estimate: the lender\'s exact rate may be up to ' + r.rateTolerance + '% higher or lower — confirm before quoting"> ±' + (r.rateTolerance === 0.125 ? '⅛' : r.rateTolerance) + '</span>' : '') + '</td><td class="num">' + (pmt ? fmtUSD(Math.round(pmt)) : "—") + '</td>';
       if (rtl){
         var lenderPts = Math.round((o.price - 100) * 1000) / 1000;
         var yourPts = points - capLost;
@@ -12394,7 +12392,7 @@ function lpRenderResults(key){
       (reasons.length ? '<div class="footnote" style="padding-top:8px">' + reasons.map(esc).join("<br>") + '</div>' : '') +
       '</div>';
   }
-  var best = anyEligible ? lpBestTerms(en.data, rtl, canSee, letters) + lpSpreadPanel(key, en.data, sc, canSee, letters, yspToCompany) : '';
+  var best = anyEligible ? lpBestTerms(en.data, rtl, canSee, letters, sc) + lpSpreadPanel(key, en.data, sc, canSee, letters, yspToCompany) : '';
   return banner + none + best + cards + footer;
 }
 function leadOrNull(key){ return lpIsStandalone(key) ? null : leadById(key); }
@@ -12419,8 +12417,18 @@ function lpViabilityTips(sc, results){
 }
 // One-line summary across lenders: lowest rate and highest loan. Lender names
 // stay masked for anyone who can't see outside-lender placement.
-function lpBestTerms(results, rtl, canSee, letters){
-  var lowest = null, biggest = null;
+// Day-one numbers for RTL pricer results (shared by lender cards + Best terms).
+function lpHoldback(r, a, sc){
+  var rehab = sc.loanType === "Bridge" ? 0 : (sc.rehabBudget || 0);
+  return Math.max(0, Math.min(r.rehabHoldback != null ? r.rehabHoldback : rehab, a || 0));
+}
+function lpDayOne(r, a, sc){ return Math.max(0, (a || 0) - lpHoldback(r, a, sc)); }
+function lpDayOnePct(r, a, sc){
+  var base = (sc.transactionType !== "purchase" && sc.currentValue) ? sc.currentValue : sc.purchasePrice;
+  return base ? Math.round(lpDayOne(r, a, sc) / base * 1000) / 10 : null;
+}
+function lpBestTerms(results, rtl, canSee, letters, sc){
+  var lowest = null, biggest = null, upfront = null;
   results.forEach(function(r, ri){
     if (!r.eligible) return;
     (r.options || []).forEach(function(o){
@@ -12428,6 +12436,11 @@ function lpBestTerms(results, rtl, canSee, letters){
       if (!rtl && o.price < 100 - 0.0005) return;
       if (!lowest || o.rate < lowest.rate) lowest = { rate: o.rate, amt: amt, ri: ri };
       if (!biggest || amt > biggest.amt || (amt === biggest.amt && o.rate < biggest.rate)) biggest = { rate: o.rate, amt: amt, ri: ri };
+      // Most toward the purchase at closing (Joe 2026-10-06: upfront leverage matters).
+      if (rtl && sc){
+        var d1 = lpDayOne(r, amt, sc);
+        if (!upfront || d1 > upfront.d1 || (d1 === upfront.d1 && o.rate < upfront.rate)) upfront = { d1: d1, pct: lpDayOnePct(r, amt, sc), rate: o.rate, ri: ri };
+      }
     });
   });
   if (!lowest) return '';
@@ -12437,6 +12450,7 @@ function lpBestTerms(results, rtl, canSee, letters){
     '<div style="display:flex;gap:24px;flex-wrap:wrap;padding-top:6px">' +
       '<div><span class="footnote">Lowest rate</span><br><b class="mono">' + lowest.rate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%</b> <span class="footnote">on ' + fmtUSD(lowest.amt) + ' · ' + esc(nm(lowest.ri)) + '</span></div>' +
       '<div><span class="footnote">Most leverage</span><br><b class="mono">' + fmtUSD(biggest.amt) + '</b> <span class="footnote">at ' + biggest.rate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '% · ' + esc(nm(biggest.ri)) + '</span></div>' +
+      (upfront ? '<div><span class="footnote">Most upfront (day one toward purchase)</span><br><b class="mono">' + fmtUSD(Math.round(upfront.d1)) + '</b>' + (upfront.pct != null ? ' <b>(' + upfront.pct + '%)</b>' : '') + ' <span class="footnote">at ' + upfront.rate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '% · ' + esc(nm(upfront.ri)) + '</span></div>' : '') +
     '</div><div class="footnote" style="padding-top:6px">Lower leverage usually buys a lower rate — every option is listed below; pick the one that fits the borrower.</div></div>';
 }
 
