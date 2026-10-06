@@ -98,8 +98,8 @@
     ],
     uploads: [
       { label: "Purchase contract", category: "purchase_contract", slot: { selector: "#documentsFileUpload_purchase_contract_optional" } },
-      { label: "Rehab list / scope of work", category: "scope_of_work", slot: { selector: "#documentsFileUpload_rehab_list_optional" } },
-      { label: "Construction budget", category: "scope_of_work", slot: { selector: "#documentsFileUpload_construction_budget_optional" } },
+      { label: "Rehab list / scope of work", category: "scope_of_work", when: (p) => !isGuc(p), slot: { selector: "#documentsFileUpload_rehab_list_optional" } },
+      { label: "Construction budget", category: "scope_of_work", when: (p) => isGuc(p), slot: { selector: "#documentsFileUpload_construction_budget_optional" } },
       { label: "Lease / rent roll", category: "leases_rent", slot: { selector: "#documentsFileUpload_lease_agreement_optional" } },
       { label: "Plans & permits", category: "construction_plans_permits", slot: { selector: "#documentsFileUpload_plans_optional" } },
       { label: "Borrower experience", category: "track_record", slot: { selector: "#documentsFileUpload_borrower_exp_optional" } },

@@ -132,6 +132,7 @@
       (ok ? res.filled : res.missing).push(name);
     }
     for (const u of page.uploads || []) {
+      if (u.when && !u.when(pkg)) continue;
       const docs = (pkg.documents || []).filter((d) => (u.categories || [u.category]).includes(d.category));
       if (!docs.length) { res.uploadMissing.push(u.label || u.category); continue; }
       const input = findUpload(u.slot || {});
