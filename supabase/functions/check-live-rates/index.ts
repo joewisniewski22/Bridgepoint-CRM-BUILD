@@ -890,7 +890,10 @@ const KIAVI_BROKER_NOT_APPROVED = ["AZ","CA","ID","MN","NC","ND","NE","NJ","NV",
 const KIAVI_MAX_BROKER_POINTS = 3;
 // Minimum loan on rental, bridge and fix & flip (Joe 2026-10-06: down from $100,000).
 const KIAVI_MIN_LOAN = 75000;
-const KIAVI_MAX_YSP = 2.5;
+// Kiavi broker guides (kiavi.com/broker-guide, read 2026-10-06): YSP up to 2.00% on
+// fix & flip / bridge, up to 1.00% on rentals.
+const KIAVI_MAX_YSP = 2.0;
+const KIAVI_MAX_YSP_RENTAL = 1.0;
 // 12-month fix & flip rate by FICO tier x loan-to-cost tier (<=75, <=80, <=85, <=90).
 const KIAVI_HM_LTC_TIERS = [75, 80, 85, 90];
 const KIAVI_HM_GRID = {
@@ -1085,6 +1088,7 @@ function kiaviRental(s, out, unit, st) {
   out.maxLoanAmount = maxLoanFound;
   out.fees = { lenderFee: 0 };
   out.compCaps.yspRatePerPoint = 0.25; // rental YSP is price-based: about +0.125-0.25% rate per point
+  out.compCaps.maxYsp = KIAVI_MAX_YSP_RENTAL;
   out.rateTolerance = 0.125;
   out.assumptions.push("Kiavi rental rate is an ESTIMATE, accurate to within 0.125% (tested 98%); confirm on Kiavi before quoting exact. Rates as of " + KIAVI_SNAPSHOT + " (rate sheet moves). 5/1 and 7/1 ARMs are typically 0.125% lower. No Kiavi origination fee on rentals.");
   return out;

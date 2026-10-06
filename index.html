@@ -1021,7 +1021,37 @@ var LENDER_DOC_PACKS = {
     }
     return items;
   },
-  kiavi: function(lead){ return [{ name:"Mortgagee Clause sent to Title & Insurance — pre-filled", autoKind:"mortgageeClause", staffOnly:true }]; },
+  // Kiavi broker guides (kiavi.com/broker-guide: bridge program, DSCR program,
+  // settlement-agent FAQ), read 2026-10-06. Kiavi gives the mortgagee clause in
+  // the loan dashboard after submission (not published), and since 9/1/2026
+  // rentals (and AZ/ID/NV/OR/SD bridge loans) are funded by Figure Lending LLC.
+  kiavi: function(lead){
+    var rental = /DSCR|Portfolio/i.test(lead.loanType || "");
+    var purchase = !lead.transactionType || lead.transactionType === "purchase";
+    var st = stateFromAddress(lead.propertyAddress);
+    var figure = rental || (st && ["AZ","ID","NV","OR","SD"].indexOf(st) !== -1);
+    var items = [
+      { name:"Mortgagee clause — copy it from the Kiavi loan dashboard insurance task", staffOnly:true, note: figure ? "This loan is funded by Figure Lending LLC (Kiavi's rentals since 9/1/2026 / " + (st || "") + " bridge) — the clause will name Figure, not Kiavi." : "Bridge loans here are funded by Kiavi Funding, LLC." },
+      { name:"Property access instructions + contact for Kiavi's inspection / appraisal", staffOnly:true },
+      { name:"Hazard insurance agent contact (name, phone, email)", staffOnly:true },
+      { name:"Closing agent contact (name, phone, email)", staffOnly:true },
+      { name:"Signed Borrowing Authorization form (Kiavi)" },
+      { name:"Broker Disclosure form (Kiavi)", staffOnly:true },
+      { name:"Title commitment, estimated fees and tax certification", staffOnly:true },
+      { name:"Closing instructions + CPL (needed for clear to close)", staffOnly:true },
+      { name:"Signer's title on every document matches Kiavi's loan docs exactly (e.g. \"Managing Member\"); corrections wet-signed", staffOnly:true }
+    ];
+    if (purchase) items.push({ name:"Executed purchase contract with all addenda" });
+    else items.push({ name:"Payoff statement / letter (refinance)" });
+    if (rental){
+      items.push({ name:"Voided check for monthly ACH auto-debit" });
+      items.push({ name:"Appraisal payment (Kiavi rental)", staffOnly:true });
+      items.push({ name:"Hazard insurance premium paid in full at closing (Kiavi escrows taxes + HOI)", staffOnly:true });
+    } else {
+      items.push({ name:"Scope of Work entered in Kiavi's SOW format — line by line (feasibility reviews it)", note:"Detailed SOWs clear feasibility fastest." });
+    }
+    return items;
+  },
   ad: function(lead){ return [{ name:"Mortgagee Clause sent to Title & Insurance — pre-filled", autoKind:"mortgageeClause", staffOnly:true }]; },
   nextres: function(lead){ return []; }
 };
@@ -13468,7 +13498,7 @@ function renderRail(lead){
               '<button class="btn btn-sm" style="flex:1" type="button" data-action="open-email-document" data-lead="' + lead.id + '" data-kind="mortgageeClause">✉️ Email Mortgagee Clause</button>' +
               '<button class="btn btn-sm btn-ghost" type="button" data-action="preview-generated-document" data-lead="' + lead.id + '" data-kind="mortgageeClause" title="Preview PDF">👁️</button>' +
             '</div>'
-          : '<div class="footnote">We don\'t have ' + esc(lead.outsideLender || "this lender") + '\'s mortgagee clause on file yet.</div>') +
+          : '<div class="footnote">' + (/Kiavi/i.test(lead.outsideLender || "") ? 'Kiavi provides the mortgagee clause in its loan dashboard (insurance task) after submission — copy it from there.' : ('We don\'t have ' + esc(lead.outsideLender || "this lender") + '\'s mortgagee clause on file yet.')) + '</div>') +
       '</div>';
     })() : '') +
     (canManageOutsideLender() ?
