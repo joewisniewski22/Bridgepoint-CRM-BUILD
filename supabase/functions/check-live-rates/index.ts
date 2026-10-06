@@ -12,6 +12,7 @@
 // Constructive Capital rate sheet is the one exception -- that one really is
 // reimplemented statically in index.html, since Constructive is our own
 // in-house paper and Joe hands us the sheet directly every time it changes).
+import { RCN_GEO_DATE, RCN_KILLED, RCN_REDUCE, RCN_TARGET, RCN_TARGET_NAMES } from "./rcn_geo.ts";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -1484,7 +1485,34 @@ function rcnRtlModel(s: Scenario, assumptions: string[]): LenderResult {
   return { lender: L, eligible: true, source: "model", options: [{ program: "RCN " + pts.toFixed(2) + " pts (est.)", rate, price: 100 + pts }, { program: "RCN 1.00 pt (est.)", rate: Math.round((rate - (et === 0 ? 0.5 : 0.75)) * 100) / 100, price: 101 }], loanAmountUsed: total, maxLoanAmount: total, assumptions };
 }
 
+// RCN's zip overlays (from RCN's Loan Sizer -- see rcn_geo.ts). RCN's online
+// calculator ignores them, RCN underwriting doesn't (Joe 2026-10-06: quote what
+// actually closes). Fix & flip / bridge / ground-up only (rentals use a separate sheet).
+function rcnApplyGeo(s: Scenario, r: LenderResult): LenderResult {
+  if (!RTL_AUTO_LOAN_TYPES.includes(s.loanType) || !r.eligible) return r;
+  const zip = (/\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(s.propertyAddress || "") || [])[1];
+  if (!zip) return { ...r, assumptions: (r.assumptions || []).concat(["No zip code on the address — RCN's zip-level market rules (do-not-lend zips, reduced leverage) couldn't be checked."]) };
+  if (RCN_KILLED.has(zip)) return { lender: r.lender, eligible: false, source: r.source, reason: "RCN isn't lending in zip " + zip + " (on RCN's declining-market do-not-lend list, sizer " + RCN_GEO_DATE + ")." };
+  const out: LenderResult = { ...r, assumptions: (r.assumptions || []).slice() };
+  const area = RCN_TARGET.get(zip);
+  if (area) {
+    const value = Math.min(s.purchasePrice || Infinity, s.currentValue || Infinity);
+    if (isFinite(value) && value < 175000) return { lender: r.lender, eligible: false, source: r.source, reason: "RCN needs a $175,000+ property value in the " + (RCN_TARGET_NAMES[area] || area) + " overlay area (zip " + zip + ")." };
+    const adj = (s.experienceDeals || 0) >= 5 ? 0.05 : 0.10;
+    const basis = (s.transactionType !== "purchase" && s.currentValue) ? s.currentValue : (s.purchasePrice || 0);
+    const cut = Math.round(basis * adj);
+    if (out.maxLoanAmount) out.maxLoanAmount = Math.max(0, Math.floor((out.maxLoanAmount - cut) / 100) * 100);
+    if (out.loanAmountUsed && out.maxLoanAmount && out.loanAmountUsed > out.maxLoanAmount) out.loanAmountUsed = out.maxLoanAmount;
+    out.assumptions!.push("RCN " + (RCN_TARGET_NAMES[area] || area) + " overlay: -" + adj * 100 + "% leverage in zip " + zip + " (RCN's calculator doesn't apply it; underwriting does) — max reduced by " + fmtMoney(cut) + ".");
+  }
+  if (RCN_REDUCE.has(zip)) out.assumptions!.push("RCN flags zip " + zip + " as a declining market (\"Reduce LTV\") — expect RCN underwriting to cut leverage; confirm before quoting max.");
+  return out;
+}
+
 async function checkRcn(s: Scenario): Promise<LenderResult> {
+  return rcnApplyGeo(s, await checkRcnRaw(s));
+}
+async function checkRcnRaw(s: Scenario): Promise<LenderResult> {
   const assumptions: string[] = [];
   const req = rcnBuildRequest(s, assumptions);
   if (typeof req === "string") return { lender: "RCN Capital", eligible: false, reason: req };
