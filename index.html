@@ -2138,7 +2138,7 @@ function evaluateKiaviFit(lead){
     estMaxLoan:null, maxLtvPct:null
   };
 }
-var OUTSIDE_LENDER_FIT_EVALUATORS = { RCN: evaluateRcnFit, "Angel Oak": evaluateAngelOakFit, NextRes: evaluateNextresFit, Kiavi: evaluateKiaviFit, RELIP: null };
+var OUTSIDE_LENDER_FIT_EVALUATORS = { RCN: evaluateRcnFit, "Angel Oak": evaluateAngelOakFit, NextRes: evaluateNextresFit, Kiavi: evaluateKiaviFit };
 function rcnRecommendation(lead, fit){
   if (!fit) return null;
   if (!fit.eligible){
@@ -11665,7 +11665,6 @@ function canViewOutsideLender(){ return canManageOutsideLender(); }
 var LENDER_EXPORT_TARGETS = [
   { key:"Constructive", label:"Constructive Capital", portal:null },
   { key:"RCN", label:"RCN Capital", portal:"https://broker.commerciallendingservicesllc.com/loans/loan-applications" },
-  { key:"RELIP", label:"RELIP", portal:null },
   { key:"Kiavi", label:"Kiavi", portal:"https://app.kiavi.com/loans/new" },
   { key:"A&D", label:"A&D Mortgage", portal:"https://aim.admortgage.com/home" },
   { key:"NextRes", label:"NextRes", portal:null }
@@ -12319,7 +12318,7 @@ function lpRenderResults(key){
       (reasons.length ? '<div class="footnote" style="padding-top:8px">' + reasons.map(esc).join("<br>") + '</div>' : '') +
       '</div>';
   }
-  var best = anyEligible ? lpBestTerms(en.data, rtl, canSee, letters) : '';
+  var best = anyEligible ? lpBestTerms(en.data, rtl, canSee, letters) + lpSpreadPanel(key, en.data, sc, canSee, letters, yspToCompany) : '';
   return banner + none + best + cards + footer;
 }
 function leadOrNull(key){ return lpIsStandalone(key) ? null : leadById(key); }
@@ -12424,7 +12423,95 @@ function lpHandleField(key, field, raw){
   }
   render();
 }
-function lpSelectOption(key, ri, oi){
+// Competitive spread (Joe 2026-10-06): when one lender clearly beats the rest,
+// it's OK to add a little yield spread -- but the borrower's rate must stay at
+// least 1/8 (plus any estimate tolerance) under the next-best lender's rate.
+// DSCR: move up the winning lender's own price ladder (max +0.5% rate).
+// RTL: rate markup on lenders that pay YSP (Kiavi, RCN; max 1 extra point).
+var LP_SPREAD_MAX_DSCR_RATE = 0.5, LP_SPREAD_MAX_RTL_PTS = 1;
+function lpCapOver(r, points, rtl){
+  var c = r.compCaps || {};
+  return (rtl && c.maxBrokerPoints != null && points > c.maxBrokerPoints) ? Math.min(points - c.maxBrokerPoints, c.maxYsp != null ? c.maxYsp : Infinity) : 0;
+}
+function lpCompetitiveSpread(results, sc){
+  var rtl = LP_RTL.indexOf(sc.loanType) !== -1;
+  var points = sc.pointsCharged || 0;
+  var ourPts = function(o){ return o.revenuePts != null ? o.revenuePts : (o.creditToBorrower ? 0 : (o.price - 100)); };
+  var amtOf = function(r, o){ return o.loanAmount || r.loanAmountUsed || 0; };
+  // The rate the borrower actually sees (RTL: plus any YSP forced by a point cap).
+  var shown = function(r, o){ return o.rate + (rtl ? lpCapOver(r, points, rtl) * ((r.compCaps || {}).yspRatePerPoint != null ? r.compCaps.yspRatePerPoint : 1) : 0); };
+  var quotable = function(o){ return rtl || o.price >= 100 - 0.0005 || o.revenuePts != null; };
+  // Best competing rate from any OTHER lender that will lend at least this much
+  // (a lender quoting a rate on a bigger loan would do a smaller one too).
+  var competitor = function(ri, amt){
+    var best = null;
+    results.forEach(function(r, k){
+      if (k === ri || !r.eligible) return;
+      (r.options || []).forEach(function(o){
+        if (!quotable(o) || amtOf(r, o) < amt * 0.99) return;
+        var rate = shown(r, o);
+        if (!best || rate < best.rate) best = { ri: k, rate: rate, tol: r.rateTolerance || 0 };
+      });
+    });
+    return best;
+  };
+  var top = null;
+  results.forEach(function(r, ri){
+    if (!r.eligible) return;
+    // Joe 2026-10-06: no yield spread with A&D -- their price credit goes to the
+    // borrower and Lender Paid comp is fixed, so a higher rate earns us nothing.
+    // A&D still counts as a competitor.
+    if ((r.options || []).some(function(o){ return o.creditToBorrower || o.revenuePts != null; })) return;
+    var c = r.compCaps || {};
+    if (rtl && c.yspRatePerPoint == null) return; // lender doesn't pay yield spread on RTL
+    (r.options || []).forEach(function(base, oi){
+      if (!quotable(base)) return;
+      var amt = amtOf(r, base), rate = shown(r, base);
+      // Nobody else lends this much: compare to their best rate at ANY size
+      // (smaller loans price lower, so this is the cautious benchmark).
+      var comp = competitor(ri, amt) || competitor(ri, 0);
+      if (!comp) return; // only one lender quoted -- nothing to compare against
+      var ceiling = comp.rate - (0.125 + Math.max(r.rateTolerance || 0, comp.tol));
+      if (ceiling <= rate + 0.0005) return;
+      var s = null;
+      if (!rtl){
+        var cap = Math.min(ceiling, rate + LP_SPREAD_MAX_DSCR_RATE), pick = null;
+        r.options.forEach(function(o, j){
+          if (o.rate > cap + 0.0005 || amtOf(r, o) !== amt) return;
+          if (pick == null || ourPts(o) > ourPts(r.options[pick])) pick = j;
+        });
+        if (pick == null || ourPts(r.options[pick]) <= ourPts(base) + 0.0005) return;
+        var po = r.options[pick];
+        s = { oi: pick, rate: po.rate, addPts: ourPts(po) - ourPts(base), ysp: 0 };
+      } else {
+        var roomPts = Math.min(LP_SPREAD_MAX_RTL_PTS, (c.maxYsp != null ? c.maxYsp : Infinity) - lpCapOver(r, points, rtl));
+        var addRate = Math.floor(Math.min(ceiling - rate, roomPts * c.yspRatePerPoint) / 0.125 + 1e-9) * 0.125; // whole 1/8ths
+        if (addRate <= 0) return;
+        s = { oi: oi, rate: rate + addRate, addPts: addRate / c.yspRatePerPoint, ysp: addRate / c.yspRatePerPoint };
+      }
+      s.winner = ri; s.runnerUp = comp.ri; s.nextRate = comp.rate; s.baseRate = rate; s.amount = amt;
+      s.extraDollars = Math.round(amt * s.addPts / 100);
+      // Most extra income; on a tie, the lower rate for the borrower.
+      if (!top || s.extraDollars > top.extraDollars || (s.extraDollars === top.extraDollars && s.rate < top.rate)) top = s;
+    });
+  });
+  return top;
+}
+function lpSpreadPanel(key, results, sc, canSee, letters, yspToCompany){
+  var s = lpCompetitiveSpread(results, sc);
+  if (!s) return '';
+  var nm = function(ri){ return canSee ? results[ri].lender : ("Lender " + letters.charAt(ri)); };
+  var f = function(x){ return (Math.round(x * 1000) / 1000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + "%"; };
+  var btn = (lpIsStandalone(key) || canEditApplication(leadOrNull(key)))
+    ? '<button class="btn btn-sm btn-primary" type="button" data-action="lp-select" data-lp="' + esc(key) + '" data-r="' + s.winner + '" data-o="' + s.oi + '" data-spread="' + s.ysp + '">Apply with spread</button>' : '';
+  return '<div class="panel panel-pad" style="margin-top:12px;border:1px solid var(--c-gold);background:var(--c-gold-bg)">' +
+    '<div class="rail-title" style="margin:0">💰 Room for yield spread</div>' +
+    '<div style="padding-top:6px">' + esc(nm(s.winner)) + ' beats the next-best lender (' + esc(nm(s.runnerUp)) + ' at ' + f(s.nextRate) + '). ' +
+    'On the ' + fmtUSD(s.amount) + ' loan, quote <b>' + f(s.rate) + '</b> instead of ' + f(s.baseRate) + ' and earn about <b>' + fmtUSD(s.extraDollars) + '</b> more (' + (Math.round(s.addPts * 1000) / 1000) + ' pts) — still the best rate available.</div>' +
+    '<div class="footnote" style="padding-top:4px">Stays at least ⅛% under every other lender we checked.' + (yspToCompany ? ' Yield spread on this file goes to the company.' : '') + '</div>' +
+    (btn ? '<div style="padding-top:8px">' + btn + '</div>' : '') + '</div>';
+}
+function lpSelectOption(key, ri, oi, spreadPts){
   var en = lpEntry(key);
   if (!en.data || !en.data[ri] || !en.data[ri].options || !en.data[ri].options[oi]) return;
   var r = en.data[ri], o = r.options[oi];
@@ -12445,10 +12532,11 @@ function lpSelectOption(key, ri, oi){
   var selCaps = r.compCaps || {};
   var selPts = sc.pointsCharged || 0;
   var selRtl = LP_RTL.indexOf(sc.loanType) !== -1;
-  var selYsp = (selRtl && selCaps.maxBrokerPoints != null && selPts > selCaps.maxBrokerPoints) ? Math.min(selPts - selCaps.maxBrokerPoints, selCaps.maxYsp != null ? selCaps.maxYsp : Infinity) : 0;
+  var capYsp = lpCapOver(r, selPts, selRtl);
+  var selYsp = capYsp + (selRtl && spreadPts > 0 ? spreadPts : 0);
   lead.loanAmount = o.loanAmount || r.loanAmountUsed;
   lead.rate = Math.round((o.rate + selYsp * (selCaps.yspRatePerPoint != null ? selCaps.yspRatePerPoint : 1)) * 1000) / 1000;
-  if (selYsp > 0) lead.pointsCharged = selCaps.maxBrokerPoints;
+  if (capYsp > 0) lead.pointsCharged = selCaps.maxBrokerPoints;
   lead.termMonths = sc.termMonths;
   lead.prepayTerm = sc.prepayTerm;
   var basis = lpBasis(sc);
@@ -17502,7 +17590,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }
   else if (action === "lp-run"){ lpRun(t.dataset.lp); }
-  else if (action === "lp-select"){ lpSelectOption(t.dataset.lp, parseInt(t.dataset.r, 10), parseInt(t.dataset.o, 10)); }
+  else if (action === "lp-select"){ lpSelectOption(t.dataset.lp, parseInt(t.dataset.r, 10), parseInt(t.dataset.o, 10), parseFloat(t.dataset.spread || "0") || 0); }
   else if (action === "lp-reset"){ lpResetInputs(t.dataset.lp); }
   else if (action === "lp-save-inputs"){ lpSaveInputs(t.dataset.lp); }
   else if (action === "lp-send-term-sheet"){ promptSendTermSheet(t.dataset.lp); }

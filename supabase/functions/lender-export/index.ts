@@ -26,7 +26,7 @@ const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { sta
 
 // Who may export files to lenders (Joe's rule: himself, Erika, Fiore).
 const EXPORTERS = ["owner", "proc-erika", "lo-fiore"];
-const LENDERS = ["Constructive", "RCN", "RELIP", "Kiavi", "A&D", "NextRes"];
+const LENDERS = ["Constructive", "RCN", "Kiavi", "A&D", "NextRes"];
 
 function randomToken(): string {
   const b = new Uint8Array(32);

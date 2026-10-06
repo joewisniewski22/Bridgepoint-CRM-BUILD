@@ -1355,7 +1355,7 @@ function rcnRtlModel(s: Scenario, assumptions: string[]): LenderResult {
   const pts = Math.max(0.5, 1500 / total * 100);
   rate = Math.round(rate * 100) / 100;
   assumptions.push("RCN live connection isn't set up yet — this is Bridgepoint's estimate of RCN's rehab pricing (" + "measured 2026-10-06" + "), 12-month term.");
-  return { lender: L, eligible: true, source: "model", options: [{ program: "RCN " + pts.toFixed(2) + " pts (est.)", rate, price: 100 + pts }, { program: "RCN 1.00 pt (est.)", rate: Math.round((rate - (et === 0 ? 0.5 : 0.75)) * 100) / 100, price: 101 }], loanAmountUsed: total, maxLoanAmount: total, assumptions };
+  return { lender: L, eligible: true, source: "model", options: [{ program: "RCN " + pts.toFixed(2) + " pts (est.)", rate, price: 100 + pts }, { program: "RCN 1.00 pt (est.)", rate: Math.round((rate - (et === 0 ? 0.5 : 0.75)) * 100) / 100, price: 101 }], loanAmountUsed: total, maxLoanAmount: total, assumptions, compCaps: { yspRatePerPoint: 1 } };
 }
 
 async function checkRcn(s: Scenario): Promise<LenderResult> {

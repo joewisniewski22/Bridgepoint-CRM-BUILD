@@ -14,6 +14,5 @@ window.BP_MAPS = {
   Kiavi: { host: /kiavi\.com$/, pages: [] },
   "A&D": { host: /admortgage\.com$/, pages: [] },
   Constructive: { host: null, pages: [] },
-  RELIP: { host: null, pages: [] },
   NextRes: { host: null, pages: [] },
 };
