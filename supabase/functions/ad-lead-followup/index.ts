@@ -186,7 +186,9 @@ Deno.serve(async (req: Request) => {
     const since = new Date(Date.now() - 45 * 86400000).toISOString();
     const { data: leadsData, error } = await sb.from("leads")
       .select("id,name,phone,email,loan_type,assigned_to,stage,status,source,created_at_ts,first_attempt_at,call_attempts,last_contact_at,activity,automation_paused,application_token")
-      .like("source", "Meta Ads%").gte("created_at_ts", since);
+      // "Website — …" = bplending.com forms (Deal Analyzer, quote, apply), which the Deal Analyzer
+      // ads drive to. Same intake, same recorded consent, so they get the same follow-up (Joe, 2026-10-05).
+      .or("source.like.Meta Ads*,source.like.Website*").gte("created_at_ts", since);
     if (error) throw new Error(error.message);
     const all: Row[] = leadsData || [];
     const active = all.filter((l) => l.status === "active");
