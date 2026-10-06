@@ -1,3 +1,30 @@
+/* Attribution: remember which post, ad or link brought a visitor, across pages, so a lead is tied to the real source. */
+(function(){
+  try {
+    var KEYS = ["utm_source","utm_medium","utm_campaign","utm_content","utm_term"], p = new URLSearchParams(location.search), cur = {}, any = false, s = null;
+    KEYS.forEach(function(k){ var v = p.get(k); if (v){ cur[k] = String(v).slice(0, 80); any = true; } });
+    try { s = JSON.parse(localStorage.getItem("bp_attr") || "null"); } catch (e) { s = null; }
+    var ref = ""; try { ref = document.referrer && document.referrer.indexOf(location.host) === -1 ? document.referrer.slice(0, 160) : ""; } catch (e) {}
+    if (any){
+      if (!s) s = { first: cur, firstAt: Date.now(), landing: location.pathname };
+      s.last = cur; s.lastAt = Date.now(); s.landing = s.landing || location.pathname; if (ref) s.ref = ref;
+      localStorage.setItem("bp_attr", JSON.stringify(s));
+    } else if (!s && ref){
+      localStorage.setItem("bp_attr", JSON.stringify({ first: {}, last: {}, firstAt: Date.now(), lastAt: Date.now(), landing: location.pathname, ref: ref }));
+    }
+  } catch (e) {}
+  window.bpAttr = function(){
+    var out = {}, s = null;
+    try { s = JSON.parse(localStorage.getItem("bp_attr") || "null"); } catch (e) {}
+    if (!s) return out;
+    var src = (s.last && Object.keys(s.last).length) ? s.last : (s.first || {});
+    Object.keys(src).forEach(function(k){ out[k] = src[k]; });
+    if (s.landing) out.landing = s.landing;
+    if (s.ref) out.referrer = s.ref;
+    return out;
+  };
+})();
+
 /* Small site behaviours: mobile menu, DSCR + fix & flip calculators, thank-you tracking. No dependencies. */
 (function(){
   "use strict";

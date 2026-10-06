@@ -510,7 +510,8 @@
         state: el("az-state").value, credit: el("az-credit").value, experience: el("az-exp").value, goal: "purchase",
         value: i.price, rent: i.rent, rehab: i.rehab, arv: i.arv, address: currentAddress(),
         estimate: "Deal Analyzer: " + (rep ? rep.summary : "started a " + DEALS[type].label + " analysis" + (currentAddress() ? " (pro lookup)" : "")) };
-      ["utm_source","utm_medium","utm_campaign"].forEach(function(k){ try { var v = new URLSearchParams(location.search).get(k); if (v) body[k] = v; } catch (x) {} });
+      ["utm_source","utm_medium","utm_campaign","utm_content","utm_term"].forEach(function(k){ try { var v = new URLSearchParams(location.search).get(k); if (v) body[k] = v; } catch (x) {} });
+      try { var A1 = window.bpAttr ? window.bpAttr() : {}; ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","landing","referrer"].forEach(function(k){ if (!body[k] && A1[k]) body[k] = A1[k]; }); } catch (x1) {}
       return fetch(API + "ad-lead-intake", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
         .then(function(r){ return r.json(); })
         .then(function(j){

@@ -112,6 +112,9 @@ Deno.serve(async (req: Request) => {
     const timeline = TIMELINES.indexOf(clean(b.timeline, 40)) !== -1 ? clean(b.timeline, 40) : "";
     const utm = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"].map((k) => clean(b[k], 80) ? k.replace("utm_", "") + "=" + clean(b[k], 80) : "").filter(Boolean).join(", ");
     const today = new Date().toISOString().slice(0, 10);
+    // source attribution: which post / ad / link brought this person (kept in its own table so it can be reported on)
+    const attr = { utm_source: clean(b.utm_source, 80) || null, utm_medium: clean(b.utm_medium, 80) || null, utm_campaign: clean(b.utm_campaign, 80) || null, utm_content: clean(b.utm_content, 120) || null, utm_term: clean(b.utm_term, 80) || null, landing: clean(b.landing, 160) || null, referrer: clean(b.referrer, 200) || null };
+    const logAttr = async (leadId: string, kind: string) => { if (Object.values(attr).some(Boolean)) { try { await sb.from("lead_attribution").insert({ lead_id: leadId, kind, tool: isTool ? "analyzer" : (isApply ? "apply" : "quote"), ...attr }); } catch (_) { /* never block a lead on tracking */ } } };
     const stamp = new Date().toISOString();
 
     // --- Repeat submission? Attach to the existing file, don't duplicate. ---
@@ -123,6 +126,7 @@ Deno.serve(async (req: Request) => {
       const activity = (existing.activity as unknown[]) || [];
       activity.push({ date: today, type: "note", text: "Filled out the " + loanType + " " + (isTool ? "Deal Analyzer" : channel) + " form again" + (utm ? " (" + utm + ")" : "") + " — already on file, no duplicate created", author: "System" });
       await sb.from("leads").update({ activity }).eq("id", existing.id as string);
+      await logAttr(existing.id as string, "repeat");
       if (existing.assigned_to) {
         await sb.from("notifications").insert({
           id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: existing.assigned_to, lead_id: existing.id, kind: "hot-lead",
@@ -166,6 +170,7 @@ Deno.serve(async (req: Request) => {
       row.arv = arv;
     }
     const { error } = await sb.from("leads").insert(row);
+    if (!error) await logAttr(id, "new");
     if (error) {
       console.error("ad-lead-intake: insert failed", error.message);
       return json({ error: "server_error", detail: "We couldn't save that — please try again." }, 500);

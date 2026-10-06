@@ -34,6 +34,7 @@
     var params = new URLSearchParams(location.search);
     var utm = {};
     ["utm_source","utm_medium","utm_campaign","utm_content","utm_term"].forEach(function(k){ if (params.get(k)) utm[k] = params.get(k); });
+    try { var A0 = window.bpAttr ? window.bpAttr() : {}; ["utm_source","utm_medium","utm_campaign","utm_content","utm_term"].forEach(function(k){ if (!utm[k] && A0[k]) utm[k] = A0[k]; }); if (A0.landing) utm.landing = A0.landing; if (A0.referrer) utm.referrer = A0.referrer; } catch (e0) {}
     if (!utm.utm_content) utm.utm_content = location.pathname.replace(/\/+$/, "") || "/";
 
     function steps(){
