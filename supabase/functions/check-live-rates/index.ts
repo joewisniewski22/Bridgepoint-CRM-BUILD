@@ -82,6 +82,10 @@ type LenderResult = {
   // one, maxLoanAmount is still reported where it can be found.
   loanAmountUsed?: number;
   maxLoanAmount?: number;
+  // Fix & flip / GUC: how much of the loan is the rehab/construction holdback
+  // (drawn later). Day-one advance = loan amount - this. When a lender doesn't
+  // report it, the UI assumes the full rehab budget is held back.
+  rehabHoldback?: number;
   // True when the lender's pricer couldn't be reached at all (as opposed to
   // answering "not eligible"), so the UI shows it as unavailable.
   unavailable?: boolean;
@@ -873,6 +877,7 @@ function kiaviHm(s, out, unit, st) {
     // Under 720 the cap is also $200,000 (test #2: "Rehab Cost ... must be no more than $200,000" at 698).
     let funded = Math.min(rehab, s.creditScore < 720 ? 200000 : 300000);
     if (s.creditScore < 720) funded = Math.min(funded, basis * 0.35);
+    (out as LenderResult).rehabHoldback = Math.round(funded);
     if (funded < rehab) out.assumptions.push("Kiavi funds $" + Math.round(funded).toLocaleString("en-US") + " of the $" + Math.round(rehab).toLocaleString("en-US") + " rehab" + (s.creditScore < 720 ? " (35% of purchase / $200k max under a 720 credit score)" : " ($300k max)") + "; the borrower covers the rest.");
     // 2-4 units: 85% max at 700+, 80% under 700.
     const capTier = unit === "2-4plex" ? (s.creditScore >= 700 ? 85 : 80) : 90;
@@ -1339,6 +1344,7 @@ function rcnParse(s: Scenario, j: any, assumptions: string[]): LenderResult {
   return {
     lender: L, eligible: true, source: "live", options: ladder.length ? ladder : [{ program: "RCN", rate: R.o_interest_rate * 100, price: 100 + (R.o_lender_points || 0) * 100 }],
     loanAmountUsed: R.o_loan_amount || R.o_max_loan_amount, maxLoanAmount: R.o_max_loan_amount,
+    rehabHoldback: R.o_rehab_lender_fund != null && isFinite(Number(R.o_rehab_lender_fund)) ? Math.round(Number(R.o_rehab_lender_fund)) : undefined,
     fees: { lenderFee: (R.o_closing_fees || []).reduce((a: number, f: any) => a + Number(f.amount || 0), 0) || undefined },
     assumptions, compCaps: caps,
   };

@@ -3581,6 +3581,63 @@ function sendSchedulingLink(leadId){
   ui.modal = { type:"sendPreview", leadId: leadId, kind: "scheduling" };
   render();
 }
+// "Send Deal Analyzer" (Joe 2026-10-06): hook on-the-fence investors with the
+// free analyzer on bplending.com. ref=<file id> makes their analysis land on
+// THIS file (ad-lead-intake) and pings the LO -- no duplicate, no round-robin.
+function dealAnalyzerLink(lead){
+  var lt = lead.loanType || "";
+  var type = /DSCR|Portfolio/i.test(lt) ? "rental" : /Bridge/i.test(lt) ? "bridge" : /Ground Up|Construction/i.test(lt) ? "build" : "flip";
+  var lo = docLoanOfficer(lead);
+  return "https://bplending.com/deal-analyzer/?type=" + type + "&ref=" + encodeURIComponent(lead.id) +
+    "&utm_source=crm&utm_medium=lo-share&utm_campaign=deal-analyzer-share&utm_content=" + encodeURIComponent(lo.id || "");
+}
+function dealAnalyzerMessage(lead, lang){
+  var first = (lead.name||"").split(" ")[0];
+  var lo = docLoanOfficer(lead);
+  var link = dealAnalyzerLink(lead);
+  return lang === "es"
+    ? ("Hola " + first + ", soy " + (lo.name||"su oficial de préstamos") + " de Bridgepoint Lending. Aquí está nuestro Analizador de Inversiones gratis — ponga los números de su propiedad y en un minuto verá su ganancia, el efectivo que necesita y su retorno: " + link + " Mándeme los resultados y lo revisamos juntos.")
+    : ("Hi " + first + ", it's " + (lo.name||"your loan officer") + " with Bridgepoint Lending. Here's our free Deal Analyzer — plug in your property's numbers and in about a minute you'll see your profit, cash needed, and return: " + link + " Send me the results and I'll walk through them with you.");
+}
+function dealAnalyzerSent(lead){ return (lead.activity || []).some(function(a){ return a && /^Sent the Deal Analyzer link/.test(a.text || ""); }); }
+function sendDealAnalyzer(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
+  ui.modal = { type:"sendPreview", leadId: leadId, kind: "analyzer" };
+  render();
+}
+function reallySendDealAnalyzer(leadId, channels){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (!sb){ showToast("Send service unavailable"); return; }
+  channels = channels || ["email", "text"];
+  var lo = docLoanOfficer(lead);
+  var lang = (lead.preferredLanguage||"en") === "es" ? "es" : "en";
+  var text = dealAnalyzerMessage(lead, lang);
+  var subject = lang === "es" ? "Bridgepoint Lending — Analice su inversión gratis" : "Bridgepoint Lending — Run the numbers on your deal (free)";
+  var calls = [];
+  if (channels.indexOf("email") !== -1 && lead.email){
+    calls.push(sb.functions.invoke("send-email", {
+      body: { leadId: lead.id, to: lead.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
+    }).then(function(res){ return { channel:"email", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"email", ok:false }; }));
+  }
+  if (channels.indexOf("text") !== -1 && lead.phone){
+    calls.push(sb.functions.invoke("send-text", {
+      body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name }
+    }).then(function(res){ return { channel:"text", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"text", ok:false }; }));
+  }
+  if (!calls.length){ showToast("Add an email or phone number first"); return; }
+  showToast("Sending the Deal Analyzer…");
+  Promise.all(calls).then(function(results){
+    var sentVia = results.filter(function(r){ return r.ok; }).map(function(r){ return r.channel; });
+    if (!sentVia.length){ showToast("Couldn't send — try again"); return; }
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"notify", text: "Sent the Deal Analyzer link via " + sentVia.join(" + ") + " — you'll get an alert if they run a deal", author: currentUser().name });
+    showToast("Deal Analyzer sent via " + sentVia.join(" + ") + (sentVia.length < results.length ? " (one channel failed)" : ""));
+    persist();
+  });
+}
 function reallySendSchedulingLink(leadId){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -5265,8 +5322,16 @@ function initPlacesAutocomplete(){
         var place = ac.getPlace();
         var addr = place && place.formatted_address;
         if (!addr) return;
-        input.value = addr;
-        input.dispatchEvent(new Event("input", { bubbles: true }));
+        // Clicking a suggestion blurs the box first, and the standalone pricer
+        // saves + re-renders on that blur -- so this input may already be
+        // replaced. Write to the box that's on screen now and fire "change"
+        // too, so the full address is what gets saved (Joe 2026-10-06: only
+        // the typed street was sticking).
+        var live = (input.isConnected ? input : null) ||
+          document.querySelector('input[data-action="address-lookup"][data-lead="' + (input.dataset.lead || "") + '"]') || input;
+        live.value = addr;
+        live.dispatchEvent(new Event("input", { bubbles: true }));
+        live.dispatchEvent(new Event("change", { bubbles: true }));
       });
     });
   }).catch(function(){ /* falls back to the existing single-match datalist suggestion */ });
@@ -9287,6 +9352,7 @@ function renderMobileCard(item, opts){
         : (lead.phone ? ('<a class="m-btn primary" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">📞 Call from my phone</a>') : '')) +
       mobileBtn('💬 Text', 'data-action="open-modal" data-modal="sendText" ' + id) +
       mobileBtn('✉ Email', 'data-action="compose-lead-email" ' + id) +
+      mobileBtn('📊 Deal Analyzer' + (dealAnalyzerSent(lead) ? ' ✓' : ''), 'data-action="send-deal-analyzer" ' + id) +
       mobileBtn('📝 Log call', 'data-action="open-modal" data-modal="logCall" ' + id) +
       mobileBtn('📅 Send calendar link', 'data-action="send-scheduling-link" ' + id) +
       ((!isProcessor() && canEditApplication(lead)) ? mobileBtn('📄 Send app' + (lead.applicationSentAt ? ' ✓' : ''), 'data-action="open-modal" data-modal="sendApplication" ' + id) : '') +
@@ -12258,6 +12324,16 @@ function lpRenderResults(key){
     var srcBadge = r.source === "model" ? ' <span class="badge badge-neutral" title="Bridgepoint\'s researched copy of this lender\'s pricing, not a live quote">Estimate</span>' : (r.source === "live" ? ' <span class="badge badge-forest">Live</span>' : '');
     var summary = '<div style="padding:10px 0 4px"><span style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-muted)">' + (r.maxLoanAmount && r.maxLoanAmount === amt ? "Maximum loan" : "Priced at") + '</span> <b class="mono" style="font-size:20px">' + fmtUSD(amt) + '</b>' + srcBadge + '<span class="footnote">' + ltvTxt + (r.fees && r.fees.lenderFee != null ? " · lender fee " + fmtUSD(r.fees.lenderFee) : "") + '</span></div>' +
       (capOver > 0 || capLost > 0 ? '<div class="footnote" style="padding:2px 0 6px;color:var(--c-gold-ink, #8a6d1f)">' + esc(label) + ' caps broker points at ' + caps.maxBrokerPoints + '% — ' + (capOver > 0 ? ('the other ' + (Math.round(capOver * 1000) / 1000) + ' pt' + (capOver === 1 ? '' : 's') + ' of your fee ' + (capOver === 1 ? 'is' : 'are') + ' earned as yield spread, so the borrower\'s rate below includes +' + (Math.round(yspRateAdd * 1000) / 1000) + '%.') : '') + (capLost > 0 ? (' ' + (Math.round(capLost * 1000) / 1000) + ' pts can\'t be earned here (yield spread maxes out at ' + caps.maxYsp + '%).') : '') + (yspToCompany && capOver > 0 ? ' Yield spread on this file goes to the company.' : '') + '</div>' : '');
+    // Day-one advance on fix & flip / bridge / GUC (Joe 2026-10-06): loan minus
+    // the rehab holdback. Lenders that report their holdback (Kiavi, RCN) use
+    // theirs; otherwise the full rehab budget is assumed held back.
+    var rehabIn = sc.loanType === "Bridge" ? 0 : (sc.rehabBudget || 0);
+    var dayBasis = (sc.transactionType !== "purchase" && sc.currentValue) ? sc.currentValue : sc.purchasePrice;
+    var holdFor = function(a){ return Math.max(0, Math.min(r.rehabHoldback != null ? r.rehabHoldback : rehabIn, a || 0)); };
+    var dayOne = function(a){ return Math.max(0, (a || 0) - holdFor(a)); };
+    var dayPct = function(a){ return dayBasis ? (Math.round(dayOne(a) / dayBasis * 1000) / 10) + "% of " + (sc.transactionType !== "purchase" && sc.currentValue ? "as-is value" : "purchase") : ""; };
+    if (rtl && amt) summary += '<div class="footnote" style="padding:0 0 6px"><b>Day one: ' + fmtUSD(Math.round(dayOne(amt))) + '</b>' + (dayBasis ? ' (' + dayPct(amt) + ')' : '') +
+      (holdFor(amt) > 0 ? ' + ' + fmtUSD(Math.round(holdFor(amt))) + ' rehab holdback' + (r.rehabHoldback == null ? ' (assumes 100% of rehab funded)' : (r.rehabHoldback < rehabIn ? ' — lender funds only part of the ' + fmtUSD(rehabIn) + ' rehab' : '')) : '') + '</div>';
     var perOptionAmounts = (r.options || []).some(function(o){ return o.loanAmount && o.loanAmount !== amt; });
     var rows = (r.options || []).map(function(o, oi){
       var oAmt = o.loanAmount || amt;
@@ -12265,7 +12341,7 @@ function lpRenderResults(key){
       var io = rtl || /\(IO\)$/.test(o.program);
       var pmt = io ? interestOnlyPayment(oAmt, oRate) : monthlyPayment(oAmt, oRate, sc.termMonths);
       var applied = en.selected && en.selected.ri === ri && en.selected.oi === oi;
-      var cells = (perOptionAmounts ? '<td class="num mono">' + fmtUSD(oAmt) + '</td>' : '') + '<td class="num">' + oRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%' + (r.rateTolerance ? '<span class="footnote" title="Estimate: the lender\'s exact rate may be up to ' + r.rateTolerance + '% higher or lower — confirm before quoting"> ±' + (r.rateTolerance === 0.125 ? '⅛' : r.rateTolerance) + '</span>' : '') + '</td><td class="num">' + (pmt ? fmtUSD(Math.round(pmt)) : "—") + '</td>';
+      var cells = (perOptionAmounts ? '<td class="num mono">' + fmtUSD(oAmt) + '</td>' + (rtl ? '<td class="num mono" title="' + esc(dayPct(oAmt)) + '">' + fmtUSD(Math.round(dayOne(oAmt))) + '</td>' : '') : '') + '<td class="num">' + oRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%' + (r.rateTolerance ? '<span class="footnote" title="Estimate: the lender\'s exact rate may be up to ' + r.rateTolerance + '% higher or lower — confirm before quoting"> ±' + (r.rateTolerance === 0.125 ? '⅛' : r.rateTolerance) + '</span>' : '') + '</td><td class="num">' + (pmt ? fmtUSD(Math.round(pmt)) : "—") + '</td>';
       if (rtl){
         var lenderPts = Math.round((o.price - 100) * 1000) / 1000;
         var yourPts = points - capLost;
@@ -12291,7 +12367,7 @@ function lpRenderResults(key){
       var badges = (isPar ? '<span class="badge badge-gold">Best par rate</span> ' : '') + (oi === best ? '<span class="badge badge-forest">Best for us</span>' : '');
       return '<tr' + rowBg + '><td>' + badges + '</td>' + cells + '<td>' + pickBtn + '</td></tr>';
     }).join("");
-    var loanHead = perOptionAmounts ? '<th class="num">Loan</th>' : '';
+    var loanHead = perOptionAmounts ? '<th class="num">Loan</th>' + (rtl ? '<th class="num">Day one</th>' : '') : '';
     var heads = rtl
       ? '<th></th>' + loanHead + '<th class="num">Rate</th><th class="num">Payment (IO)</th><th class="num">Lender points</th><th class="num">Total points $</th><th></th>'
       : '<th></th>' + loanHead + '<th class="num">Rate</th><th class="num">Payment</th><th class="num">Price</th><th class="num">YSP</th><th class="num">DSCR</th><th class="num">Est. revenue</th><th></th>';
@@ -13036,6 +13112,7 @@ function renderRail(lead){
         '<button class="btn btn-sm" data-action="dialer-call" data-lead="' + lead.id + '" title="Calls ' + esc(lead.name) + ' straight through your computer">📞 Call</button>' +
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<button class="btn btn-sm" type="button" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline">Email</button>' +
+        '<button class="btn btn-sm" type="button" data-action="send-deal-analyzer" data-lead="' + lead.id + '" title="Texts and emails them the free Deal Analyzer — if they run a deal, it lands on this file and you get an alert">📊 Send Deal Analyzer' + (dealAnalyzerSent(lead) ? ' ✓' : '') + '</button>' +
         '<button class="btn btn-sm" data-action="send-scheduling-link" data-lead="' + lead.id + '" title="Sends your personal booking link by email and text so they can grab a time with you directly">📅 Schedule Appointment</button>' +
         // Always visible, regardless of stage or role -- separate from
         // "Take Application by Phone" below, which is the edit action and
@@ -15044,6 +15121,12 @@ function modalSendPreview(leadId, kind){
     emailBody = "Hi " + firstNameSched + ", you can grab a time on my calendar directly here, whatever works best for you: " + schedLink;
     smsMsg = emailBody;
     showPdfBtn = false;
+  } else if (kind === "analyzer"){
+    title = "Preview — Send Deal Analyzer";
+    subject = "Bridgepoint Lending — Run the numbers on your deal (free)";
+    emailBody = dealAnalyzerMessage(lead, "en");
+    smsMsg = emailBody;
+    showPdfBtn = false;
   } else {
     var isTerm = kind === "termSheet";
     var label = isTerm ? "Term Sheet" : "Pre-Approval Letter";
@@ -15069,7 +15152,7 @@ function modalSendPreview(leadId, kind){
         (showPdfBtn ? '<div class="form-row"><button class="btn btn-sm" type="button" data-action="preview-document-pdf" data-lead="' + lead.id + '" data-kind="' + kind + '">View Exact PDF</button></div>' : '') +
       '</div>' +
       '<div class="modal-foot" style="flex-wrap:wrap"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button>' +
-        (kind === "portal"
+        ((kind === "portal" || kind === "analyzer")
           ? (
               '<button class="btn" type="button" data-action="confirm-send-preview" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channels="email"' + (lead.email ? '' : ' disabled') + '>Email It</button>' +
               '<button class="btn" type="button" data-action="confirm-send-preview" data-lead="' + lead.id + '" data-kind="' + kind + '" data-channels="text"' + (lead.phone ? '' : ' disabled') + '>Text It</button>' +
@@ -17564,6 +17647,7 @@ appEl.addEventListener("click", function(e){
     var csKind = t.dataset.kind;
     if (csKind === "portal") reallySendBorrowerPortalInvite(t.dataset.lead, t.dataset.channels ? t.dataset.channels.split(",") : null);
     else if (csKind === "scheduling") reallySendSchedulingLink(t.dataset.lead);
+    else if (csKind === "analyzer") reallySendDealAnalyzer(t.dataset.lead, t.dataset.channels ? t.dataset.channels.split(",") : null);
     else reallySendDocumentBoth(t.dataset.lead, csKind);
     ui.modal = null;
     render();
@@ -17587,6 +17671,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "order-credit"){ logCreditOrder(t.dataset.lead); }
   else if (action === "send-borrower-portal"){ sendBorrowerPortalInvite(t.dataset.lead); }
   else if (action === "send-scheduling-link"){ sendSchedulingLink(t.dataset.lead); }
+  else if (action === "send-deal-analyzer"){ sendDealAnalyzer(t.dataset.lead); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }

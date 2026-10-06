@@ -117,6 +117,30 @@ Deno.serve(async (req: Request) => {
     const logAttr = async (leadId: string, kind: string) => { if (Object.values(attr).some(Boolean)) { try { await sb.from("lead_attribution").insert({ lead_id: leadId, kind, tool: isTool ? "analyzer" : (isApply ? "apply" : "quote"), ...attr }); } catch (_) { /* never block a lead on tracking */ } } };
     const stamp = new Date().toISOString();
 
+    // --- Sent from the CRM ("Send Deal Analyzer", Joe 2026-10-06)? ----------
+    // The link carries ?ref=<file id>. If the phone or email matches that file
+    // (any age), attach the analysis there and ping its LO -- never a new file
+    // and never re-routed by round-robin.
+    const ref = clean(b.ref, 40);
+    if (ref) {
+      const { data: refLead } = await sb.from("leads").select("id,name,phone,email,activity,assigned_to").eq("id", ref).maybeSingle();
+      const same = refLead && ((((refLead.phone as string) || "").replace(/\D/g, "").slice(-10) === phoneDigits) || (!!refLead.email && (refLead.email as string).toLowerCase() === email));
+      if (refLead && same) {
+        const summary = clean(b.estimate, 300);
+        const activity = (refLead.activity as unknown[]) || [];
+        activity.push({ date: today, type: "note", text: "Ran the Deal Analyzer from the link you sent" + (summary ? " — " + summary : "") + (num(b.value) ? " (price " + num(b.value) + (num(b.rehab) ? ", rehab " + num(b.rehab) : "") + (num(b.arv) ? ", ARV " + num(b.arv) : "") + (num(b.rent) ? ", rent " + num(b.rent) : "") + ")" : ""), author: "System" });
+        await sb.from("leads").update({ activity }).eq("id", refLead.id as string);
+        await logAttr(refLead.id as string, "crm-share");
+        if (refLead.assigned_to) {
+          await sb.from("notifications").insert({
+            id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: refLead.assigned_to, lead_id: refLead.id, kind: "hot-lead",
+            text: (refLead.name as string) + " just ran a deal in the Deal Analyzer you sent — call them while it's fresh", date: today, read: false,
+          });
+        }
+        return json({ ok: true, repeat: true, leadId: isTool ? (refLead.id as string) : undefined });
+      }
+    }
+
     // --- Repeat submission? Attach to the existing file, don't duplicate. ---
     const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
     const { data: recent } = await sb.from("leads").select("id,name,phone,email,activity,assigned_to,status,application_token").gte("created_at", since);

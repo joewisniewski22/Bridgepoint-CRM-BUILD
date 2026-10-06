@@ -323,7 +323,9 @@
       '<input id="az-' + group + k + '" data-k="' + k + '" data-g="' + group + '" inputmode="decimal" value="' + (t === "usd" ? Number(def).toLocaleString("en-US") : def) + '">' + (t === "pct" ? '<span class="az-u r">%</span>' : "") + '</div></div>';
   }
   function init(root){
-    var type = "flip", touchedRate = false, ballpark = null, lastReport = null, jsPdfPromise = null, logoPromise = null;
+    // ?type=rental etc. opens that tab (the CRM's "Send Deal Analyzer" link sets it from the file's loan type).
+    var qsType = (function(){ try { return new URLSearchParams(location.search).get("type"); } catch (x) { return null; } })();
+    var type = DEALS[qsType] ? qsType : "flip", touchedRate = false, ballpark = null, lastReport = null, jsPdfPromise = null, logoPromise = null;
     var saved = {}; try { saved = JSON.parse(localStorage.getItem("bp_az_contact") || "{}"); } catch (e) {}
     var tabs = Object.keys(DEALS).map(function(k){ return '<button type="button" class="az-tab" data-type="' + k + '">' + DEALS[k].label + '</button>'; }).join("");
     root.innerHTML =
@@ -510,7 +512,7 @@
         state: el("az-state").value, credit: el("az-credit").value, experience: el("az-exp").value, goal: "purchase",
         value: i.price, rent: i.rent, rehab: i.rehab, arv: i.arv, address: currentAddress(),
         estimate: "Deal Analyzer: " + (rep ? rep.summary : "started a " + DEALS[type].label + " analysis" + (currentAddress() ? " (pro lookup)" : "")) };
-      ["utm_source","utm_medium","utm_campaign","utm_content","utm_term"].forEach(function(k){ try { var v = new URLSearchParams(location.search).get(k); if (v) body[k] = v; } catch (x) {} });
+      ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","ref"].forEach(function(k){ try { var v = new URLSearchParams(location.search).get(k); if (v) body[k] = v; } catch (x) {} });
       try { var A1 = window.bpAttr ? window.bpAttr() : {}; ["utm_source","utm_medium","utm_campaign","utm_content","utm_term","landing","referrer"].forEach(function(k){ if (!body[k] && A1[k]) body[k] = A1[k]; }); } catch (x1) {}
       return fetch(API + "ad-lead-intake", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
         .then(function(r){ return r.json(); })
