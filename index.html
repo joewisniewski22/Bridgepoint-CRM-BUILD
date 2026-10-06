@@ -12172,9 +12172,19 @@ function lpRenderResults(key){
       if (!bestPar || o.rate < bestPar.rate || (o.rate === bestPar.rate && o.price < bestPar.price)) bestPar = { ri: ri, oi: oi, rate: o.rate, price: o.price };
     });
   });
+  // Yield spread goes to the LO only for Joe and Fiore (Joe 2026-10-06);
+  // on everyone else's files the company keeps it.
+  var fileLo = lpIsStandalone(key) ? currentUser().id : (leadOrNull(key) || {}).assignedTo;
+  var yspToCompany = !(fileLo === "owner" || fileLo === "lo-fiore");
   var cards = en.data.map(function(r, ri){
     var label = canSee ? r.lender : ("Lender " + letters.charAt(ri));
     var amt = r.loanAmountUsed;
+    var caps = r.compCaps || {};
+    // Points above the lender's cap (Kiavi: 3) can only be earned as yield
+    // spread, which raises the borrower's rate. capOver = points that move to YSP.
+    var capOver = (rtl && caps.maxBrokerPoints != null && points > caps.maxBrokerPoints) ? Math.min(points - caps.maxBrokerPoints, caps.maxYsp != null ? caps.maxYsp : Infinity) : 0;
+    var capLost = (rtl && caps.maxBrokerPoints != null && points > caps.maxBrokerPoints) ? Math.max(0, points - caps.maxBrokerPoints - capOver) : 0;
+    var yspRateAdd = capOver * (caps.yspRatePerPoint != null ? caps.yspRatePerPoint : 1);
     var best = -1;
     if (r.eligible && !rtl) (r.options || []).forEach(function(o, oi){ if (best === -1 || o.price > r.options[best].price) best = oi; });
     var head = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div class="rail-title" style="margin:0">' + esc(label) + '</div>' +
@@ -12183,20 +12193,26 @@ function lpRenderResults(key){
       return '<div class="panel panel-pad" style="margin-top:12px">' + head + '<div class="footnote" style="padding-top:8px;color:' + (r.unavailable ? 'var(--ink-muted)' : 'var(--c-rust)') + '">' + esc(canSee || !r.unavailable ? (r.reason || "Doesn't fit this lender's guidelines.") : "Not available right now.") + '</div></div>';
     }
     var ltvTxt = (basis && amt && !rtl) ? (" · " + (Math.round(amt / basis * 1000) / 10) + "% LTV") : "";
-    var summary = '<div style="padding:10px 0 4px"><span style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-muted)">' + (r.maxLoanAmount && r.maxLoanAmount === amt ? "Maximum loan" : "Priced at") + '</span> <b class="mono" style="font-size:20px">' + fmtUSD(amt) + '</b><span class="footnote">' + ltvTxt + (r.fees && r.fees.lenderFee != null ? " · lender fee " + fmtUSD(r.fees.lenderFee) : "") + '</span></div>';
+    var srcBadge = r.source === "model" ? ' <span class="badge badge-neutral" title="Bridgepoint\'s researched copy of this lender\'s pricing, not a live quote">Estimate</span>' : (r.source === "live" ? ' <span class="badge badge-forest">Live</span>' : '');
+    var summary = '<div style="padding:10px 0 4px"><span style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-muted)">' + (r.maxLoanAmount && r.maxLoanAmount === amt ? "Maximum loan" : "Priced at") + '</span> <b class="mono" style="font-size:20px">' + fmtUSD(amt) + '</b>' + srcBadge + '<span class="footnote">' + ltvTxt + (r.fees && r.fees.lenderFee != null ? " · lender fee " + fmtUSD(r.fees.lenderFee) : "") + '</span></div>' +
+      (capOver > 0 || capLost > 0 ? '<div class="footnote" style="padding:2px 0 6px;color:var(--c-gold-ink, #8a6d1f)">' + esc(label) + ' caps broker points at ' + caps.maxBrokerPoints + '% — ' + (capOver > 0 ? ('the other ' + (Math.round(capOver * 1000) / 1000) + ' pt' + (capOver === 1 ? '' : 's') + ' of your fee ' + (capOver === 1 ? 'is' : 'are') + ' earned as yield spread, so the borrower\'s rate below includes +' + (Math.round(yspRateAdd * 1000) / 1000) + '%.') : '') + (capLost > 0 ? (' ' + (Math.round(capLost * 1000) / 1000) + ' pts can\'t be earned here (yield spread maxes out at ' + caps.maxYsp + '%).') : '') + (yspToCompany && capOver > 0 ? ' Yield spread on this file goes to the company.' : '') + '</div>' : '');
+    var perOptionAmounts = (r.options || []).some(function(o){ return o.loanAmount && o.loanAmount !== amt; });
     var rows = (r.options || []).map(function(o, oi){
+      var oAmt = o.loanAmount || amt;
+      var oRate = Math.round((o.rate + yspRateAdd) * 1000) / 1000;
       var io = rtl || /\(IO\)$/.test(o.program);
-      var pmt = io ? interestOnlyPayment(amt, o.rate) : monthlyPayment(amt, o.rate, sc.termMonths);
+      var pmt = io ? interestOnlyPayment(oAmt, oRate) : monthlyPayment(oAmt, oRate, sc.termMonths);
       var applied = en.selected && en.selected.ri === ri && en.selected.oi === oi;
-      var cells = '<td class="num">' + o.rate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%</td><td class="num">' + (pmt ? fmtUSD(Math.round(pmt)) : "—") + '</td>';
+      var cells = (perOptionAmounts ? '<td class="num mono">' + fmtUSD(oAmt) + '</td>' : '') + '<td class="num">' + oRate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%</td><td class="num">' + (pmt ? fmtUSD(Math.round(pmt)) : "—") + '</td>';
       if (rtl){
         var lenderPts = Math.round((o.price - 100) * 1000) / 1000;
-        cells += '<td class="num">' + lenderPts + ' pt' + (lenderPts === 1 ? "" : "s") + ' to lender</td><td class="num">' + fmtUSD(Math.round(amt * (points + lenderPts) / 100)) + '</td>';
+        var yourPts = points - capLost;
+        cells += '<td class="num">' + lenderPts + ' pt' + (lenderPts === 1 ? "" : "s") + ' to lender</td><td class="num">' + fmtUSD(Math.round(oAmt * (yourPts + lenderPts) / 100)) + '</td>';
       } else {
         var ysp = Math.round((o.price - 100) * 1000) / 1000;
-        var yspDollar = Math.round(ysp / 100 * amt);
+        var yspDollar = Math.round(ysp / 100 * oAmt);
         cells += '<td class="num">' + o.price.toFixed(3) + '</td><td class="num" style="color:' + (ysp < 0 ? 'var(--c-rust)' : 'inherit') + '">' + (ysp > 0 ? "+" : "") + ysp.toFixed(3) + ' (' + fmtUSD(yspDollar) + ')</td>' +
-          '<td class="num">' + (o.dscr != null ? o.dscr.toFixed(2) + "x" : "—") + '</td><td class="num">' + fmtUSD(Math.round(amt * points / 100) + yspDollar) + '</td>';
+          '<td class="num">' + (o.dscr != null ? o.dscr.toFixed(2) + "x" : "—") + '</td><td class="num">' + fmtUSD(Math.round(oAmt * points / 100) + yspDollar) + '</td>';
       }
       var pickBtn = (lpIsStandalone(key) || canEditApplication(leadOrNull(key)))
         ? '<button class="btn btn-sm' + (applied ? '' : ' btn-primary') + '" type="button" data-action="lp-select" data-lp="' + esc(key) + '" data-r="' + ri + '" data-o="' + oi + '">' + (applied ? "Applied ✓" : (lpIsStandalone(key) ? "Use this" : "Apply to file")) + '</button>' : '';
@@ -12205,9 +12221,10 @@ function lpRenderResults(key){
       var badges = (isPar ? '<span class="badge badge-gold">Best par rate</span> ' : '') + (oi === best ? '<span class="badge badge-forest">Best for us</span>' : '');
       return '<tr' + rowBg + '><td>' + badges + '</td>' + cells + '<td>' + pickBtn + '</td></tr>';
     }).join("");
+    var loanHead = perOptionAmounts ? '<th class="num">Loan</th>' : '';
     var heads = rtl
-      ? '<th></th><th class="num">Rate</th><th class="num">Payment (IO)</th><th class="num">Lender points</th><th class="num">Total points $</th><th></th>'
-      : '<th></th><th class="num">Rate</th><th class="num">Payment</th><th class="num">Price</th><th class="num">YSP</th><th class="num">DSCR</th><th class="num">Est. revenue</th><th></th>';
+      ? '<th></th>' + loanHead + '<th class="num">Rate</th><th class="num">Payment (IO)</th><th class="num">Lender points</th><th class="num">Total points $</th><th></th>'
+      : '<th></th>' + loanHead + '<th class="num">Rate</th><th class="num">Payment</th><th class="num">Price</th><th class="num">YSP</th><th class="num">DSCR</th><th class="num">Est. revenue</th><th></th>';
     var assumptions = (canSee && r.assumptions && r.assumptions.length) ? '<div class="footnote" style="padding-top:8px">Assumed: ' + r.assumptions.map(esc).join(" · ") + '</div>' : '';
     return '<div class="panel panel-pad" style="margin-top:12px">' + head + summary +
       '<div class="table-wrap"><table style="white-space:nowrap"><thead><tr>' + heads + '</tr></thead><tbody>' + rows + '</tbody></table></div>' + assumptions + '</div>';
@@ -12218,10 +12235,60 @@ function lpRenderResults(key){
     : 'Best par rate is the lowest rate across all lenders that still prices at 100 or better — no points cost to the borrower. Price is the lender\'s own price for that rate: above 100 earns yield spread, below 100 costs points. Est. revenue = your ' + points + '% origination + yield spread (negative if priced below par). "Best for us" is the highest-price option — not necessarily the lowest rate for the borrower.') +
     ' Checked live ' + (en.ranAt ? new Date(en.ranAt).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "") + '.</div>';
   var banner = stale ? '<div class="hint" style="color:var(--c-rust);padding:10px 0 0">You\'ve changed something since these were checked — check live rates again to refresh them.</div>' : '';
-  var none = anyEligible ? '' : '<div class="hint" style="padding:10px 0 0">No lender fits this scenario as entered — the reasons are listed below. Adjust the deal above and check again.</div>';
-  return banner + none + cards + footer;
+  var none = '';
+  if (!anyEligible){
+    // Joe 2026-10-06: if NO lender we use will do the deal, say so plainly and
+    // say what would change that.
+    var reasons = en.data.filter(function(r){ return !r.unavailable && r.reason; }).map(function(r, i){ return (canSee ? r.lender : ("Lender " + letters.charAt(en.data.indexOf(r)))) + ": " + r.reason; });
+    var tips = lpViabilityTips(sc, en.data);
+    none = '<div class="panel panel-pad" style="margin-top:12px;border:2px solid var(--c-rust);background:var(--c-rust-bg, #fbeee9)">' +
+      '<div class="rail-title" style="margin:0;color:var(--c-rust)">⚠ This deal isn\'t viable as submitted</div>' +
+      '<div class="footnote" style="padding-top:6px">None of our lenders will do this scenario as entered.</div>' +
+      (tips.length ? '<div style="padding-top:8px"><b>What could make it work:</b><ul style="margin:4px 0 0 18px">' + tips.map(function(t){ return '<li>' + esc(t) + '</li>'; }).join("") + '</ul></div>' : '') +
+      (reasons.length ? '<div class="footnote" style="padding-top:8px">' + reasons.map(esc).join("<br>") + '</div>' : '') +
+      '</div>';
+  }
+  var best = anyEligible ? lpBestTerms(en.data, rtl, canSee, letters) : '';
+  return banner + none + best + cards + footer;
 }
 function leadOrNull(key){ return lpIsStandalone(key) ? null : leadById(key); }
+// Plain-language fixes for a scenario no lender takes, read from the
+// lenders' own reasons plus the obvious levers (credit, leverage, rehab size).
+function lpViabilityTips(sc, results){
+  var tips = [];
+  var all = results.map(function(r){ return String(r.reason || ""); }).join(" | ").toLowerCase();
+  if (sc.creditScore && sc.creditScore < 680 && /credit|fico/.test(all)) tips.push("Credit is the main blocker — most of our lenders need 650–680+ (" + sc.creditScore + " entered). A co-guarantor with stronger credit, or credit repair first.");
+  if (/ltc|loan-to-cost|leverage|ltv|arv/.test(all)) tips.push("Ask for less leverage — a bigger down payment (lower loan-to-cost) or a higher, supportable ARV.");
+  if (/rehab|holdback/.test(all)) tips.push("Scale the rehab budget down or have the borrower fund part of it.");
+  if (/minimum|100,000|\$100k/.test(all)) tips.push("The loan is under the $100,000 minimum most of our lenders have.");
+  if (/dscr|rent/.test(all)) tips.push("The rent doesn't cover the payment — a lower loan amount, a longer prepay, or interest-only can raise the DSCR.");
+  if (/not approved|doesn't lend|don't lend|isn't approved|state/.test(all)) tips.push("This state or property type is outside what our lenders cover.");
+  if (/experience|tier/.test(all)) tips.push("More completed projects would open more programs — or pair the borrower with an experienced partner on the entity.");
+  if (!tips.length) tips.push("Check the inputs above — each lender's reason is listed below.");
+  return tips;
+}
+// One-line summary across lenders: lowest rate and highest loan. Lender names
+// stay masked for anyone who can't see outside-lender placement.
+function lpBestTerms(results, rtl, canSee, letters){
+  var lowest = null, biggest = null;
+  results.forEach(function(r, ri){
+    if (!r.eligible) return;
+    (r.options || []).forEach(function(o){
+      var amt = o.loanAmount || r.loanAmountUsed || 0;
+      if (!rtl && o.price < 100 - 0.0005) return;
+      if (!lowest || o.rate < lowest.rate) lowest = { rate: o.rate, amt: amt, ri: ri };
+      if (!biggest || amt > biggest.amt || (amt === biggest.amt && o.rate < biggest.rate)) biggest = { rate: o.rate, amt: amt, ri: ri };
+    });
+  });
+  if (!lowest) return '';
+  var nm = function(ri){ return canSee ? results[ri].lender : ("Lender " + letters.charAt(ri)); };
+  return '<div class="panel panel-pad" style="margin-top:12px;background:var(--c-forest-bg)">' +
+    '<div class="rail-title" style="margin:0">Best terms for this deal</div>' +
+    '<div style="display:flex;gap:24px;flex-wrap:wrap;padding-top:6px">' +
+      '<div><span class="footnote">Lowest rate</span><br><b class="mono">' + lowest.rate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '%</b> <span class="footnote">on ' + fmtUSD(lowest.amt) + ' · ' + esc(nm(lowest.ri)) + '</span></div>' +
+      '<div><span class="footnote">Most leverage</span><br><b class="mono">' + fmtUSD(biggest.amt) + '</b> <span class="footnote">at ' + biggest.rate.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + '% · ' + esc(nm(biggest.ri)) + '</span></div>' +
+    '</div><div class="footnote" style="padding-top:6px">Lower leverage usually buys a lower rate — every option is listed below; pick the one that fits the borrower.</div></div>';
+}
 
 function renderLivePricerPanel(key){
   var en = lpEntry(key);
@@ -12298,8 +12365,15 @@ function lpSelectOption(key, ri, oi){
   Object.keys(en.edits).forEach(function(k){ if (LP_SAVE_KEYS.indexOf(k) !== -1) lead[k] = en.edits[k]; });
   syncUnitTotal(lead);
   en.edits = {};
-  lead.loanAmount = r.loanAmountUsed;
-  lead.rate = o.rate;
+  // Same cap logic as lpRenderResults: points over the lender's broker-point
+  // cap become yield spread, which is baked into the borrower's rate.
+  var selCaps = r.compCaps || {};
+  var selPts = sc.pointsCharged || 0;
+  var selRtl = LP_RTL.indexOf(sc.loanType) !== -1;
+  var selYsp = (selRtl && selCaps.maxBrokerPoints != null && selPts > selCaps.maxBrokerPoints) ? Math.min(selPts - selCaps.maxBrokerPoints, selCaps.maxYsp != null ? selCaps.maxYsp : Infinity) : 0;
+  lead.loanAmount = o.loanAmount || r.loanAmountUsed;
+  lead.rate = Math.round((o.rate + selYsp * (selCaps.yspRatePerPoint != null ? selCaps.yspRatePerPoint : 1)) * 1000) / 1000;
+  if (selYsp > 0) lead.pointsCharged = selCaps.maxBrokerPoints;
   lead.termMonths = sc.termMonths;
   lead.prepayTerm = sc.prepayTerm;
   var basis = lpBasis(sc);
@@ -12312,6 +12386,7 @@ function lpSelectOption(key, ri, oi){
   lead.guidelineCheck = Object.assign({}, lead.guidelineCheck || {}, { pricerTerms: {
     lender: r.lender, inHouse: isInHouse, program: o.program, loanAmount: lead.loanAmount, rate: lead.rate,
     price: sc.loanType === "DSCR" ? o.price : null, maxLoanAmount: r.maxLoanAmount || r.loanAmountUsed,
+    yspPoints: selYsp || null, source: r.source || null,
     appliedAt: todayISO(), appliedBy: currentUser().name
   } });
   refreshGuidelineCheck(lead);
