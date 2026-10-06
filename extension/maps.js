@@ -145,7 +145,16 @@
       const g = p.borrower.guarantor || {}, ent = p.borrower.entityName || "";
       const sel = document.querySelector('input[id^="bedrock-select-input"]');
       const existing = ent && await H.comboPick(sel, (t) => H.norm(t).startsWith(H.norm(ent + " (Entity)")));
-      if (existing) { res.filled.push("existing Kiavi entity: " + ent); }
+      if (existing) {
+        res.filled.push("existing Kiavi entity: " + ent);
+        // An existing entity then asks which guarantor: reuse theirs, or create the file's guarantor.
+        await H.sleep(800);
+        const gsel = Array.from(document.querySelectorAll('input[id^="bedrock-select-input"]')).filter((e) => e.offsetParent !== null)[1];
+        const gname = [g.firstName, g.lastName].filter(Boolean).join(" ");
+        const gotG = gsel && gname && await H.comboPick(gsel, (t) => H.norm(t).startsWith(H.norm(gname + " (Individual)")));
+        if (gotG) res.filled.push("existing guarantor: " + gname);
+        else if (gsel) { await H.comboPick(gsel, "-- Create New Guarantor --"); await H.sleep(600); res.filled.push("new guarantor"); }
+      }
       else {
         await H.comboPick(sel, "-- Create New Entity --");
         await H.sleep(800);
