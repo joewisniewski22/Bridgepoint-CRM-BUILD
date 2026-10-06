@@ -11652,6 +11652,66 @@ function renderOutsideLenderFitBox(lead){
 var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes"];
 function canManageOutsideLender(){ return ui.viewAs==="owner" || ui.viewAs==="lo-fiore" || ui.viewAs==="proc-erika"; }
 function canViewOutsideLender(){ return canManageOutsideLender(); }
+/* ---------------------------------------------------------------------
+   Export to Lender (Joe 2026-10-06). Joe/Erika/Fiore pick a lender; the
+   lender-export edge function issues a one-time token; the Bridgepoint
+   Lender Export Chrome extension (content script on this site) picks it up
+   via postMessage, opens the lender's portal, and after the staff member
+   logs in it fills the application and uploads documents from the package.
+   A person always reviews and clicks the lender's Submit. Lender maps live
+   in the extension (one per lender); a lender without a map yet still gets
+   the package side panel (copy fields, download each document).
+--------------------------------------------------------------------- */
+var LENDER_EXPORT_TARGETS = [
+  { key:"Constructive", label:"Constructive Capital", portal:null },
+  { key:"RCN", label:"RCN Capital", portal:"https://broker.commerciallendingservicesllc.com/loans/loan-applications" },
+  { key:"RELIP", label:"RELIP", portal:null },
+  { key:"Kiavi", label:"Kiavi", portal:"https://app.kiavi.com/loans/new" },
+  { key:"A&D", label:"A&D Mortgage", portal:"https://aim.admortgage.com/home" },
+  { key:"NextRes", label:"NextRes", portal:null }
+];
+function renderLenderExportPanel(lead){
+  ui.lenderExport = ui.lenderExport || {};
+  var st = ui.lenderExport[lead.id];
+  if (!st || !st.open) return '';
+  var btns = LENDER_EXPORT_TARGETS.map(function(t){
+    return '<button class="btn btn-sm" type="button" data-action="lender-export-go" data-lead="' + lead.id + '" data-lender="' + esc(t.key) + '"' + (st.busy ? ' disabled' : '') + '>' + esc(t.label) + '</button>';
+  }).join("");
+  var msg = st.msg ? '<div class="footnote" style="padding-top:6px">' + st.msg + '</div>' : '';
+  return '<div class="panel panel-pad" style="margin:-4px 0 12px;background:var(--c-forest-bg)">' +
+    '<div class="rail-title" style="margin:0 0 6px">Export to which lender?</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap">' + (lead.outsideLender ? '' : '') + btns + '</div>' +
+    '<div class="footnote" style="padding-top:6px">A new tab opens on the lender\'s site. Log in like normal — the Bridgepoint extension fills the application and uploads the documents. Review everything, then submit on the lender\'s site yourself. SSNs and bank account numbers are never sent; type those on the lender\'s form.</div>' +
+    msg + '</div>';
+}
+function lenderExportGo(leadId, lenderKey){
+  var lead = leadById(leadId);
+  var target = LENDER_EXPORT_TARGETS.filter(function(t){ return t.key === lenderKey; })[0];
+  if (!lead || !target || !sb || !canManageOutsideLender()) return;
+  var st = ui.lenderExport[leadId] = ui.lenderExport[leadId] || { open:true };
+  st.busy = true; st.msg = "Preparing the " + esc(target.label) + " package…"; render();
+  sb.functions.invoke("lender-export", { body: { action:"create", leadId: leadId, lender: lenderKey } }).then(function(res){
+    st.busy = false;
+    if (res.error || !res.data || !res.data.token){ st.msg = '<span style="color:var(--c-rust)">Couldn\'t create the export — ' + esc((res.data && res.data.detail) || "try again") + '</span>'; render(); return; }
+    var token = res.data.token, acked = false;
+    var onAck = function(e){
+      if (e.source !== window || !e.data || e.data.type !== "BRIDGEPOINT_LENDER_EXPORT_ACK" || e.data.token !== token) return;
+      acked = true; window.removeEventListener("message", onAck);
+      st.msg = "✅ Opened " + esc(target.label) + " in a new tab. Log in there — the Bridgepoint panel on the right fills the file. This link works for 30 minutes.";
+      lead.activity = lead.activity || [];
+      lead.activity.push({ date: todayISO(), type:"note", text:"Export to Lender started: " + target.label, author: currentUser().name });
+      persist(); render();
+    };
+    window.addEventListener("message", onAck);
+    window.postMessage({ type:"BRIDGEPOINT_LENDER_EXPORT", token: token, lender: lenderKey, lenderLabel: target.label, portalUrl: target.portal, api: SUPABASE_URL + "/functions/v1/lender-export", leadName: lead.name }, window.location.origin);
+    setTimeout(function(){
+      if (acked) return;
+      window.removeEventListener("message", onAck);
+      st.msg = '<span style="color:var(--c-rust)">The Bridgepoint Lender Export extension isn\'t installed in this browser.</span> Install it once (ask Joe for the extension folder: Chrome → ⋮ → Extensions → turn on Developer mode → Load unpacked), refresh this page, and click again. Meanwhile, “⬇ Complete File (PDF)” above has everything for a manual upload.';
+      render();
+    }, 1500);
+  }).catch(function(){ st.busy = false; st.msg = '<span style="color:var(--c-rust)">Couldn\'t reach the server — try again.</span>'; render(); });
+}
 function setOutsideLender(leadId, lender){
   var lead = leadById(leadId);
   if (!lead || !canManageOutsideLender()) return;
@@ -12530,9 +12590,10 @@ function renderTabDocuments(lead){
     '<button class="btn btn-sm btn-ghost" type="button" data-action="export-all-documents" data-lead="' + lead.id + '" title="Downloads every uploaded document on this file as one ZIP, to save internally">⬇ Export All Documents (ZIP)' + (receivedCount ? (' — ' + receivedCount) : '') + '</button>' +
     (canExportMismo ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="download-complete-file" data-lead="' + lead.id + '" title="One PDF with the loan summary on top and every uploaded document merged in behind it — for sending to an Account Executive">⬇ Complete File (PDF)</button>') : '') +
     (canManageOutsideLender() ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-modal" data-modal="emailCompleteFile" data-lead="' + lead.id + '" title="Emails the complete file PDF (summary plus every uploaded document) to your Account Executive or anyone you choose">✉ Email Complete File</button>') : '') +
+    (canManageOutsideLender() ? ('<button class="btn btn-sm btn-primary" type="button" data-action="lender-export-toggle" data-lead="' + lead.id + '" title="Opens the lender\'s portal; you log in and the Bridgepoint extension fills the application and uploads the documents. You review and submit.">🚀 Export to Lender</button>') : '') +
     (canExportMismo ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="download-mismo-export" data-lead="' + lead.id + '" title="Exports the loan file as a MISMO 3.4 XML document for investors, title, or outside lenders">⬇ Export MISMO 3.4</button>') : '') +
     (canManage ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-modal" data-modal="addInternalDocument" data-lead="' + lead.id + '" title="A staff-only file — a completed Constructive Capital sizer, a lender summary, anything the borrower never sees">+ Internal Document</button>') : '') +
-  '</div>';
+  '</div>' + (canManageOutsideLender() ? renderLenderExportPanel(lead) : '');
 
   var scanBar = "";
   if (canAiReview){
@@ -17281,6 +17342,8 @@ appEl.addEventListener("click", function(e){
     downloadDocumentPdf(t.dataset.lead, t.dataset.kind);
   }
   else if (action === "download-complete-file"){ downloadCompleteFile(t.dataset.lead); }
+  else if (action === "lender-export-toggle"){ ui.lenderExport = ui.lenderExport || {}; var lx = ui.lenderExport[t.dataset.lead] = ui.lenderExport[t.dataset.lead] || {}; lx.open = !lx.open; lx.msg = null; render(); }
+  else if (action === "lender-export-go"){ lenderExportGo(t.dataset.lead, t.dataset.lender); }
   else if (action === "export-all-documents"){
     exportAllDocuments(t.dataset.lead);
   }

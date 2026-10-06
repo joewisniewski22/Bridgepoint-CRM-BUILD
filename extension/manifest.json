@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Bridgepoint Lender Export",
+  "version": "0.1.0",
+  "description": "Fills outside-lender applications and uploads documents from a Bridgepoint CRM loan file. Staff log in to the lender themselves and always submit by hand.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": [
+    "https://bridgepoint-crm-build.vercel.app/*",
+    "https://idzkigmvovehjpapatxv.supabase.co/*",
+    "https://broker.commerciallendingservicesllc.com/*",
+    "https://app.kiavi.com/*",
+    "https://aim.admortgage.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://bridgepoint-crm-build.vercel.app/*"],
+      "js": ["crm-bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://broker.commerciallendingservicesllc.com/*",
+        "https://app.kiavi.com/*",
+        "https://aim.admortgage.com/*"
+      ],
+      "js": ["maps.js", "filler.js", "panel.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [{ "resources": ["viewer.html"], "matches": ["<all_urls>"] }]
+}
