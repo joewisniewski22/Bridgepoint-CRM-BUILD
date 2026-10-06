@@ -135,7 +135,7 @@ Get-ChildItem $srcDir -Recurse -Filter *.html | ForEach-Object {
   if ($body.Contains("data-qw")) { $scripts += "`n" + '<script src="{{BASE}}/static/quote.js" defer></script>' }
   $html = $head + $body + "`n" + $foot
   $html = $html.Replace("{{SCRIPTS}}", $scripts).Replace("{{ROBOTS}}", $robots)
-  $html = $html.Replace("{{TITLE}}", $meta["title"]).Replace("{{DESC}}", $meta["description"]).Replace("{{OGIMG}}", $(if ($meta["image"]) { $meta["image"] } else { "/static/logo-wide.png" })).Replace("{{CANON}}", $canon).Replace("{{DOMAIN}}", $domain).Replace("{{BASE}}", $Base).Replace("{{EXCLUDED_NAMES}}", $exNames).Replace("{{STATE_COUNT}}", [string]$stCount).Replace("{{TRACKING}}", $tracking)
+  $html = $html.Replace("{{TITLE}}", $meta["title"]).Replace("{{DESC}}", $meta["description"]).Replace("{{OGIMG}}", $(if ($meta["image"]) { $meta["image"] } else { "/static/og-default.png" })).Replace("{{CANON}}", $canon).Replace("{{DOMAIN}}", $domain).Replace("{{BASE}}", $Base).Replace("{{EXCLUDED_NAMES}}", $exNames).Replace("{{STATE_COUNT}}", [string]$stCount).Replace("{{TRACKING}}", $tracking)
   $dest = Join-Path $outDir $rel
   New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
   [IO.File]::WriteAllText($dest, $html, (New-Object Text.UTF8Encoding($false)))
