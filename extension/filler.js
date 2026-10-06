@@ -91,15 +91,45 @@
     return null;
   }
 
+  // Never press anything that could submit, sign, lock, or send on the lender's side.
+  const FORBIDDEN = /submit|sign|lock|send|email|confirm|finish|complete|delete|remove|clear/i;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // Pick a radio by its value: { radioName: "loanProgram" } or { radioPrefix: "currentOccupancy_" }.
+  function pickRadioByValue(f, v) {
+    const sel = f.radioName ? 'input[type="radio"][name="' + f.radioName + '"]' : 'input[type="radio"][name^="' + f.radioPrefix + '"]';
+    const r = Array.from(document.querySelectorAll(sel)).find((x) => x.value === String(v));
+    if (!r) return false;
+    if (!r.checked) r.click();
+    return true;
+  }
+
   // Run one page map. Returns { filled:[], missing:[], uploaded:[], uploadMissing:[] }.
+  // Field entries run in order; besides fields they can be
+  //   { click: "css", index?: n, when?: (pkg)=>bool }  -- reveal-only UI buttons (e.g. "Can't find address")
+  //   { wait: ms }                                      -- let the lender's page react
   async function runPage(page, pkg, fetchDoc) {
     const res = { filled: [], missing: [], skipped: [], uploaded: [], uploadMissing: [] };
     for (const f of page.fields || []) {
+      if (f.when && !f.when(pkg)) continue;
+      if (f.wait) { await sleep(f.wait); continue; }
+      if (f.click) {
+        const b = document.querySelectorAll(f.click)[f.index || 0];
+        if (b && !FORBIDDEN.test((b.innerText || b.value || "").replace(/can't find address/i, ""))) { b.click(); await sleep(250); }
+        continue;
+      }
       let v = typeof f.value === "function" ? f.value(pkg) : pick(pkg, f.value);
       if (f.fmt && FMT[f.fmt]) v = FMT[f.fmt](v);
-      if (v == null || v === "") { res.skipped.push(f.label || f.selector); continue; }
-      const ok = f.radio ? pickRadio(f, v) : (() => { const el = findField(f); return el ? setValue(el, v) : false; })();
-      (ok ? res.filled : res.missing).push(f.label || f.selector);
+      const name = f.label || f.name || f.selector || f.radioName || f.radioPrefix;
+      if (v == null || v === "") { res.skipped.push(name); continue; }
+      let ok;
+      if (f.radioName || f.radioPrefix) { ok = pickRadioByValue(f, v); if (ok) await sleep(200); }
+      else if (f.radio) ok = pickRadio(f, v);
+      else {
+        const el = f.selector ? document.querySelectorAll(f.selector)[f.index || 0] : findField(f);
+        ok = el ? setValue(el, v) : false;
+      }
+      (ok ? res.filled : res.missing).push(name);
     }
     for (const u of page.uploads || []) {
       const docs = (pkg.documents || []).filter((d) => (u.categories || [u.category]).includes(d.category));
