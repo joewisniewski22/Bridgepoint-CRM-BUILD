@@ -3255,8 +3255,9 @@ function closeDialer(){
 --------------------------------------------------------------------- */
 function scopedLeads(){
   if (isOwner()) return state.leads;
+  // Processor sees every in-process stage (Docs and Approved were missing until 2026-10-07).
   if (isProcessor()) return state.leads.filter(function(l){
-    return ["processing","underwriting","ctc","closed"].indexOf(l.stage) !== -1;
+    return ["docs","processing","underwriting","approved","ctc","closed","postclosing"].indexOf(l.stage) !== -1;
   });
   if (isLO()) return state.leads.filter(function(l){ return l.assignedTo===ui.viewAs; });
   return state.leads;
@@ -6426,8 +6427,10 @@ function moveStage(leadId, target){
   } else {
     var oldLabel = stageLabel(lead.stage);
     lead.stage = target;
+    // Any move into processing assigns the processor (files jumping straight to
+    // Processing used to stay unassigned and drop off her lists).
+    if (["docs","processing","underwriting","approved","ctc"].indexOf(target) !== -1) ensureProcessorAssigned(lead);
     if (target==="docs"){
-      ensureProcessorAssigned(lead);
       if (!lead.applicationSentAt) reallySendBorrowerPortalInvite(lead.id);
     }
     lead.status = (target==="closed" || target==="postclosing") ? "closed" : "active";
@@ -9435,8 +9438,9 @@ function tourStepsForRole(){
     { title:"That's the whole loop", body:"Lead comes in → contacted fast → priced live → application + portal sent → documents AI-reviewed → processed → closed → paid out — all in one place, for every loan officer and processor, every time. Take it away — click into anything live." }
   ];
   if (isProcessor()) return [
-    { title:"Today = your processing queue", body:"No cold-calling here — just what needs processing: appraisal/title requests from loan officers, files flagged for review, and anything else routed to you." },
-    { title:"You only see processing-stage loans", body:"Leads & Loans and Pipeline only show loans in Processing, Underwriting, Clear to Close, and Closed. Everything earlier stays with the loan officer until it's ready for you." },
+    { title:"Today = your Processing Board", body:"Every file in processing on one screen, most urgent first. Each row shows the closing checklist (docs, title, insurance, appraisal, lender, conditions) and the ONE next step that moves it. Use the filters — Your move, Closing ≤ 7 days, Waiting on borrower — and click Open to land right on the tab you need." },
+    { title:"Set a close date on every file", body:"Files without a target close date can't be ranked by urgency — set it right on the board (the date box in the Close column). It's the single most useful number for keeping closings on time." },
+    { title:"You see every in-process loan", body:"Leads & Loans and Pipeline show loans from Docs through Clear to Close and Closed. Anything earlier stays with the loan officer until it's ready for you." },
     { title:"Guideline Check + Explain to LO", body:"When a file comes back \"Needs Review,\" click ✨ Explain to LO — it turns the numbers (like LTC or DSCR) into a plain-English message you can send straight to the loan officer explaining exactly what needs to change." },
     { title:"Documents", body:"The required checklist loads automatically the moment you open the tab. Upload anything a client emails you directly, click View File to open what's on file, and run AI Review to catch issues on anything received." },
     { title:"Request Title & Insurance in one click", body:"Once a Title Company or Insurance Agent contact is on the file, one button emails them directly. When they reply, their attachment files itself onto the loan automatically — no manual saving." },
@@ -10495,6 +10499,107 @@ function staleTitleInsuranceItems(){
   });
   return items;
 }
+// ---------------------------------------------------------------------
+// Processing Board (Joe 2026-10-07: "make Erika's job as easy and seamless as
+// possible so when we scale she can handle a large loan volume"). One row per
+// in-process file: the closing checklist at a glance + the ONE next action,
+// ranked by urgency. Erika is the processor on every file for now (Joe), so an
+// unassigned file counts as hers.
+// ---------------------------------------------------------------------
+var PROCESSING_STAGES = ["docs","processing","underwriting","approved","ctc"];
+function processorOwns(lead){
+  if (!isProcessor()) return true;
+  return !lead.assignedProcessor || lead.assignedProcessor === ui.viewAs;
+}
+function daysSince(iso){ if (!iso) return null; return Math.max(0, Math.round((startOfToday() - new Date(String(iso).slice(0,10)+"T00:00:00")) / 86400000)); }
+function hasReceivedDoc(lead, re){ return (lead.documents||[]).some(function(d){ return d.status === "received" && re.test(d.name||""); }); }
+function lastActivityDays(lead){
+  var dates = (lead.activity||[]).map(function(a){ return a.at || a.date; }).filter(Boolean).sort();
+  return dates.length ? daysSince(dates[dates.length-1]) : null;
+}
+function processingStatus(lead){
+  var docs = (lead.documents||[]).filter(function(d){ return !d.staffOnly && !d.isTermSheetOption; });
+  var received = docs.filter(function(d){ return d.status === "received"; });
+  var neverAsked = docs.filter(function(d){ return d.status === "suggested"; });
+  var waiting = docs.filter(function(d){ return d.status === "requested"; });
+  var oldestAsk = waiting.map(function(d){ return daysSince(d.requestedAt || d.requestedDate); }).filter(function(x){ return x != null; }).sort(function(a,b){ return b-a; })[0];
+  var isRefiNoPurchase = lead.transactionType && lead.transactionType !== "purchase";
+  var exported = (lead.activity||[]).some(function(a){ return a.author === "Lender Export" || /^Export to /.test(a.text||""); });
+  var lender = lead.outsideLender || "Constructive";
+  var openConds = (lead.uwConditions||[]).filter(function(c){ return c.status !== "cleared" && c.status !== "waived"; });
+  var title = (lead.titleConfirmed || hasReceivedDoc(lead, /title commitment|preliminary title/i)) ? "done" : ((lead.titleOrdered || lead.titleRequestedAt) ? "ordered" : "todo");
+  var ins = hasReceivedDoc(lead, /insurance (policy|binder|declaration)|evidence of insurance|hazard insurance|builder.?s risk/i) ? "done" : (lead.insuranceRequestedAt ? "ordered" : "todo");
+  var appr = lead.appraisalConfirmed || hasReceivedDoc(lead, /^appraisal(?! invoice)/i) ? "done" : (lead.appraisalOrdered ? "ordered" : "todo");
+  var toClose = lead.closeDate ? Math.round((new Date(lead.closeDate+"T00:00:00") - startOfToday()) / 86400000) : null;
+  var s = { docsTotal: docs.length, docsIn: received.length, neverAsked: neverAsked.length, waiting: waiting.length, oldestAsk: oldestAsk,
+    lender: lender, exported: exported, title: title, ins: ins, appr: appr, conds: openConds.length, toClose: toClose,
+    quiet: lastActivityDays(lead), onHold: !!lead.onHold };
+  // The ONE next thing that moves this file, in closing order. who: erika | borrower | thirdparty | lender
+  var n;
+  if (s.onHold) n = { text: "On hold", who: "none", tab: "overview" };
+  else if (s.neverAsked > 0) n = { text: "Request " + s.neverAsked + " doc" + (s.neverAsked>1?"s":"") + " from the borrower (never sent)", who: "erika", tab: "documents" };
+  else if (s.toClose == null) n = { text: "Set a target close date", who: "erika", tab: "overview", closeDate: true };
+  else if (s.conds > 0) n = { text: "Clear " + s.conds + " underwriting condition" + (s.conds>1?"s":""), who: "erika", tab: "documents" };
+  else if (s.waiting > 0 && (s.oldestAsk||0) >= 3) n = { text: "Chase " + s.waiting + " doc" + (s.waiting>1?"s":"") + " — waiting " + s.oldestAsk + " days", who: "borrower", tab: "documents" };
+  else if (title === "todo") n = { text: "Order title", who: "erika", tab: "overview" };
+  else if (ins === "todo") n = { text: "Request insurance (send the mortgagee clause)", who: "erika", tab: "overview" };
+  else if (appr === "todo" && lead.loanType !== "Bridge") n = { text: "Order the appraisal", who: "erika", tab: "overview" };
+  else if (s.waiting > 0) n = { text: s.waiting + " doc" + (s.waiting>1?"s":"") + " requested — waiting on borrower", who: "borrower", tab: "documents" };
+  else if (lead.outsideLender && !exported && s.docsIn >= Math.max(1, s.docsTotal - 1)) n = { text: "Export to " + lender + " (file is complete)", who: "erika", tab: "documents" };
+  else if (title === "ordered" || ins === "ordered" || appr === "ordered") n = { text: "Waiting on " + [title==="ordered"?"title":null, ins==="ordered"?"insurance":null, appr==="ordered"?"appraisal":null].filter(Boolean).join(", "), who: "thirdparty", tab: "overview" };
+  else { var nextSt = PROCESSING_STAGES[PROCESSING_STAGES.indexOf(lead.stage)+1]; n = { text: "Everything's in — move to " + (nextSt ? stageLabel(nextSt) : "Closed"), who: "erika", tab: "overview" }; }
+  s.next = n;
+  // Urgency: close date first, then files gone quiet, then things Erika can act on.
+  s.score = (s.toClose == null ? 40 : Math.max(0, 60 - s.toClose * 4)) + Math.min(30, (s.quiet||0) * 3) + (n.who === "erika" ? 15 : 0) + (s.conds ? 10 : 0) - (s.onHold ? 100 : 0);
+  return s;
+}
+function pbChip(state, label){
+  var c = state === "done" ? ["#e6f4ea","#1e6b35","✓"] : state === "ordered" ? ["#fff4d6","#6b4e00","…"] : ["#fbe9e7","#9a2b1a","✗"];
+  return '<span title="' + esc(label) + ': ' + (state === "done" ? "received" : state === "ordered" ? "ordered / waiting" : "not started") + '" style="display:inline-block;padding:1px 6px;border-radius:999px;background:' + c[0] + ';color:' + c[1] + ';font-size:11px;font-weight:600;margin:1px 2px;white-space:nowrap">' + c[2] + ' ' + esc(label) + '</span>';
+}
+function renderProcessingBoard(){
+  var leads = state.leads.filter(function(l){ return l.status === "active" && PROCESSING_STAGES.indexOf(l.stage) !== -1 && processorOwns(l); });
+  var rows = leads.map(function(l){ return { lead: l, s: processingStatus(l) }; });
+  var filt = ui.pbFilter || "all";
+  var counts = {
+    all: rows.length,
+    me: rows.filter(function(r){ return r.s.next.who === "erika"; }).length,
+    week: rows.filter(function(r){ return r.s.toClose != null && r.s.toClose <= 7; }).length,
+    borrower: rows.filter(function(r){ return r.s.next.who === "borrower"; }).length,
+    third: rows.filter(function(r){ return r.s.next.who === "thirdparty"; }).length,
+    quiet: rows.filter(function(r){ return (r.s.quiet||0) >= 5 && !r.s.onHold; }).length
+  };
+  var shown = rows.filter(function(r){
+    return filt === "all" || (filt === "me" && r.s.next.who === "erika") || (filt === "week" && r.s.toClose != null && r.s.toClose <= 7) ||
+      (filt === "borrower" && r.s.next.who === "borrower") || (filt === "third" && r.s.next.who === "thirdparty") || (filt === "quiet" && (r.s.quiet||0) >= 5 && !r.s.onHold);
+  }).sort(function(a,b){ return b.s.score - a.s.score; });
+  var seg = function(key, label){ return '<button class="seg-btn' + (filt===key?' active':'') + '" data-action="pb-filter" data-filter="' + key + '">' + label + ' <span class="hint">' + counts[key] + '</span></button>'; };
+  var whoColor = { erika:"var(--brand)", borrower:"#8a6d1f", thirdparty:"#5b6b7a", lender:"#5b6b7a", none:"var(--ink-faint)" };
+  var body = shown.map(function(r){
+    var l = r.lead, s = r.s;
+    var closeTxt = s.toClose == null
+      ? '<input type="date" class="input" style="max-width:150px;padding:2px 6px;font-size:12px" data-action="pb-close-date" data-lead="' + l.id + '" title="Set the target close date">'
+      : '<b style="color:' + (s.toClose < 0 ? '#9a2b1a' : s.toClose <= 7 ? '#8a6d1f' : 'inherit') + '">' + (s.toClose < 0 ? Math.abs(s.toClose) + 'd late' : s.toClose === 0 ? 'Today' : s.toClose + 'd') + '</b><div class="hint">' + fmtDate(l.closeDate) + '</div>';
+    var docsState = s.docsTotal && s.docsIn >= s.docsTotal ? "done" : (s.neverAsked ? "todo" : "ordered");
+    var checklist = pbChip(docsState, "Docs " + s.docsIn + "/" + s.docsTotal) + pbChip(s.title, "Title") + pbChip(s.ins, "Insurance") +
+      (l.loanType !== "Bridge" ? pbChip(s.appr, "Appraisal") : "") +
+      (l.outsideLender ? pbChip(s.exported ? "done" : "todo", "Sent to " + s.lender) : "") +
+      (s.conds ? pbChip("todo", s.conds + " condition" + (s.conds>1?"s":"")) : "");
+    return '<tr>' +
+      '<td><a href="#" data-action="select-lead" data-lead="' + l.id + '" style="font-weight:600">' + esc(l.name) + '</a><div class="hint">' + esc((l.propertyAddress||"No address").split(",")[0]) + ' · ' + esc(l.loanType||"") + ' · ' + fmtUSD(l.loanAmount) + '</div><div class="hint">LO: ' + esc(userName(l.assignedTo)) + ' · ' + esc(stageLabel(l.stage)) + (s.quiet != null && s.quiet >= 5 ? ' · <span style="color:#9a2b1a">quiet ' + s.quiet + 'd</span>' : '') + '</div></td>' +
+      '<td style="white-space:nowrap">' + closeTxt + '</td>' +
+      '<td style="min-width:220px">' + checklist + '</td>' +
+      '<td><div style="font-weight:600;color:' + (whoColor[s.next.who]||"inherit") + '">' + esc(s.next.text) + '</div>' +
+        '<div class="hint">' + ({ erika:"Your move", borrower:"Waiting on borrower", thirdparty:"Waiting on title / insurance / appraiser", none:"" })[s.next.who] + '</div></td>' +
+      '<td style="text-align:right;white-space:nowrap"><button class="btn btn-sm ' + (s.next.who === "erika" ? 'btn-primary' : 'btn-ghost') + '" data-action="select-lead" data-lead="' + l.id + '" data-tab="' + s.next.tab + '">Open ' + (s.next.tab === "documents" ? "Docs" : "File") + '</button></td>' +
+    '</tr>';
+  }).join("");
+  return '<div class="section"><div class="section-head"><h2>📋 Processing Board</h2><div class="hint">Every file in processing, most urgent first — the checklist shows what\'s in, the right column is the one thing that moves it.</div></div>' +
+    '<div class="seg" style="margin:0 0 10px;flex-wrap:wrap">' + seg("all","All files") + seg("me","Your move") + seg("week","Closing ≤ 7 days") + seg("borrower","Waiting on borrower") + seg("third","Waiting on 3rd party") + seg("quiet","Gone quiet 5d+") + '</div>' +
+    (shown.length ? '<div class="table-wrap"><table class="table"><thead><tr><th>File</th><th>Close</th><th>Checklist</th><th>Next step</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>'
+      : '<div class="empty">' + (rows.length ? "Nothing in this filter." : "No files in processing right now.") + '</div>') +
+  '</div>';
+}
 function renderProcessingTodo(){
   var items = (state.notifications||[]).filter(function(n){
     return !n.read && (isOwner() || n.toUserId===ui.viewAs) && n.kind !== "review";
@@ -10520,7 +10625,7 @@ function renderProcessingTodo(){
   }).join("");
 
   var aiHTML = aiFlaggedDocs().filter(function(f){
-    return isOwner() || !isProcessor() || f.lead.assignedProcessor === ui.viewAs;
+    return isOwner() || processorOwns(f.lead);
   }).map(function(f){
     return '<div class="queue-card type-winback">' +
       '<div class="queue-main">' +
@@ -10536,7 +10641,7 @@ function renderProcessingTodo(){
   }).join("");
 
   var staleHTML = staleTitleInsuranceItems().filter(function(it){
-    return isOwner() || !isProcessor() || it.lead.assignedProcessor === ui.viewAs;
+    return isOwner() || processorOwns(it.lead);
   }).map(function(it){
     var lo = userById(it.lead.assignedTo) || {};
     return '<div class="queue-card type-followup">' +
@@ -11369,9 +11474,21 @@ function renderToday(){
   '</div>';
 
   if (isProcessor()){
-    return topbar("Today", "Your processing to-do list — everything an LO has ordered or routed to you.", '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLendingWise">⬆ Import from LendingWise</button>') +
-      '<div class="content">' + kpis + renderMyCalendarWidget() +
-        '<div class="section"><div class="section-head"><h2>Processing to-do</h2></div>' + renderProcessingTodo() + '</div>' +
+    // Processor home (Joe 2026-10-07): no call counts -- her numbers are files, closings and blockers.
+    var pFiles = state.leads.filter(function(l){ return l.status === "active" && PROCESSING_STAGES.indexOf(l.stage) !== -1 && processorOwns(l); });
+    var pStat = pFiles.map(processingStatus);
+    var pWeek = pStat.filter(function(s){ return s.toClose != null && s.toClose >= 0 && s.toClose <= 7; }).length;
+    var pMine = pStat.filter(function(s){ return s.next.who === "erika"; }).length;
+    var pKpis = '<div class="kpi-row">' +
+      '<div class="kpi"><div class="kpi-label">Files in processing</div><div class="kpi-value num">' + pFiles.length + '</div><div class="kpi-sub">' + fmtUSD(pFiles.reduce(function(t,l){ return t + (Number(l.loanAmount)||0); }, 0)) + ' in loans</div></div>' +
+      '<div class="kpi"><div class="kpi-label">Your move</div><div class="kpi-value num">' + pMine + '</div><div class="kpi-sub">Files waiting on you, not the borrower</div></div>' +
+      '<div class="kpi"><div class="kpi-label">Closing in 7 days</div><div class="kpi-value num">' + pWeek + '</div><div class="kpi-sub">' + k.closedCount + ' closed this month</div></div>' +
+    '</div>';
+    var todoHTML = renderProcessingTodo();
+    return topbar("Today", "Your processing desk — every file, what's in, and the one thing that moves it.", '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLendingWise">⬆ Import from LendingWise</button>') +
+      '<div class="content">' + pKpis + renderProcessingBoard() +
+        '<div class="section"><div class="section-head"><h2>Requests &amp; alerts</h2><div class="hint">Orders from loan officers, AI document flags, and overdue title/insurance.</div></div>' + todoHTML + '</div>' +
+        renderMyCalendarWidget() +
       '</div>';
   }
 
@@ -17851,7 +17968,13 @@ appEl.addEventListener("click", function(e){
     if (ui.view==="payroll" && ui.achStatusByUser===undefined) loadAchStatusForPayroll();
     render();
   }
-  else if (action === "select-lead"){ ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); }
+  else if (action === "select-lead"){
+    if (e && e.preventDefault) e.preventDefault();
+    ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab=t.dataset.tab || "overview";
+    if (ui.activeTab === "documents") applyRequiredDocs(ui.selectedLeadId, { silent:true });
+    render();
+  }
+  else if (action === "pb-filter"){ ui.pbFilter = t.dataset.filter; render(); }
   else if (action === "select-lead-from-modal"){ if (t.dataset.lead){ ui.modal=null; ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); } }
   else if (action === "go-to-contacts"){ ui.view="contacts"; ui.selectedLeadId=null; render(); }
   else if (action === "apply-loan-guideline-max"){
@@ -18243,6 +18366,16 @@ appEl.addEventListener("change", function(e){
   var autoSaveChangeForm =t.closest && t.closest('form[data-form="public-application"]');
   if (autoSaveChangeForm) scheduleApplicationAutoSave(autoSaveChangeForm);
   var action = t.dataset.action;
+  if (action === "pb-close-date"){
+    var pbLead = leadById(t.dataset.lead);
+    if (pbLead && t.value){
+      pbLead.closeDate = t.value;
+      pbLead.activity = pbLead.activity || [];
+      pbLead.activity.push({ date: todayISO(), type:"note", text:"Target close date set to " + fmtDate(t.value), author: currentUser().name });
+      persist(); showToast("Target close set — " + fmtDate(t.value)); render();
+    }
+    return;
+  }
   if (action === "filter"){
     ui.leadFilter[t.dataset.key] = t.value; render();
   } else if (action === "filter-comm"){
