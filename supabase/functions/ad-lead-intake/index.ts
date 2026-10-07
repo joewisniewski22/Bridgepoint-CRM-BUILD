@@ -128,9 +128,17 @@ Deno.serve(async (req: Request) => {
     if (ref) {
       const { data: refLead } = await sb.from("leads").select("id,name,phone,email,activity,assigned_to").eq("id", ref).maybeSingle();
       const same = refLead && ((((refLead.phone as string) || "").replace(/\D/g, "").slice(-10) === phoneDigits) || (!!refLead.email && (refLead.email as string).toLowerCase() === email));
-      if (refLead && same) {
+      // Social leads (Facebook/Instagram comment or DM, 2026-10-07) start with no phone/email:
+      // the link we DM'd them carries their file id, so their submission fills it in.
+      const blankSocial = refLead && !refLead.phone && !refLead.email && (phoneDigits || email);
+      if (refLead && (same || blankSocial)) {
         const summary = clean(b.estimate, 300);
         const activity = (refLead.activity as unknown[]) || [];
+        if (blankSocial) {
+          activity.push({ date: today, type: "note", text: "Added their contact info from the Deal Analyzer link we sent (" + [phone, email].filter(Boolean).join(", ") + ")", author: "System" });
+          activity.push({ date: today, type: "note", text: "TCPA consent recorded — agreed to the contact disclaimer on the Deal Analyzer form", author: "System" });
+          await sb.from("leads").update({ phone: phone || null, email: email || null, ai_stage: "engaging" }).eq("id", refLead.id as string);
+        }
         activity.push({ date: today, type: "note", text: "Ran the Deal Analyzer from the link you sent" + (summary ? " — " + summary : "") + (num(b.value) ? " (price " + num(b.value) + (num(b.rehab) ? ", rehab " + num(b.rehab) : "") + (num(b.arv) ? ", ARV " + num(b.arv) : "") + (num(b.rent) ? ", rent " + num(b.rent) : "") + ")" : ""), author: "System" });
         await sb.from("leads").update({ activity }).eq("id", refLead.id as string);
         await logAttr(refLead.id as string, "crm-share");

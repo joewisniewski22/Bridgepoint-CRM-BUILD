@@ -168,6 +168,91 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   }
 }
 
+// ---------------------------------------------------------------------------
+// Comments + DMs on OUR Facebook page and Instagram (Joe 2026-10-07: capture social leads
+// automatically). AI scores intent (bots, spam, brokers, consumer home-buyers -> ignored);
+// real investors become leads, the LO is alerted, and they get ONE private reply with a
+// Deal Analyzer link tied to their file (their submission fills in phone/email).
+// ---------------------------------------------------------------------------
+const BOT_RE = /(dm me|check (my|our) (bio|page)|whats ?app|telegram|crypto|bitcoin|forex|investment opportunity|earn \$|guaranteed (approval|funding)|we (fund|lend)|click (the )?link)/i;
+type SocialEvt = { platform: "facebook" | "instagram"; kind: "comment" | "dm"; externalId: string; fromId: string; name?: string | null; username?: string | null; text: string; commentId?: string | null; pageId: string };
+
+async function socialClassify(text: string, platform: string) {
+  const r = await fetch(SUPABASE_URL + "/functions/v1/social-intake", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify({ action: "classify", text, platform }) }).then((x) => x.json()).catch(() => null);
+  return (r && r.result) || { intent: "low", loan_type: null, summary: text.slice(0, 140), reply: "" };
+}
+async function sendPageMessage(pageId: string, recipient: Record<string, string>, text: string): Promise<boolean> {
+  const token = await pageToken(pageId);
+  if (!token) return false;
+  const r = await fetch(GRAPH + "/" + pageId + "/messages?access_token=" + encodeURIComponent(token), {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recipient, messaging_type: "RESPONSE", message: { text: text.slice(0, 1900) } }),
+  }).then((x) => x.json()).catch(() => null);
+  if (!r || r.error) { console.error("meta-leads-webhook: reply failed", JSON.stringify(r)); return false; }
+  return true;
+}
+async function handleSocial(e: SocialEvt) {
+  const text = (e.text || "").trim();
+  if (!text || e.fromId === e.pageId) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const label = (e.platform === "facebook" ? "Facebook" : "Instagram") + (e.kind === "dm" ? " DM" : " comment");
+  // Ongoing DM conversation with someone already on file: add to their file, alert the LO.
+  const { data: prior } = await sb.from("social_prospects").select("id, lead_id, status").eq("external_id", e.externalId).maybeSingle();
+  if (prior && prior.lead_id) {
+    const { data: l } = await sb.from("leads").select("id, name, activity, assigned_to").eq("id", prior.lead_id).maybeSingle();
+    if (l) {
+      const act = ((l.activity as unknown[]) || []).concat([{ date: today, at: new Date().toISOString(), type: "note", author: l.name, text: "Messaged us on " + label.replace(/ (DM|comment)$/, "") + ": " + text.slice(0, 600) }]);
+      await sb.from("leads").update({ activity: act }).eq("id", l.id);
+      if (l.assigned_to) await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: l.assigned_to, lead_id: l.id, kind: "social", text: "💬 " + l.name + " messaged on " + label + ": " + text.slice(0, 120), date: today, read: false });
+    }
+    return;
+  }
+  if (prior) return; // already screened out
+  // Cheap bot / spam screen before spending an AI call.
+  const urlChars = (text.match(/https?:\/\/\S+/g) || []).join("").length;
+  if (text.length < 12 || BOT_RE.test(text) || urlChars > text.length * 0.4) {
+    await sb.from("social_prospects").insert({ id: "SP" + crypto.randomUUID().slice(0, 10), platform: e.platform, kind: e.kind, handle: e.username || e.name || null, display_name: e.name || e.username || null, external_id: e.externalId, text: text.slice(0, 4000), intent: "none", status: "dismissed", summary: "Filtered as bot/spam" });
+    return;
+  }
+  const c = await socialClassify(text, e.platform);
+  if (c.intent !== "high" && c.intent !== "medium") {
+    await sb.from("social_prospects").insert({ id: "SP" + crypto.randomUUID().slice(0, 10), platform: e.platform, kind: e.kind, handle: e.username || e.name || null, display_name: e.name || e.username || null, external_id: e.externalId, text: text.slice(0, 4000), intent: c.intent, status: "dismissed", summary: c.summary });
+    return;
+  }
+  // A real investor: create the lead.
+  let name = e.name || e.username || null;
+  if (!name && e.kind === "dm") {
+    const token = await pageToken(e.pageId);
+    const prof = token ? await fetch(GRAPH + "/" + e.fromId + "?fields=name,username&access_token=" + encodeURIComponent(token)).then((x) => x.json()).catch(() => null) : null;
+    name = (prof && (prof.name || prof.username)) || null;
+  }
+  name = name || label + " lead";
+  const spanish = !!c.spanish;
+  const assignee = spanish ? SPANISH_LO : await pickEnglishAdLO();
+  const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
+  await sb.from("leads").insert({
+    id, name, source: "Meta Ads — " + label, loan_type: c.loan_type, stage: "new", status: "active", assigned_to: assignee,
+    created_at: today, created_at_ts: new Date().toISOString(), preferred_language: spanish ? "es" : "en", entity_type: "LLC", application_token: crypto.randomUUID(),
+    activity: [
+      { date: today, type: "note", author: "System", text: "Captured from a " + label + (e.username ? " (@" + e.username + ")" : "") + " — " + c.summary },
+      { date: today, at: new Date().toISOString(), type: "note", author: name, text: "Their " + (e.kind === "dm" ? "message" : "comment") + ": " + text.slice(0, 800) },
+    ],
+  });
+  await sb.from("social_prospects").insert({ id: "SP" + crypto.randomUUID().slice(0, 10), platform: e.platform, kind: e.kind, handle: e.username || name, display_name: name, external_id: e.externalId, text: text.slice(0, 4000), intent: c.intent, loan_type: c.loan_type, summary: c.summary, ai_reply: c.reply, status: "converted", lead_id: id, assigned_to: assignee });
+  // One private reply with a Deal Analyzer link tied to their file.
+  const link = "https://bplending.com/deal-analyzer/?ref=" + id + "&utm_source=" + e.platform + "&utm_medium=social&utm_campaign=" + e.kind + "-capture";
+  const msg = (c.reply || (spanish ? "¡Gracias por escribirnos! Con gusto le ayudamos con el financiamiento." : "Thanks for reaching out — happy to help with financing on this.")) +
+    "\n\n" + (spanish ? "Calcule su préstamo en 2 minutos (nosotros le damos seguimiento): " : "Run your numbers in 2 minutes and we'll follow up with real terms: ") + link;
+  const sent = await sendPageMessage(e.pageId, e.kind === "comment" && e.commentId ? { comment_id: e.commentId } : { id: e.fromId }, msg);
+  const { data: lead } = await sb.from("leads").select("activity").eq("id", id).single();
+  const act = ((lead && lead.activity) as unknown[] || []).concat([{ date: today, at: new Date().toISOString(), type: "note", author: "System", text: sent ? "Auto-replied privately on " + label.replace(/ (DM|comment)$/, "") + " with a Deal Analyzer link (their submission adds phone/email here)." : "Couldn't auto-reply on " + label + " — reply by hand: " + c.reply }]);
+  await sb.from("leads").update({ activity: act }).eq("id", id);
+  const alert = "🔥 New " + label + " lead: " + name + (c.loan_type ? " · " + c.loan_type : "") + " — " + c.summary + " " + CRM_URL + "?lead=" + id;
+  await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: assignee, lead_id: id, kind: "hot-lead", text: alert, date: today, read: false });
+  const { data: lo } = await sb.from("users").select("phone").eq("id", assignee).single();
+  if (lo?.phone) await post("send-text", { to: lo.phone, text: alert, fromName: "Bridgepoint CRM" });
+}
+
 async function authorized(body: Record<string, unknown>): Promise<boolean> {
   const { data } = await sb.from("ad_followup_auth").select("secret").eq("id", 1).single();
   return !!(data && body.secret && body.secret === data.secret);
@@ -197,8 +282,9 @@ Deno.serve(async (req: Request) => {
     out.pageToken = pt ? "ok" : "missing";
     if (body.action === "setup") {
       const cb = SUPABASE_URL + "/functions/v1/meta-leads-webhook";
-      out.appSubscription = await fetch(GRAPH + "/" + META_APP_ID + "/subscriptions", { method: "POST", body: new URLSearchParams({ object: "page", callback_url: cb, fields: "leadgen", verify_token: META_VERIFY_TOKEN, include_values: "true", access_token: appToken }) }).then((r) => r.json()).catch((e) => String(e));
-      if (pt) out.pageSubscription = await fetch(GRAPH + "/" + META_PAGE_ID + "/subscribed_apps", { method: "POST", body: new URLSearchParams({ subscribed_fields: "leadgen", access_token: pt }) }).then((r) => r.json()).catch((e) => String(e));
+      out.appSubscription = await fetch(GRAPH + "/" + META_APP_ID + "/subscriptions", { method: "POST", body: new URLSearchParams({ object: "page", callback_url: cb, fields: "leadgen,feed,messages", verify_token: META_VERIFY_TOKEN, include_values: "true", access_token: appToken }) }).then((r) => r.json()).catch((e) => String(e));
+      out.igSubscription = await fetch(GRAPH + "/" + META_APP_ID + "/subscriptions", { method: "POST", body: new URLSearchParams({ object: "instagram", callback_url: cb, fields: "comments,messages", verify_token: META_VERIFY_TOKEN, include_values: "true", access_token: appToken }) }).then((r) => r.json()).catch((e) => String(e));
+      if (pt) out.pageSubscription = await fetch(GRAPH + "/" + META_PAGE_ID + "/subscribed_apps", { method: "POST", body: new URLSearchParams({ subscribed_fields: "leadgen,feed,messages", access_token: pt }) }).then((r) => r.json()).catch((e) => String(e));
     }
     out.appSubscriptions = await fetch(GRAPH + "/" + META_APP_ID + "/subscriptions?access_token=" + encodeURIComponent(appToken)).then((r) => r.json()).catch(() => null);
     if (pt) out.pageSubscribedApps = await fetch(GRAPH + "/" + META_PAGE_ID + "/subscribed_apps?access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch(() => null);
@@ -207,15 +293,25 @@ Deno.serve(async (req: Request) => {
     return json(out);
   }
 
-  // ---- Meta leadgen webhook ----
+  // ---- Meta webhooks: lead forms, page comments, Messenger, Instagram ----
   try {
+    const isIg = body.object === "instagram";
     for (const entry of body.entry || []) {
+      const pageId = isIg ? META_PAGE_ID : String(entry.id || META_PAGE_ID);
       for (const change of entry.changes || []) {
-        if (change.field !== "leadgen") continue;
         const v = change.value || {};
-        if (!v.leadgen_id) continue;
         // Process before answering (edge functions can stop once the response is sent).
-        await processLeadgenId(v.leadgen_id, v.page_id, v.form_id, v.ad_id).catch((e) => console.error("meta-leads-webhook: processing error", e));
+        if (change.field === "leadgen" && v.leadgen_id) {
+          await processLeadgenId(v.leadgen_id, v.page_id, v.form_id, v.ad_id).catch((e) => console.error("meta-leads-webhook: processing error", e));
+        } else if (!isIg && change.field === "feed" && v.item === "comment" && v.verb === "add" && v.from) {
+          await handleSocial({ platform: "facebook", kind: "comment", externalId: "fb:" + v.comment_id, fromId: String(v.from.id), name: v.from.name || null, text: v.message || "", commentId: v.comment_id, pageId }).catch((e) => console.error("social fb comment", e));
+        } else if (isIg && change.field === "comments" && v.from) {
+          await handleSocial({ platform: "instagram", kind: "comment", externalId: "ig:" + v.id, fromId: String(v.from.id), username: v.from.username || null, text: v.text || "", commentId: v.id, pageId }).catch((e) => console.error("social ig comment", e));
+        }
+      }
+      for (const m of entry.messaging || []) {
+        if (!m.message || m.message.is_echo || !m.message.text || !m.sender) continue;
+        await handleSocial({ platform: isIg ? "instagram" : "facebook", kind: "dm", externalId: (isIg ? "igdm:" : "fbdm:") + m.sender.id, fromId: String(m.sender.id), text: m.message.text, pageId }).catch((e) => console.error("social dm", e));
       }
     }
   } catch (err) { console.error("meta-leads-webhook: bad payload", String(err)); }

@@ -5404,6 +5404,7 @@ function ensureGlobalPolling(){
       state.notifications = fresh;
       if (ui.view !== "detail") render();
     });
+    if (!isProcessor()) loadSocial(false); // keeps the Social badge count current
   }, 25000);
 }
 function hydrateFromSupabase(){
@@ -9650,6 +9651,7 @@ function renderShell(){
         ((isOwner() || !isProcessor()) && navVisible("repeat") ? navItem("repeat","👥","Repeat Clients") : "") +
         (navVisible("notifications") ? navItem("notifications","🔔","Notifications", notifCount||null) : "") +
         navItem("messages","📱","Messages", unreadTextMessagesTotal()||null) +
+        (!isProcessor() ? navItem("social","🔎","Social", socialNewCount()||null) : "") +
         navItem("teamchat","💬","Team Chat", unreadTeamChatTotal(ui.viewAs)||null) +
         navItem("email","📧","Email") +
         navItem("contacts","📇","Contacts") +
@@ -9704,6 +9706,7 @@ function renderShell(){
   else if (ui.view === "repeat") body = renderRepeatClients();
   else if (ui.view === "notifications") body = renderNotifications();
   else if (ui.view === "messages") body = renderTextMessages();
+  else if (ui.view === "social") body = renderSocial();
   else if (ui.view === "teamchat") body = renderTeamChat();
   else if (ui.view === "email") body = renderEmailInbox();
   else if (ui.view === "coaching") body = renderCoaching();
@@ -15524,7 +15527,63 @@ function textThreadHTML(c, mobile){
       '<button class="btn btn-primary" type="submit"' + (mobile ? ' style="min-height:46px"' : '') + '>Send</button>' +
     '</form>');
 }
-function renderTextMessages(){
+// ---------------------------------------------------------------------
+// Social prospecting (Joe 2026-10-07). Reddit finds + pasted Facebook-group posts, scored by AI
+// with a drafted reply. Facebook/Instagram comments & DMs on our own page skip this and become
+// leads automatically (meta-leads-webhook). Nothing here posts for you -- you post the reply.
+// ---------------------------------------------------------------------
+state.socialProspects = state.socialProspects || [];
+var socialLoadedAt = 0;
+function loadSocial(force){
+  if (!sb || (!force && Date.now() - socialLoadedAt < 60000)) return;
+  socialLoadedAt = Date.now();
+  sb.from("social_prospects").select("*").in("status", ["new","replied"]).in("intent", ["high","medium"]).order("created_at", { ascending:false }).limit(200).then(function(res){
+    if (res.error || !res.data) return;
+    state.socialProspects = res.data;
+    if (ui.view === "social") render();
+  });
+}
+function socialNewCount(){ return (state.socialProspects||[]).filter(function(p){ return p.status === "new"; }).length; }
+function socialPlatformLabel(p){ return ({ reddit:"Reddit", fb_group:"Facebook group", facebook:"Facebook", instagram:"Instagram", x:"X" })[p] || p; }
+function renderSocial(){
+  loadSocial(false);
+  var filt = ui.socialFilter || "new";
+  var mine = (state.socialProspects||[]).filter(function(p){ return isOwner() || p.assigned_to === ui.viewAs; });
+  var list = mine.filter(function(p){ return p.status === filt; });
+  var cards = list.map(function(p){
+    var hot = p.intent === "high";
+    return '<div class="panel panel-pad" style="margin-bottom:12px;' + (hot ? 'border-color:var(--brand)' : '') + '">' +
+      '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><div><span class="badge ' + (hot ? 'badge-hot' : 'badge-slate') + '">' + (hot ? 'Hot' : 'Warm') + '</span> <b>' + esc(socialPlatformLabel(p.platform)) + '</b>' + (p.handle ? ' · ' + esc(p.handle) : '') + (p.loan_type ? ' · ' + esc(p.loan_type) : '') + '</div>' +
+        '<span class="hint">' + esc(fmtDate(String(p.created_at||"").slice(0,10))) + '</span></div>' +
+      '<div style="margin:6px 0;font-weight:600">' + esc(p.summary||"") + '</div>' +
+      '<details><summary class="hint" style="cursor:pointer">Their post</summary><div style="white-space:pre-wrap;margin-top:6px" class="footnote">' + esc(String(p.text||"").slice(0,1500)) + '</div></details>' +
+      '<div class="form-row" style="margin-top:8px"><label>Suggested reply <span class="hint">(edit, then post it yourself)</span></label><textarea class="textarea" rows="3" id="sp-reply-' + p.id + '">' + esc(p.ai_reply||"") + '</textarea></div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+        '<button class="btn btn-sm btn-primary" data-action="social-copy-open" data-id="' + p.id + '">Copy reply' + (p.post_url ? ' & open post' : '') + '</button>' +
+        (p.status === "new" ? '<button class="btn btn-sm" data-action="social-status" data-id="' + p.id + '" data-status="replied">Mark replied</button>' : '') +
+        (p.lead_id ? '<button class="btn btn-sm" data-action="select-lead" data-lead="' + p.lead_id + '">Open lead</button>' : '<button class="btn btn-sm" data-action="social-convert" data-id="' + p.id + '">Make lead</button>') +
+        '<button class="btn btn-sm btn-ghost" data-action="social-status" data-id="' + p.id + '" data-status="dismissed">Dismiss</button>' +
+      '</div></div>';
+  }).join("");
+  var seg = function(k, label){ var n = mine.filter(function(p){ return p.status === k; }).length; return '<button class="seg-btn' + (filt===k?' active':'') + '" data-action="social-filter" data-filter="' + k + '">' + label + ' <span class="hint">' + n + '</span></button>'; };
+  var paste = '<div class="panel panel-pad" style="margin-bottom:14px"><div class="rail-title">Found a good post in a Facebook group?</div>' +
+    '<form data-form="social-paste" style="display:grid;gap:6px">' +
+      '<textarea class="textarea" name="text" rows="3" placeholder="Paste the post here — the AI scores it and drafts your reply" required></textarea>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap"><input class="input" name="handle" placeholder="Their name (optional)" style="flex:1;min-width:160px"><input class="input" name="url" placeholder="Link to the post (optional)" style="flex:2;min-width:200px">' +
+      '<button class="btn btn-primary" type="submit"' + (ui.socialBusy ? ' disabled' : '') + '>' + (ui.socialBusy ? 'Scoring…' : 'Score & draft') + '</button></div>' +
+    '</form></div>';
+  return topbar("Social", "Investors asking about financing — Reddit is scanned automatically; Facebook/Instagram comments and messages on our page become leads on their own.", '<button class="btn btn-ghost" data-action="social-refresh">↻ Refresh</button>') +
+    '<div class="content">' + paste +
+      '<div class="seg" style="margin-bottom:10px">' + seg("new","To reply") + seg("replied","Replied") + '</div>' +
+      (cards || '<div class="empty">' + (filt === "new" ? 'Nothing waiting. New Reddit finds show up here automatically.' : 'Nothing here yet.') + '</div>') +
+    '</div>';
+}
+function socialUpdate(id, fields){
+  var p = (state.socialProspects||[]).filter(function(x){ return x.id === id; })[0];
+  if (p) Object.assign(p, fields);
+  if (sb) sb.from("social_prospects").update(Object.assign({ updated_at: new Date().toISOString() }, fields)).eq("id", id).then(function(){}, function(){});
+  render();
+}function renderTextMessages(){
   var convos = textMessageLeads();
   var activeLead = ui.textMessagesWith ? leadById(ui.textMessagesWith) : null;
   if (!activeLead && convos[0] && !ui.textNewOpen) { activeLead = convos[0].lead; ui.textMessagesWith = activeLead.id; }
@@ -18257,6 +18316,24 @@ appEl.addEventListener("click", function(e){
   else if (action === "pb-chase-docs"){ chaseOutstandingDocs(t.dataset.lead); }
   else if (action === "call-via-cell"){ callViaMyCell(t.dataset.lead); }
   else if (action === "call-teammate"){ callTeammate(t.dataset.user); }
+  else if (action === "social-filter"){ ui.socialFilter = t.dataset.filter; render(); }
+  else if (action === "social-refresh"){ loadSocial(true); }
+  else if (action === "social-status"){ socialUpdate(t.dataset.id, { status: t.dataset.status }); }
+  else if (action === "social-copy-open"){
+    var spp = (state.socialProspects||[]).filter(function(x){ return x.id === t.dataset.id; })[0];
+    var box = document.getElementById("sp-reply-" + t.dataset.id);
+    var txt = box ? box.value : (spp && spp.ai_reply) || "";
+    try { navigator.clipboard.writeText(txt); showToast("Reply copied — paste it into the post"); } catch(e){ showToast("Select the reply and copy it"); }
+    if (spp && spp.post_url) window.open(spp.post_url, "_blank");
+  }
+  else if (action === "social-convert"){
+    if (!sb) return;
+    sb.functions.invoke("social-intake", { body: { action: "convert", prospectId: t.dataset.id } }).then(function(res){
+      if (res.error || !res.data || !res.data.ok){ showToast("Couldn't create the lead"); return; }
+      socialUpdate(t.dataset.id, { status: "converted", lead_id: res.data.leadId });
+      refreshLeadsNow(); showToast("Lead created — open it from Leads & Loans");
+    });
+  }
   else if (action === "m-more"){ ui.mobileMore = ui.mobileMore || {}; ui.mobileMore[t.dataset.lead] = !ui.mobileMore[t.dataset.lead]; render(); }
   else if (action === "m-text-thread"){
     // Text opens the real conversation (history + reply box), like a phone.
@@ -19267,6 +19344,18 @@ appEl.addEventListener("submit", function(e){
     ui.modal = null; render();
   } else if (type === "login"){
     attemptLogin(fd.get("username"), fd.get("pin"));
+  } else if (type === "social-paste"){
+    if (!sb) return;
+    ui.socialBusy = true; render();
+    sb.functions.invoke("social-intake", { body: { action: "paste", platform: "fb_group", text: fd.get("text"), handle: (fd.get("handle")||"").trim() || null, url: (fd.get("url")||"").trim() || null } }).then(function(res){
+      ui.socialBusy = false;
+      if (res.error || !res.data || !res.data.ok){ showToast("Couldn't score that post — try again"); render(); return; }
+      var row = res.data.prospect;
+      if (row.intent === "high" || row.intent === "medium"){ state.socialProspects.unshift(row); ui.socialFilter = "new"; showToast((row.intent === "high" ? "Hot" : "Warm") + " — reply drafted below"); }
+      else showToast("Not an investor financing need (" + row.intent + ") — skipped");
+      render();
+    });
+    form.reset();
   } else if (type === "customize-portal"){
     requestPortalCustomization(fd.get("prompt"));
     form.reset();
