@@ -56,7 +56,8 @@ Deno.serve(async (req: Request) => {
   if (!callTrusted) return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: CORS_HEADERS });
 
   try {
-    const { leadId, phone, userId, direct } = await req.json();
+    // targetName: who's being called when it isn't a lead (inter-office calls, 2026-10-07).
+    const { leadId, phone, userId, direct, targetName } = await req.json();
     if ((!leadId && !phone) || !userId) {
       return new Response(JSON.stringify({ error: "leadId or phone, plus userId, required" }), { status: 400, headers: CORS_HEADERS });
     }
@@ -72,6 +73,9 @@ Deno.serve(async (req: Request) => {
       }
       destPhone = lead.phone as string;
       leadName = lead.name as string;
+    } else if (phone && targetName) {
+      // Inter-office call to a teammate: no lead file, just the name for the press-1 prompt.
+      leadName = String(targetName).slice(0, 60);
     } else if (phone) {
       // Manual-dial box gave a raw number, no leadId -- if it happens to
       // match an existing lead anyway, attach it so the call still logs

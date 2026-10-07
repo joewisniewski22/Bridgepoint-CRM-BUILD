@@ -9850,7 +9850,8 @@ function renderMobileShell(){
         }, { autoOpen: i === 0 });
       }).join("") : '<div class="empty">No active leads assigned to you yet. New ones show up here the moment they arrive.</div>');
   } else if (tab === "contacts"){
-    body = '<div class="form-row" style="margin-top:12px"><input class="input" type="search" placeholder="Search name, phone or email" value="' + esc(ui.mobileQuery||"") + '" data-action="m-search" style="min-height:46px"></div>' +
+    body = (ui.mobileQuery ? '' : teamDirectoryHTML(true)) +
+      '<div class="form-row" style="margin-top:12px"><input class="input" type="search" placeholder="Search name, phone or email" value="' + esc(ui.mobileQuery||"") + '" data-action="m-search" style="min-height:46px"></div>' +
       '<div id="m-search-results">' + mobileContactResults(ui.mobileQuery) + '</div>';
   } else if (tab === "messages"){
     // Mobile messenger (Joe 2026-09-23, upgraded 2026-10-07): conversation list with search,
@@ -15271,6 +15272,34 @@ function renderNotifications(){
 function teammatesForChat(){
   return state.users.filter(function(u){ return u.id !== ui.viewAs && !isDemoAccountId(u.id); });
 }
+// Inter-office calling (Joe 2026-10-07: "an extension option ... someone can call me, they can
+// call Fiore"). Same bridge as client calls: your cell rings, press 1, their cell rings showing
+// the company number -- nobody needs anyone's personal number.
+function callTeammate(userId){
+  var u = userById(userId), me = currentUser();
+  if (!u || !u.phone){ showToast((u ? u.name : "They") + " doesn't have a cell on file"); return; }
+  if (!me.phone){ showToast("Your cell number isn't on file — ask Joe to add it"); return; }
+  if (!sb){ showToast("Phone service unavailable"); return; }
+  showToast("Calling your cell now — answer and press 1 to reach " + (u.name||"").split(" ")[0]);
+  sb.functions.invoke("make-call", { body: { phone: u.phone, userId: me.id, targetName: u.name } }).then(function(res){
+    var err = res.error || (res.data && res.data.error);
+    if (err) showToast(typeof err === "string" ? err : "Couldn't start the call — try again");
+  }).catch(function(){ showToast("Couldn't start the call — try again"); });
+}
+function teamDirectoryHTML(mobile){
+  var mates = teammatesForChat().filter(function(u){ return u.phone; });
+  if (!mates.length) return "";
+  var role = function(u){ return u.role === "owner" ? "Owner" : u.role === "processor" ? "Processor" : "Loan Officer"; };
+  if (mobile) return '<div class="m-section">Team</div>' + mates.map(function(u){
+    return '<div class="m-card"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px">' +
+      '<div><div class="m-name">' + esc(u.name) + '</div><div class="m-sub">' + role(u) + '</div></div>' +
+      '<button type="button" class="m-btn primary" style="min-height:42px" data-action="call-teammate" data-user="' + u.id + '">📞 Call</button></div></div>';
+  }).join("");
+  return mates.map(function(u){
+    return '<div class="doc-row"><div><b>' + esc(u.name) + '</b><div class="cell-sub">' + role(u) + '</div></div>' +
+      '<button type="button" class="btn btn-sm" data-action="call-teammate" data-user="' + u.id + '" title="Rings your cell, press 1, then connects you — shows the company number">📞 Call</button></div>';
+  }).join("");
+}
 function threadWith(userId){
   return (state.teamMessages||[]).filter(function(m){
     return (m.fromUserId===ui.viewAs && m.toUserId===userId) || (m.fromUserId===userId && m.toUserId===ui.viewAs);
@@ -15483,6 +15512,7 @@ function renderTeamChat(){
         '<div>' + esc(u.name) + (unread ? (' <span class="badge badge-hot">' + unread + '</span>') : '') + '</div>' +
         '<div class="cell-sub">' + esc(last ? (last.body.slice(0,60) + (last.body.length>60?"…":"")) : "No messages yet") + '</div>' +
       '</div>' +
+      (u.phone ? '<button type="button" class="btn btn-sm btn-ghost" style="margin-left:auto" data-action="call-teammate" data-user="' + u.id + '" title="Rings your cell, press 1, then connects you — shows the company number">📞</button>' : '') +
     '</div>';
   }).join("");
   var activeUser = userById(ui.teamChatWith);
@@ -18138,6 +18168,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "pb-filter"){ ui.pbFilter = t.dataset.filter; render(); }
   else if (action === "pb-chase-docs"){ chaseOutstandingDocs(t.dataset.lead); }
   else if (action === "call-via-cell"){ callViaMyCell(t.dataset.lead); }
+  else if (action === "call-teammate"){ callTeammate(t.dataset.user); }
   else if (action === "m-more"){ ui.mobileMore = ui.mobileMore || {}; ui.mobileMore[t.dataset.lead] = !ui.mobileMore[t.dataset.lead]; render(); }
   else if (action === "m-text-thread"){
     // Text opens the real conversation (history + reply box), like a phone.
