@@ -13262,7 +13262,7 @@ function renderTabDocuments(lead){
         ? '<button class="btn btn-sm btn-primary" type="button" data-action="lender-export-go" data-lead="' + lead.id + '" data-lender="' + esc(tgt.key) + '" title="Opens ' + esc(tgt.label) + '\'s portal (this file\'s assigned lender). Log in and the Bridgepoint extension fills the application and uploads the documents. You review and submit.">🚀 Export to ' + esc(tgt.label) + (tgt.mapped ? ' ⚡' : '') + '</button>'
         : '') +
         '<button class="btn btn-sm btn-ghost" type="button" data-action="lender-export-toggle" data-lead="' + lead.id + '" title="Export to a different lender">' + (tgt ? 'Other lender…' : '🚀 Export to Lender') + '</button>';
-    })()) : '') +
+    })() : '') +
     (canExportMismo ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="download-mismo-export" data-lead="' + lead.id + '" title="Exports the loan file as a MISMO 3.4 XML document for investors, title, or outside lenders">⬇ Export MISMO 3.4</button>') : '') +
     (canManage ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-modal" data-modal="addInternalDocument" data-lead="' + lead.id + '" title="A staff-only file — a completed Constructive Capital sizer, a lender summary, anything the borrower never sees">+ Internal Document</button>') : '') +
   '</div>' + (canManageOutsideLender() ? renderLenderExportPanel(lead) : '');
