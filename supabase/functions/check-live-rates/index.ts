@@ -1660,7 +1660,15 @@ async function checkRcn(s: Scenario): Promise<LenderResult> {
   // Joe 2026-10-07: "RCN does not do rural at all" -- any loan type. Blocked before quoting,
   // even though RCN's own calculator will still return a price for a rural flag.
   if (s.ruralStatus === "rural") return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN doesn't lend on rural properties." };
-  return rcnApplyGeo(s, await checkRcnRaw(s));
+  // Joe 2026-10-07: "RCN starts mixed uses at 250k" -- RCN's own calculator still prices smaller ones.
+  const RCN_MIXED_MIN = 250000;
+  if (s.propertyType === "Mixed-Use" && s.loanAmount && s.loanAmount < RCN_MIXED_MIN) return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN's mixed-use loans start at $250,000." };
+  const rcnRes = rcnApplyGeo(s, await checkRcnRaw(s));
+  if (s.propertyType === "Mixed-Use" && rcnRes.eligible) {
+    const amt = rcnRes.loanAmountUsed || rcnRes.maxLoanAmount || 0;
+    if (amt < RCN_MIXED_MIN) return { lender: "RCN Capital", eligible: false, source: rcnRes.source, reason: "RCN's mixed-use loans start at $250,000 (this deal sizes to " + fmtMoney(amt) + ")." };
+  }
+  return rcnRes;
 }
 async function checkRcnRaw(s: Scenario): Promise<LenderResult> {
   const assumptions: string[] = [];
