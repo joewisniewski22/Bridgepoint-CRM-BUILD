@@ -55,189 +55,135 @@ function el(tag: string, value: unknown): string {
   return "<" + tag + ">" + xesc(value) + "</" + tag + ">";
 }
 
+// Handles "123 Main St, City, ST 12345" and "123 Main St, City, ST, 12345".
 function parseAddress(addr: string | null): { line: string; city: string; state: string; zip: string } {
   const out = { line: "", city: "", state: "", zip: "" };
   if (!addr) return out;
-  const parts = addr.split(",").map((s) => s.trim()).filter(Boolean);
+  const parts = String(addr).replace(/,\s*(USA|US|United States)\s*$/i, "").split(",").map((s) => s.trim()).filter(Boolean);
   out.line = parts[0] || "";
   out.city = parts[1] || "";
-  const stateZip = (parts[2] || "").split(" ").filter(Boolean);
-  out.state = stateZip[0] || "";
-  out.zip = stateZip[1] || "";
+  const rest = parts.slice(2).join(" ").split(/\s+/).filter(Boolean);
+  out.state = (rest.find((x) => /^[A-Za-z]{2}$/.test(x)) || "").toUpperCase();
+  out.zip = (rest.find((x) => /^\d{5}(-\d{4})?$/.test(x)) || "").slice(0, 5);
   return out;
 }
 
 const LOAN_PURPOSE_MAP: Record<string, string> = {
-  purchase: "Purchase", "rate/term refinance": "NoCashOutRefinance", "cash-out refinance": "CashOutRefinance",
+  purchase: "Purchase", "rate/term refinance": "Refinance", "cash-out refinance": "Refinance",
+  ratetermrefi: "Refinance", cashout: "Refinance", refinance: "Refinance",
 };
 const PROPERTY_TYPE_MAP: Record<string, string> = {
-  "Single Family": "Detached", "Condo": "Condominium", "Townhome": "Attached",
-  "2-4 Unit": "TwoToFourUnitProperty", "Multifamily 5+": "FiveOrMoreUnitProperty",
+  "Single Family": "Detached", "SFR": "Detached", "Condo": "Condominium", "Townhome": "Attached",
+  "2-4 Unit": "Detached", "Multifamily 5+": "Detached",
 };
+const UNITS_BY_TYPE: Record<string, number> = { "Single Family": 1, "SFR": 1, "Condo": 1, "Townhome": 1 };
 
 type LoanOfficer = { name: string | null; email: string | null; phone: string | null; nmls: string | null } | null;
 type CompanyInfo = { name: string; address: string; nmls: string };
 
+// 2026-10-07: rewritten to standard MISMO 3.4 element form (data in child elements,
+// PARTY/ROLE SequenceNumber + xlink:label). The earlier attribute style was not read by
+// lenders' importers -- A&D's AIM ignored the borrower entirely until parties carried
+// SequenceNumber/xlink labels (tested live on AIM's "Upload MISMO" screen).
 function buildMismoXml(lead: Record<string, unknown>, lo: LoanOfficer, ssnFull: string | null, company: CompanyInfo): string {
   const addr = parseAddress(lead.property_address as string);
-  const [firstName, ...restName] = ((lead.guarantor_first_name as string) ? [lead.guarantor_first_name, lead.guarantor_last_name] : String(lead.name || "").split(" "));
+  const gAddr = parseAddress(lead.guarantor_address as string);
+  const [firstName, ...restName] = ((lead.guarantor_first_name as string) ? [lead.guarantor_first_name as string, lead.guarantor_last_name as string] : String(lead.name || "").trim().split(/\s+/));
   const lastName = (lead.guarantor_last_name as string) || restName.join(" ");
-  const loanPurpose = LOAN_PURPOSE_MAP[(lead.transaction_type as string) || "purchase"] || "Purchase";
+  const loanPurpose = LOAN_PURPOSE_MAP[String(lead.transaction_type || "purchase").toLowerCase()] || "Purchase";
+  const isCashOut = /cash/i.test(String(lead.transaction_type || ""));
   const propertyType = PROPERTY_TYPE_MAP[lead.property_type as string] || "";
-  const createdDatetime = new Date().toISOString();
+  const units = (lead.num_units as number) || UNITS_BY_TYPE[lead.property_type as string] || null;
   const ssnDigits = ssnFull ? String(ssnFull).replace(/\D/g, "") : "";
-  const loName = lo?.name || "";
-  const [loFirst, ...loRest] = loName.split(" ");
-  const loLast = loRest.join(" ");
+  const [loFirst, ...loRest] = String(lo?.name || "").split(" ");
+  const email = (lead.guarantor_email || lead.email) as string;
+  const phone = String((lead.guarantor_phone || lead.phone || "") as string).replace(/\D/g, "").slice(-10);
+  const citizenship: Record<string, string> = { "US Citizen": "USCitizen", "Permanent Resident": "PermanentResidentAlien", "Foreign National": "NonPermanentResidentAlien" };
 
-  const extensions = [
-    { name: "ARVAmount", value: lead.arv },
-    { name: "RehabBudgetAmount", value: lead.rehab_budget },
-    { name: "ExitStrategyType", value: lead.exit_strategy },
-    { name: "BorrowingEntityLegalName", value: lead.entity_legal_name },
-    { name: "OriginationPointsPercent", value: lead.points_charged },
-    { name: "LoanProgramName", value: lead.loan_type },
-    { name: "LeadSourceName", value: lead.source },
-  ].filter((e) => e.value != null && e.value !== "");
+  const ext = [
+    ["ARVAmount", lead.arv], ["RehabBudgetAmount", lead.rehab_budget], ["ExitStrategyType", lead.exit_strategy],
+    ["BorrowingEntityLegalName", lead.entity_legal_name], ["BorrowingEntityType", lead.entity_type],
+    ["OriginationPointsPercent", lead.points_charged], ["LoanProgramName", lead.loan_type],
+    ["MonthlyRentAmount", lead.rent_estimate], ["PrepaymentPenaltyTerm", lead.prepay_term],
+    ["ExperienceDealsCount", lead.experience_deals],
+  ].filter(([, v]) => v != null && v !== "");
+  const extensionXml = ext.length ? "<EXTENSION><OTHER>" + ext.map(([n, v]) => "<BRIDGEPOINT_" + n + ">" + xesc(v) + "</BRIDGEPOINT_" + n + ">").join("") + "</OTHER></EXTENSION>" : "";
 
-  const extensionXml = extensions.length
-    ? "<EXTENSION><OTHER>" + extensions.map((e) => "<BRIDGEPOINT_" + e.name + ">" + xesc(e.value) + "</BRIDGEPOINT_" + e.name + ">").join("") + "</OTHER></EXTENSION>"
-    : "";
+  const valuations = [
+    lead.purchase_price != null ? ["PurchasePrice", lead.purchase_price] : null,
+    lead.current_value != null ? ["Other", lead.current_value] : null,
+  ].filter(Boolean) as Array<[string, unknown]>;
 
-  const taxpayerXml = ssnDigits
-    ? ("              <TAXPAYER_IDENTIFIERS>\n" +
-       '                <TAXPAYER_IDENTIFIER SequenceNumber="1">\n' +
-       '                  <TAXPAYER_IDENTIFIER_DETAIL TaxpayerIdentifierType="SocialSecurityNumber" TaxpayerIdentifierValue="' + xesc(ssnDigits) + '"/>\n' +
-       "                </TAXPAYER_IDENTIFIER>\n" +
-       "              </TAXPAYER_IDENTIFIERS>\n")
-    : "";
+  const addressXml = (a: { line: string; city: string; state: string; zip: string }) =>
+    "<ADDRESS>" + el("AddressLineText", a.line) + el("CityName", a.city) + el("StateCode", a.state) + el("PostalCode", a.zip) + el("CountryCode", "US") + "</ADDRESS>";
 
-  const originationCompanyParty =
-    "            <PARTY SequenceNumber=\"2\">\n" +
-    "              <LEGAL_ENTITY>\n" +
-    '                <LEGAL_ENTITY_DETAIL FullName="' + xesc(company.name) + '"/>\n' +
-    "              </LEGAL_ENTITY>\n" +
-    "              <ADDRESSES>\n" +
-    '                <ADDRESS SequenceNumber="1" AddressLineText="' + xesc(company.address) + '"/>\n' +
-    "              </ADDRESSES>\n" +
-    "              <ROLES>\n" +
-    "                <ROLE>\n" +
-    "                  <LICENSES>\n" +
-    '                    <LICENSE SequenceNumber="1">\n' +
-    '                      <LICENSE_DETAIL LicenseIdentifier="' + xesc(company.nmls) + '"/>\n' +
-    "                    </LICENSE>\n" +
-    "                  </LICENSES>\n" +
-    "                  <ROLE_DETAIL PartyRoleType=\"LoanOriginationCompany\"/>\n" +
-    "                </ROLE>\n" +
-    "              </ROLES>\n" +
-    "            </PARTY>\n";
+  const borrowerParty =
+    '<PARTY SequenceNumber="1" xlink:label="PARTY1_1">' +
+      "<INDIVIDUAL>" +
+        "<CONTACT_POINTS>" +
+          (email ? '<CONTACT_POINT SequenceNumber="1"><CONTACT_POINT_EMAIL>' + el("ContactPointEmailValue", email) + "</CONTACT_POINT_EMAIL></CONTACT_POINT>" : "") +
+          (phone ? '<CONTACT_POINT SequenceNumber="2"><CONTACT_POINT_TELEPHONE>' + el("ContactPointTelephoneValue", phone) + "</CONTACT_POINT_TELEPHONE><CONTACT_POINT_DETAIL>" + el("ContactPointRoleType", "Mobile") + "</CONTACT_POINT_DETAIL></CONTACT_POINT>" : "") +
+        "</CONTACT_POINTS>" +
+        "<NAME>" + el("FirstName", firstName) + el("MiddleName", lead.guarantor_middle_name) + el("LastName", lastName) + "</NAME>" +
+      "</INDIVIDUAL>" +
+      (gAddr.line ? '<ADDRESSES><ADDRESS SequenceNumber="1">' + el("AddressLineText", gAddr.line) + el("AddressType", "Mailing") + el("CityName", gAddr.city) + el("PostalCode", gAddr.zip) + el("StateCode", gAddr.state) + "</ADDRESS></ADDRESSES>" : "") +
+      "<ROLES>" +
+        '<ROLE SequenceNumber="1" xlink:label="BORROWER_1">' +
+          "<BORROWER>" +
+            "<BORROWER_DETAIL>" + el("BorrowerBirthDate", lead.birthday ? String(lead.birthday).slice(0, 10) : null) + el("BorrowerClassificationType", "Primary") + "</BORROWER_DETAIL>" +
+            (lead.citizenship_status && citizenship[lead.citizenship_status as string] ? "<DECLARATION><DECLARATION_DETAIL>" + el("CitizenshipResidencyType", citizenship[lead.citizenship_status as string]) + "</DECLARATION_DETAIL></DECLARATION>" : "") +
+          "</BORROWER>" +
+          "<ROLE_DETAIL>" + el("PartyRoleType", "Borrower") + "</ROLE_DETAIL>" +
+        "</ROLE>" +
+      "</ROLES>" +
+      (ssnDigits ? '<TAXPAYER_IDENTIFIERS><TAXPAYER_IDENTIFIER SequenceNumber="1">' + el("TaxpayerIdentifierType", "SocialSecurityNumber") + el("TaxpayerIdentifierValue", ssnDigits) + "</TAXPAYER_IDENTIFIER></TAXPAYER_IDENTIFIERS>" : "") +
+    "</PARTY>";
 
-  const originatorParty =
-    "            <PARTY SequenceNumber=\"3\">\n" +
-    "              <INDIVIDUAL>\n" +
-    "                <NAME" + attr("FirstName", loFirst) + attr("LastName", loLast) + "/>\n" +
-    "                <CONTACT_POINTS>\n" +
-    (lo?.email ? ('                  <CONTACT_POINT SequenceNumber="1"><CONTACT_POINT_EMAIL ContactPointEmailValue="' + xesc(lo.email) + '"/></CONTACT_POINT>\n') : "") +
-    (lo?.phone ? ('                  <CONTACT_POINT SequenceNumber="2"><CONTACT_POINT_TELEPHONE ContactPointTelephoneValue="' + xesc(lo.phone) + '"/></CONTACT_POINT>\n') : "") +
-    "                </CONTACT_POINTS>\n" +
-    "              </INDIVIDUAL>\n" +
-    "              <ROLES>\n" +
-    "                <ROLE>\n" +
-    "                  <LICENSES>\n" +
-    '                    <LICENSE SequenceNumber="1">\n' +
-    '                      <LICENSE_DETAIL LicenseIdentifier="' + xesc(lo?.nmls || "") + '"/>\n' +
-    "                    </LICENSE>\n" +
-    "                  </LICENSES>\n" +
-    "                  <ROLE_DETAIL PartyRoleType=\"LoanOriginator\"/>\n" +
-    "                </ROLE>\n" +
-    "              </ROLES>\n" +
-    "            </PARTY>\n";
+  const companyParty =
+    '<PARTY SequenceNumber="2" xlink:label="PARTY2_1">' +
+      "<LEGAL_ENTITY><LEGAL_ENTITY_DETAIL>" + el("FullName", company.name) + "</LEGAL_ENTITY_DETAIL></LEGAL_ENTITY>" +
+      (company.address ? (() => { const c = parseAddress(company.address); return '<ADDRESSES><ADDRESS SequenceNumber="1">' + el("AddressLineText", c.line) + el("CityName", c.city) + el("PostalCode", c.zip) + el("StateCode", c.state) + "</ADDRESS></ADDRESSES>"; })() : "") +
+      '<ROLES><ROLE SequenceNumber="1" xlink:label="LOAN_ORIGINATION_COMPANY_1">' +
+        (company.nmls ? '<LICENSES><LICENSE SequenceNumber="1"><LICENSE_DETAIL>' + el("LicenseIdentifier", company.nmls) + "</LICENSE_DETAIL></LICENSE></LICENSES>" : "") +
+        "<ROLE_DETAIL>" + el("PartyRoleType", "LoanOriginationCompany") + "</ROLE_DETAIL>" +
+      "</ROLE></ROLES>" +
+    "</PARTY>";
+
+  const originatorParty = lo?.name ? (
+    '<PARTY SequenceNumber="3" xlink:label="PARTY3_1">' +
+      "<INDIVIDUAL>" +
+        "<CONTACT_POINTS>" +
+          (lo.email ? '<CONTACT_POINT SequenceNumber="1"><CONTACT_POINT_EMAIL>' + el("ContactPointEmailValue", lo.email) + "</CONTACT_POINT_EMAIL></CONTACT_POINT>" : "") +
+          (lo.phone ? '<CONTACT_POINT SequenceNumber="2"><CONTACT_POINT_TELEPHONE>' + el("ContactPointTelephoneValue", String(lo.phone).replace(/\D/g, "").slice(-10)) + "</CONTACT_POINT_TELEPHONE></CONTACT_POINT>" : "") +
+        "</CONTACT_POINTS>" +
+        "<NAME>" + el("FirstName", loFirst) + el("LastName", loRest.join(" ")) + "</NAME>" +
+      "</INDIVIDUAL>" +
+      '<ROLES><ROLE SequenceNumber="1" xlink:label="LOAN_ORIGINATOR_1">' +
+        (lo.nmls ? '<LICENSES><LICENSE SequenceNumber="1"><LICENSE_DETAIL>' + el("LicenseIdentifier", lo.nmls) + "</LICENSE_DETAIL></LICENSE></LICENSES>" : "") +
+        "<ROLE_DETAIL>" + el("PartyRoleType", "LoanOriginator") + "</ROLE_DETAIL>" +
+      "</ROLE></ROLES>" +
+    "</PARTY>") : "";
 
   return '<?xml version="1.0" encoding="UTF-8"?>\n' +
-    '<MESSAGE xmlns="http://www.mismo.org/residential/2009/schemas" MISMOReferenceModelIdentifier="3.4.0">\n' +
-    "  <ABOUT_VERSIONS>\n" +
-    '    <ABOUT_VERSION CreatedDatetime="' + xesc(createdDatetime) + '" DataVersionIdentifier="1" MISMOReferenceModelIdentifier="3.4.0" SchemaVersionIdentifier="3.4"/>\n' +
-    "  </ABOUT_VERSIONS>\n" +
-    "  <DEAL_SETS>\n" +
-    "    <DEAL_SET>\n" +
-    "      <DEALS>\n" +
-    '        <DEAL SequenceNumber="1">\n' +
-    "          <COLLATERALS>\n" +
-    '            <COLLATERAL SequenceNumber="1">\n' +
-    "              <SUBJECT_PROPERTY_INDICATOR>true</SUBJECT_PROPERTY_INDICATOR>\n" +
-    "              <SUBJECT_PROPERTY>\n" +
-    "                <ADDRESS" + attr("AddressLineText", addr.line) + attr("CityName", addr.city) + attr("StateCode", addr.state) + attr("PostalCode", addr.zip) + "/>\n" +
-    (propertyType ? ('                <PROPERTY_DETAIL PropertyEstateTypeType="FeeSimple" PropertyUsageType="Investment" PropertyTypeType="' + xesc(propertyType) + '"/>\n') : "") +
-    (lead.purchase_price != null ? (
-      "                <PROPERTY_VALUATIONS>\n" +
-      '                  <PROPERTY_VALUATION SequenceNumber="1">\n' +
-      '                    <PROPERTY_VALUATION_DETAIL PropertyValuationAmount="' + xesc(lead.purchase_price) + '" PropertyValuationMethodType="PurchasePrice"/>\n' +
-      "                  </PROPERTY_VALUATION>\n" +
-      "                </PROPERTY_VALUATIONS>\n"
-    ) : "") +
-    "              </SUBJECT_PROPERTY>\n" +
-    "            </COLLATERAL>\n" +
-    "          </COLLATERALS>\n" +
-    "          <LOANS>\n" +
-    '            <LOAN LoanRoleType="SubjectLoan" SequenceNumber="1">\n' +
-    "              <LOAN_IDENTIFIERS>\n" +
-    '                <LOAN_IDENTIFIER LoanIdentifier="' + xesc(lead.id) + '" LoanIdentifierType="LenderLoan"/>\n' +
-    "              </LOAN_IDENTIFIERS>\n" +
-    "              <TERMS_OF_LOAN>\n" +
-    el("BaseLoanAmount", lead.loan_amount) +
-    "\n                <LoanPurposeType>" + xesc(loanPurpose) + "</LoanPurposeType>\n" +
-    (lead.rate != null ? ("                <NoteRatePercent>" + xesc(lead.rate) + "</NoteRatePercent>\n") : "") +
-    (lead.term_months != null ? (
-      "                <LoanMaturityPeriodCount>" + xesc(lead.term_months) + "</LoanMaturityPeriodCount>\n" +
-      "                <LoanMaturityPeriodType>Month</LoanMaturityPeriodType>\n"
-    ) : "") +
-    (lead.ltv != null ? ("                <LTVRatioPercent>" + xesc(lead.ltv) + "</LTVRatioPercent>\n") : "") +
-    "              </TERMS_OF_LOAN>\n" +
-    extensionXml + "\n" +
-    "            </LOAN>\n" +
-    "          </LOANS>\n" +
-    "          <PARTIES>\n" +
-    '            <PARTY SequenceNumber="1">\n' +
-    "              <INDIVIDUAL>\n" +
-    "                <NAME" + attr("FirstName", firstName) + attr("LastName", lastName) + "/>\n" +
-    "                <CONTACT_POINTS>\n" +
-    (lead.guarantor_email || lead.email ? (
-      '                  <CONTACT_POINT SequenceNumber="1">\n' +
-      '                    <CONTACT_POINT_EMAIL ContactPointEmailValue="' + xesc(lead.guarantor_email || lead.email) + '"/>\n' +
-      "                  </CONTACT_POINT>\n"
-    ) : "") +
-    (lead.guarantor_phone || lead.phone ? (
-      '                  <CONTACT_POINT SequenceNumber="2">\n' +
-      '                    <CONTACT_POINT_TELEPHONE ContactPointTelephoneValue="' + xesc(lead.guarantor_phone || lead.phone) + '"/>\n' +
-      "                  </CONTACT_POINT>\n"
-    ) : "") +
-    "                </CONTACT_POINTS>\n" +
-    "              </INDIVIDUAL>\n" +
-    "              <ROLES>\n" +
-    "                <ROLE>\n" +
-    "                  <BORROWER>\n" +
-    '                    <BORROWER_DETAIL BorrowerClassificationType="Primary"' + attr("CitizenshipResidencyType", lead.citizenship_status) + attr("BorrowerBirthDate", lead.birthday) + "/>\n" +
-    (lead.credit_score != null ? (
-      "                    <CREDIT_SCORES>\n" +
-      '                      <CREDIT_SCORE SequenceNumber="1">\n' +
-      "                        <CREDIT_REPOSITORY_SOURCE_TYPE>Other</CREDIT_REPOSITORY_SOURCE_TYPE>\n" +
-      "                        <CreditScoreValue>" + xesc(lead.credit_score) + "</CreditScoreValue>\n" +
-      "                      </CREDIT_SCORE>\n" +
-      "                    </CREDIT_SCORES>\n"
-    ) : "") +
-    "                  </BORROWER>\n" +
-    "                </ROLE>\n" +
-    "              </ROLES>\n" +
-    taxpayerXml +
-    "            </PARTY>\n" +
-    originationCompanyParty +
-    originatorParty +
-    "          </PARTIES>\n" +
-    "        </DEAL>\n" +
-    "      </DEALS>\n" +
-    "    </DEAL_SET>\n" +
-    "  </DEAL_SETS>\n" +
-    "</MESSAGE>\n";
+    '<MESSAGE xmlns="http://www.mismo.org/residential/2009/schemas" xmlns:xlink="http://www.w3.org/1999/xlink" MISMOReferenceModelIdentifier="3.4.0">\n' +
+    "<ABOUT_VERSIONS><ABOUT_VERSION>" + el("CreatedDatetime", new Date().toISOString()) + el("DataVersionIdentifier", "1") + "</ABOUT_VERSION></ABOUT_VERSIONS>\n" +
+    "<DEAL_SETS><DEAL_SET><DEALS><DEAL>\n" +
+    '<COLLATERALS><COLLATERAL SequenceNumber="1"><SUBJECT_PROPERTY>' +
+      addressXml(addr) +
+      "<PROPERTY_DETAIL>" + el("FinancedUnitCount", units) + el("PropertyEstateType", "FeeSimple") + el("PropertyUsageType", "Investment") + el("AttachmentType", propertyType === "Attached" ? "Attached" : (propertyType ? "Detached" : null)) + "</PROPERTY_DETAIL>" +
+      (valuations.length ? "<PROPERTY_VALUATIONS>" + valuations.map(([m, v], i) => '<PROPERTY_VALUATION SequenceNumber="' + (i + 1) + '"><PROPERTY_VALUATION_DETAIL>' + el("PropertyValuationAmount", v) + el("PropertyValuationMethodType", m) + "</PROPERTY_VALUATION_DETAIL></PROPERTY_VALUATION>").join("") + "</PROPERTY_VALUATIONS>" : "") +
+      (lead.purchase_price != null ? "<SALES_CONTRACTS><SALES_CONTRACT><SALES_CONTRACT_DETAIL>" + el("SalesContractAmount", lead.purchase_price) + "</SALES_CONTRACT_DETAIL></SALES_CONTRACT></SALES_CONTRACTS>" : "") +
+    "</SUBJECT_PROPERTY></COLLATERAL></COLLATERALS>\n" +
+    '<LOANS><LOAN LoanRoleType="SubjectLoan" SequenceNumber="1" xlink:label="LOAN_1">' +
+      "<LOAN_DETAIL>" + el("BalloonIndicator", "false") + el("InterestOnlyIndicator", null) + "</LOAN_DETAIL>" +
+      '<LOAN_IDENTIFIERS><LOAN_IDENTIFIER SequenceNumber="1">' + el("LoanIdentifier", lead.id) + el("LoanIdentifierType", "LenderLoan") + "</LOAN_IDENTIFIER></LOAN_IDENTIFIERS>" +
+      (loanPurpose === "Refinance" ? "<REFINANCE>" + el("RefinanceCashOutDeterminationType", isCashOut ? "CashOut" : "NoCashOut") + "</REFINANCE>" : "") +
+      "<TERMS_OF_LOAN>" + el("BaseLoanAmount", lead.loan_amount) + el("LienPriorityType", "FirstLien") + el("LoanPurposeType", loanPurpose) + el("MortgageType", "Other") + el("NoteAmount", lead.loan_amount) + el("NoteRatePercent", lead.rate) + "</TERMS_OF_LOAN>" +
+      (lead.term_months != null ? "<MATURITY><MATURITY_RULE>" + el("LoanMaturityPeriodCount", lead.term_months) + el("LoanMaturityPeriodType", "Month") + "</MATURITY_RULE></MATURITY>" : "") +
+      extensionXml +
+    "</LOAN></LOANS>\n" +
+    "<PARTIES>" + borrowerParty + companyParty + originatorParty + "</PARTIES>\n" +
+    "</DEAL></DEALS></DEAL_SET></DEAL_SETS>\n</MESSAGE>\n";
 }
 
 // Mirrors get_guarantor_ssn_full's own owner/full-access/assigned-LO rule

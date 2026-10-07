@@ -215,10 +215,43 @@
     } },
   ];
 
+  // ---------------- A&D Mortgage (aim.admortgage.com) ----------------
+  // Mapped 2026-10-07 on AIM's live "Create New Loan" screen. A&D starts a loan from a
+  // MISMO 3.4 upload; the package carries one generated server-side (no SSN). AIM reads
+  // borrower name, loan amount and subject address from it (verified with TEST data).
+  // The person reviews and clicks AIM's "Upload MISMO" -- that is what creates the loan.
+  const AD_PAGES = [
+    { name: "A&D: new loan (MISMO upload)", match: () => /^\/loan\/new/.test(location.pathname), run: async (p, H, res) => {
+      const inp = document.querySelector('input[type="file"][accept*="xml"]');
+      if (!p.mismo || !p.mismo.xml) { res.missing.push("MISMO file (not in the package — re-export from the CRM)"); return; }
+      if (!inp) { res.missing.push("AIM's upload box (page changed?)"); return; }
+      const dt = new DataTransfer();
+      dt.items.add(new File([p.mismo.xml], p.mismo.fileName || "Bridgepoint-MISMO34.xml", { type: "text/xml" }));
+      inp.files = dt.files; inp.dispatchEvent(new Event("change", { bubbles: true }));
+      res.uploaded.push("MISMO 3.4 loan file");
+      await H.sleep(5000);
+      const texts = () => Array.from(document.querySelectorAll('input[type="text"]')).filter((i) => i.offsetParent !== null);
+      const t = texts();
+      if (t[0] && t[0].value) res.filled.push("borrower " + t[0].value + " " + ((t[1] && t[1].value) || "")); else res.missing.push("borrower name (AIM didn't read it — check the file)");
+      if (t[2] && t[2].value) res.filled.push("loan amount " + t[2].value); else res.missing.push("loan amount");
+      // AIM looks the address up live; if that comes back empty, type it into its address search.
+      const addrIn = t[3];
+      if (addrIn && !addrIn.value && p.property.street) {
+        const ok = await H.typeaheadPick(addrIn, p.property.street + ", " + (p.property.city || ""), p.property.city);
+        (ok ? res.filled : res.missing).push("subject address" + (ok ? "" : " — pick it by hand"));
+      } else if (addrIn && addrIn.value) res.filled.push("subject address");
+      // Estimated closing date: the file's target close date when it has one.
+      const close = t[4];
+      if (close && p.loan.closeDate) { const [y, m, d] = String(p.loan.closeDate).slice(0, 10).split("-"); H.setNative(close, m + "/" + d + "/" + y); res.filled.push("estimated closing date"); }
+      else res.missing.push("estimated closing date — AIM defaulted it, confirm it");
+      res.missing.push("Review, then click AIM's \"Upload MISMO\" to create the loan. Documents go in on the loan's Documents tab (use the panel's attach buttons).");
+    } },
+  ];
+
   window.BP_MAPS = {
     RCN: { host: /commerciallendingservicesllc\.com$/, pages: [RCN_PAGE] },
     Kiavi: { host: /kiavi\.com$/, pages: KIAVI_PAGES },
-    "A&D": { host: /admortgage\.com$/, pages: [] },
+    "A&D": { host: /admortgage\.com$/, pages: AD_PAGES },
     Constructive: { host: /bplhub\.com$/, pages: [] }, // portal side panel (copy + attach); full map built on the next real Constructive file
     NextRes: { host: null, pages: [] },
   };
