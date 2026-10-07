@@ -38,7 +38,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const leadId: string | null = body.leadId || null;
     const to: string = body.to;
-    const text: string = body.text;
+    let text: string = body.text;
     const fromName: string | null = body.fromName || null;
     // Who actually caused this send -- "staff" (default) for every real
     // button-click in the CRM, "ai" only when the AI engagement/campaign
@@ -81,6 +81,15 @@ Deno.serve(async (req: Request) => {
         return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: CORS_HEADERS });
       }
     }
+
+    // Plain characters only (10/6/26: ~10% of texts spam-blocked). Smart quotes,
+    // em/en dashes and "…" (common in AI-written texts) force the whole message
+    // into Unicode encoding -- more segments and a known carrier spam signal.
+    // Spanish accents are left alone.
+    text = String(text || "")
+      .replace(/[‘’‛′]/g, "'").replace(/[“”″]/g, '"')
+      .replace(/\s*[—–]\s*/g, " - ").replace(/…/g, "...").replace(/[   ]/g, " ")
+      .replace(/[​-‍﻿]/g, "");
 
     const telnyxRes = await fetch("https://api.telnyx.com/v2/messages", {
       method: "POST",
