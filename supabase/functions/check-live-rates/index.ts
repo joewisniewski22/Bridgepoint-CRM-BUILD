@@ -1015,6 +1015,11 @@ function kiaviPrice(s) {
   if (!st) { out.reason = "Needs the property state."; return out; }
   if (KIAVI_BROKER_NOT_APPROVED.indexOf(st) !== -1) { out.reason = "Bridgepoint isn't approved with Kiavi in " + st + "."; return out; }
   if (s.citizenshipStatus === "Foreign National" || s.citizenshipStatus === "ITIN") { out.reason = s.citizenshipStatus + " borrowers aren't modeled for Kiavi — price directly with Kiavi."; return out; }
+  // kiavi.com FAQ (read 2026-10-07): entities only; SFR, PUD, 2-4plex, condo (not FL) and manufactured;
+  // no mixed-use, commercial, mobile homes, 5+ units, or rural (agricultural-zoned / 4+ acres).
+  if ((s.entityType || "LLC") === "Individual") { out.reason = "Kiavi only lends to business entities (LLC/Corp) — not individuals."; return out; }
+  if (s.propertyType === "Multifamily 5+") { out.reason = "Kiavi lends on 1-4 units only (no 5+ multifamily)."; return out; }
+  if (s.ruralStatus === "rural") { out.reason = "Kiavi doesn't lend on rural properties (agricultural-zoned / 4+ acres)."; return out; }
   const unit = kiaviUnit(s.propertyType);
   if (!unit) { out.reason = "Kiavi doesn't lend on " + s.propertyType + " properties."; return out; }
   if (!s.creditScore) { out.reason = "Needs a credit score."; return out; }
