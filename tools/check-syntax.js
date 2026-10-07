@@ -1,6 +1,7 @@
 // Deploy guard (2026-10-06: one stray ")" in index.html blanked the whole CRM for
-// every user). Vercel runs this as the build step; any JavaScript syntax error in
-// the CRM page or the extension fails the build, so the last good version stays live.
+// every user). Vercel runs this as the "ignore build step" (vercel.json ignoreCommand):
+// any JavaScript syntax error in the CRM page or the extension skips the deploy, so
+// the last good version stays live.
 const fs = require("fs");
 const vm = require("vm");
 let failed = false;
