@@ -77,6 +77,8 @@ type LenderResult = {
   source?: "live" | "model";
   // Set when the rate is only known to within +/- this much (Kiavi rental).
   rateTolerance?: number;
+  staleWarning?: string;          // rates behind the lender's latest sheet -- shown as a banner
+  staleFix?: string;              // how to fix it -- shown only to Joe/Fiore/Erika
   // Loan amount every option above was priced at. When the caller doesn't
   // supply a loan amount, this is the highest amount the lender will do on
   // this scenario (maxLoanAmount === loanAmountUsed); when they do supply
@@ -916,6 +918,8 @@ const KIAVI_HM_TERM_ADDER = { 12: 0, 18: 0.75, 24: 1.00 };
 // Experienced ("Pro", 3+ flips) borrowers -- pulled 2026-10-07 from Kiavi's own pricing
 // query (HardMoneyLoanScenarioResults) on a Pro TEST draft vs a first-time TEST draft,
 // identical inputs. First-time grid above matched Kiavi exactly; Pro prices 1.25-2.3 lower.
+// Kiavi's 4 experience answers collapse to 2 tiers (verified 2026-10-07 on TEST drafts for
+// each answer): None and 1-2 flips = first-time grid; 3-4 and 5+ = Pro grid (identical).
 const KIAVI_HM_GRID_PRO = {
   "760": [8.50, 8.75, 8.95, 9.25],
   "700": [8.75, 9.25, 9.75, 9.95],
@@ -1228,6 +1232,16 @@ const AD_FN_INTERACT = { "fnpu|50": 0.125, "fnpt|75": -0.25, "fnpt|50": 0.125, "
 function adLadder(adj: number, lenderPaid: boolean, B: any = AD_FIT.B): Array<[number, number]> {
   return Object.entries(B).map(([r, b]) => [Number(r), Math.max(-AD_MAX_CREDIT, Math.round(((b as number) - adj) * 1000) / 1000) + (lenderPaid ? AD_LPC : 0)] as [number, number]).sort((a, b) => a[0] - b[0]);
 }
+// Weekdays (Eastern) between the snapshot and today: Friday's sheet on Monday = 1.
+function adBusinessDaysOld(captured: string | null): number | null {
+  if (!captured) return null;
+  const etDate = (d: Date) => new Date(d.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const a = etDate(new Date(captured)), b = etDate(new Date());
+  a.setHours(0, 0, 0, 0); b.setHours(0, 0, 0, 0);
+  let n = 0;
+  for (const d = new Date(a); d < b; d.setDate(d.getDate() + 1)) { const w = d.getDay(); if (w !== 0 && w !== 6) n++; }
+  return n;
+}
 function adMonthlyPI(loan: number, rate: number): number { const r = rate / 100 / 12; return loan * r / (1 - Math.pow(1 + r, -360)); }
 
 async function checkAD(s: Scenario): Promise<LenderResult> {
@@ -1300,8 +1314,17 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
     // $80 tax service, $6.95 flood cert, $24.95 MERS (the CRM adds those as lender charges).
     const res: LenderResult = { lender: L, eligible: true, source: "model", options: options as any, loanAmountUsed: loan, maxLoanAmount: loan, assumptions, fees: { lenderFee: 1595 } };
     if (cit !== "us") { res.rateTolerance = 0.25; assumptions.unshift("Foreign national / ITIN pricing at A&D is only accurate to about 0.25% here — confirm with A&D."); }
-    // Older than 3 days (or never refreshed): rates may have moved.
-    if (ageDays == null || ageDays > 3) { res.rateTolerance = Math.max(res.rateTolerance || 0, 0.25); assumptions.unshift("A&D rates haven't been refreshed in " + (ageDays == null ? "a while" : Math.floor(ageDays) + " days") + " — confirm before quoting."); }
+    // A&D reprices every business day; the refresh job runs each weekday morning and fails
+    // when the AIM login has expired. More than 1 business day old = flag it loudly.
+    const bizOld = adBusinessDaysOld(snap.captured);
+    if (bizOld == null || bizOld > 1) {
+      res.rateTolerance = Math.max(res.rateTolerance || 0, 0.25);
+      // LOs only see the plain warning; the login fix is for Joe/Fiore/Erika (Joe 2026-10-07:
+      // LOs don't know what AIM is) -- the CRM shows staleFix only to them.
+      res.staleWarning = "These rates are from " + (snap.captured ? new Date(snap.captured).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" }) : "an older rate sheet") + " and may have changed. Confirm before quoting.";
+      res.staleFix = "The daily A&D rate refresh hasn't run — usually the AIM login expired. Log back into AIM so it can refresh.";
+      assumptions.unshift(res.staleWarning);
+    }
     return res;
   }
   return { lender: L, eligible: false, source: "model", reason: "No A&D DSCR tier fits (credit, leverage, DSCR, loan size, or a layered guideline like low credit with DSCR under 1.00)." };

@@ -12704,6 +12704,9 @@ function lpRenderResults(key){
     if (!r.eligible){
       return '<div class="panel panel-pad" style="margin-top:12px">' + head + '<div class="footnote" style="padding-top:8px;color:' + (r.unavailable ? 'var(--ink-muted)' : 'var(--c-rust)') + '">' + esc(canSee || !r.unavailable ? (r.reason || "Doesn't fit this lender's guidelines.") : "Not available right now.") + '</div></div>';
     }
+    // Lender's rate sheet is behind (A&D: daily refresh failed, usually an expired login).
+    // The login fix is shown only to Joe/Fiore/Erika -- LOs just see the warning (Joe 2026-10-07).
+    if (r.staleWarning) head += '<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:#fff4d6;border:1px solid #e8c36a;color:#6b4e00;font-size:13px"><b>⚠ Rates may be out of date.</b> ' + esc(r.staleWarning) + (r.staleFix && canManageOutsideLender() ? '<div style="margin-top:4px"><b>Fix:</b> ' + esc(r.staleFix) + '</div>' : '') + '</div>';
     var ltvTxt = (basis && amt && !rtl) ? (" · " + (Math.round(amt / basis * 1000) / 10) + "% LTV") : "";
     var srcBadge = r.source === "model" ? ' <span class="badge badge-neutral" title="Bridgepoint\'s researched copy of this lender\'s pricing, not a live quote">Estimate</span>' : (r.source === "live" ? ' <span class="badge badge-forest">Live</span>' : '');
     var summary = '<div style="padding:10px 0 4px"><span style="font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-muted)">' + (r.maxLoanAmount && r.maxLoanAmount === amt ? "Maximum loan" : "Priced at") + '</span> <b class="mono" style="font-size:20px">' + fmtUSD(amt) + '</b>' + srcBadge + '<span class="footnote">' + ltvTxt + (r.fees && r.fees.lenderFee != null ? " · lender fee " + fmtUSD(r.fees.lenderFee) : "") + '</span></div>' +
