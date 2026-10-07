@@ -27,6 +27,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
+// Borrower-facing links (booking, application/portal) use the branded domain -- the
+// vercel.app address trips carrier spam filters. Staff links stay on CRM_URL.
+const CLIENT_URL = "https://app.bplending.com/";
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 const LAUNCH_DATE = "2026-10-03";
@@ -134,8 +137,8 @@ const TOUCHES: Array<{ k: string; after: number; ch: "text" | "email"; subject?:
 ];
 
 async function generate(touch: typeof TOUCHES[number], l: Row, lo: Row): Promise<{ subject: string; body: string } | null> {
-  const bookingLink = CRM_URL + "?book=" + l.assigned_to;
-  const appLink = CRM_URL.replace(/\/$/, "") + "/?apply=" + l.id + "&t=" + (l.application_token || "");
+  const bookingLink = CLIENT_URL + "?book=" + l.assigned_to;
+  const appLink = CLIENT_URL + "?apply=" + l.id + "&t=" + (l.application_token || "");
   const prompt = "You are " + lo.name + ", a loan officer at Bridgepoint Lending (business-purpose real estate investor loans, not consumer mortgages). " +
     "Write ONE " + (touch.ch === "text" ? "text message (max 2 short sentences, plain, friendly, no emojis)" : "short email (max 90 words, plain text, no markdown, sign off with just your first name)") + " to " + first(l.name) + ", an investor who filled out our " + (l.loan_type || "loan") + " web form " + Math.max(1, Math.round((Date.now() - new Date(l.created_at_ts).getTime()) / 86400000)) + " day(s) ago and hasn't gone further. " +
     "Goal of this message: " + touch.angle + " " +

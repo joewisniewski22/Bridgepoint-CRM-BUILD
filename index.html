@@ -2335,6 +2335,9 @@ var XACTUS_PORTAL_URL = "https://xactus.com/sign-in/";
 // for this API, no server-side proxy needed. Empty until Joe adds his own.
 var GOOGLE_MAPS_API_KEY = "AIzaSyDS6Qm6Rm2HJYRwo4GQrMMGMm487F8v-sQ";
 var CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
+// Borrower-facing links (application/portal, booking) use the branded domain -- the
+// vercel.app address trips carrier spam filters (10/6/26). Staff stay on CRM_URL.
+var CLIENT_URL = "https://app.bplending.com/";
 var CADENCE_STAGES = ["new","attempting","qualifying"];
 var CADENCE_MAX = 5;
 // Daily call quota system -- see buildDailyCallQueue(). DAILY_CALL_QUOTA is
@@ -3674,7 +3677,7 @@ function applicationLink(lead){
   var qp = new URLSearchParams();
   qp.set("apply", lead.id);
   qp.set("t", lead.applicationToken || "");
-  return CRM_URL.replace(/\/$/, "") + "/?" + qp.toString();
+  return CLIENT_URL + "?" + qp.toString();
 }
 function sendBorrowerPortalInvite(leadId){
   var lead = leadById(leadId);
@@ -3724,7 +3727,7 @@ function reallySendBorrowerPortalInvite(leadId, channels){
   });
 }
 function bookingLinkFor(userId, leadId){
-  return window.location.origin + window.location.pathname + "?book=" + userId + (leadId ? ("&forLead=" + leadId) : "");
+  return CLIENT_URL + "?book=" + userId + (leadId ? ("&forLead=" + leadId) : "");
 }
 function sendSchedulingLink(leadId){
   var lead = leadById(leadId);
@@ -14280,7 +14283,7 @@ function modalMySchedule(){
     '</div>';
   }).join("") : '<div class="empty">No availability set yet — add a window below.</div>';
 
-  var bookingLink = window.location.origin + window.location.pathname + "?book=" + uid;
+  var bookingLink = CLIENT_URL + "?book=" + uid;
   var nowTsVal = Date.now();
   var upcoming = (state.appointments||[]).filter(function(a){ return a.userId===uid && a.status!=="canceled" && new Date(a.startAt).getTime() >= nowTsVal; }).sort(function(a,b){ return new Date(a.startAt)-new Date(b.startAt); });
   var upcomingHTML = upcoming.length ? upcoming.map(function(a){

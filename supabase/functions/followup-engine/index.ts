@@ -43,6 +43,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
+// Borrower-facing links (booking, application/portal) use the branded domain -- the
+// vercel.app address trips carrier spam filters. Staff links stay on CRM_URL.
+const CLIENT_URL = "https://app.bplending.com/";
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const BRIEF_MODEL = "claude-sonnet-5-5";
 const TOUCH_MODEL = "claude-haiku-4-5-20251001";
@@ -533,8 +536,8 @@ No emojis anywhere. Return ONLY the JSON.`;
 
 // AI-written borrower touch
 async function makeTouch(touch, l, lo, sit, anchorLabel) {
-  const bookingLink = CRM_URL + "?book=" + l.assigned_to;
-  const appLink = CRM_URL + "?apply=" + l.id + "&t=" + (l.application_token || "");
+  const bookingLink = CLIENT_URL + "?book=" + l.assigned_to;
+  const appLink = CLIENT_URL + "?apply=" + l.id + "&t=" + (l.application_token || "");
   const lang = l.preferred_language === "es" ? "Spanish" : "English";
   const exp = l.termsheet_sent_at ? addDays(dateOf(l.termsheet_sent_at), 15) : null;
   const prompt = `You are ${lo.name}, a loan officer at Bridgepoint Lending (business-purpose real estate investor loans — not consumer mortgages). Write ONE ${touch.ch === "text" ? "text message (max 2 short sentences, plain, friendly, no emojis)" : "short email (max 90 words, plain text, no markdown, sign off with just your first name)"} in ${lang} to ${first(l.name)}.

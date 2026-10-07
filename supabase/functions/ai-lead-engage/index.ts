@@ -13,6 +13,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const MODEL = "claude-sonnet-5";
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
+// Borrower-facing links (booking, application/portal) use the branded domain -- the
+// vercel.app address trips carrier spam filters. Staff links stay on CRM_URL.
+const CLIENT_URL = "https://app.bplending.com/";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -52,7 +55,7 @@ function normalizeLoanType(text: string | null | undefined): string | null {
   return null;
 }
 function applicationLink(leadId: string, token: string): string {
-  return CRM_URL.replace(/\/$/, "") + "/?apply=" + leadId + "&t=" + (token || "");
+  return CLIENT_URL + "?apply=" + leadId + "&t=" + (token || "");
 }
 
 function marketRateContext(loanType: string, rates: Array<Record<string, unknown>>): string {
@@ -111,7 +114,7 @@ Deno.serve(async (req: Request) => {
       ? ("Additional guidance learned from real conversion data across all conversations, follow this: " + engagementConfig.messaging_guidance + " ")
       : "";
 
-    const bookingLink = CRM_URL + "?book=" + lead.assigned_to;
+    const bookingLink = CLIENT_URL + "?book=" + lead.assigned_to;
     const hasLoanType = !!lead.loan_type;
     const alreadyApplied = !!lead.application_sent_at;
     const systemPrompt =

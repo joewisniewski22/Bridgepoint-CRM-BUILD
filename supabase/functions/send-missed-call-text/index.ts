@@ -17,6 +17,9 @@ const TELNYX_MESSAGING_PROFILE_ID = Deno.env.get("TELNYX_MESSAGING_PROFILE_ID")!
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
+// Borrower-facing links (booking, application/portal) use the branded domain -- the
+// vercel.app address trips carrier spam filters. Staff links stay on CRM_URL.
+const CLIENT_URL = "https://app.bplending.com/";
 const COMPANY_PHONE_DISPLAY = "(850) 279-8588";
 const DEDUPE_WINDOW_MS = 12 * 60 * 60 * 1000;
 
@@ -78,7 +81,7 @@ Deno.serve(async (req: Request) => {
     const first = ((lead.name as string) || "").trim().split(" ")[0] || "there";
     const loName = ((staff.name as string) || "your loan officer").trim();
     const loanType = lead.loan_type ? (lead.loan_type as string) + " loan" : "loan";
-    const book = CRM_URL + "?book=" + staffId;
+    const book = CLIENT_URL + "?book=" + staffId;
 
     let message =
       "Hey " + first + ", it's " + loName + " with Bridgepoint Lending following up on your " + loanType + " inquiry — sorry I missed you! " +

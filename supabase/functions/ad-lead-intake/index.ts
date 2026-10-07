@@ -17,6 +17,9 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
+// Borrower-facing links (booking, application/portal) use the branded domain -- the
+// vercel.app address trips carrier spam filters. Staff links stay on CRM_URL.
+const CLIENT_URL = "https://app.bplending.com/";
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -157,7 +160,7 @@ Deno.serve(async (req: Request) => {
           text: (existing.name as string) + " just filled out the " + loanType + " " + (isSite ? "website" : "ad") + " form again — they're actively shopping", date: today, read: false,
         });
       }
-      return json({ ok: true, repeat: true, leadId: isTool ? (existing.id as string) : undefined, applyUrl: isApply && existing.application_token ? (CRM_URL + "?apply=" + existing.id + "&t=" + existing.application_token) : undefined });
+      return json({ ok: true, repeat: true, leadId: isTool ? (existing.id as string) : undefined, applyUrl: isApply && existing.application_token ? (CLIENT_URL + "?apply=" + existing.id + "&t=" + existing.application_token) : undefined });
     }
 
     // --- Build the file --------------------------------------------------
@@ -216,7 +219,7 @@ Deno.serve(async (req: Request) => {
     // --- AI first contact (English), consent recorded above ----------------
     if (lo && !isApply) {
       try {
-        const bookingLink = CRM_URL + "?book=" + ASSIGNEE;
+        const bookingLink = CLIENT_URL + "?book=" + ASSIGNEE;
         const known: string[] = ["Loan type: " + loanType].concat(answers);
         if (propertyType) known.push("Property: " + propertyType);
         if (valueAmt) known.push((goal === "purchase" ? "Purchase price" : "Property value") + ": about $" + Math.round(valueAmt).toLocaleString());
@@ -246,7 +249,7 @@ Deno.serve(async (req: Request) => {
         console.error("ad-lead-intake: AI first contact failed", String(e));
       }
     }
-    return json({ ok: true, leadId: id, applyUrl: isApply ? (CRM_URL + "?apply=" + id + "&t=" + appToken) : undefined });
+    return json({ ok: true, leadId: id, applyUrl: isApply ? (CLIENT_URL + "?apply=" + id + "&t=" + appToken) : undefined });
   } catch (err) {
     console.error("ad-lead-intake: error", String(err));
     return json({ error: "server_error", detail: "Something went wrong — please try again." }, 500);

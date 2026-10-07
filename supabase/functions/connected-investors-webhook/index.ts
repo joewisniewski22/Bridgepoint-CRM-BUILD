@@ -23,6 +23,9 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const WEBHOOK_TOKEN = Deno.env.get("CONNECTED_INVESTORS_WEBHOOK_TOKEN")!;
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
+// Borrower-facing links (booking, application/portal) use the branded domain -- the
+// vercel.app address trips carrier spam filters. Staff links stay on CRM_URL.
+const CLIENT_URL = "https://app.bplending.com/";
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -213,7 +216,7 @@ Deno.serve(async (req: Request) => {
     // --- AI first-contact message to the borrower, in English --------------
     if ((email || phone) && assignee) {
       try {
-        const bookingLink = CRM_URL + "?book=" + assignedTo;
+        const bookingLink = CLIENT_URL + "?book=" + assignedTo;
         const known: string[] = [];
         if (loanType) known.push("Loan type: " + loanType);
         if (loanAmount) known.push("Requested amount: approx. $" + loanAmount.toLocaleString());

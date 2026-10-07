@@ -764,7 +764,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
           email: l.email || null, phone: phoneAllowed ? (l.phone || null) : null, loanType: l.loan_type || null,
           loId: l.assigned_to || null, loName: lo.name || "your Bridgepoint contact",
           loPhone: "(850) 279-8588", // the one company number -- never a personal cell
-          bookingLink: "https://bridgepoint-crm-build.vercel.app/?book=" + (l.assigned_to || "owner"),
+          bookingLink: "https://app.bplending.com/?book=" + (l.assigned_to || "owner"),
         };
       })
       .filter((r) => {
