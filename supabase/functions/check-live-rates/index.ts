@@ -15,6 +15,7 @@
 import { RCN_GEO_DATE, RCN_KILLED, RCN_REDUCE, RCN_TARGET, RCN_TARGET_NAMES } from "./rcn_geo.ts";
 import { checkVelocity, velocityGet, velocityPost } from "./velocity.ts";
 import { checkLend } from "./lend.ts";
+import { RCN_LTR_AREAS, RCN_LTR_ZIP, RCN_LTR_GEO_DATE } from "./rcn_ltr_geo.ts";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -1635,7 +1636,13 @@ function rcnRentalRules(s: Scenario, r: LenderResult): LenderResult {
   if (f && f < 680 && !fn) return no("RCN rentals need a 680+ credit score.");
   const value = (s.transactionType !== "purchase" && s.currentValue) ? s.currentValue : s.purchasePrice;
   if (value && value < (fn ? 125000 : 115000)) return no("RCN rentals need a property value of at least " + fmtMoney(fn ? 125000 : 115000) + ".");
-  const minD = fn ? 1.3 : f >= 720 ? 1.0 : f >= 700 ? 1.1 : 1.2;
+  // LTR geo overlays (sizer 9/24/26): blocked areas, and DSCR/value floors in Philadelphia, Birmingham, Baltimore-area counties.
+  const zip = (/\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(s.propertyAddress || "") || [])[1];
+  const area = zip ? RCN_LTR_ZIP.get(zip) : undefined;
+  const ov = area ? RCN_LTR_AREAS[area] : null;
+  if (ov && !ov.permitted) return no("RCN isn't doing rentals in the " + area + " area (zip " + zip + ", RCN sizer " + RCN_LTR_GEO_DATE + ").");
+  if (ov && ov.minValue && value && value < ov.minValue) return no("RCN rentals in the " + area + " area need a property value of at least " + fmtMoney(ov.minValue) + ".");
+  const minD = Math.max(fn ? 1.3 : f >= 720 ? 1.0 : f >= 700 ? 1.1 : 1.2, s.propertyType === "Multifamily 5+" ? 1.25 : 0, (ov && ov.minDscr) || 0);
   const opts = (r.options || []).filter((o) => o.dscr == null || o.dscr >= minD - 0.005);
   if (!opts.length) return no("DSCR is under RCN's " + minD.toFixed(2) + "x minimum for this credit score — lower the loan amount or raise the rent.");
   return { ...r, options: opts };
@@ -1669,10 +1676,27 @@ async function checkRcn(s: Scenario): Promise<LenderResult> {
   // Joe 2026-10-07: "RCN starts mixed uses at 250k" -- RCN's own calculator still prices smaller ones.
   const RCN_MIXED_MIN = 250000;
   if (s.propertyType === "Mixed-Use" && s.loanAmount && s.loanAmount < RCN_MIXED_MIN) return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN's mixed-use loans start at $250,000." };
+  // RCN Product Summary (Lender Documents, rev 10/21/25, read 2026-10-07).
+  const L = "RCN Capital";
+  const big = s.propertyType === "Mixed-Use" || s.propertyType === "Multifamily 5+";
+  const isGuc = s.loanType === "Ground Up Construction";
+  const isRtl = RTL_AUTO_LOAN_TYPES.includes(s.loanType);
+  if (isGuc && s.citizenshipStatus && s.citizenshipStatus !== "US Citizen") return { lender: L, eligible: false, source: "model", reason: "RCN ground-up is for US citizens only." };
+  if (isGuc && s.arv && s.arv < 175000) return { lender: L, eligible: false, source: "model", reason: "RCN ground-up needs a completed value (ARV) of at least $175,000." };
+  if (isRtl && !isGuc && s.loanType !== "Bridge" && s.arv && s.arv < 100000) return { lender: L, eligible: false, source: "model", reason: "RCN needs an ARV of at least $100,000." };
+  if (s.creditScore && s.creditScore < 650) return { lender: L, eligible: false, source: "model", reason: "RCN's minimum credit score is 650." };
+  if (!isRtl && s.propertyType === "Multifamily 5+" && s.creditScore && s.creditScore < 700) return { lender: L, eligible: false, source: "model", reason: "RCN 5-9 unit rentals need a 700+ credit score." };
   const rcnRes = rcnApplyGeo(s, await checkRcnRaw(s));
-  if (s.propertyType === "Mixed-Use" && rcnRes.eligible) {
+  if (rcnRes.eligible) {
     const amt = rcnRes.loanAmountUsed || rcnRes.maxLoanAmount || 0;
-    if (amt < RCN_MIXED_MIN) return { lender: "RCN Capital", eligible: false, source: rcnRes.source, reason: "RCN's mixed-use loans start at $250,000 (this deal sizes to " + fmtMoney(amt) + ")." };
+    const fn = s.citizenshipStatus === "Foreign National";
+    let min = 75000, max = 2000000, why = "";
+    if (big) { min = 250000; max = isRtl ? 3000000 : 2000000; why = s.propertyType === "Mixed-Use" ? "mixed-use" : "5+ unit"; }
+    if (isGuc) { min = Math.max(min, 100000); max = 2000000; }
+    if (!isRtl && fn) min = Math.max(min, 85000);
+    if (amt && amt < min) return { lender: L, eligible: false, source: rcnRes.source, reason: "RCN's " + (why ? why + " " : "") + (fn && !isRtl ? "foreign-national " : "") + "loans start at " + fmtMoney(min) + " (this deal sizes to " + fmtMoney(amt) + ")." };
+    if (amt && amt > max) rcnRes.assumptions = (rcnRes.assumptions || []).concat(["Above RCN's " + fmtMoney(max) + " standard max — needs RCN approval."]);
+    if (!isRtl && s.propertyType === "Multifamily 5+") rcnRes.assumptions = (rcnRes.assumptions || []).concat(["RCN 5-9 unit rentals: 1.25x DSCR minimum, 70% max (65% cash-out), 1 point minimum."]);
   }
   return rcnRes;
 }
