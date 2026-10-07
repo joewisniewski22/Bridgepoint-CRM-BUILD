@@ -375,6 +375,9 @@ async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?
     if (isGuc && s.propertyType === "Condo") return no("Condos aren't eligible for Constructive ground-up.");
     if (s.citizenshipStatus === "Foreign National" && (s.entityType || "LLC") === "Individual") return no("Constructive foreign-national guarantors must borrow through a U.S. entity.");
     if (s.citizenshipStatus === "Foreign National" && !s.creditScore) return no("Constructive foreign nationals need a valid credit report and score.");
+    // RTL Guidelines App. E: ineligible countries for foreign-national guarantors.
+    const BPL_FN_BANNED = ["afghanistan","libya","balkans","nicaragua","belarus","north korea","bosnia","russia","burma","myanmar","saudi arabia","burundi","somalia","central african republic","south sudan","crimea","sudan","cuba","syria","congo","turkey","egypt","ukraine","eritrea","united arab emirates","uae","haiti","vanuatu","iran","venezuela","iraq","yemen","lebanon","zimbabwe","liberia"];
+    if (s.citizenshipStatus === "Foreign National" && s.countryOfDomicile && BPL_FN_BANNED.some((c) => s.countryOfDomicile!.toLowerCase().includes(c))) return no("Constructive can't lend to foreign nationals domiciled in " + s.countryOfDomicile + " (ineligible-country list).");
     const limitsRaw = isGuc ? BPL_GUC_MATRIX[band] : BPL_V7_GRID[band][profile];
     if (!limitsRaw) return null;
     const limits: RtlLimits = { ...limitsRaw };
@@ -404,6 +407,9 @@ async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?
       if (limits.ltarv != null && s.arv) caps.push(limits.ltarv / 100 * s.arv);
     }
     if (!caps.length) return null;
+    // RTL Guidelines §14.3: minimum $7,500 borrower equity on every loan (on a purchase: cost minus loan).
+    if (s.transactionType === "purchase") caps.push((pp + rehab) - 7500);
+    if (experienceTier(s.experienceDeals) === "1-2") notes.push("Constructive's 0-2 project borrowers must own their primary residence.");
     const amt = Math.floor(Math.max(0, Math.min(MAX_LOAN_SANITY_CEILING, ...caps)));
     if (amt < 75000) return no("Below Constructive's $75,000 minimum (max here is " + fmtMoney(amt) + ").");
     notes.unshift("Constructive " + band + " band, " + (isGuc ? "ground-up" : profile === "bridge" ? "bridge" : profile + " rehab") + " (V7 pricing engine, 9/30/26).");
