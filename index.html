@@ -2462,6 +2462,9 @@ try {
   } else if (qp.get("showcase")){
     ui.publicShowcase = { status:"loading", items:[] };
     loadPublicShowcase();
+  } else if (qp.get("sign") && qp.get("s") && applyToken){
+    ui.publicSign = { id: qp.get("sign"), signer: qp.get("s"), token: applyToken, status: "loading" };
+    loadPublicSign();
   } else if (qp.get("borrower") && qp.get("b") && applyToken){
     ui.publicBorrower = { leadId: qp.get("borrower"), bid: qp.get("b"), token: applyToken, status: "loading" };
     loadPublicBorrower();
@@ -5383,7 +5386,7 @@ function ensureGlobalPolling(){
   // pattern already used for the lead-detail/team-chat/email polling.
   if (globalPollTimer || !sb) return;
   globalPollTimer = setInterval(function(){
-    if (!ui.loggedIn || ui.publicApply || ui.publicBorrower || ui.publicBooking || ui.publicShowcase) return;
+    if (!ui.loggedIn || ui.publicApply || ui.publicBorrower || ui.publicSign || ui.publicBooking || ui.publicShowcase) return;
     sb.from("leads").select("*").then(function(res){
       if (res.error || !res.data) return;
       var fresh = res.data.map(rowToLead);
@@ -9106,6 +9109,13 @@ function render(){
     initSignaturePads();
     return;
   }
+  if (ui.publicSign){
+    app.innerHTML = renderPublicSign();
+    var toastHostPS = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
+    app.insertAdjacentHTML("beforeend", toastHostPS);
+    initSignaturePads();
+    return;
+  }
   if (ui.publicBorrower){
     app.innerHTML = renderPublicBorrower();
     var toastHostPBW = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
@@ -9234,7 +9244,7 @@ function syncHistory(){
   lastHistoryKey = key;
 }
 window.addEventListener("popstate", function(e){
-  if (!e.state || !ui.loggedIn || ui.publicApply || ui.publicBorrower || ui.publicBooking || ui.publicShowcase) return;
+  if (!e.state || !ui.loggedIn || ui.publicApply || ui.publicBorrower || ui.publicSign || ui.publicBooking || ui.publicShowcase) return;
   ui.view = e.state.view || "today";
   ui.selectedLeadId = e.state.leadId || null;
   ui.activeTab = e.state.tab || "overview";
@@ -12365,7 +12375,7 @@ function renderOutsideLenderFitBox(lead){
 // NextRes added 2026-09-26 -- Joe is now a table funder with them and will
 // upload their real term sheets via the existing Upload Outside Term Sheet
 // flow (no dedicated rate sheet/pricer built in yet, unlike Constructive).
-var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes"];
+var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital"];
 // Pricer lender name -> the routing value the rest of the CRM uses ("RCN Capital"
 // -> "RCN", Constructive -> null = in-house). undefined = unknown lender, leave routing alone.
 function lenderRoutingValue(name){
@@ -12375,6 +12385,8 @@ function lenderRoutingValue(name){
   if (/Kiavi/i.test(n)) return "Kiavi";
   if (/A&D/i.test(n)) return "A&D Mortgage";
   if (/NextRes/i.test(n)) return "NextRes";
+  if (/Velocity/i.test(n)) return "Velocity";
+  if (/Lend Investors|^LEND\b/i.test(n)) return "Lend Investors Capital";
   return undefined;
 }
 // Routing vs. the terms actually applied to the file (pricer) -- flags files like
@@ -12406,7 +12418,9 @@ var LENDER_EXPORT_TARGETS = [
   { key:"RCN", label:"RCN Capital", portal:"https://broker.commerciallendingservicesllc.com/loans/loan-requests/referral_intake_broker", mapped:true },
   { key:"Kiavi", label:"Kiavi", portal:"https://app.kiavi.com/loans/new", mapped:true },
   { key:"A&D", label:"A&D Mortgage", portal:"https://aim.admortgage.com/loan/new/", mapped:true },
-  { key:"NextRes", label:"NextRes", portal:null }
+  { key:"NextRes", label:"NextRes", portal:null },
+  { key:"Velocity", label:"Velocity Mortgage Capital", portal:"https://www.generatevelocity.com/#/BrokerDashboard" },
+  { key:"LEND", label:"Lend Investors Capital", portal:"https://www.leapplenderportal.com/Partner/s/" }
 ];
 // The file's placement -> its Export to Lender target (Joe 2026-10-06: one click
 // exports to the assigned lender).
@@ -12417,6 +12431,8 @@ function exportKeyForLead(lead){
   if (/Kiavi/i.test(ol)) return "Kiavi";
   if (/A&D/i.test(ol)) return "A&D";
   if (/NextRes/i.test(ol)) return "NextRes";
+  if (/Velocity/i.test(ol)) return "Velocity";
+  if (/Lend Investors/i.test(ol)) return "LEND";
   return null;
 }
 var LENDER_EXTENSION_ZIP = "https://bridgepoint-crm-build.vercel.app/bridgepoint-lender-export.zip";
@@ -16923,6 +16939,79 @@ function submitBorrowerApp(form){
   }).catch(function(){ if (btn){ btn.disabled = false; btn.textContent = "Submit my information"; } showToast("Something went wrong — please try again", true); });
 }
 
+/* ---- In-house e-signature page: ?sign=<requestId>&s=<signerKey>&t=<token> (esign edge function).
+   Joe 10/7/26: a lender form filled from the file, each signer reviews it, types their own SSN
+   (never pre-filled), and draws their signature; it's stamped onto the form's signature line. ---- */
+function loadPublicSign(){
+  var ps = ui.publicSign;
+  if (!sb){ ps.status = "invalid"; render(); return; }
+  sb.functions.invoke("esign", { body: { action: "view", id: ps.id, signer: ps.signer, token: ps.token } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){ ps.status = "invalid"; render(); return; }
+    ps.info = res.data;
+    ps.status = res.data.signedAt ? "done" : "ready";
+    render();
+  }).catch(function(){ ps.status = "invalid"; render(); });
+}
+function renderPublicSign(){
+  var ps = ui.publicSign;
+  var wrap = function(inner){ return '<div class="login-screen"><div class="login-card" style="max-width:640px;text-align:left">' + inner + '</div></div>'; };
+  if (ps.status === "loading") return wrap('<div class="empty">Loading… / Cargando…</div>');
+  if (ps.status === "invalid") return wrap('<div class="empty">This link isn\'t valid anymore. Please contact your loan officer at Bridgepoint Lending for a new one.<br><br>Este enlace ya no es válido. Comuníquese con su oficial de préstamos en Bridgepoint Lending.</div>');
+  var info = ps.info || {};
+  var contact = info.loName ? (esc(info.loName) + (info.loPhone ? " · " + esc(info.loPhone) : "")) : "your loan officer";
+  if (ps.status === "done"){
+    return wrap('<div class="rail-title" style="margin-bottom:8px">Thank you, ' + esc((info.name || "").split(" ")[0]) + ' ✓ &nbsp;¡Gracias!</div>' +
+      '<div class="footnote" style="padding:0 0 10px">Your signature is on the application' + (info.property ? ' for ' + esc(info.property) : '') + '. Your loan officer has been notified.<br>Su firma quedó registrada en la solicitud. Su oficial de préstamos ya fue notificado.</div>' +
+      (info.pdfUrl ? '<a class="btn btn-sm" href="' + esc(info.pdfUrl) + '" target="_blank" rel="noopener">View the application / Ver la solicitud</a>' : '') +
+      '<div class="footnote" style="padding:12px 0 0">Questions? ' + contact + '</div>');
+  }
+  return wrap(
+    '<div class="rail-title" style="margin-bottom:4px">Review &amp; sign your loan application</div>' +
+    '<div class="footnote" style="padding:0 0 4px"><b>' + esc(info.name || "") + '</b> · ' + esc(info.role || "") + (info.property ? ' · ' + esc(info.property) : '') + '</div>' +
+    '<div class="footnote" style="padding:0 0 12px">Revise y firme su solicitud de préstamo. Ya está llenada con la información de su expediente.</div>' +
+    '<div class="panel panel-pad" style="margin:0 0 14px">' +
+      '<div style="margin-bottom:6px"><b>1.</b> Review the application (already filled in from your file) · <i>Revise la solicitud</i></div>' +
+      (info.pdfUrl ? '<a class="btn btn-sm btn-primary" href="' + esc(info.pdfUrl) + '" target="_blank" rel="noopener">Open the application (PDF) / Abrir la solicitud</a>' : '') +
+      '<div class="footnote" style="padding:6px 0 0">If anything is wrong, don\'t sign. Call or text ' + contact + ' and we\'ll fix it first. / Si algo está incorrecto, no firme y comuníquese con nosotros.</div>' +
+    '</div>' +
+    '<form data-form="submit-esign">' +
+      '<div style="margin-bottom:6px"><b>2.</b> Your information · <i>Su información</i></div>' +
+      '<div class="form-two">' +
+        '<div class="form-row"><label>Social Security number / Número de Seguro Social</label><input class="input" type="password" autocomplete="off" name="ssn" inputmode="numeric" placeholder="XXX-XX-XXXX" required></div>' +
+        (info.needsEin ? '<div class="form-row"><label>Business EIN / EIN de la empresa <span class="hint">(XX-XXXXXXX)</span></label><input class="input" autocomplete="off" name="ein" inputmode="numeric" placeholder="XX-XXXXXXX"></div>' : '') +
+      '</div>' +
+      '<div class="form-row"><label>Type your full legal name / Escriba su nombre legal completo</label><input class="input" name="typedName" required autocomplete="off" value=""></div>' +
+      '<div style="margin:10px 0 6px"><b>3.</b> Sign · <i>Firme</i></div>' +
+      sigPadHTML("esign-pad", "Draw your signature / Dibuje su firma", "en") +
+      '<label style="display:flex;gap:10px;align-items:flex-start;margin:12px 0;font-size:13px"><input type="checkbox" name="consent" style="margin-top:3px"><span>I reviewed the application and agree to sign it electronically. I certify the information is true and complete, and I authorize the lender and Bridgepoint Lending to obtain my credit report as described in the Credit Authorization. <i>Revisé la solicitud y acepto firmarla electrónicamente. Certifico que la información es verdadera y autorizo que se obtenga mi reporte de crédito.</i></span></label>' +
+      '<button class="btn btn-primary" type="submit">Sign the application / Firmar</button>' +
+      '<div class="footnote" style="padding:10px 0 0">Your Social Security number is sent securely and only placed on your application. Questions? ' + contact + '</div>' +
+    '</form>');
+}
+function submitPublicSign(form){
+  var ps = ui.publicSign;
+  if (!ps || !sb) return;
+  var fd = new FormData(form);
+  var ssn = String(fd.get("ssn") || "").replace(/\D/g, "");
+  if (ssn.length !== 9){ showToast("Enter your 9-digit Social Security number / Ingrese su número de Seguro Social", true); return; }
+  var ein = String(fd.get("ein") || "").replace(/\D/g, "");
+  if (ein && ein.length !== 9){ showToast("The EIN should be 9 digits", true); return; }
+  var typedName = String(fd.get("typedName") || "").trim();
+  if (typedName.length < 3){ showToast("Type your full legal name / Escriba su nombre", true); return; }
+  var sig = signaturePadDataUrl("esign-pad");
+  if (!sig){ showToast("Please draw your signature / Por favor firme", true); return; }
+  if (!fd.get("consent")){ showToast("Please check the box to agree / Marque la casilla", true); return; }
+  var btn = form.querySelector('button[type="submit"]'); if (btn){ btn.disabled = true; btn.textContent = "Signing… / Firmando…"; }
+  sb.functions.invoke("esign", { body: { action: "sign", id: ps.id, signer: ps.signer, token: ps.token, ssn: ssn, ein: ein || null, typedName: typedName, signature: sig, consent: true } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){
+      if (btn){ btn.disabled = false; btn.textContent = "Sign the application / Firmar"; }
+      showToast("Something went wrong — please try again or contact your loan officer", true);
+      return;
+    }
+    ps.status = "loading"; render(); loadPublicSign();
+  }).catch(function(){ if (btn){ btn.disabled = false; btn.textContent = "Sign the application / Firmar"; } showToast("Something went wrong — please try again", true); });
+}
+
 function coPdfSection(w, lead, heading){
   w.heading(heading);
   w.row("Name", [lead.coFirstName, lead.coMiddleName, lead.coLastName].filter(Boolean).join(" "));
@@ -19392,6 +19481,8 @@ appEl.addEventListener("submit", function(e){
     addAdditionalBorrower(form.dataset.lead, fd);
   } else if (type === "submit-borrower-app"){
     submitBorrowerApp(form);
+  } else if (type === "submit-esign"){
+    submitPublicSign(form);
   } else if (type === "submit-booking"){
     submitBooking(fd);
   } else if (type === "save-signature"){

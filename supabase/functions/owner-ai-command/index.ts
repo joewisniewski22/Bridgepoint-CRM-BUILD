@@ -1,4 +1,4 @@
-import { createClient as __guardCreateClient } from "https://esm.sh/@supabase/supabase-js@2";
+﻿import { createClient as __guardCreateClient } from "https://esm.sh/@supabase/supabase-js@2";
 // AI command box, available to every staff member. Joe types a
 // plain-English request in his portal; Claude decides which of a small,
 // fixed set of real backend tools to call (look up closed deals, draft/
@@ -50,7 +50,7 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 const LOAN_TYPES = ["DSCR", "Fix & Flip", "Ground Up Construction", "Portfolio/Blanket", "Bridge", "Mixed-Use"];
 const SOURCES = ["Meta Ads", "Connected Investors", "Referral", "Repeat Client", "Website", "Self-Generated"];
-const OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes"];
+const OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital"];
 const CITIZENSHIP_STATUSES = ["US Citizen", "Permanent Resident", "Foreign National", "ITIN"];
 const PREPAY_TERMS = ["5yr", "3yr", "2yr", "1yr", "none"];
 
@@ -455,13 +455,13 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
       if (assignee?.email) {
         fetch(SUPABASE_URL + "/functions/v1/send-email", {
           method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-          body: JSON.stringify({ to: assignee.email, subject: "New loan file: " + input.name, text: "New loan file: " + input.name + " (" + input.loanType + ") — open & dial: " + link, fromName: "Bridgepoint CRM" }),
+          body: JSON.stringify({ to: assignee.email, subject: "New loan file: " + input.name, text: "New loan file: " + input.name + " (" + input.loanType + ") â€” open & dial: " + link, fromName: "Bridgepoint CRM" }),
         }).catch(() => {});
       }
       if (assignee?.phone) {
         fetch(SUPABASE_URL + "/functions/v1/send-text", {
           method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
-          body: JSON.stringify({ to: assignee.phone, text: "🔥 New loan file: " + input.name + " (" + input.loanType + ") — open & dial: " + link, fromName: "Bridgepoint CRM" }),
+          body: JSON.stringify({ to: assignee.phone, text: "ðŸ”¥ New loan file: " + input.name + " (" + input.loanType + ") â€” open & dial: " + link, fromName: "Bridgepoint CRM" }),
         }).catch(() => {});
       }
     }
@@ -538,7 +538,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     const link = "https://bridgepoint-crm-build.vercel.app/?lead=" + leadId;
     if (input.notifyAssignee !== false && existing.assigned_to) {
       const { data: assignee } = await sb.from("users").select("email,phone,name").eq("id", existing.assigned_to as string).single();
-      const alertText = (existing.name as string) + "'s loan terms were updated: " + changedLabels.join(", ") + " — " + link;
+      const alertText = (existing.name as string) + "'s loan terms were updated: " + changedLabels.join(", ") + " â€” " + link;
       if (assignee?.email) {
         fetch(SUPABASE_URL + "/functions/v1/send-email", {
           method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },

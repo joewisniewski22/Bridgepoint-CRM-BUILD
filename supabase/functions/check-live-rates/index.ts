@@ -13,6 +13,7 @@
 // reimplemented statically in index.html, since Constructive is our own
 // in-house paper and Joe hands us the sheet directly every time it changes).
 import { RCN_GEO_DATE, RCN_KILLED, RCN_REDUCE, RCN_TARGET, RCN_TARGET_NAMES } from "./rcn_geo.ts";
+import { checkVelocity } from "./velocity.ts";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -1662,6 +1663,7 @@ const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult
   { key: "kiavi", check: checkKiavi },
   { key: "rcn", check: checkRcn },
   { key: "ad", check: checkAD },
+  { key: "velocity", check: (s: Scenario) => checkVelocity(s as any) },
 ];
 
 Deno.serve(async (req: Request) => {

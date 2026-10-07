@@ -1,4 +1,4 @@
-// "Export to Lender" (Joe 2026-10-06): Joe, Erika or Fiore clicks Export to
+﻿// "Export to Lender" (Joe 2026-10-06): Joe, Erika or Fiore clicks Export to
 // Lender on a file; the Bridgepoint Chrome extension opens the lender's portal,
 // the staff member logs in themselves, and the extension fills the lender's
 // application and uploads documents from this package. A person always reviews
@@ -26,7 +26,7 @@ const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { sta
 
 // Who may export files to lenders (Joe's rule: himself, Erika, Fiore).
 const EXPORTERS = ["owner", "proc-erika", "lo-fiore"];
-const LENDERS = ["Constructive", "RCN", "Kiavi", "A&D", "NextRes"];
+const LENDERS = ["Constructive", "RCN", "Kiavi", "A&D", "NextRes", "Velocity", "LEND"];
 
 function randomToken(): string {
   const b = new Uint8Array(32);
@@ -159,7 +159,7 @@ Deno.serve(async (req) => {
       const token = String(body.token || "");
       if (!/^[0-9a-f]{64}$/.test(token)) return json({ error: "bad_token" }, 400);
       const { data: ex } = await sb.from("lender_exports").select("*").eq("token", token).maybeSingle();
-      if (!ex || new Date(ex.expires_at).getTime() < Date.now()) return json({ error: "expired", detail: "This export link expired — click Export to Lender again in the CRM." }, 410);
+      if (!ex || new Date(ex.expires_at).getTime() < Date.now()) return json({ error: "expired", detail: "This export link expired â€” click Export to Lender again in the CRM." }, 410);
       if (body.action === "package") {
         const pkg = await buildPackage(ex.lead_id, ex.lender);
         await sb.from("lender_exports").update({ fetched_at: new Date().toISOString() }).eq("id", ex.id);
