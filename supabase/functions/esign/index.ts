@@ -378,6 +378,9 @@ Deno.serve(async (req) => {
       await upload(allDone ? finalPath! : reqRow.current_path, bytes);
       await sb.from("esign_requests").update({ signers, status: allDone ? "complete" : "partial", signed_path: finalPath, completed_at: allDone ? new Date().toISOString() : null }).eq("id", reqRow.id);
       const label = tpl.title;
+      // Per-request alerts (esign_requests.notify): {textTo:"631...", emailCompleteTo:["x@y.com"], emailCompleteNote:"..."}
+      const notify = reqRow.notify || {};
+      const externalSent: string[] = [], externalFailed: string[] = [];
       if (allDone) {
         const fileName = "Signed - " + label.replace(/[^A-Za-z0-9 &-]/g, "") + ".pdf";
         await addToLead(reqRow.lead_id, me.name + " (" + me.role + ") e-signed the " + label + ". All signatures are in — the signed PDF is filed under Documents.",
@@ -390,8 +393,25 @@ Deno.serve(async (req) => {
         for (const addr of to) {
           await sendEmail({ leadId: reqRow.lead_id, to: addr as string, subject: "Signed: " + label + " — " + (lead?.property_address || reqRow.lead_id), text: "All signers have e-signed the " + label + " for loan " + reqRow.lead_id + " (" + signers.map((s) => s.name).join(", ") + "). The signed PDF is attached and filed on the loan under Documents.", attachmentBase64: b64, attachmentName: fileName });
         }
+        // Outside recipients chosen by staff for this request (e.g. the lender's processor).
+        const prop = clean(lead?.property_address).replace(/,?\s*USA$/i, "");
+        for (const addr of (Array.isArray(notify.emailCompleteTo) ? notify.emailCompleteTo : [])) {
+          const ok = await sendEmail({ leadId: reqRow.lead_id, to: addr, cc: notify.emailCompleteCc || undefined, fromUserId: reqRow.created_by,
+            subject: "Signed application & credit authorization — " + signers.map((s) => s.name).join(" & ") + " — " + prop,
+            text: (notify.emailCompleteNote ? notify.emailCompleteNote + "\n\n" : "") + "Attached is the signed loan application and credit authorization for " + signers.map((s) => s.name).join(" and ") + " (" + prop + ").\n\nThank you,",
+            attachmentBase64: b64, attachmentName: fileName });
+          (ok ? externalSent : externalFailed).push(addr);
+        }
+        if (externalSent.length) await addToLead(reqRow.lead_id, "Emailed the signed application & credit authorization to " + externalSent.join(", ") + ".");
       } else {
         await addToLead(reqRow.lead_id, me.name + " (" + me.role + ") e-signed the " + label + ". Waiting on: " + signers.filter((s) => !s.signedAt).map((s) => s.name).join(", ") + ".");
+      }
+      if (notify.textTo) {
+        const waiting = signers.filter((s) => !s.signedAt).map((s) => s.name);
+        const msg = me.name + " (" + me.role + ") just e-signed the application for " + clean(lead?.property_address).replace(/,?\s*USA$/i, "") + ". " +
+          (allDone ? "All signatures are in. Signed copy filed on the loan" + (externalSent.length ? " and emailed to " + externalSent.join(", ") : "") + "." + (externalFailed.length ? " EMAIL FAILED to " + externalFailed.join(", ") + "." : "")
+                   : "Still waiting on " + waiting.join(", ") + ".");
+        await fetch(SUPABASE_URL + "/functions/v1/send-text", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + SERVICE_ROLE_KEY, apikey: SERVICE_ROLE_KEY }, body: JSON.stringify({ to: notify.textTo, text: msg, fromName: "Bridgepoint E-Sign" }) }).catch(() => null);
       }
       return json({ ok: true, complete: allDone });
     }

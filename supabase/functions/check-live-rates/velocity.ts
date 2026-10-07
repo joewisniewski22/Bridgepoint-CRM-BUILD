@@ -56,12 +56,27 @@ export async function velocityPost(path: string, body: unknown, retry = true): P
   return r.json();
 }
 
+export async function velocityGet(path: string): Promise<any> {
+  const tok = await velocityToken();
+  const x = await velocityXsrf();
+  const r = await fetch(API + path, { headers: { "Accept": "application/json", "Authorization": "Bearer " + tok, "X-XSRF-TOKEN": x.token, "Cookie": x.cookie, "X-App-Source": "AngularJS" } });
+  return r.ok ? r.json() : { http: r.status };
+}
+
 const VEL_PROPERTY: Record<string, string> = {
   "SFR": "SingleFamilyResidence", "Single Family": "SingleFamilyResidence", "Condo": "SingleFamilyCondo", "Townhome": "SingleFamilyPUD",
   "2-4 Unit": "2to4Units", "Duplex": "2to4Units", "Multifamily 5+": "5plusUnits", "Mixed-Use": "MixedUse",
   "Office": "Office", "Retail": "Retail", "Warehouse": "Warehouse", "Self-Storage": "Storage", "Storage": "Storage",
 };
-const VEL_CITIZEN: Record<string, string> = { "US Citizen": "USCitizen", "Permanent Resident": "PermanentResident", "Non-Permanent Resident": "NonPermanentResident", "Foreign National": "ForeignNational" };
+// Velocity's own values (portal code, 10/7/26): "US Citizen" | "Foreign National" (in the US, not a
+// permanent resident) | "Foreign Investor" (lives abroad, no US credit) | "Foreign Investor with Credit".
+// Velocity has no permanent-resident option -- green card holders go in as US Citizen.
+function velCitizen(c: string | null, fico: number | null): string {
+  if (c === "Non-Permanent Resident") return "Foreign National";
+  if (c === "Foreign National") return fico ? "Foreign Investor with Credit" : "Foreign Investor";
+  return "US Citizen";
+}
+const VEL_ENTITY: Record<string, string> = { "LLC": "Limited Liability Company", "Corporation": "Corporation", "Trust": "Trust", "Limited Partnership": "Limited Partnership", "General Partnership": "General Partnership", "Partnership": "General Partnership" };
 
 export type VelScenario = {
   loanType: string; transactionType: string; propertyAddress: string; propertyState: string; propertyType: string; numUnits?: number | null;
@@ -83,7 +98,8 @@ export async function checkVelocity(s: VelScenario): Promise<any> {
   if (!program) { out.reason = "Velocity doesn't offer " + lt + "."; return out; }
   const pt = VEL_PROPERTY[s.propertyType] || (lt === "Mixed-Use" ? "MixedUse" : null);
   if (!pt) { out.reason = "Velocity property type not mapped for " + s.propertyType + "."; return out; }
-  if (!s.creditScore) { out.reason = "Needs a credit score."; return out; }
+  if (!s.creditScore && s.citizenshipStatus !== "Foreign National") { out.reason = "Needs a credit score."; return out; }
+  if (s.citizenshipStatus === "Permanent Resident") out.assumptions.push("Velocity prices permanent residents the same as US citizens.");
   const refi = s.transactionType && s.transactionType !== "purchase";
   const value = refi ? (s.currentValue || s.purchasePrice) : (s.purchasePrice && s.currentValue ? Math.min(s.purchasePrice, s.currentValue) : (s.purchasePrice || s.currentValue));
   if (!value) { out.reason = refi ? "Needs the current value." : "Needs the purchase price."; return out; }
@@ -92,8 +108,8 @@ export async function checkVelocity(s: VelScenario): Promise<any> {
 
   const base: any = {
     LoanGUID: "", PropertyType: [pt], PropertyCounties: [], PropertyCities: [city(s.propertyAddress)].filter(Boolean), PropertyState: (s.propertyState || "").toUpperCase(),
-    FICO: s.creditScore, CitizenshipStatus: VEL_CITIZEN[s.citizenshipStatus || "US Citizen"] || "USCitizen", OtherLienAmounts: [], NumberOfUnits: [s.numUnits || (pt === "2to4Units" ? 2 : 1)],
-    LoanPurpose: purpose, MatrixDate: "", VestedEntity: (s.entityType || "LLC") !== "Individual", EntityType: s.entityType === "Corporation" ? "Corporation" : "LLC", OwnerOccupied: false,
+    FICO: s.creditScore || 0, CitizenshipStatus: velCitizen(s.citizenshipStatus, s.creditScore), OtherLienAmounts: [], NumberOfUnits: [s.numUnits || (pt === "2to4Units" ? 2 : 1)],
+    LoanPurpose: purpose, MatrixDate: "", VestedEntity: (s.entityType || "LLC") !== "Individual", EntityType: (s.entityType || "LLC") === "Individual" ? "" : (VEL_ENTITY[s.entityType || "LLC"] || "Limited Liability Company"), OwnerOccupied: false,
     ProgramType: program, ARVInvestorExperienceLevel: Number(s.experienceDeals || 0), ProgramSubType: "", FirstTimeInvestor: !s.experienceDeals, FirstTimeBuyer: false,
     FixedTerm: "", BrokerRebatePoints: 0, RateBuydownFeePOC: 0, PrepayBuydownYears: 0, RebateOrBuydown: "Buydown", LenderFeeBuydown: 0, RateOrFee: "Rate", PromoCodes: [],
     PurchasePrice: s.purchasePrice || 0, EstimatedCurrentValue: s.currentValue || value, EstimatedFutureValue: s.arv || 0, CostOfImprovements: 0,

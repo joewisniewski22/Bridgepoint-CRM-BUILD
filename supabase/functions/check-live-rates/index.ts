@@ -13,7 +13,7 @@
 // reimplemented statically in index.html, since Constructive is our own
 // in-house paper and Joe hands us the sheet directly every time it changes).
 import { RCN_GEO_DATE, RCN_KILLED, RCN_REDUCE, RCN_TARGET, RCN_TARGET_NAMES } from "./rcn_geo.ts";
-import { checkVelocity } from "./velocity.ts";
+import { checkVelocity, velocityGet } from "./velocity.ts";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -1673,14 +1673,20 @@ Deno.serve(async (req: Request) => {
   }
   try {
     const body = await req.json();
+    // Server-key-only: read one of Velocity's reference lists (e.g. "LoanPurpose", "PropertyType").
+    if (body.velocityList && (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "") === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
+      return new Response(JSON.stringify(await velocityGet(String(body.velocityList).replace(/[^A-Za-z]/g, ""))), { headers: CORS_HEADERS });
+    }
     const scenario: Scenario = body.lead;
     if (!scenario) {
       return new Response(JSON.stringify({ error: "missing_lead" }), { status: 400, headers: CORS_HEADERS });
     }
-    const results = await Promise.allSettled(LENDERS.map(function (l) { return l.check(scenario); }));
+    // Optional body.lenders: ["velocity", ...] prices only those (used for accuracy testing).
+    const picked = Array.isArray(body.lenders) && body.lenders.length ? LENDERS.filter(function (l) { return body.lenders.indexOf(l.key) !== -1; }) : LENDERS;
+    const results = await Promise.allSettled(picked.map(function (l) { return l.check(scenario); }));
     const out = results.map(function (r, i) {
       if (r.status === "fulfilled") return r.value;
-      return { lender: LENDERS[i].key, eligible: false, reason: "Lookup failed: " + String(r.reason) };
+      return { lender: picked[i].key, eligible: false, reason: "Lookup failed: " + String(r.reason) };
     });
     return new Response(JSON.stringify({ ok: true, results: out }), { headers: CORS_HEADERS });
   } catch (err) {
