@@ -30,6 +30,13 @@ export const LEND_FIT = {
   expFeePct: { "0": 1.0, "1": 0.5, "2": 0.25 } as Record<string, number>,
   ficoFeePct: [ { max: 699, add: 0.25 } ],
   termFeePctPer3Mo: 0.25,      // 15 mo +0.25, 18 mo +0.5, 21 +0.75, 24 +1.0 (12/18/24 measured)
+  // New Construction (ground-up), measured 10/7/26 at $297,000: 7+ builds 10.5, 4-6 10.75, 2-3 11.0, 1 11.25.
+  // Size break measured: $297,000 -> 10.5, $305,100 -> 9.5; flat 9.5 through $1.045M.
+  // and $1,080,000 @ 90% LTC -> 9.25 ($1M+ band).
+  ncRateBands: [ { min: 0, rate: 10.5 }, { min: 300000, rate: 9.5 }, { min: 1000000, rate: 9.25 } ],
+  ncHighLtcAdd: 0.25,          // loans over 90% LTC (the 93/95% low-land tiers): 275,500 @95% = 10.75; 324,000 @90% = no add
+  ncExpRate: { "1": 0.75, "2": 0.5, "3": 0.5, "4": 0.25, "5": 0.25, "6": 0.25 } as Record<string, number>,
+  ncExpFeePct: { "1": 0.75, "2": 0.5, "3": 0.25 } as Record<string, number>,
   buydownPtsPerRate: 1.0,      // -0.25% rate = +0.25 pts (to -1.00%)
   buyupPtsPerRate: 0.5,        // +0.50% rate = -0.25 pts
 };
@@ -79,12 +86,85 @@ export function lendFee(fit: typeof LEND_FIT, loan: number, exp: number, fico: n
   return Math.round((Math.max(fit.feeFloor, loan * fit.feeMinPct / 100) + loan * pct / 100) * 100) / 100;
 }
 
+// New Construction matrix (p.5). ltcLow/ltcHigh = max LTC when land value is under / at-or-over 15% of ARV.
+// ia = initial advance (% of lot). bigLot = lot price or land value over $200k allowed.
+const NC_TIERS = [
+  { name: "7+", minExp: 7, f700: { ltcLow: 95, ltcHigh: 90, arv: 75, ia: 75, bigLot: true }, f660: { ltcLow: 93, ltcHigh: 88, arv: 72.5, ia: 70, bigLot: true }, declining: true },
+  { name: "4+", minExp: 4, f700: { ltcLow: 93, ltcHigh: 88, arv: 72.5, ia: 70, bigLot: true }, f660: { ltcLow: 90, ltcHigh: 83, arv: 70, ia: 70, bigLot: false }, declining: true },
+  // Matrix table says 2+ "not eligible" in declining markets, but the product overview says "requires 2+ NC
+  // experience and a 5% LTV reduction" and LEND's own pricer approves 2+ (measured 10/7) -- follow the pricer.
+  { name: "2+", minExp: 2, f700: { ltcLow: 90, ltcHigh: 83, arv: 70, ia: 70, bigLot: false }, f660: { ltcLow: 85, ltcHigh: 78, arv: 65, ia: 65, bigLot: false }, declining: true },
+  { name: "1", minExp: 1, f700: { ltcLow: 85, ltcHigh: 78, arv: 65, ia: 65, bigLot: false }, f660: null, declining: false },
+];
+const NC_PROPERTY = ["SFR", "Single Family", "Townhome", "2-4 Unit", "Duplex"];
+
+async function checkLendNc(s: S, out: any): Promise<any> {
+  const no = (why: string) => { out.reason = why; return out; };
+  if ((s.entityType || "LLC") === "Individual") return no("LEND ground-up requires an entity borrower.");
+  if (s.citizenshipStatus === "Foreign National") return no("LEND doesn't lend to foreign nationals on ground-up.");
+  const fico = Number(s.creditScore || 0);
+  if (!fico) return no("Needs a credit score.");
+  if (fico < 660) return no("LEND's ground-up minimum FICO is 660.");
+  const exp = Math.max(0, Math.floor(Number(s.experienceDeals || 0)));
+  if (exp < 1) return no("LEND ground-up needs at least 1 completed new-construction project in the last 3 years.");
+  const st = (s.propertyState || "").toUpperCase();
+  if (NO_STATES.includes(st)) return no("LEND doesn't lend in " + st + ".");
+  if (EXCEPTION_STATES.includes(st)) return no("LEND only lends in " + st + " by exception — not quotable.");
+  if (EXCEPTION_CITIES.some((re) => re.test(s.propertyAddress || ""))) return no("LEND only lends in this city by exception — not quotable.");
+  if (s.ruralStatus === "rural") return no("LEND doesn't do rural ground-up.");
+  if (!NC_PROPERTY.includes(s.propertyType)) return no("LEND ground-up is SFR, townhome/PUD or 2-4 units only (condos case-by-case) — not " + s.propertyType + ".");
+  if (s.appraisalTransfer === "yes") return no("LEND doesn't accept transferred appraisals — a new valuation would be needed.");
+  const lot = s.purchasePrice && s.currentValue ? Math.min(s.purchasePrice, s.currentValue) : Number(s.purchasePrice || s.currentValue || 0);
+  const budget = Number(s.rehabBudget || 0), arv = Number(s.arv || 0);
+  if (!lot) return no("Needs the lot price.");
+  if (!budget) return no("Needs the construction budget.");
+  if (!arv) return no("Needs the after-completion value (ARV).");
+  const term = [12, 15, 18, 21, 24].includes(Number(s.termMonths)) ? Number(s.termMonths) : 12;
+  const fit = (await lendFit()).fit;
+  const landHigh = lot / arv >= 0.15;
+  const options: any[] = [];
+  let firstReason = "";
+  for (const t of NC_TIERS) {
+    if (exp < t.minExp) continue;
+    const lim = fico >= 700 ? t.f700 : t.f660;
+    if (!lim) { firstReason = firstReason || "LEND's 1-build tier needs a 700+ FICO."; continue; }
+    if (lot > 200000 && !lim.bigLot) { firstReason = firstReason || "LEND only finances lots over $200k for 7+ builders (or 4+ with a 700+ FICO)."; continue; }
+    if (s.transactionType === "cashout") { firstReason = firstReason || "Cash-out on LEND ground-up isn't priced here yet."; continue; }
+    let ltc = landHigh ? lim.ltcHigh : lim.ltcLow, arvPct = lim.arv;
+    if (s.decliningMarket === "yes") { if (!t.declining) { firstReason = firstReason || "LEND ground-up in a declining market needs 2+ builds."; continue; } arvPct -= 5; }
+    if (s.vacationArea === "yes") ltc = Math.min(ltc - 5, 85);
+    let max = Math.min((lot + budget) * ltc / 100, arv * arvPct / 100, lot * lim.ia / 100 + budget);
+    max = Math.floor(max + 1e-6);
+    const amt = s.loanAmount ? Math.min(s.loanAmount, max) : max;
+    if (amt < 100000) { firstReason = firstReason || "LEND's minimum loan is $100,000."; continue; }
+    if (amt > 3000000) continue;
+    let base = fit.ncRateBands[0].rate; for (const b of fit.ncRateBands) if (amt >= b.min) base = b.rate;
+    const highLtc = amt / (lot + budget) > 0.9000001 ? (fit.ncHighLtcAdd ?? 0.25) : 0;
+    const rate = Math.round((base + highLtc + (exp >= 7 ? 0 : (fit.ncExpRate[String(exp)] ?? 0)) + ((fit.ficoRate.find((x) => fico <= x.max) || { add: 0 }).add)) * 1000) / 1000;
+    const pct = (exp >= 4 ? 0 : (fit.ncExpFeePct[String(exp)] ?? 0)) + ((fit.ficoFeePct.find((x) => fico <= x.max) || { add: 0 }).add) + Math.max(0, Math.round((term - 12) / 3)) * fit.termFeePctPer3Mo;
+    const fee = Math.round((Math.max(fit.feeFloor, amt * fit.feeMinPct / 100) + amt * pct / 100) * 100) / 100;
+    if (options.some((o) => o.loanAmount === amt && o.rate === rate)) continue;
+    options.push({ program: "New Construction " + t.name + " · " + term + "-mo I/O", rate, price: 100 + fee / amt * 100, loanAmount: amt, lenderPoints: Math.round(fee / amt * 100000) / 1000, lenderFee: fee, term });
+  }
+  if (!options.length) return no(firstReason || "No LEND ground-up tier fits this deal.");
+  options.sort((a, b) => b.loanAmount - a.loanAmount || a.rate - b.rate);
+  out.eligible = true; out.options = options.slice(0, 3);
+  out.loanAmountUsed = options[0].loanAmount; out.maxLoanAmount = options[0].loanAmount;
+  out.rehabHoldback = budget; out.fees = { lenderFee: Math.round(options[0].lenderFee) };
+  out.compCaps = { maxBrokerPoints: 5 }; out.rateTolerance = 0.125;
+  out.assumptions.push("LEND ground-up pricing measured from LEND's own quote tool. Land " + (landHigh ? "≥" : "<") + " 15% of ARV. Licensed GC required (1-build borrowers need a GC with 3+ builds); 1-build loans need approved permits before closing.");
+  out.assumptions.push("LEND counts only completed NEW-CONSTRUCTION projects (last 3 yrs) as experience here — " + exp + " assumed.");
+  out.assumptions.push("LEND requires a top-300 MSA and does its own valuation (transfers not accepted).");
+  return out;
+}
+
 export async function checkLend(s: S): Promise<any> {
   const L = "Lend Investors Capital";
   const out: any = { lender: L, eligible: false, source: "model", assumptions: [] as string[] };
   const no = (why: string) => { out.reason = why; return out; };
   const lt = s.loanType || "";
-  if (lt !== "Fix & Flip") return no("LEND is priced here for fix & flip only so far (rental, bridge and construction pricing still being measured).");
+  if (lt === "Ground Up Construction") return checkLendNc(s, out);
+  if (lt !== "Fix & Flip") return no("LEND is priced here for fix & flip and ground-up only (their rental pricing wasn't competitive; bridge not measured yet).");
   // ---- borrower
   if ((s.entityType || "LLC") === "Individual") return no("LEND rehab loans require an entity borrower (LLC/LP/Corp) — individuals aren't eligible.");
   if (s.citizenshipStatus === "Foreign National") return no("LEND doesn't lend to foreign nationals on rehab loans.");

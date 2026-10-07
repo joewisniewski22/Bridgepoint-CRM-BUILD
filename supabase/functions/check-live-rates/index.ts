@@ -1711,7 +1711,20 @@ const APPRAISAL_TRANSFER: Record<string, "no" | "yes" | "unknown"> = {
 const APPRAISAL_TRANSFER_NOTE: Record<string, string> = {
   "Constructive Capital": "Constructive accepts the transferred appraisal with a release letter, subject to their review.",
 };
+// Joe 2026-10-07: "A&D and RCN are both out of Baltimore; Constructive still doing it deal by deal
+// and capped at 65% LTV on cash-out -- Baltimore turning into a straight no-go right now."
+// Deal-by-deal = no price (scenario-runner rule), so Baltimore City is out for every lender.
+function isBaltimoreCity(s: Scenario): boolean {
+  const a = s.propertyAddress || "";
+  return /\bBaltimore,\s*MD\b/i.test(a) && !/county/i.test(a);
+}
 function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
+  if (r && isBaltimoreCity(s)) {
+    return { lender: r.lender, eligible: false, source: r.source,
+      reason: r.lender === "Constructive Capital"
+        ? "Baltimore City is deal-by-deal only at Constructive (65% LTV max on cash-out) — not quotable; bring it to Joe."
+        : r.lender + " isn't lending in Baltimore City right now." };
+  }
   if (!r || !r.eligible) return r;
   if (Array.isArray(r.options)) {
     r.options = r.options.filter((o) => o && isFinite(Number(o.rate)) && Number(o.rate) > 0 && (!o.loanAmount || o.loanAmount > 0));
