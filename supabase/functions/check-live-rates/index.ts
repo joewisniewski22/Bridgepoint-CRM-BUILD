@@ -913,9 +913,22 @@ const KIAVI_HM_GRID = {
   "680": [10.00, 11.00, 12.00, 13.24],
 };
 const KIAVI_HM_TERM_ADDER = { 12: 0, 18: 0.75, 24: 1.00 };
-// Bridge (no rehab) only ever measured at 700-759 / 75% of as-is (11.50);
-// other tiers assume the same FICO spread as the rehab grid's 75% column.
-const KIAVI_BRIDGE_RATE = { "760": 11.04, "700": 11.50, "680": 11.80 };
+// Experienced ("Pro", 3+ flips) borrowers -- pulled 2026-10-07 from Kiavi's own pricing
+// query (HardMoneyLoanScenarioResults) on a Pro TEST draft vs a first-time TEST draft,
+// identical inputs. First-time grid above matched Kiavi exactly; Pro prices 1.25-2.3 lower.
+const KIAVI_HM_GRID_PRO = {
+  "760": [8.50, 8.75, 8.95, 9.25],
+  "700": [8.75, 9.25, 9.75, 9.95],
+  "680": [9.50, 9.95, 10.50, 11.25],
+};
+const KIAVI_HM_TERM_ADDER_PRO = { 12: 0, 18: 0.50, 24: 1.00 };
+const KIAVI_PRO_MIN_DEALS = 3;
+// Bridge (no rehab), 12-month, by % of as-is value: <=65% and the max tier
+// (75% at 700+, 70% at 680-699). Measured 2026-10-07 on Kiavi's pricer.
+const KIAVI_BRIDGE = {
+  first: { "760": { 65: 10.00, 75: 11.00 }, "700": { 65: 10.50, 75: 11.50 }, "680": { 65: 11.00, 70: 11.70 } },
+  pro:   { "760": { 65: 8.95, 75: 10.25 },  "700": { 65: 9.50, 75: 10.75 },  "680": { 65: 9.95, 70: 10.50 } },
+};
 // Rental 30-yr fixed: Kiavi prices in points and rounds the rate UP to the
 // next 1/8, so this is a fitted "pre-rounding" rate. Rate = ceil8(B[fico|ltv]
 // + prepay + property + loan size + DSCR, the last four by LTV band
@@ -936,6 +949,7 @@ function kiaviRentalRate(fico, ltvTier, ppp, unit, loan, dscr) {
   return Math.ceil(v * 8 - 1e-6) / 8;
 }
 const KIAVI_STATE_ADJ_HM = { TX: -0.5 };
+const KIAVI_STATE_ADJ_HM_PRO = { TX: -0.25 };
 
 function kiaviUnit(pt) {
   if (pt === "SFR") return "single-family";
@@ -983,19 +997,29 @@ function kiaviHm(s, out, unit, st) {
   if (refi) out.assumptions.push("Priced as an unseasoned refinance (Kiavi has paused brokered seasoned refis).");
   const basis = refi ? (s.currentValue || s.purchasePrice) : s.purchasePrice;
   if (!basis) { out.reason = refi ? "Needs the current (as-is) value." : "Needs the purchase price."; return out; }
-  const stateAdj = KIAVI_STATE_ADJ_HM[st] || 0;
-  const termAdj = KIAVI_HM_TERM_ADDER[term];
+  // Experience: Kiavi prices "Pro" borrowers (3+ completed flips) on a separate, lower grid.
+  const deals = Number(s.experienceDeals || 0);
+  const pro = deals >= KIAVI_PRO_MIN_DEALS;
+  const grid = pro ? KIAVI_HM_GRID_PRO : KIAVI_HM_GRID;
+  const stateAdj = (pro ? KIAVI_STATE_ADJ_HM_PRO[st] : KIAVI_STATE_ADJ_HM[st]) || 0;
+  const termAdj = (pro ? KIAVI_HM_TERM_ADDER_PRO : KIAVI_HM_TERM_ADDER)[term];
+  out.assumptions.push(pro ? ("Priced on Kiavi's experienced-investor (Pro) grid: " + deals + " completed deals.")
+    : deals > 0 ? ("Priced as first-time investor: Kiavi's lower Pro pricing starts at " + KIAVI_PRO_MIN_DEALS + " completed flips (file shows " + deals + ").")
+    : "Priced as first-time investor (no completed deals on file). 3+ flips gets Kiavi's Pro pricing, 1.25-2.3% lower.");
   const rehab = s.loanType === "Bridge" ? 0 : (s.rehabBudget || 0);
   const opts = [];
   if (rehab <= 0) {
-    // Bridge: one tier, 75% of as-is.
-    const loan = Math.floor(basis * 0.75 / 100) * 100;
-    if (loan < KIAVI_MIN_LOAN) { out.reason = "Kiavi's minimum loan is $75,000 (75% of value here is $" + Math.round(loan).toLocaleString("en-US") + ")."; return out; }
-    if (loan > 1000000) out.assumptions.push("Capped at Kiavi's $1,000,000 first-time-investor maximum.");
-    const amt = Math.min(loan, 1000000);
-    const rate = Math.round((KIAVI_BRIDGE_RATE[tier] + termAdj + stateAdj) * 100) / 100;
-    opts.push({ program: term + "-mo bridge · 75% of value", rate, price: 100 + kiaviHmFee(amt) / amt * 100, loanAmount: amt });
-    out.assumptions.push("Bridge (no rehab) pricing measured at one tier only; other credit tiers estimated.");
+    // Bridge (no rehab): <=65% of as-is, and the max tier (75% at 700+, 70% at 680-699).
+    const tbl = KIAVI_BRIDGE[pro ? "pro" : "first"][tier];
+    const tiers = Object.keys(tbl).map(Number).sort(function (a, b) { return b - a; });
+    for (const t of tiers) {
+      const amt = Math.min(Math.floor(basis * t / 100 / 100) * 100, 1000000);
+      if (amt < KIAVI_MIN_LOAN) continue;
+      const rate = Math.round((tbl[t] + termAdj + stateAdj) * 100) / 100;
+      opts.push({ program: term + "-mo bridge · " + t + "% of value", rate, price: 100 + kiaviHmFee(amt) / amt * 100, loanAmount: amt });
+    }
+    if (!opts.length) { out.reason = "Below Kiavi's $75,000 minimum at " + tiers[tiers.length - 1] + "% of value."; return out; }
+    if (basis * tiers[0] / 100 > 1000000) out.assumptions.push("Capped at Kiavi's $1,000,000 maximum.");
   } else {
     if (!s.arv) { out.reason = "Needs the after-repair value."; return out; }
     // Rehab Kiavi will fund: $300k max, and 35% of the purchase price under a
@@ -1021,7 +1045,7 @@ function kiaviHm(s, out, unit, st) {
       const ltc = (total - funded) / basis * 100;
       let idx = KIAVI_HM_LTC_TIERS.findIndex(function (x) { return ltc <= x + 0.0001; });
       if (idx < 0) continue;
-      const rate = Math.round((KIAVI_HM_GRID[tier][idx] + termAdj + stateAdj) * 100) / 100;
+      const rate = Math.round((grid[tier][idx] + termAdj + stateAdj) * 100) / 100;
       if (opts.some(function (o) { return o.loanAmount === total; })) continue;
       opts.push({ program: term + "-mo · " + KIAVI_HM_LTC_TIERS[idx] + "% of " + (refi ? "value" : "purchase"), rate, price: 100 + kiaviHmFee(total) / total * 100, loanAmount: total });
     }
@@ -1040,7 +1064,7 @@ function kiaviHm(s, out, unit, st) {
   out.maxLoanAmount = opts[0].loanAmount;
   out.fees = { lenderFee: kiaviHmFee(opts[0].loanAmount) };
   out.compCaps.yspRatePerPoint = 1; // fix & flip YSP is 1:1 (+1.00% rate pays 1 point)
-  out.assumptions.push("Kiavi model " + KIAVI_SNAPSHOT + " (first-time-investor profile; experienced borrowers price the same or better). Lower leverage = lower rate.");
+  out.assumptions.push("Kiavi model " + KIAVI_SNAPSHOT + ", checked against Kiavi's own pricer 2026-10-07. Lower leverage = lower rate.");
   return out;
 }
 
