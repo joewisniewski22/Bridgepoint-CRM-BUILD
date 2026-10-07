@@ -132,7 +132,7 @@ export async function checkLend(s: S): Promise<any> {
     const ia = Math.min(lim.ia, ltc);
     let max = Math.min(cost * ltc / 100, arv * arvPct / 100, basis * ia / 100 + rehab);
     if (t.maxLoan) max = Math.min(max, t.maxLoan);
-    max = Math.floor(max / 10) * 10;
+    max = Math.floor(max + 1e-6);   // LEND doesn't round (e.g. 87.5% x $695,000 = $608,125)
     const amt = s.loanAmount ? Math.min(s.loanAmount, max) : max;
     if (amt < 100000) { firstReason = firstReason || "LEND's minimum loan is $100,000."; continue; }
     if (amt > 3000000) continue;
