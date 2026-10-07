@@ -194,6 +194,19 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, adsets: result.data.data }), { headers: CORS_HEADERS });
     }
 
+    // Change an existing ad set's optimization goal and/or targeting (e.g. placements).
+    if (action === "update-adset") {
+      const adsetId: string = body.adsetId;
+      if (!adsetId) return new Response(JSON.stringify({ error: "missing_fields", detail: "adsetId is required" }), { status: 400, headers: CORS_HEADERS });
+      const params: Record<string, string> = {};
+      if (body.optimizationGoal) params.optimization_goal = body.optimizationGoal;
+      if (body.targeting) params.targeting = JSON.stringify(body.targeting);
+      if (body.name) params.name = body.name;
+      const result = await graphFetch("/" + adsetId, params, "POST");
+      if (!result.ok) return new Response(JSON.stringify({ error: "meta_error", detail: result.data }), { status: 502, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ ok: true, result: result.data }), { headers: CORS_HEADERS });
+    }
+
     if (action === "ads") {
       const parentId: string = body.campaignId || body.adsetId;
       if (!parentId) return new Response(JSON.stringify({ error: "missing_fields", detail: "campaignId or adsetId is required" }), { status: 400, headers: CORS_HEADERS });
