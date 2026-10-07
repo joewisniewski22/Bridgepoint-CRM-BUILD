@@ -11610,7 +11610,7 @@ function renderLoanPlacementBanner(lead){
   var editor = canManageOutsideLender()
     ? ('<select class="select" data-action="set-outside-lender" data-lead="' + lead.id + '" style="font-weight:700;margin-top:8px;max-width:320px">' +
         '<option value="">In-House (Constructive Capital)</option>' +
-        OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (current===l?" selected":"") + '>' + l + '</option>'; }).join("") +
+        OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + ((current===l || lenderRoutingValue(current)===l)?" selected":"") + '>' + l + '</option>'; }).join("") +
       '</select>')
     : '<div class="footnote" style="padding-top:4px">Only Joe, Fiore, and Erika can change this.</div>';
   return '<div class="panel panel-pad" style="margin-bottom:16px;border:2px solid ' + (isInHouse ? 'var(--brand)' : 'var(--c-rust)') + '">' +
@@ -12052,7 +12052,10 @@ function routingMismatch(lead){
   var pt = lead.guidelineCheck && lead.guidelineCheck.pricerTerms;
   if (!pt || !pt.lender) return null;
   var termsRoute = lenderRoutingValue(pt.lender);
-  if (termsRoute === undefined || termsRoute === (lead.outsideLender || null)) return null;
+  // Compare normalized values ("RCN Capital" saved by older code == "RCN").
+  var placed = lead.outsideLender ? lenderRoutingValue(lead.outsideLender) : null;
+  if (placed === undefined) placed = lead.outsideLender;
+  if (termsRoute === undefined || termsRoute === (placed || null)) return null;
   return { termsLender: pt.lender, routedTo: lead.outsideLender || "Constructive (in-house)" };
 }
 function canManageOutsideLender(){ return ui.viewAs==="owner" || ui.viewAs==="lo-fiore" || ui.viewAs==="proc-erika"; }
@@ -12194,7 +12197,7 @@ function renderOutsideLenderBox(lead, guidelineStatus){
     '</div>';
   }
   var options = '<option value="">— In-House (Constructive Capital) —</option>' +
-    OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (current===l?" selected":"") + '>' + l + '</option>'; }).join("");
+    OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + ((current===l || lenderRoutingValue(current)===l)?" selected":"") + '>' + l + '</option>'; }).join("");
   return '<div class="panel panel-pad" style="margin-top:10px">' +
     '<div class="rail-title" style="margin-bottom:4px">Where This Is Being Placed</div>' +
     '<div class="footnote" style="padding-bottom:6px">Only you, Fiore, and Erika can set this. Every other LO just sees the current placement, read-only.</div>' +
@@ -13499,7 +13502,7 @@ function renderRail(lead){
       (canManageOutsideLender() ? (
         '<select class="select" style="width:100%" data-action="set-outside-lender" data-lead="' + lead.id + '">' +
           '<option value="">— In-House (Constructive Capital) —</option>' +
-          OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + (lead.outsideLender===l?" selected":"") + '>' + l + '</option>'; }).join("") +
+          OUTSIDE_LENDERS.map(function(l){ return '<option value="' + l + '"' + ((lead.outsideLender===l || lenderRoutingValue(lead.outsideLender)===l)?" selected":"") + '>' + l + '</option>'; }).join("") +
         '</select>'
       ) : ('<div>' + esc(lead.outsideLender || "In-House (Constructive Capital)") + '</div>')) +
     '</div>') : '') +
