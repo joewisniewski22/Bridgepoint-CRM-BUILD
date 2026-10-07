@@ -1225,6 +1225,21 @@ async function adSnapshot() {
   adSnapCache = { at: Date.now(), B: (row && row.data && row.data.B) || AD_FIT.B, fico: (row && row.data && row.data.fico) || AD_FIT.fico, asOf: row ? row.sheet_as_of : AD_SNAPSHOT, captured: row ? row.captured_at : null };
   return adSnapCache;
 }
+// A&D DSCR Matrix 10/01/2026: max loan amount by credit tier and HCLTV.
+function adMaxLoan(fico: number, cltv: number, purpose: string): number {
+  const tiers: Array<[number, number]> = purpose === "cashout"
+    ? (fico >= 720 ? [[55, 3e6], [60, 2.5e6], [70, 2e6], [75, 1.5e6]]
+      : fico >= 700 ? [[55, 3e6], [60, 2.5e6], [65, 2e6], [75, 1.5e6]]
+      : fico >= 680 ? [[55, 2.5e6], [65, 2e6], [70, 1.5e6]]
+      : [[65, 1e6]])
+    : (fico >= 720 ? [[65, 3e6], [70, 2.5e6], [75, 2e6], [80, 1.5e6]]
+      : fico >= 700 ? [[65, 2.5e6], [70, 2e6], [80, 1.5e6]]
+      : fico >= 680 ? [[55, 2.5e6], [70, 2e6], [75, 1e6]]
+      : fico >= 640 ? [[70, 1e6]]
+      : [[65, 1e6]]);
+  for (const [c, amt] of tiers) if (cltv <= c + 1e-9) return amt;
+  return 0;
+}
 // Returns total adjustment in points, or null when A&D doesn't offer the scenario.
 function adAdjust(s: AdIn, ficoGrid: any = AD_FIT.fico): number | null {
   const c = adCltvBucket(s.cltv);
@@ -1240,7 +1255,11 @@ function adAdjust(s: AdIn, ficoGrid: any = AD_FIT.fico): number | null {
   // Layered guideline "no"s found in testing (never contradicted in ~340 quotes).
   if (s.fico < 680 && (s.dscr < 1.0 || (s.purpose === "cashout" && s.cltv > 67) || s.pt === "rural")) return null;
   if (s.cit === "itin" && (s.cltv > 65 || s.fico < 700 || s.purpose === "cashout")) return null;
-  if (s.pt === "condo" && s.dscr < 1.0) return null;
+  if ((s.pt === "condo" || s.pt === "condotel") && s.dscr < 1.0) return null;
+  // DSCR Matrix 10/01/2026 (admortgage.com/documents-forms), read 2026-10-07.
+  if (s.cit === "np" && s.fico < 700) return null;                                   // non-permanent residents: 700 min
+  if (s.purpose === "cashout" && ((s.dscr < 0.75 && s.cltv > 65) || (s.dscr < 1.0 && s.cltv > 70))) return null;
+  if (s.amt > adMaxLoan(s.fico, s.cltv, s.purpose)) return null;
   let adj = base;
   for (const k of adKeys(s)) adj += adMain(k, s);
   if (s.fico < 680 && s.purpose === "cashout") adj -= 0.125;
@@ -1286,8 +1305,11 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
   if (s.loanType !== "DSCR") return { lender: L, eligible: false, reason: "A&D is only set up for DSCR rentals in this pricer." };
   const pt = s.propertyType === "SFR" ? "sfr" : s.propertyType === "Condo" ? "condo" : (s.propertyType === "2-4 Unit" || s.propertyType === "Duplex") ? "2-4" : null;
   if (!pt) return { lender: L, eligible: false, source: "model", reason: "A&D's DSCR program doesn't take " + s.propertyType + " properties." };
-  const cit = s.citizenshipStatus === "Foreign National" ? "fn" : s.citizenshipStatus === "ITIN" ? "itin" : "us";
+  const cit = s.citizenshipStatus === "Foreign National" ? "fn" : s.citizenshipStatus === "ITIN" ? "itin" : s.citizenshipStatus === "Non-Permanent Resident" ? "np" : "us";
   if (!s.creditScore || s.creditScore < 620) return { lender: L, eligible: false, source: "model", reason: "A&D needs at least a 620 credit score." };
+  // Scenario-runner rule (Joe 10/7): A&D foreign-national / ITIN pricing only matched A&D 32-50% of the
+  // time in testing, so no price is shown until it's re-measured -- confirm those on AIM.
+  if (cit === "fn" || cit === "itin") return { lender: L, eligible: false, source: "model", reason: "A&D " + (cit === "fn" ? "foreign-national" : "ITIN") + " pricing isn't verified to our accuracy bar yet — price it on A&D's AIM pricer." };
   const refi = s.transactionType !== "purchase";
   const value = refi ? (s.currentValue || s.purchasePrice) : Math.min(s.purchasePrice || Infinity, s.currentValue || Infinity);
   if (!value || !isFinite(value)) return { lender: L, eligible: false, source: "model", reason: refi ? "Needs the current value." : "Needs the purchase price." };
@@ -1300,7 +1322,7 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
   if (st === "PA" && /^191/.test(zip)) return { lender: L, eligible: false, source: "model", reason: "A&D doesn't lend in Philadelphia County." };
   // Bridgepoint holds no state licenses (Joe 2026-10-06: business-purpose only, most states
   // don't require one), so only A&D's "Eligible States Inv (No License Required)" list applies.
-  const AD_NO_LICENSE_STATES = ["AK","AL","AR","CO","CT","DE","FL","GA","IA","IL","IN","KS","KY","LA","MA","MD","ME","MO","MS","MT","NC","NE","NH","NJ","NM","NY","OH","OK","PA","RI","SC","TN","TX","WA","WI","WV","WY"];
+  const AD_NO_LICENSE_STATES = ["AK","AL","AR","CO","CT","DE","FL","GA","IA","IL","IN","KS","KY","LA","MA","MD","ME","MO","MS","MT","NC","NE","NH","NJ","NY","OH","OK","PA","RI","SC","TN","TX","WA","WI","WV","WY"];
   if (st && !AD_NO_LICENSE_STATES.includes(st)) return { lender: L, eligible: false, source: "model", reason: "A&D requires a broker license in " + st + " — Bridgepoint can't place A&D loans there." };
   if (st === "MD" && /\bBaltimore\b/i.test(s.propertyAddress || "")) return { lender: L, eligible: false, source: "model", reason: "A&D excludes Baltimore City and Baltimore County for unlicensed brokers." };
   // A&D state prepay rules (same document): no prepay (buydown required) in some states / below
@@ -1791,7 +1813,7 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify(await velocityGet(String(body.velocityList).replace(/[^A-Za-z]/g, ""))), { headers: CORS_HEADERS });
     }
     if (body.velocityRaw && (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "") === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
-      return new Response(JSON.stringify(await velocityPost("GetPricing", body.velocityRaw)), { headers: CORS_HEADERS });
+      return new Response(JSON.stringify(await velocityPost(String(body.velocityPath || "GetPricing").replace(/[^A-Za-z]/g, ""), body.velocityRaw)), { headers: CORS_HEADERS });
     }
     const scenario: Scenario = body.lead;
     if (!scenario) {
