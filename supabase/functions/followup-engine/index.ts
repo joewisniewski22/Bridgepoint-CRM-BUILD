@@ -420,7 +420,9 @@ async function textUser(userId, text, leadId, kind) {
   const u = users[userId];
   if (!u) return false;
   await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: userId, lead_id: leadId || null, kind: kind || "followup", text: text.slice(0, 240), date: etParts().date, read: false });
-  if (u.phone) await post("send-text", { to: u.phone, text, fromName: "Bridgepoint CRM" });
+  // followup_config.staff_texts = false (Joe 2026-10-07: "too frequent"): staff get the
+  // in-app task/notification only, no SMS. Borrower-facing AI touches are unaffected.
+  if (u.phone && cfg.staff_texts !== false) await post("send-text", { to: u.phone, text, fromName: "Bridgepoint CRM" });
   return true;
 }
 
@@ -719,7 +721,7 @@ Deno.serve(async (req) => {
       for (const tk of openTasks.filter((x) => x.notified_at)) {
         const l = byId[tk.lead_id]; if (!l || !userAllowed(tk.assigned_to)) continue;
         const since_ = now - new Date(tk.notified_at).getTime();
-        if (tk.reminder_count === 0 && since_ >= (tk.urgent ? 30 : 120) * 60000) {
+        if (tk.reminder_count === 0 && cfg.staff_texts !== false && since_ >= (tk.urgent ? 30 : 120) * 60000) {
           await textUser(tk.assigned_to, `⏰ Still open: ${l.name} — ${tk.title}.${l.phone ? " " + l.phone : ""} Brief + log: ${taskLink(tk)}`, l.id, "followup");
           await sb.from("followup_tasks").update({ reminded_at: new Date().toISOString(), reminder_count: 1 }).eq("id", tk.id);
           stats.reminders++;
