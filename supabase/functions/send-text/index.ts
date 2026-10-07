@@ -112,6 +112,7 @@ Deno.serve(async (req: Request) => {
       const activity = (leadRow && leadRow.activity) || [];
       activity.push({
         date: new Date().toISOString().slice(0, 10),
+        at: new Date().toISOString(), // exact time for the Messages thread
         type: "text",
         text: "Texted (via Telnyx): " + text,
         author: fromName || "System",

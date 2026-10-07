@@ -156,6 +156,7 @@ Deno.serve(async (req: Request) => {
       const activity = (match.activity as unknown[]) || [];
       activity.push({
         date: new Date().toISOString().slice(0, 10),
+        at: new Date().toISOString(), // exact time for the Messages thread
         type: "text",
         text: "Received (via Telnyx): " + msg.text,
         author: (match.name as string) || "Borrower",
