@@ -9765,28 +9765,38 @@ function renderMobileCard(item, opts){
   var canSendDocs = !isProcessor() && lead.rate && lead.loanAmount;
   var lastNote = null;
   (lead.callAttempts||[]).slice().reverse().some(function(a){ if (a.notes){ lastNote = a; return true; } return false; });
+  // Last real touch (call, text, email) so the rep knows where things stand before dialing.
+  var lastTouch = (lead.activity||[]).filter(function(a){ return a.type === "call" || a.type === "text" || a.type === "email"; }).slice(-1)[0];
+  var touchTxt = lastTouch ? ((lastTouch.type === "text" ? (/^Received/.test(lastTouch.text||"") ? "They texted" : "Texted") : lastTouch.type === "email" ? "Emailed" : "Called") + " · " + (lastTouch.at && typeof textStamp === "function" ? textStamp(lastTouch, true) : fmtDate(lastTouch.date))) : "No contact yet";
   var detail = open ? ('<div class="m-detail">' +
+    '<div><b>Stage:</b> ' + esc(stageLabel(lead.stage)) + (lead.preferredLanguage === "es" ? ' · <span class="m-badge" style="display:inline-block;margin:0">Español</span>' : '') + '</div>' +
+    '<div><b>Last touch:</b> ' + esc(touchTxt) + '</div>' +
     '<div><b>Phone:</b> ' + esc(lead.phone||"—") + '</div>' +
     (lead.email ? ('<div><b>Email:</b> ' + esc(lead.email) + '</div>') : '') +
     (lead.propertyAddress ? ('<div><b>Property:</b> ' + esc(lead.propertyAddress) + '</div>') : '') +
     (lead.loanAmount ? ('<div><b>Loan amount:</b> ' + fmtUSD(lead.loanAmount) + (lead.rate ? (' @ ' + fmtPct(lead.rate)) : '') + '</div>') : '') +
-    (lastNote ? ('<div><b>Last call (' + fmtDate(lastNote.date) + '):</b> ' + esc(lastNote.notes) + '</div>') : '') +
+    (lastNote ? ('<div><b>Last call note (' + fmtDate(lastNote.date) + '):</b> ' + esc(lastNote.notes) + '</div>') : '') +
   '</div>') : '';
   var actions = '';
   if (!opts.compact || open){
+    // The 4 things reps do all day up front; everything else under More (2026-10-07).
+    var more = !!(ui.mobileMore && ui.mobileMore[lead.id]);
     actions = '<div class="m-actions">' +
-      // Primary: ring my cell, then connect (company number, reliable on cell). In-app phone is the backup.
-      (lead.phone ? mobileBtn('📞 Call from my phone', 'data-action="call-via-cell" ' + id, 'primary') : '') +
-      (SOFTPHONE_ENABLED && lead.phone ? mobileBtn('🎧 Call in app', 'data-action="dialer-call-app" ' + id, 'ghost') : '') +
-      mobileBtn('💬 Text', 'data-action="open-modal" data-modal="sendText" ' + id) +
-      mobileBtn('✉ Email', 'data-action="compose-lead-email" ' + id) +
-      mobileBtn('📊 Deal Analyzer' + (dealAnalyzerSent(lead) ? ' ✓' : ''), 'data-action="send-deal-analyzer" ' + id) +
-      mobileBtn('📝 Log call', 'data-action="open-modal" data-modal="logCall" ' + id) +
-      mobileBtn('📅 Send calendar link', 'data-action="send-scheduling-link" ' + id) +
-      ((!isProcessor() && canEditApplication(lead)) ? mobileBtn('📄 Send app' + (lead.applicationSentAt ? ' ✓' : ''), 'data-action="open-modal" data-modal="sendApplication" ' + id) : '') +
-      (canSendDocs ? mobileBtn('📑 Term sheet' + (lead.termsheetSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="termSheet" ' + id) : '') +
-      (canSendDocs ? mobileBtn('✅ Pre-approval' + (lead.preapprovalSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="preapproval" ' + id) : '') +
-      (lead.phone ? ('<a class="m-btn ghost" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Dial directly (shows your personal number)</a>') : '') +
+      // Call = ring my cell, press 1, connect from the company number (reliable on cell).
+      (lead.phone ? mobileBtn('📞 Call', 'data-action="call-via-cell" ' + id, 'primary') : '') +
+      (lead.phone ? mobileBtn('💬 Text', 'data-action="m-text-thread" ' + id) : '') +
+      mobileBtn('📅 Calendar', 'data-action="send-scheduling-link" ' + id) +
+      ((!isProcessor() && canEditApplication(lead)) ? mobileBtn('📄 App' + (lead.applicationSentAt ? ' ✓' : ''), 'data-action="open-modal" data-modal="sendApplication" ' + id) : '') +
+      mobileBtn(more ? 'Less ▴' : 'More ▾', 'data-action="m-more" ' + id, 'ghost') +
+      (more ? (
+        mobileBtn('📝 Log call', 'data-action="open-modal" data-modal="logCall" ' + id) +
+        mobileBtn('✉ Email', 'data-action="compose-lead-email" ' + id) +
+        mobileBtn('📊 Deal Analyzer' + (dealAnalyzerSent(lead) ? ' ✓' : ''), 'data-action="send-deal-analyzer" ' + id) +
+        (canSendDocs ? mobileBtn('📑 Term sheet' + (lead.termsheetSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="termSheet" ' + id) : '') +
+        (canSendDocs ? mobileBtn('✅ Pre-approval' + (lead.preapprovalSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="preapproval" ' + id) : '') +
+        (SOFTPHONE_ENABLED && lead.phone ? mobileBtn('🎧 Call in app', 'data-action="dialer-call-app" ' + id, 'ghost') : '') +
+        (lead.phone ? ('<a class="m-btn ghost" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Dial directly (your personal number)</a>') : '')
+      ) : '') +
       (opts.skippable ? mobileBtn('Skip today', 'data-action="m-skip" ' + id, 'ghost') : '') +
     '</div>';
   }
@@ -9850,7 +9860,7 @@ function renderMobileShell(){
       body = '<div class="m-section">New message</div>' + textNewPickerHTML(true);
     } else if (mActiveLead){
       body = '<button type="button" class="link-btn" style="margin:12px 0 4px" data-action="m-messages-back">‹ All Messages</button>' +
-        '<div class="m-card" style="margin-bottom:10px" data-action="select-lead" data-lead="' + mActiveLead.id + '">' +
+        '<div class="m-card" style="margin-bottom:10px">' +
           '<div class="m-name">' + esc(mActiveLead.name) + '</div>' +
           '<div class="m-sub">' + esc(mActiveLead.phone||"") + (mActiveLead.loanType ? (' · ' + esc(mActiveLead.loanType)) : '') + '</div>' +
         '</div>' + textThreadHTML(textConvoFor(mActiveLead), true);
@@ -9877,7 +9887,7 @@ function renderMobileShell(){
   }
   return '<div class="m-shell">' +
     '<div class="m-head">' +
-      '<div class="m-head-row"><div class="m-title">' + esc((me.name||"").split(" ")[0]) + ' · ' + done + ' / ' + quota + ' calls today</div>' +
+      '<div class="m-head-row"><div class="m-title">' + esc((me.name||"").split(" ")[0]) + (isProcessor() ? '' : (' · ' + done + ' / ' + quota + ' calls today')) + '</div>' +
         '<div style="display:flex;gap:6px"><button type="button" class="m-btn" style="min-height:40px" data-action="m-refresh" aria-label="Refresh">↻</button>' +
         '<button type="button" class="m-btn" style="min-height:40px" data-action="open-modal" data-modal="addLead">＋ Lead</button>' +
         '<button type="button" class="m-btn" style="min-height:40px" data-action="start-dialer">▶ Dialer</button></div></div>' +
@@ -18128,6 +18138,12 @@ appEl.addEventListener("click", function(e){
   else if (action === "pb-filter"){ ui.pbFilter = t.dataset.filter; render(); }
   else if (action === "pb-chase-docs"){ chaseOutstandingDocs(t.dataset.lead); }
   else if (action === "call-via-cell"){ callViaMyCell(t.dataset.lead); }
+  else if (action === "m-more"){ ui.mobileMore = ui.mobileMore || {}; ui.mobileMore[t.dataset.lead] = !ui.mobileMore[t.dataset.lead]; render(); }
+  else if (action === "m-text-thread"){
+    // Text opens the real conversation (history + reply box), like a phone.
+    ui.mobileTab = "messages"; ui.textNewOpen = false; ui.mobileMessagesLeadId = t.dataset.lead; markTextThreadRead(t.dataset.lead); render();
+    var mtb = document.querySelector('form[data-form="text-message-send"] input[name="body"]'); if (mtb) mtb.focus();
+  }
   else if (action === "pb-move-stage"){
     var pbl = leadById(t.dataset.lead);
     if (pbl && (t.dataset.target !== "closed" || window.confirm("Mark " + pbl.name + "'s loan CLOSED / funded? This sends the payout notification."))) moveStage(t.dataset.lead, t.dataset.target);
