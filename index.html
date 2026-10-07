@@ -6901,7 +6901,7 @@ function notifyLoNewLead(lead){
   var text = "New lead: " + lead.name + " (" + lead.loanType + ", " + lead.source + ") — open & dial: " + link;
   sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lo.email, subject: "New lead: " + lead.name, text: text, fromName: "Bridgepoint CRM", initiatedBy: "ai" } }).catch(function(){});
 }
-var BILINGUAL_LOS = ["lo-fanis","lo-david"];
+var BILINGUAL_LOS = ["lo-fanis"]; // David removed from the system 2026-10-07 (Joe)
 function startAiEngagement(lead){
   if (!sb || !lead.phone) return;
   if (lead.source === "Self-Generated") return;
