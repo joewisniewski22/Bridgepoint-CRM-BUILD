@@ -456,7 +456,9 @@ Deno.serve(async (req: Request) => {
           // the hangup (which can arrive without client_state after a transfer) still logs.
           const nextState: CallState = { ...state, stage: "connecting_lead", originalCallControlId: "bridge:" + callControlId };
           await saveTransferState(payload.call_session_id as string, nextState);
-          await telnyxAction(callControlId, "transfer", { to: state.leadPhone, from: TELNYX_FROM_NUMBER, timeout_secs: 35, client_state: encodeState(nextState) });
+          // early_media: the rep hears the client ringing / their voicemail greeting (Joe heard silence 2026-10-07);
+          // 45s so voicemail (often ~30s) picks up before we give up.
+          await telnyxAction(callControlId, "transfer", { to: state.leadPhone, from: TELNYX_FROM_NUMBER, timeout_secs: 45, early_media: true, client_state: encodeState(nextState) });
         } else {
           // No key press: a voicemail or pocket answer -- don't dial the client.
           await telnyxAction(callControlId, "hangup", {});
