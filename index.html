@@ -2447,6 +2447,8 @@ try {
 
 (function(){
   var qp = new URLSearchParams(window.location.search);
+  // Owner preview of the processor phone app: ?m=1&preview=processor (only honored for the owner).
+  if (qp.get("preview") === "processor") ui.previewProcessor = true;
   var applyId = qp.get("apply");
   var applyToken = qp.get("t");
   var deepLinkLead = qp.get("lead");
@@ -7666,8 +7668,13 @@ function notifyUser(userId, leadId, kind, text, opts){
     id: "N" + Date.now().toString(36) + Math.floor(Math.random()*1000),
     toUserId:userId, leadId:leadId, kind:kind, text:text, date: todayISO(), read:false
   });
-  if (!opts || !opts.skipText) pushStaffAlert(userId, text);
+  // Each person chooses which alerts text them vs. stay in-app (✨ Customize, 2026-10-07).
+  var target = userById(userId);
+  var muted = (target && target.portalPrefs && target.portalPrefs.mutedTextKinds) || [];
+  if ((!opts || !opts.skipText) && muted.indexOf(kind) === -1) pushStaffAlert(userId, text);
 }
+// The signed-in person's own view settings (board defaults, alert flow, phone app tab).
+function myPrefs(){ return (currentUser() && currentUser().portalPrefs) || {}; }
 function pushStaffAlert(userId, text){
   if (!sb) return;
   var u = userById(userId);
@@ -9594,7 +9601,12 @@ function requestPortalCustomization(prompt){
     sb.rpc("set_portal_prefs", { p_user_id: u.id, p_prefs: res.data.prefs }).then(function(saveRes){
       if (saveRes.error) console.error("set_portal_prefs error", saveRes.error);
     }).catch(function(err){ console.error("set_portal_prefs threw", err); });
-    showToast(res.data.summary || "Portal updated");
+    // Bigger than a personal setting: goes to Joe as a change request (he approves; built system-wide).
+    if (res.data.changeRequest){
+      notifyUser("owner", null, "change-request", "🛠 " + u.name + " requested a CRM change: " + res.data.changeRequest);
+      if (sb) sb.from("team_messages").insert({ id: "TM" + Date.now().toString(36), from_user_id: u.id, to_user_id: "owner", body: "CRM change request: " + res.data.changeRequest }).then(function(){}, function(){});
+    }
+    showToast((res.data.summary || "Updated your view") + (res.data.changeRequest ? " — the bigger request was sent to Joe." : ""));
     render();
   }).catch(function(){
     ui.portalCustomizeBusy = false;
@@ -9666,7 +9678,7 @@ function renderShell(){
             '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="logout">Log Out</button>' +
           '</div>' +
         '</div>' +
-        (isLO() ? renderPortalCustomizer() : '') +
+        ((isLO() || isProcessor()) ? renderPortalCustomizer() : '') +
         '<div class="footnote" style="padding:10px 0 0">Early testing — emails, texts, and document uploads are all real, including SMS alerts to your phone for things that need your attention. We\'re actively taking feedback.</div>' +
       '</div>' +
     '</aside>';
@@ -9857,12 +9869,15 @@ function mobileMessagesBody(){
 }
 function renderMobileProcessorShell(){
   var me = currentUser();
-  var tab = ui.mobileTab === "messages" || ui.mobileTab === "team" ? ui.mobileTab : "files";
+  var tabPick = ui.mobileTab || myPrefs().mobileDefaultTab;
+  var tab = tabPick === "messages" || tabPick === "team" ? tabPick : "files";
   var body = "";
   if (tab === "files"){
     var files = state.leads.filter(function(l){ return l.status === "active" && PROCESSING_STAGES.indexOf(l.stage) !== -1 && processorOwns(l); })
-      .map(function(l){ return { lead: l, s: processingStatus(l) }; }).sort(function(a,b){ return b.s.score - a.s.score; });
-    var f = ui.pbFilter || "all";
+      .map(function(l){ return { lead: l, s: processingStatus(l) }; }).sort(function(a,b){ return myPrefs().boardSort === "closeDate" ? ((a.s.toClose == null ? 9999 : a.s.toClose) - (b.s.toClose == null ? 9999 : b.s.toClose)) : (b.s.score - a.s.score); });
+    var f = ui.pbFilter || myPrefs().boardDefaultFilter || "all";
+    var hideChkM = myPrefs().boardHiddenChecks || [];
+    var showChkM = function(n){ return hideChkM.indexOf(n) === -1; };
     var shown = files.filter(function(r){ return f === "all" || (f === "me" && r.s.next.who === "erika") || (f === "week" && r.s.toClose != null && r.s.toClose <= 7) || (f === "borrower" && r.s.next.who === "borrower"); });
     var chip = function(key, label, n){ return '<button type="button" class="m-tab' + (f === key ? ' on' : '') + '" style="flex:0 0 auto" data-action="pb-filter" data-filter="' + key + '">' + label + ' ' + n + '</button>'; };
     body = '<div style="display:flex;gap:6px;overflow-x:auto;margin:10px 0 6px">' +
@@ -9882,8 +9897,8 @@ function renderMobileProcessorShell(){
             '<div class="m-sub">' + esc(stageLabel(l.stage)) + ' · ' + esc(l.loanType||"") + ' · ' + fmtUSD(l.loanAmount) + (lo ? ' · LO ' + esc(lo.name.split(" ")[0]) : '') + '</div>' +
             '<div class="m-reason" style="font-weight:600">' + esc(s.next.text) + (s.next.done ? ' · ✓ ' + esc(s.next.done) : '') + '</div>' +
           '</div>' +
-          (open ? '<div class="m-detail">' + pbChip(docsState, "Docs " + s.docsIn + "/" + s.docsTotal) + pbChip(s.title, "Title") + pbChip(s.ins, "Insurance") +
-            (l.loanType !== "Bridge" ? pbChip(s.appr, "Appraisal") : "") + (l.outsideLender ? pbChip(s.exported ? "done" : "todo", "Sent to " + s.lender) : "") + (s.conds ? pbChip("todo", s.conds + " cond.") : "") +
+          (open ? '<div class="m-detail">' + (showChkM("Docs") ? pbChip(docsState, "Docs " + s.docsIn + "/" + s.docsTotal) : "") + (showChkM("Title") ? pbChip(s.title, "Title") : "") + (showChkM("Insurance") ? pbChip(s.ins, "Insurance") : "") +
+            (l.loanType !== "Bridge" && showChkM("Appraisal") ? pbChip(s.appr, "Appraisal") : "") + (l.outsideLender && showChkM("Lender") ? pbChip(s.exported ? "done" : "todo", "Sent to " + s.lender) : "") + (s.conds && showChkM("Conditions") ? pbChip("todo", s.conds + " cond.") : "") +
             (s.toClose == null ? '<div style="margin-top:8px"><label class="hint">Target close date</label><input type="date" class="input" data-action="pb-close-date" ' + id + ' style="min-height:44px"></div>' : '') +
           '</div>' : '') +
           '<div class="m-actions">' +
@@ -9897,13 +9912,14 @@ function renderMobileProcessorShell(){
       }).join("") : '<div class="empty">' + (files.length ? 'Nothing in this filter.' : 'No files in processing right now.') + '</div>') +
       '<div class="footnote" style="padding:10px 2px">Full checklist, documents and lender export are on the computer.</div>';
   } else if (tab === "team"){
-    body = teamDirectoryHTML(true) || '<div class="empty">No teammates with a cell on file.</div>';
+    body = (teamDirectoryHTML(true) || '<div class="empty">No teammates with a cell on file.</div>') + '<div class="m-card" style="margin-top:12px">' + renderPortalCustomizer() + '</div>';
   } else {
     body = mobileMessagesBody();
   }
   var unread = unreadTextMessagesTotal();
   return '<div class="m-shell">' +
     '<div class="m-head">' +
+      (ui.previewProcessor && isOwner() ? '<div class="m-badge" style="margin-bottom:6px">Preview of Erika\'s processing app — you see every file</div>' : '') +
       '<div class="m-head-row"><div class="m-title">' + esc((me.name||"").split(" ")[0]) + ' · Processing</div>' +
         '<div style="display:flex;gap:6px"><button type="button" class="m-btn" style="min-height:40px" data-action="m-refresh" aria-label="Refresh">↻</button></div></div>' +
       '<div class="m-tabs"><button type="button" class="m-tab' + (tab==="files" ? " on" : "") + '" data-action="m-tab" data-tab="files">Files</button>' +
@@ -9916,7 +9932,8 @@ function renderMobileProcessorShell(){
   '</div>';
 }
 function renderMobileShell(){
-  if (isProcessor()) return renderMobileProcessorShell();
+  // Owner can preview the processor app with ?m=1&preview=processor (2026-10-07).
+  if (isProcessor() || (ui.previewProcessor && isOwner())) return renderMobileProcessorShell();
   var me = currentUser();
   var tab = ui.mobileTab || "new";
   var quota = effectiveDailyQuota();
@@ -10722,19 +10739,21 @@ function pbChip(state, label){
 function renderProcessingBoard(){
   var leads = state.leads.filter(function(l){ return l.status === "active" && PROCESSING_STAGES.indexOf(l.stage) !== -1 && processorOwns(l); });
   var rows = leads.map(function(l){ return { lead: l, s: processingStatus(l) }; });
-  var filt = ui.pbFilter || "all";
+  var filt = ui.pbFilter || myPrefs().boardDefaultFilter || "all";
+  var qd = myPrefs().quietDays || 5, hideChk = myPrefs().boardHiddenChecks || [];
+  var showChk = function(n){ return hideChk.indexOf(n) === -1; };
   var counts = {
     all: rows.length,
     me: rows.filter(function(r){ return r.s.next.who === "erika"; }).length,
     week: rows.filter(function(r){ return r.s.toClose != null && r.s.toClose <= 7; }).length,
     borrower: rows.filter(function(r){ return r.s.next.who === "borrower"; }).length,
     third: rows.filter(function(r){ return r.s.next.who === "thirdparty"; }).length,
-    quiet: rows.filter(function(r){ return (r.s.quiet||0) >= 5 && !r.s.onHold; }).length
+    quiet: rows.filter(function(r){ return (r.s.quiet||0) >= qd && !r.s.onHold; }).length
   };
   var shown = rows.filter(function(r){
     return filt === "all" || (filt === "me" && r.s.next.who === "erika") || (filt === "week" && r.s.toClose != null && r.s.toClose <= 7) ||
-      (filt === "borrower" && r.s.next.who === "borrower") || (filt === "third" && r.s.next.who === "thirdparty") || (filt === "quiet" && (r.s.quiet||0) >= 5 && !r.s.onHold);
-  }).sort(function(a,b){ return b.s.score - a.s.score; });
+      (filt === "borrower" && r.s.next.who === "borrower") || (filt === "third" && r.s.next.who === "thirdparty") || (filt === "quiet" && (r.s.quiet||0) >= qd && !r.s.onHold);
+  }).sort(function(a,b){ return myPrefs().boardSort === "closeDate" ? ((a.s.toClose == null ? 9999 : a.s.toClose) - (b.s.toClose == null ? 9999 : b.s.toClose)) : (b.s.score - a.s.score); });
   var seg = function(key, label){ return '<button class="seg-btn' + (filt===key?' active':'') + '" data-action="pb-filter" data-filter="' + key + '">' + label + ' <span class="hint">' + counts[key] + '</span></button>'; };
   var whoColor = { erika:"var(--brand)", borrower:"#8a6d1f", thirdparty:"#5b6b7a", lender:"#5b6b7a", none:"var(--ink-faint)" };
   var body = shown.map(function(r){
@@ -10743,10 +10762,10 @@ function renderProcessingBoard(){
       ? '<input type="date" class="input" style="max-width:150px;padding:2px 6px;font-size:12px" data-action="pb-close-date" data-lead="' + l.id + '" title="Set the target close date">'
       : '<b style="color:' + (s.toClose < 0 ? '#9a2b1a' : s.toClose <= 7 ? '#8a6d1f' : 'inherit') + '">' + (s.toClose < 0 ? Math.abs(s.toClose) + 'd late' : s.toClose === 0 ? 'Today' : s.toClose + 'd') + '</b><div class="hint">' + fmtDate(l.closeDate) + '</div>';
     var docsState = s.docsTotal && s.docsIn >= s.docsTotal ? "done" : (s.neverAsked ? "todo" : "ordered");
-    var checklist = pbChip(docsState, "Docs " + s.docsIn + "/" + s.docsTotal) + pbChip(s.title, "Title") + pbChip(s.ins, "Insurance") +
-      (l.loanType !== "Bridge" ? pbChip(s.appr, "Appraisal") : "") +
-      (l.outsideLender ? pbChip(s.exported ? "done" : "todo", "Sent to " + s.lender) : "") +
-      (s.conds ? pbChip("todo", s.conds + " condition" + (s.conds>1?"s":"")) : "");
+    var checklist = (showChk("Docs") ? pbChip(docsState, "Docs " + s.docsIn + "/" + s.docsTotal) : "") + (showChk("Title") ? pbChip(s.title, "Title") : "") + (showChk("Insurance") ? pbChip(s.ins, "Insurance") : "") +
+      (l.loanType !== "Bridge" && showChk("Appraisal") ? pbChip(s.appr, "Appraisal") : "") +
+      (l.outsideLender && showChk("Lender") ? pbChip(s.exported ? "done" : "todo", "Sent to " + s.lender) : "") +
+      (s.conds && showChk("Conditions") ? pbChip("todo", s.conds + " condition" + (s.conds>1?"s":"")) : "");
     return '<tr>' +
       '<td><a href="#" data-action="select-lead" data-lead="' + l.id + '" style="font-weight:600">' + esc(l.name) + '</a><div class="hint">' + esc((l.propertyAddress||"No address").split(",")[0]) + ' · ' + esc(l.loanType||"") + ' · ' + fmtUSD(l.loanAmount) + '</div><div class="hint">LO: ' + esc(userName(l.assignedTo)) + ' · ' + esc(stageLabel(l.stage)) + (s.quiet != null && s.quiet >= 5 ? ' · <span style="color:#9a2b1a">quiet ' + s.quiet + 'd</span>' : '') + '</div></td>' +
       '<td style="white-space:nowrap">' + closeTxt + '</td>' +
@@ -10760,7 +10779,7 @@ function renderProcessingBoard(){
     '</tr>';
   }).join("");
   return '<div class="section"><div class="section-head"><h2>📋 Processing Board</h2><div class="hint">Every file in processing, most urgent first — the checklist shows what\'s in, the right column is the one thing that moves it.</div></div>' +
-    '<div class="seg" style="margin:0 0 10px;flex-wrap:wrap">' + seg("all","All files") + seg("me","Your move") + seg("week","Closing ≤ 7 days") + seg("borrower","Waiting on borrower") + seg("third","Waiting on 3rd party") + seg("quiet","Gone quiet 5d+") + '</div>' +
+    '<div class="seg" style="margin:0 0 10px;flex-wrap:wrap">' + seg("all","All files") + seg("me","Your move") + seg("week","Closing ≤ 7 days") + seg("borrower","Waiting on borrower") + seg("third","Waiting on 3rd party") + seg("quiet","Gone quiet " + qd + "d+") + '</div>' +
     (shown.length ? '<div class="table-wrap"><table class="table"><thead><tr><th>File</th><th>Close</th><th>Checklist</th><th>Next step</th><th></th></tr></thead><tbody>' + body + '</tbody></table></div>'
       : '<div class="empty">' + (rows.length ? "Nothing in this filter." : "No files in processing right now.") + '</div>') +
   '</div>';
