@@ -1719,6 +1719,12 @@ function isBaltimoreCity(s: Scenario): boolean {
   return /\bBaltimore,\s*MD\b/i.test(a) && !/county/i.test(a);
 }
 function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
+  // Joe 10/7: "I think NextRes does Baltimore" -- confirmed: NextRes's own quote engine prices Baltimore City
+  // fix & flip (10.99%, 10/7); it won't price any Maryland DSCR (statewide, not Baltimore-specific).
+  if (r && isBaltimoreCity(s) && r.lender === "NextRes" && RTL_AUTO_LOAN_TYPES.includes(s.loanType)) {
+    if (r.eligible) r.assumptions = (r.assumptions || []).concat(["NextRes's engine prices Baltimore City fix & flip; confirm the specific address with NextRes before quoting."]);
+    return r;
+  }
   if (r && isBaltimoreCity(s)) {
     return { lender: r.lender, eligible: false, source: r.source,
       reason: r.lender === "Constructive Capital"
