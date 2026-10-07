@@ -124,8 +124,11 @@ export async function checkLend(s: S): Promise<any> {
     if (t.maxBudget && rehab > t.maxBudget) { firstReason = firstReason || ("LEND's no-experience tier caps the rehab budget at $" + t.maxBudget.toLocaleString() + "."); continue; }
     let ltc = lim.ltc, arvPct = lim.arv;
     if (cashout) { ltc -= 5; arvPct -= 5; if (structural) { ltc = Math.min(ltc, 78); arvPct = Math.min(arvPct, 65); } }
-    if (s.decliningMarket === "yes") { if (t.declining === false) { firstReason = firstReason || "LEND's no-experience tier isn't available in declining markets."; continue; } ltc = Math.min(ltc - 5, 85); arvPct -= 5; }
-    if (s.vacationArea === "yes") ltc = t.vacationCap ? Math.min(ltc - 5, t.vacationCap) : ltc - 5;
+    // Reductions first, caps after (measured: 92.5 tier, declining + vacation = 82.5% LTC, not 80%).
+    const caps: number[] = [];
+    if (s.decliningMarket === "yes") { if (t.declining === false) { firstReason = firstReason || "LEND's no-experience tier isn't available in declining markets."; continue; } ltc -= 5; arvPct -= 5; caps.push(85); }
+    if (s.vacationArea === "yes") { ltc -= 5; if (t.vacationCap) caps.push(t.vacationCap); }
+    if (caps.length) ltc = Math.min(ltc, ...caps);
     const ia = Math.min(lim.ia, ltc);
     let max = Math.min(cost * ltc / 100, arv * arvPct / 100, basis * ia / 100 + rehab);
     if (t.maxLoan) max = Math.min(max, t.maxLoan);
