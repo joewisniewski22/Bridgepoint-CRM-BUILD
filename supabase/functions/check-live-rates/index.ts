@@ -1632,6 +1632,9 @@ function rcnApplyGeo(s: Scenario, r: LenderResult): LenderResult {
 }
 
 async function checkRcn(s: Scenario): Promise<LenderResult> {
+  // Joe 2026-10-07: "RCN does not do rural at all" -- any loan type. Blocked before quoting,
+  // even though RCN's own calculator will still return a price for a rural flag.
+  if (s.ruralStatus === "rural") return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN doesn't lend on rural properties." };
   return rcnApplyGeo(s, await checkRcnRaw(s));
 }
 async function checkRcnRaw(s: Scenario): Promise<LenderResult> {
