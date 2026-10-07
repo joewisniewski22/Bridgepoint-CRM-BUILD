@@ -6890,6 +6890,23 @@ function startDialerCall(leadId){
   if (!e164){ showToast("No phone number on file for this lead"); return; }
   placeSoftphoneCall(leadId, lead.name, e164);
 }
+// "Call from my phone" (Joe 2026-10-07: the in-app phone is quirky on cell data). The CRM
+// rings the rep's own cell; they answer and press 1, then the client is dialed showing the
+// COMPANY number. Plain cell audio, and the call still logs + sends the missed-call text.
+function callViaMyCell(leadId){
+  var lead = leadById(leadId);
+  if (!lead || !lead.phone){ showToast("No phone number on file for this lead"); return; }
+  var me = currentUser();
+  if (!me.phone){ showToast("Your cell number isn't on file — ask Joe to add it"); return; }
+  if (!sb){ showToast("Phone service unavailable"); return; }
+  showToast("Calling your cell now — answer, press 1, and we'll connect " + (lead.name||"them").split(" ")[0]);
+  sb.functions.invoke("make-call", { body: { leadId: lead.id, userId: me.id } }).then(function(res){
+    var err = res.error || (res.data && res.data.error);
+    if (err){ showToast(typeof err === "string" ? err : "Couldn't start the call — try again"); return; }
+    lead.firstAttemptAt = lead.firstAttemptAt || todayISO();
+    persist();
+  }).catch(function(){ showToast("Couldn't start the call — try again"); });
+}
 function notifyLoNewLead(lead){
   // notifyUser()'s own pushStaffAlert already texts the LO for "hot-lead"
   // notifications (with the deep link baked into that text) -- this only
@@ -9739,9 +9756,9 @@ function renderMobileCard(item, opts){
   var actions = '';
   if (!opts.compact || open){
     actions = '<div class="m-actions">' +
-      (SOFTPHONE_ENABLED
-        ? mobileBtn('📞 Call', 'data-action="dialer-call" ' + id, 'primary')
-        : (lead.phone ? ('<a class="m-btn primary" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">📞 Call from my phone</a>') : '')) +
+      // Primary: ring my cell, then connect (company number, reliable on cell). In-app phone is the backup.
+      (lead.phone ? mobileBtn('📞 Call from my phone', 'data-action="call-via-cell" ' + id, 'primary') : '') +
+      (SOFTPHONE_ENABLED && lead.phone ? mobileBtn('🎧 Call in app', 'data-action="dialer-call" ' + id, 'ghost') : '') +
       mobileBtn('💬 Text', 'data-action="open-modal" data-modal="sendText" ' + id) +
       mobileBtn('✉ Email', 'data-action="compose-lead-email" ' + id) +
       mobileBtn('📊 Deal Analyzer' + (dealAnalyzerSent(lead) ? ' ✓' : ''), 'data-action="send-deal-analyzer" ' + id) +
@@ -9750,7 +9767,7 @@ function renderMobileCard(item, opts){
       ((!isProcessor() && canEditApplication(lead)) ? mobileBtn('📄 Send app' + (lead.applicationSentAt ? ' ✓' : ''), 'data-action="open-modal" data-modal="sendApplication" ' + id) : '') +
       (canSendDocs ? mobileBtn('📑 Term sheet' + (lead.termsheetSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="termSheet" ' + id) : '') +
       (canSendDocs ? mobileBtn('✅ Pre-approval' + (lead.preapprovalSentAt ? ' ✓' : ''), 'data-action="send-document-both" data-kind="preapproval" ' + id) : '') +
-      ((SOFTPHONE_ENABLED && lead.phone) ? ('<a class="m-btn ghost" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Use my phone (shows your own number)</a>') : '') +
+      (lead.phone ? ('<a class="m-btn ghost" href="tel:' + esc((lead.phone||"").replace(/[^0-9+]/g,"")) + '">Dial directly (shows your personal number)</a>') : '') +
       (opts.skippable ? mobileBtn('Skip today', 'data-action="m-skip" ' + id, 'ghost') : '') +
     '</div>';
   }
@@ -18031,6 +18048,7 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "pb-filter"){ ui.pbFilter = t.dataset.filter; render(); }
   else if (action === "pb-chase-docs"){ chaseOutstandingDocs(t.dataset.lead); }
+  else if (action === "call-via-cell"){ callViaMyCell(t.dataset.lead); }
   else if (action === "pb-move-stage"){
     var pbl = leadById(t.dataset.lead);
     if (pbl && (t.dataset.target !== "closed" || window.confirm("Mark " + pbl.name + "'s loan CLOSED / funded? This sends the payout notification."))) moveStage(t.dataset.lead, t.dataset.target);

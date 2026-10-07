@@ -69,7 +69,7 @@ const PHONE_TREE_EXCLUDED_IDS = ["lo-david"];
 const PHONE_TREE_EXCLUDED_FILTER = "(" + PHONE_TREE_EXCLUDED_IDS.join(",") + ")";
 
 type Stage =
-  | "ringing_staff" | "connecting_lead"                       // outbound dialer (sequential mode, unused since the softphone)
+  | "ringing_staff" | "staff_confirm" | "connecting_lead"     // outbound "call me first" bridge (mobile app, 2026-10-07)
   | "direct_dial_leg"                                         // outbound quick-dial (direct/parallel mode, unused since the softphone)
   | "webrtc_outbound"                                         // outbound softphone call (current dialer)
   | "answering_inbound" | "connecting_staff"                  // inbound, matched lead
@@ -250,7 +250,8 @@ async function logCallOutcome(opts: { leadId: string; staffId?: string | null; s
   if (existingIdx !== -1) attempts[existingIdx] = entry;
   else attempts.push(entry);
 
-  activity.push({ date: d, type: "call", text: opts.note, author: staffName });
+  // Both legs of a bridged call send a hangup -- one history line per call.
+  if (existingIdx === -1) activity.push({ date: d, type: "call", text: opts.note, author: staffName });
   await sb.from("leads").update({ call_attempts: attempts, activity, last_contact_at: d }).eq("id", opts.leadId);
 }
 
@@ -389,10 +390,10 @@ Deno.serve(async (req: Request) => {
       if (!state) return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
 
       if (state.stage === "ringing_staff") {
-        const nextState: CallState = { ...state, stage: "connecting_lead" };
-        await telnyxAction(callControlId, "transfer", {
-          to: state.leadPhone, from: TELNYX_FROM_NUMBER, client_state: encodeState(nextState),
-        });
+        // The staff member's cell picked up. Ask them to press 1 before dialing the client, so
+        // a voicemail answering their phone never connects the client to it (2026-10-07).
+        const who = state.leadName ? state.leadName : "your client";
+        await gather(callControlId, "Bridgepoint call to " + who + ". Press 1 to connect.", "1", { ...state, stage: "staff_confirm" });
       } else if (state.stage === "answering_inbound") {
         const nextState: CallState = { ...state, stage: "connecting_staff", originalCallControlId: callControlId };
         await saveTransferState(payload.call_session_id as string, nextState);
@@ -448,6 +449,20 @@ Deno.serve(async (req: Request) => {
       const callControlId = payload.call_control_id as string;
       const digits = (payload.digits as string) || "";
       if (!state) return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+
+      if (state.stage === "staff_confirm") {
+        if (digits === "1") {
+          // Connect the client, showing the company number. Save the state by session so
+          // the hangup (which can arrive without client_state after a transfer) still logs.
+          const nextState: CallState = { ...state, stage: "connecting_lead", originalCallControlId: "bridge:" + callControlId };
+          await saveTransferState(payload.call_session_id as string, nextState);
+          await telnyxAction(callControlId, "transfer", { to: state.leadPhone, from: TELNYX_FROM_NUMBER, timeout_secs: 35, client_state: encodeState(nextState) });
+        } else {
+          // No key press: a voicemail or pocket answer -- don't dial the client.
+          await telnyxAction(callControlId, "hangup", {});
+        }
+        return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+      }
 
       if (state.stage === "ivr_lang_menu") {
         if (digits === "2") {
@@ -597,16 +612,21 @@ Deno.serve(async (req: Request) => {
             note: "Dialer call to " + (state.staffName || "staff") + " went unanswered before reaching " + (state.leadName || "the lead"),
           });
         }
+      } else if (state.stage === "staff_confirm") {
+        // Staff leg ended before pressing 1 (declined, voicemail, or hung up) -- client never dialed.
       } else if (state.stage === "connecting_lead") {
         if (state.leadId) {
           await logCallOutcome({
             leadId: state.leadId, staffId: state.userId, sessionId,
             outcome: neverConnected ? "no-answer" : "connected",
             note: neverConnected
-              ? "Outbound call — " + (state.leadName || "lead") + " did not pick up"
-              : "Outbound call connected with " + (state.leadName || "lead"),
+              ? "Outbound call (via " + (state.staffName || "staff") + "'s cell) — " + (state.leadName || "lead") + " did not pick up"
+              : "Outbound call connected with " + (state.leadName || "lead") + " (via " + (state.staffName || "staff") + "'s cell)",
           });
+          // Same as the in-app phone: a missed outbound call gets the automatic follow-up text.
+          if (neverConnected) await sendMissedCallText({ leadId: state.leadId, staffId: state.userId || null });
         }
+        if (fromSavedState === false && payload.call_session_id) await sb.from("voice_call_state").delete().eq("call_session_id", payload.call_session_id as string);
       } else if (state.stage === "answering_inbound") {
         if (state.leadId) {
           await logCallOutcome({
