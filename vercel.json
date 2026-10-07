@@ -1,4 +1,6 @@
 {
+  "buildCommand": "node tools/check-syntax.js",
+  "outputDirectory": ".",
   "routes": [
     { "src": "^/api/(.*)$", "has": [{ "type": "host", "value": "((www\\.)?bplending\\.com|bplending-preview\\.vercel\\.app)" }], "dest": "/api/$1" },
     { "src": "^/lp/(.*)$", "has": [{ "type": "host", "value": "((www\\.)?bplending\\.com|bplending-preview\\.vercel\\.app)" }], "dest": "/lp/$1" },
