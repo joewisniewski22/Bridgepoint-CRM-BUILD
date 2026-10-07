@@ -82,7 +82,11 @@ export type VelScenario = {
   loanType: string; transactionType: string; propertyAddress: string; propertyState: string; propertyType: string; numUnits?: number | null;
   creditScore: number | null; purchasePrice: number | null; currentValue: number | null; loanAmount: number | null; rehabBudget: number | null; arv: number | null;
   entityType: string | null; citizenshipStatus: string | null; experienceDeals: number | null; currentLoanBalance?: number | null;
+  prepayTerm?: string | null;
 };
+// Velocity's 30-yr carries a 5-yr step-down prepay (5/4/3/2/1%) by default; shorter ones are bought
+// down for a fee (measured 10/7/26: 3-yr = +0.75 pts, 1-yr = +1.5 pts). PrepayBuydownYears = years removed.
+const VEL_PREPAY_BUYDOWN: Record<string, number> = { "5yr": 0, "4yr": 1, "3yr": 2, "2yr": 3, "1yr": 4 };
 
 function city(addr: string): string {
   const parts = String(addr || "").split(",").map((x) => x.trim());
@@ -104,6 +108,11 @@ export async function checkVelocity(s: VelScenario): Promise<any> {
   const value = refi ? (s.currentValue || s.purchasePrice) : (s.purchasePrice && s.currentValue ? Math.min(s.purchasePrice, s.currentValue) : (s.purchasePrice || s.currentValue));
   if (!value) { out.reason = refi ? "Needs the current value." : "Needs the purchase price."; return out; }
   const purpose = !refi ? "Purchase" : s.transactionType === "cashout" ? "CashOutRefinance" : "Refinance";
+  let prepayBuydown = 0;
+  if (program === "Perm") {
+    const pp = s.prepayTerm || "5yr";
+    prepayBuydown = VEL_PREPAY_BUYDOWN[pp] ?? 0;
+  }
   if (program === "FixFlip" && (s.rehabBudget || 0) > 0) out.assumptions.push("Velocity's fix & flip (Flex I/O) doesn't fund rehab — loan is on the as-is value only, rehab is the borrower's.");
 
   const base: any = {
@@ -111,7 +120,7 @@ export async function checkVelocity(s: VelScenario): Promise<any> {
     FICO: s.creditScore || 0, CitizenshipStatus: velCitizen(s.citizenshipStatus, s.creditScore), OtherLienAmounts: [], NumberOfUnits: [s.numUnits || (pt === "2to4Units" ? 2 : 1)],
     LoanPurpose: purpose, MatrixDate: "", VestedEntity: (s.entityType || "LLC") !== "Individual", EntityType: (s.entityType || "LLC") === "Individual" ? "" : (VEL_ENTITY[s.entityType || "LLC"] || "Limited Liability Company"), OwnerOccupied: false,
     ProgramType: program, ARVInvestorExperienceLevel: Number(s.experienceDeals || 0), ProgramSubType: "", FirstTimeInvestor: !s.experienceDeals, FirstTimeBuyer: false,
-    FixedTerm: "", BrokerRebatePoints: 0, RateBuydownFeePOC: 0, PrepayBuydownYears: 0, RebateOrBuydown: "Buydown", LenderFeeBuydown: 0, RateOrFee: "Rate", PromoCodes: [],
+    FixedTerm: "", BrokerRebatePoints: 0, RateBuydownFeePOC: 0, PrepayBuydownYears: prepayBuydown, RebateOrBuydown: "Buydown", LenderFeeBuydown: 0, RateOrFee: "Fee", PromoCodes: [],
     PurchasePrice: s.purchasePrice || 0, EstimatedCurrentValue: s.currentValue || value, EstimatedFutureValue: s.arv || 0, CostOfImprovements: 0,
     InitialDistribution: 0, Holdback: 0, PolicyExceptions: {}, SelectedLTC: 0, SelectedLTV: 0, SelectedARV: 0, SelectedARVProOption: 3, AddressPropTypes: "", LoanType: "", IOPeriod: 0, FixedPeriodType: "PI", NewModel: true,
   };
@@ -126,13 +135,22 @@ export async function checkVelocity(s: VelScenario): Promise<any> {
     let d: any;
     try { d = await velocityPost("GetPricing", Object.assign({}, base, { LoanAmount: amt, LTV: ltv })); }
     catch (e) { const m = String((e as Error).message || e); return { lender: L, eligible: false, unavailable: true, reason: m === "not_configured" ? "Velocity isn't connected yet (add the Velocity login in Supabase)." : "Velocity pricing failed (" + m + ")." }; }
-    if (!first) first = d;
+    if (!first) {
+      first = d;
+      // No-prepay request: only possible where the state itself bars prepay penalties.
+      if (program === "Perm" && s.prepayTerm === "none" && !(d.PrepayTerms && d.PrepayTerms.NoPrepayState)) {
+        out.reason = "Velocity's 30-year loan requires a prepayment penalty (1-year minimum) in " + (s.propertyState || "this state") + ". Price it with a 1–5 year prepay to see Velocity.";
+        return out;
+      }
+    }
     const fatal = (d.PricingViolations || []).find((v: string) => !/LTV|Max loan|loan amount/i.test(v));
     if (fatal) { out.reason = "Velocity: " + fatal; return out; }
     if (!d.IsValid) continue;
     const lt2 = d.LoanTerms || {};
-    const pts = Number(lt2.LenderFeePOC || 0);
-    options.push({ program: (program === "Perm" ? "30-yr fixed" : "24-mo Flex I/O") + " · " + Math.round(ltv) + "% LTV", rate: Number(d.FinalRate), price: 100 + pts, loanAmount: amt, lenderPoints: pts, term: lt2.FixedTerm || null, appraisalFee: (d.AppraisalFees || [])[0] || null, adjustments: String(d.RateAdjustmentString || "").split("#").filter(Boolean) });
+    const prepayPts = program === "Perm" ? Number((d.PrepayTerms && d.PrepayTerms.PrepayFeeAmount) || 0) : 0;
+    const pts = Number(lt2.LenderFeePOC || 0) + prepayPts;
+    const ppText = program === "Perm" && d.PrepayTerms ? (d.PrepayTerms.NoPrepayState ? " · no prepay (state)" : " · " + (String(d.PrepayTerms.PrepayYears || "").split(",").length) + "-yr prepay") : "";
+    options.push({ program: (program === "Perm" ? "30-yr fixed" : "24-mo Flex I/O") + " · " + Math.round(ltv) + "% LTV" + ppText, rate: Number(d.FinalRate), price: 100 + pts, loanAmount: amt, lenderPoints: pts, term: lt2.FixedTerm || null, appraisalFee: (d.AppraisalFees || [])[0] || null, adjustments: String(d.RateAdjustmentString || "").split("#").filter(Boolean) });
     if (options.length >= 2) break;
   }
   if (!options.length) { out.reason = "Velocity: " + (((first && first.PricingViolations) || [])[0] || "no eligible leverage tier"); return out; }

@@ -12870,7 +12870,9 @@ function lpGroups(key){
   if (rtl && needsRehab){
     money.push({ k:"arv", label:"After-Repair Value (ARV)", type:"num", req:true });
     money.push({ k:"rehabBudget", label:"Rehab / Construction Budget", type:"num", req:true });
+    if (lt === "Fix & Flip") money.push({ k:"rehabScope", label:"Rehab Scope", type:"select", opts:[["cosmetic","Cosmetic (no structural work)"],["structural","Structural (gut, additions, conversions, fire/water)"]], hint:"lenders price these differently" });
   }
+  deal.push({ k:"appraisalTransfer", label:"Existing appraisal to transfer?", type:"select", opts:[["no","No — lender orders a new one"],["yes","Yes — borrower already has one"]], hint:"some lenders won't take a transfer" });
   if (refi) money.push({ k:"currentLoanBalance", label:"Existing Loan Payoff", type:"num", hint:"NextRes needs this on a refinance" });
   if (rtl) money.push({ k:"termMonths", label:"Term (months)", type:"num", req:true, min:6, max:36 });
   money.push({ k:"loanAmount", label:"Loan Amount", type:"num", hint:"optional — leave blank and each lender's maximum is found for you" });
@@ -12942,7 +12944,9 @@ function lpScenario(key){
     ruralStatus: g("ruralStatus"),
     liquidity: num("liquidity"),
     countryOfDomicile: g("countryOfDomicile"),
-    currentLoanBalance: num("currentLoanBalance")
+    currentLoanBalance: num("currentLoanBalance"),
+    appraisalTransfer: g("appraisalTransfer") || "no",
+    rehabScope: lt === "Fix & Flip" ? (g("rehabScope") || "cosmetic") : null
   };
 }
 function lpPoints(key){

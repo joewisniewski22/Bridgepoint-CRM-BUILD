@@ -13,7 +13,8 @@
 // reimplemented statically in index.html, since Constructive is our own
 // in-house paper and Joe hands us the sheet directly every time it changes).
 import { RCN_GEO_DATE, RCN_KILLED, RCN_REDUCE, RCN_TARGET, RCN_TARGET_NAMES } from "./rcn_geo.ts";
-import { checkVelocity, velocityGet } from "./velocity.ts";
+import { checkVelocity, velocityGet, velocityPost } from "./velocity.ts";
+import { checkLend } from "./lend.ts";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -49,6 +50,8 @@ type Scenario = {
   liquidity: number | null;           // seasoned US bank funds -- only matters for Foreign National RTL
   countryOfDomicile: string | null;    // only matters for Foreign National RTL
   currentLoanBalance: number | null;   // existing lien payoff -- only matters on a refinance
+  appraisalTransfer?: string | null;   // "yes" = borrower already has an appraisal to transfer (RCN/LEND refuse)
+  rehabScope?: string | null;          // "cosmetic" | "structural" (gut, additions, conversions, fire/water)
 };
 
 type LenderResult = {
@@ -1664,7 +1667,30 @@ const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult
   { key: "rcn", check: checkRcn },
   { key: "ad", check: checkAD },
   { key: "velocity", check: (s: Scenario) => checkVelocity(s as any) },
+  { key: "lend", check: (s: Scenario) => checkLend(s as any) },
 ];
+
+// ---------------------------------------------------------------------
+// Final guideline gate (Joe 10/7/26: "only return rates that actually qualify"). Runs on every
+// lender's result after its own check, for rules that cut across lenders or that a lender's own
+// calculator doesn't enforce. Unknown policies are flagged, never silently passed.
+// ---------------------------------------------------------------------
+const APPRAISAL_TRANSFER: Record<string, "no" | "unknown"> = {
+  "RCN Capital": "no", "Lend Investors Capital": "no",
+};
+function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
+  if (!r || !r.eligible) return r;
+  if (Array.isArray(r.options)) {
+    r.options = r.options.filter((o) => o && isFinite(Number(o.rate)) && Number(o.rate) > 0 && (!o.loanAmount || o.loanAmount > 0));
+    if (!r.options.length) return { ...r, eligible: false, options: [], reason: "No valid rate came back for this scenario." };
+  }
+  if (s.appraisalTransfer === "yes") {
+    const pol = APPRAISAL_TRANSFER[r.lender] || "unknown";
+    if (pol === "no") return { lender: r.lender, eligible: false, source: r.source, reason: r.lender + " doesn't accept transferred appraisals — they'd need to order a new one." };
+    r.assumptions = (r.assumptions || []).concat(["Confirm " + r.lender + " will accept the existing appraisal as a transfer."]);
+  }
+  return r;
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
@@ -1677,6 +1703,9 @@ Deno.serve(async (req: Request) => {
     if (body.velocityList && (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "") === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
       return new Response(JSON.stringify(await velocityGet(String(body.velocityList).replace(/[^A-Za-z]/g, ""))), { headers: CORS_HEADERS });
     }
+    if (body.velocityRaw && (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "") === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
+      return new Response(JSON.stringify(await velocityPost("GetPricing", body.velocityRaw)), { headers: CORS_HEADERS });
+    }
     const scenario: Scenario = body.lead;
     if (!scenario) {
       return new Response(JSON.stringify({ error: "missing_lead" }), { status: 400, headers: CORS_HEADERS });
@@ -1685,7 +1714,7 @@ Deno.serve(async (req: Request) => {
     const picked = Array.isArray(body.lenders) && body.lenders.length ? LENDERS.filter(function (l) { return body.lenders.indexOf(l.key) !== -1; }) : LENDERS;
     const results = await Promise.allSettled(picked.map(function (l) { return l.check(scenario); }));
     const out = results.map(function (r, i) {
-      if (r.status === "fulfilled") return r.value;
+      if (r.status === "fulfilled") return guidelineGate(scenario, r.value);
       return { lender: picked[i].key, eligible: false, reason: "Lookup failed: " + String(r.reason) };
     });
     return new Response(JSON.stringify({ ok: true, results: out }), { headers: CORS_HEADERS });
