@@ -4261,7 +4261,7 @@ function buildTermSheet(lead, langOverride){
     }
     lines.push("Originación: " + commission);
     if (lenderPointsForLead(lead)) lines.push("Puntos del Prestamista: " + pricerTermsFor(lead).lenderPointsPct + "% (" + fmtUSD(lenderPointsForLead(lead)) + ")");
-    lines.push((lead.underwritingFeeOverride == null ? "Cargo de Suscripción" : "Cargo del Prestamista") + ": " + fmtUSD(lenderFeeForLead(lead)));
+    lines.push((lead.underwritingFeeOverride == null && !lead.outsideLender ? "Cargo de Suscripción" : "Cargo del Prestamista") + ": " + fmtUSD(lenderFeeForLead(lead)));
     if (adLenderExtras(lead)) lines.push("Cargos del Prestamista (servicio de impuestos, certificación de inundación" + (adLenderExtras(lead).mers ? ", MERS" : "") + "): " + fmtUSD(adLenderExtras(lead).total));
     if (lead.underwritingFeeOverride != null) lines.push("Cargo de Suscripción: " + fmtUSD(underwritingFeeForLead(lead)));
     lines.push("Cargo de Procesamiento: " + fmtUSD(processingFeeForLead(lead)));
@@ -4319,7 +4319,7 @@ function buildTermSheet(lead, langOverride){
     }
     lines.push("Origination: " + commission);
     if (lenderPointsForLead(lead)) lines.push("Lender Points: " + pricerTermsFor(lead).lenderPointsPct + "% (" + fmtUSD(lenderPointsForLead(lead)) + ")");
-    lines.push((lead.underwritingFeeOverride == null ? "Underwriting Fee" : "Lender Fee") + ": " + fmtUSD(lenderFeeForLead(lead)));
+    lines.push((lead.underwritingFeeOverride == null && !lead.outsideLender ? "Underwriting Fee" : "Lender Fee") + ": " + fmtUSD(lenderFeeForLead(lead)));
     if (adLenderExtras(lead)) lines.push("Lender Charges (tax service, flood certification" + (adLenderExtras(lead).mers ? ", MERS" : "") + "): " + fmtUSD(adLenderExtras(lead).total));
     if (lead.underwritingFeeOverride != null) lines.push("Underwriting Fee: " + fmtUSD(underwritingFeeForLead(lead)));
     lines.push("Processing Fee: " + fmtUSD(processingFeeForLead(lead)));
