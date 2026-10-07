@@ -6410,6 +6410,8 @@ function moveStage(leadId, target){
   } else if (target === "lost"){
     lead.status = "lost"; lead.stage = "lost";
     lead.activity.push({ date:d, type:"system", text:"Marked lost / dead", author: currentUser().name });
+    // Processor closing out a dead file: tell the LO so it isn't a surprise.
+    if (isProcessor() && lead.assignedTo) notifyUser(lead.assignedTo, lead.id, "file-dead", currentUser().name + " marked " + lead.name + "'s file dead" + (lead.lostReason ? (" (" + lead.lostReason + ")") : "") + ".");
     if (sb && lead.assignedTo){
       sb.functions.invoke("generate-coaching-note", { body:{ leadId: lead.id, staffId: lead.assignedTo, source:"lost_deal" } }).catch(function(){});
     }
@@ -9588,7 +9590,8 @@ function renderShell(){
       '</div>' +
       '<nav class="nav">' +
         '<button class="nav-item" type="button" data-action="open-quick-dial"><span class="ic">📞</span><span>Dialer</span></button>' +
-        navItem("today","☎","Today", callsDue||null) +
+        navItem("today", isProcessor() ? "📋" : "☎", "Today", isProcessor() ? null : (callsDue||null)) +
+        (isOwner() ? navItem("processing","📋","Processing") : "") +
         ((isOwner() || !isProcessor()) && navVisible("pricer") ? navItem("pricer","🧮","Pricer") : "") +
         (navVisible("pipeline") ? navItem("pipeline","▤","Pipeline") : "") +
         navItem("leads","☰","Leads & Loans", leads.length) +
@@ -9635,6 +9638,7 @@ function renderShell(){
   var body = "";
   if (ui.view === "today") body = renderToday();
   else if (ui.view === "pricer") body = renderStandalonePricer();
+  else if (ui.view === "processing") body = topbar("Processing", "Erika's desk — every in-process file, what's in, and the one thing that moves it.") + '<div class="content">' + renderProcessingBoard() + '</div>';
   else if (ui.view === "pipeline") body = renderPipeline();
   else if (ui.view === "leads") body = renderLeadsTable();
   else if (ui.view === "detail") body = renderLeadDetail();
@@ -10589,7 +10593,7 @@ function processingStatus(lead){
   else if (s.waiting > 0) n = { text: s.waiting + " doc" + (s.waiting>1?"s":"") + " requested — waiting on borrower", who: "borrower", tab: "documents" };
   else if (lead.outsideLender && !exported && s.docsIn >= Math.max(1, s.docsTotal - 1)) n = { text: "Export to " + lender + " (file is complete)", who: "erika", tab: "documents" };
   else if (title === "ordered" || ins === "ordered" || appr === "ordered") n = { text: "Waiting on " + [title==="ordered"?"title":null, ins==="ordered"?"insurance":null, appr==="ordered"?"appraisal":null].filter(Boolean).join(", "), who: "thirdparty", tab: "overview" };
-  else { var nextSt = PROCESSING_STAGES[PROCESSING_STAGES.indexOf(lead.stage)+1]; n = { text: "Everything's in — move to " + (nextSt ? stageLabel(nextSt) : "Closed"), who: "erika", tab: "overview" }; }
+  else { var nextSt = PROCESSING_STAGES[PROCESSING_STAGES.indexOf(lead.stage)+1] || "closed"; n = { text: "Everything's in — move to " + stageLabel(nextSt), who: "erika", tab: "overview", quick: { action:"pb-move-stage", target: nextSt, label: "Move to " + stageLabel(nextSt) } }; }
   // One-click actions right on the board (no need to open the file).
   if (/^Request \d+ doc/.test(n.text)) n.quick = { action:"request-all-suggested-docs", label:"Request docs" };
   else if (n.who === "borrower" && s.waiting > 0 && !docRemindedToday(lead)) n.quick = { action:"pb-chase-docs", label:"Send reminder" };
@@ -10638,8 +10642,9 @@ function renderProcessingBoard(){
       '<td><div style="font-weight:600;color:' + (whoColor[s.next.who]||"inherit") + '">' + esc(s.next.text) + '</div>' +
         '<div class="hint">' + ({ erika:"Your move", borrower:"Waiting on borrower", thirdparty:"Waiting on title / insurance / appraiser", none:"" })[s.next.who] + (s.next.done ? ' · ✓ ' + s.next.done : '') + '</div></td>' +
       '<td style="text-align:right;white-space:nowrap">' +
-        (s.next.quick ? '<button class="btn btn-sm btn-primary" style="margin-right:4px" data-action="' + s.next.quick.action + '" data-lead="' + l.id + '">' + s.next.quick.label + '</button>' : '') +
-        '<button class="btn btn-sm ' + (s.next.who === "erika" && !s.next.quick ? 'btn-primary' : 'btn-ghost') + '" data-action="select-lead" data-lead="' + l.id + '" data-tab="' + s.next.tab + '">Open ' + (s.next.tab === "documents" ? "Docs" : "File") + '</button></td>' +
+        (s.next.quick ? '<button class="btn btn-sm btn-primary" style="margin-right:4px" data-action="' + s.next.quick.action + '" data-lead="' + l.id + '"' + (s.next.quick.target ? ' data-target="' + s.next.quick.target + '"' : '') + '>' + esc(s.next.quick.label) + '</button>' : '') +
+        '<button class="btn btn-sm ' + (s.next.who === "erika" && !s.next.quick ? 'btn-primary' : 'btn-ghost') + '" data-action="select-lead" data-lead="' + l.id + '" data-tab="' + s.next.tab + '">Open ' + (s.next.tab === "documents" ? "Docs" : "File") + '</button>' +
+        '<button class="btn btn-sm btn-ghost" style="margin-left:4px;color:#9a2b1a" data-action="open-modal" data-modal="markLost" data-lead="' + l.id + '" title="Deal is dead — close out this file (the LO is notified)">Dead</button></td>' +
     '</tr>';
   }).join("");
   return '<div class="section"><div class="section-head"><h2>📋 Processing Board</h2><div class="hint">Every file in processing, most urgent first — the checklist shows what\'s in, the right column is the one thing that moves it.</div></div>' +
@@ -13652,6 +13657,8 @@ function renderRail(lead){
   else if (!isProcessor()) statusRow = '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="cold">Mark Cold</button>' +
       '<button class="btn btn-sm btn-danger" data-action="open-modal" data-modal="markLost" data-lead="' + lead.id + '">Mark Lost</button>' +
       '<button class="btn btn-sm btn-danger" data-action="move-stage" data-lead="' + lead.id + '" data-target="spam" title="Clearly a scam or robot — different from Cold/Lost, this never resurfaces in win-back and never auto-reactivates from a connected call">🚫 Mark Spam</button>';
+  // Processor can close out a dead file (Joe 2026-10-07: she triages her own files).
+  if (isProcessor() && lead.status === "active") statusRow += '<button class="btn btn-sm btn-danger" data-action="open-modal" data-modal="markLost" data-lead="' + lead.id + '">Mark Dead</button>';
   if (isProcessor() || isOwner()){
     statusRow += '<button class="btn btn-sm' + (lead.onHold ? ' btn-primary' : '') + '" data-action="toggle-on-hold" data-lead="' + lead.id + '">' + (lead.onHold ? "Remove Hold" : "⏸ Put On Hold") + '</button>';
   }
@@ -18024,6 +18031,10 @@ appEl.addEventListener("click", function(e){
   }
   else if (action === "pb-filter"){ ui.pbFilter = t.dataset.filter; render(); }
   else if (action === "pb-chase-docs"){ chaseOutstandingDocs(t.dataset.lead); }
+  else if (action === "pb-move-stage"){
+    var pbl = leadById(t.dataset.lead);
+    if (pbl && (t.dataset.target !== "closed" || window.confirm("Mark " + pbl.name + "'s loan CLOSED / funded? This sends the payout notification."))) moveStage(t.dataset.lead, t.dataset.target);
+  }
   else if (action === "select-lead-from-modal"){ if (t.dataset.lead){ ui.modal=null; ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); } }
   else if (action === "go-to-contacts"){ ui.view="contacts"; ui.selectedLeadId=null; render(); }
   else if (action === "apply-loan-guideline-max"){
