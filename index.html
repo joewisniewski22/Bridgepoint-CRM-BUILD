@@ -6883,7 +6883,11 @@ function toggleSoftphoneMute(){
   else { telnyxActiveCall.muteAudio(); ui.softphoneCall.muted = true; }
   render();
 }
-function startDialerCall(leadId){
+function startDialerCall(leadId, forceApp){
+  // On a phone, every Call button rings the rep's own cell and bridges (Joe 2026-10-07: the
+  // in-app phone is unreliable on cell data). "Call in app" passes forceApp to skip this.
+  var onPhone = isMobileMode() || /iPhone|iPod|Android.*Mobile/i.test(navigator.userAgent || "");
+  if (!forceApp && onPhone) return callViaMyCell(leadId);
   var lead = leadById(leadId);
   if (!lead || !lead.phone){ showToast("No phone number on file for this lead"); return; }
   var e164 = toE164Phone(lead.phone);
@@ -9773,7 +9777,7 @@ function renderMobileCard(item, opts){
     actions = '<div class="m-actions">' +
       // Primary: ring my cell, then connect (company number, reliable on cell). In-app phone is the backup.
       (lead.phone ? mobileBtn('📞 Call from my phone', 'data-action="call-via-cell" ' + id, 'primary') : '') +
-      (SOFTPHONE_ENABLED && lead.phone ? mobileBtn('🎧 Call in app', 'data-action="dialer-call" ' + id, 'ghost') : '') +
+      (SOFTPHONE_ENABLED && lead.phone ? mobileBtn('🎧 Call in app', 'data-action="dialer-call-app" ' + id, 'ghost') : '') +
       mobileBtn('💬 Text', 'data-action="open-modal" data-modal="sendText" ' + id) +
       mobileBtn('✉ Email', 'data-action="compose-lead-email" ' + id) +
       mobileBtn('📊 Deal Analyzer' + (dealAnalyzerSent(lead) ? ' ✓' : ''), 'data-action="send-deal-analyzer" ' + id) +
@@ -18164,6 +18168,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "resolve-review"){ resolveReview(t.dataset.lead); }
   else if (action === "clear-guideline-override"){ clearGuidelineOverride(t.dataset.lead); }
   else if (action === "dialer-call"){ startDialerCall(t.dataset.lead); }
+  else if (action === "dialer-call-app"){ startDialerCall(t.dataset.lead, true); }
   else if (action === "open-brief"){ openBrief(t.dataset.task); }
   else if (action === "brief-close"){ closeBrief(); }
   else if (action === "brief-peek-next"){ var bpn = nextBriefTask(ui.briefTaskId); if (bpn) openBrief(bpn.id); else showToast("That's the last follow-up for now"); }
