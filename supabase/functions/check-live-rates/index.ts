@@ -367,6 +367,14 @@ async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?
     if (isGuc && band === "1-2") return no("Constructive ground-up needs 3+ completed projects in the last 3 years.");
     if (!isGuc && profile === "heavy" && band === "1-2") return no("Heavy rehab at Constructive needs 3+ completed projects (V7 grid: 1-2 band is light rehab / bridge only).");
     if (isGuc && s.transactionType === "cashout") return no("No cash-out on Constructive ground-up.");
+    // RTL Guidelines 9-15-26 (bplhub.com) §12.2/12.3, §7.3, App. G -- read 2026-10-07.
+    if (s.ruralStatus === "rural") return no("Constructive doesn't lend on rural properties (fix & flip / bridge / ground-up).");
+    if ((s as any).decliningMarket === "yes") return no("Constructive's RTL guidelines exclude properties in declining markets.");
+    const BPL_RTL_TYPES = ["SFR", "Single Family", "Townhome", "Condo", "2-4 Unit", "Duplex"];
+    if (!BPL_RTL_TYPES.includes(s.propertyType)) return no("Constructive fix & flip / bridge is 1-4 unit residential only (SFR, townhome/PUD, condo under 4 stories, 2-4 units) — not " + s.propertyType + ".");
+    if (isGuc && s.propertyType === "Condo") return no("Condos aren't eligible for Constructive ground-up.");
+    if (s.citizenshipStatus === "Foreign National" && (s.entityType || "LLC") === "Individual") return no("Constructive foreign-national guarantors must borrow through a U.S. entity.");
+    if (s.citizenshipStatus === "Foreign National" && !s.creditScore) return no("Constructive foreign nationals need a valid credit report and score.");
     const limitsRaw = isGuc ? BPL_GUC_MATRIX[band] : BPL_V7_GRID[band][profile];
     if (!limitsRaw) return null;
     const limits: RtlLimits = { ...limitsRaw };
@@ -486,6 +494,12 @@ async function checkConstructiveAt(s: Scenario): Promise<LenderResult> {
   if (propState && DSCR_INELIGIBLE_STATES.includes(propState)) {
     return { lender: "Constructive Capital", eligible: false, reason: propState + " is on this program's ineligible-states list (ND, NV, SD)." };
   }
+  // DSCR Guideline Matrix 7-1-26 (bplhub.com), read 2026-10-07.
+  if (s.propertyType === "Mixed-Use" || s.propertyType === "Land") return { lender: "Constructive Capital", eligible: false, reason: "Constructive DSCR doesn't lend on " + s.propertyType + " (1-4 units, condos, PUDs and 5-8 unit multifamily only)." };
+  if ((s.entityType || "LLC") === "Individual" && propState && ["CO", "NY", "FL", "VA", "GA"].includes(propState)) return { lender: "Constructive Capital", eligible: false, reason: "Constructive requires an entity borrower for DSCR loans in " + propState + "." };
+  if (s.loanAmount < 50000) return { lender: "Constructive Capital", eligible: false, reason: "Below Constructive's $50,000 DSCR minimum." };
+  if (s.loanAmount > 2000000) return { lender: "Constructive Capital", eligible: false, reason: "Above Constructive's $2,000,000 DSCR maximum." };
+  if (valueBasis < 75000) return { lender: "Constructive Capital", eligible: false, reason: "Constructive DSCR needs a property value of at least $75,000." };
   const propertyType = pricingPropertyType(s.propertyType) || "SFR";
   const ltv = (s.loanAmount / valueBasis) * 100;
   const col = dscrLtvCol(ltv);
@@ -570,7 +584,12 @@ async function checkConstructiveAt(s: Scenario): Promise<LenderResult> {
     options.push({ program: "DSCR 30yr Fixed", rate: stepRate, price: priceRow.price, dscr: stepDscr });
   }
   if (!options.length) return { lender: "Constructive Capital", eligible: false, reason: "No priceable options for this scenario." };
-  return { lender: "Constructive Capital", eligible: true, options, fees: { lenderFee: fee } };
+  const dscrNotes: string[] = [];
+  if (propertyType === "Multifamily 5+") dscrNotes.push("Constructive DSCR multifamily is 5-8 units only.");
+  if (s.propertyType === "Condo") dscrNotes.push("Non-warrantable condos are capped at 65% LTV at Constructive.");
+  if (s.loanAmount > 1000000) dscrNotes.push("Loans over $1M need Constructive second-level approval" + (s.loanAmount > 1500000 ? " and a second full appraisal." : "."));
+  if (s.citizenshipStatus === "Non-Permanent Resident") dscrNotes.push("Non-permanent residents need an unexpired eligible visa (6+ months remaining).");
+  return { lender: "Constructive Capital", eligible: true, options, fees: { lenderFee: fee }, assumptions: dscrNotes.length ? dscrNotes : undefined };
 }
 
 // ---------------------------------------------------------------------
@@ -1675,8 +1694,12 @@ const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult
 // lender's result after its own check, for rules that cut across lenders or that a lender's own
 // calculator doesn't enforce. Unknown policies are flagged, never silently passed.
 // ---------------------------------------------------------------------
-const APPRAISAL_TRANSFER: Record<string, "no" | "unknown"> = {
+const APPRAISAL_TRANSFER: Record<string, "no" | "yes" | "unknown"> = {
   "RCN Capital": "no", "Lend Investors Capital": "no",
+  "Constructive Capital": "yes",   // RTL Guidelines §13.1.2: allowed with a release letter + lender approval
+};
+const APPRAISAL_TRANSFER_NOTE: Record<string, string> = {
+  "Constructive Capital": "Constructive accepts the transferred appraisal with a release letter, subject to their review.",
 };
 function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
   if (!r || !r.eligible) return r;
@@ -1687,7 +1710,7 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
   if (s.appraisalTransfer === "yes") {
     const pol = APPRAISAL_TRANSFER[r.lender] || "unknown";
     if (pol === "no") return { lender: r.lender, eligible: false, source: r.source, reason: r.lender + " doesn't accept transferred appraisals — they'd need to order a new one." };
-    r.assumptions = (r.assumptions || []).concat(["Confirm " + r.lender + " will accept the existing appraisal as a transfer."]);
+    r.assumptions = (r.assumptions || []).concat([pol === "yes" ? (APPRAISAL_TRANSFER_NOTE[r.lender] || r.lender + " accepts transferred appraisals.") : "Confirm " + r.lender + " will accept the existing appraisal as a transfer."]);
   }
   return r;
 }
