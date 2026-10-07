@@ -4,7 +4,7 @@
 (function(){
   "use strict";
   var ENDPOINT = "https://idzkigmvovehjpapatxv.supabase.co/functions/v1/ad-lead-intake";
-  var BOOK_URL = "https://bridgepoint-crm-build.vercel.app/?book=owner";
+  var BOOK_URL = "https://app.bplending.com/?book=owner";
   var META_PIXEL_ID = "828172673668690"; // paste the Meta Pixel ID here to turn on pixel tracking + the Lead event
 
   if (META_PIXEL_ID){
