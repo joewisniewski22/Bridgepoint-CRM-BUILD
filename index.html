@@ -9822,7 +9822,101 @@ function mobileContactResults(q){
   return '<div class="footnote" style="padding:4px 2px 8px">' + hits.length + ' contact' + (hits.length===1 ? '' : 's') + (hits.length > shown.length ? ' — showing the first 50, search to narrow' : '') + '</div>' +
     (shown.length ? shown.map(function(l){ return renderMobileCard({ leadId:l.id, label: stageLabel(l.stage) }, { compact:true }); }).join("") : '<div class="empty">No matches.</div>');
 }
+// Processor phone app (Joe 2026-10-07: "optimize the app for Erika ... her app should help her;
+// it's perfect for sales people"). Her files with the closing checklist and the one next step,
+// one-tap doc actions, call/text the borrower, call the file's LO.
+function mobileMessagesBody(){
+  var body = "";
+    // Mobile messenger (Joe 2026-09-23, upgraded 2026-10-07): conversation list with search,
+    // New message, live updates (ensureMessagesPolling), phone-style timestamps.
+    var mActiveLead = ui.mobileMessagesLeadId ? leadById(ui.mobileMessagesLeadId) : null;
+    if (ui.textNewOpen){
+      body = '<div class="m-section">New message</div>' + textNewPickerHTML(true);
+    } else if (mActiveLead){
+      body = '<button type="button" class="link-btn" style="margin:12px 0 4px" data-action="m-messages-back">‹ All Messages</button>' +
+        '<div class="m-card" style="margin-bottom:10px">' +
+          '<div class="m-name">' + esc(mActiveLead.name) + '</div>' +
+          '<div class="m-sub">' + esc(mActiveLead.phone||"") + (mActiveLead.loanType ? (' · ' + esc(mActiveLead.loanType)) : '') + '</div>' +
+        '</div>' + textThreadHTML(textConvoFor(mActiveLead), true);
+    } else {
+      var mConvos = textMessageLeads();
+      var mUnread = unreadTextMessagesTotal();
+      body = '<div style="display:flex;gap:8px;align-items:center;margin:12px 0 8px"><input class="input" data-action="text-search" placeholder="Search messages" autocomplete="off" value="' + esc(ui.textSearch||"") + '" style="flex:1;min-height:44px">' +
+          '<button type="button" class="btn btn-primary" style="min-height:44px" data-action="text-new-open">✏️ New</button></div>' +
+        '<div class="m-section">Messages' + (mUnread ? (' · ' + mUnread + ' unread') : '') + '</div>' +
+        (mConvos.length ? mConvos.map(function(c){
+          var preview = c.last.text.replace(TEXT_PREFIX_RE, "");
+          return '<div class="m-card" style="cursor:pointer" data-action="m-messages-open" data-lead="' + c.lead.id + '">' +
+            (c.unread ? ('<div class="m-badge hot">' + c.unread + ' new</div>') : '') +
+            '<div style="display:flex;justify-content:space-between;gap:8px"><div class="m-name">' + esc(c.lead.name) + '</div><div class="m-sub" style="white-space:nowrap">' + textStamp(c.last, true) + '</div></div>' +
+            '<div class="m-reason">' + (/^Texted/.test(c.last.text) ? 'You: ' : '') + esc(preview.slice(0,90)) + '</div>' +
+          '</div>';
+        }).join("") : '<div class="empty">' + (ui.textSearch ? 'No conversations match.' : 'No text conversations yet — tap ✏️ New to text a client.') + '</div>');
+    }
+  return body;
+}
+function renderMobileProcessorShell(){
+  var me = currentUser();
+  var tab = ui.mobileTab === "messages" || ui.mobileTab === "team" ? ui.mobileTab : "files";
+  var body = "";
+  if (tab === "files"){
+    var files = state.leads.filter(function(l){ return l.status === "active" && PROCESSING_STAGES.indexOf(l.stage) !== -1 && processorOwns(l); })
+      .map(function(l){ return { lead: l, s: processingStatus(l) }; }).sort(function(a,b){ return b.s.score - a.s.score; });
+    var f = ui.pbFilter || "all";
+    var shown = files.filter(function(r){ return f === "all" || (f === "me" && r.s.next.who === "erika") || (f === "week" && r.s.toClose != null && r.s.toClose <= 7) || (f === "borrower" && r.s.next.who === "borrower"); });
+    var chip = function(key, label, n){ return '<button type="button" class="m-tab' + (f === key ? ' on' : '') + '" style="flex:0 0 auto" data-action="pb-filter" data-filter="' + key + '">' + label + ' ' + n + '</button>'; };
+    body = '<div style="display:flex;gap:6px;overflow-x:auto;margin:10px 0 6px">' +
+        chip("all", "All", files.length) + chip("me", "Your move", files.filter(function(r){ return r.s.next.who === "erika"; }).length) +
+        chip("week", "≤7 days", files.filter(function(r){ return r.s.toClose != null && r.s.toClose <= 7; }).length) +
+        chip("borrower", "Borrower", files.filter(function(r){ return r.s.next.who === "borrower"; }).length) + '</div>' +
+      (shown.length ? shown.map(function(r){
+        var l = r.lead, s = r.s, id = 'data-lead="' + l.id + '"';
+        var open = ui.mobileOpen === l.id;
+        var closeTxt = s.toClose == null ? "No close date" : (s.toClose < 0 ? Math.abs(s.toClose) + "d late" : s.toClose === 0 ? "Closes today" : "Closes in " + s.toClose + "d");
+        var docsState = s.docsTotal && s.docsIn >= s.docsTotal ? "done" : (s.neverAsked ? "todo" : "ordered");
+        var lo = userById(l.assignedTo);
+        return '<div class="m-card">' +
+          '<div class="m-card-top" data-action="m-toggle" ' + id + '>' +
+            (s.next.who === "erika" ? '<div class="m-badge hot">Your move</div>' : '') +
+            '<div style="display:flex;justify-content:space-between;gap:8px"><div class="m-name">' + esc(l.name) + '</div><div class="m-sub" style="white-space:nowrap;' + (s.toClose != null && s.toClose <= 7 ? 'color:#9a2b1a;font-weight:600' : '') + '">' + closeTxt + '</div></div>' +
+            '<div class="m-sub">' + esc(stageLabel(l.stage)) + ' · ' + esc(l.loanType||"") + ' · ' + fmtUSD(l.loanAmount) + (lo ? ' · LO ' + esc(lo.name.split(" ")[0]) : '') + '</div>' +
+            '<div class="m-reason" style="font-weight:600">' + esc(s.next.text) + (s.next.done ? ' · ✓ ' + esc(s.next.done) : '') + '</div>' +
+          '</div>' +
+          (open ? '<div class="m-detail">' + pbChip(docsState, "Docs " + s.docsIn + "/" + s.docsTotal) + pbChip(s.title, "Title") + pbChip(s.ins, "Insurance") +
+            (l.loanType !== "Bridge" ? pbChip(s.appr, "Appraisal") : "") + (l.outsideLender ? pbChip(s.exported ? "done" : "todo", "Sent to " + s.lender) : "") + (s.conds ? pbChip("todo", s.conds + " cond.") : "") +
+            (s.toClose == null ? '<div style="margin-top:8px"><label class="hint">Target close date</label><input type="date" class="input" data-action="pb-close-date" ' + id + ' style="min-height:44px"></div>' : '') +
+          '</div>' : '') +
+          '<div class="m-actions">' +
+            (s.next.quick ? mobileBtn(esc(s.next.quick.label), 'data-action="' + s.next.quick.action + '" ' + id + (s.next.quick.target ? ' data-target="' + s.next.quick.target + '"' : ''), 'primary') : '') +
+            (l.phone ? mobileBtn('📞 Borrower', 'data-action="call-via-cell" ' + id) : '') +
+            (l.phone ? mobileBtn('💬 Text', 'data-action="m-text-thread" ' + id) : '') +
+            (lo && lo.phone && lo.id !== me.id ? mobileBtn('📞 ' + esc(lo.name.split(" ")[0]) + ' (LO)', 'data-action="call-teammate" data-user="' + lo.id + '"') : '') +
+            mobileBtn(open ? 'Less ▴' : 'Checklist ▾', 'data-action="m-toggle" ' + id, 'ghost') +
+          '</div>' +
+        '</div>';
+      }).join("") : '<div class="empty">' + (files.length ? 'Nothing in this filter.' : 'No files in processing right now.') + '</div>') +
+      '<div class="footnote" style="padding:10px 2px">Full checklist, documents and lender export are on the computer.</div>';
+  } else if (tab === "team"){
+    body = teamDirectoryHTML(true) || '<div class="empty">No teammates with a cell on file.</div>';
+  } else {
+    body = mobileMessagesBody();
+  }
+  var unread = unreadTextMessagesTotal();
+  return '<div class="m-shell">' +
+    '<div class="m-head">' +
+      '<div class="m-head-row"><div class="m-title">' + esc((me.name||"").split(" ")[0]) + ' · Processing</div>' +
+        '<div style="display:flex;gap:6px"><button type="button" class="m-btn" style="min-height:40px" data-action="m-refresh" aria-label="Refresh">↻</button></div></div>' +
+      '<div class="m-tabs"><button type="button" class="m-tab' + (tab==="files" ? " on" : "") + '" data-action="m-tab" data-tab="files">Files</button>' +
+        '<button type="button" class="m-tab' + (tab==="messages" ? " on" : "") + '" data-action="m-tab" data-tab="messages">Msgs' + (unread ? (' (' + unread + ')') : '') + '</button>' +
+        '<button type="button" class="m-tab' + (tab==="team" ? " on" : "") + '" data-action="m-tab" data-tab="team">Team</button></div>' +
+    '</div>' + body +
+    '<div class="m-foot"><button type="button" class="link-btn" data-action="m-desktop">Desktop site</button>' +
+      '<button type="button" class="link-btn" data-action="open-modal" data-modal="changePin">Change PIN</button>' +
+      '<button type="button" class="link-btn" data-action="logout">Log out</button></div>' +
+  '</div>';
+}
 function renderMobileShell(){
+  if (isProcessor()) return renderMobileProcessorShell();
   var me = currentUser();
   var tab = ui.mobileTab || "new";
   var quota = effectiveDailyQuota();
@@ -9854,32 +9948,7 @@ function renderMobileShell(){
       '<div class="form-row" style="margin-top:12px"><input class="input" type="search" placeholder="Search name, phone or email" value="' + esc(ui.mobileQuery||"") + '" data-action="m-search" style="min-height:46px"></div>' +
       '<div id="m-search-results">' + mobileContactResults(ui.mobileQuery) + '</div>';
   } else if (tab === "messages"){
-    // Mobile messenger (Joe 2026-09-23, upgraded 2026-10-07): conversation list with search,
-    // New message, live updates (ensureMessagesPolling), phone-style timestamps.
-    var mActiveLead = ui.mobileMessagesLeadId ? leadById(ui.mobileMessagesLeadId) : null;
-    if (ui.textNewOpen){
-      body = '<div class="m-section">New message</div>' + textNewPickerHTML(true);
-    } else if (mActiveLead){
-      body = '<button type="button" class="link-btn" style="margin:12px 0 4px" data-action="m-messages-back">‹ All Messages</button>' +
-        '<div class="m-card" style="margin-bottom:10px">' +
-          '<div class="m-name">' + esc(mActiveLead.name) + '</div>' +
-          '<div class="m-sub">' + esc(mActiveLead.phone||"") + (mActiveLead.loanType ? (' · ' + esc(mActiveLead.loanType)) : '') + '</div>' +
-        '</div>' + textThreadHTML(textConvoFor(mActiveLead), true);
-    } else {
-      var mConvos = textMessageLeads();
-      var mUnread = unreadTextMessagesTotal();
-      body = '<div style="display:flex;gap:8px;align-items:center;margin:12px 0 8px"><input class="input" data-action="text-search" placeholder="Search messages" autocomplete="off" value="' + esc(ui.textSearch||"") + '" style="flex:1;min-height:44px">' +
-          '<button type="button" class="btn btn-primary" style="min-height:44px" data-action="text-new-open">✏️ New</button></div>' +
-        '<div class="m-section">Messages' + (mUnread ? (' · ' + mUnread + ' unread') : '') + '</div>' +
-        (mConvos.length ? mConvos.map(function(c){
-          var preview = c.last.text.replace(TEXT_PREFIX_RE, "");
-          return '<div class="m-card" style="cursor:pointer" data-action="m-messages-open" data-lead="' + c.lead.id + '">' +
-            (c.unread ? ('<div class="m-badge hot">' + c.unread + ' new</div>') : '') +
-            '<div style="display:flex;justify-content:space-between;gap:8px"><div class="m-name">' + esc(c.lead.name) + '</div><div class="m-sub" style="white-space:nowrap">' + textStamp(c.last, true) + '</div></div>' +
-            '<div class="m-reason">' + (/^Texted/.test(c.last.text) ? 'You: ' : '') + esc(preview.slice(0,90)) + '</div>' +
-          '</div>';
-        }).join("") : '<div class="empty">' + (ui.textSearch ? 'No conversations match.' : 'No text conversations yet — tap ✏️ New to text a client.') + '</div>');
-    }
+    body = mobileMessagesBody();
   } else {
     var mq = mobileQueue();
     body = mobileTaskCards() + '<div class="m-section">Today\'s calls (' + mq.newBusiness.length + ')</div>' +
