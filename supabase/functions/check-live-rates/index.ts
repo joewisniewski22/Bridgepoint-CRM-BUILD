@@ -460,6 +460,8 @@ async function checkConstructive(s: Scenario): Promise<LenderResult> {
     const r = await checkConstructiveAt(s);
     return { ...r, loanAmountUsed: s.loanAmount, maxLoanAmount: max ? max.amount : undefined, rehabHoldback: constructiveHoldback(s, s.loanAmount) };
   }
+  if (s.loanType === "Mixed-Use" || s.propertyType === "Mixed-Use") return { lender: "Constructive Capital", eligible: false, reason: "Constructive doesn't lend on mixed-use properties." };
+  if (s.loanType === "Portfolio/Blanket") return { lender: "Constructive Capital", eligible: false, reason: "Constructive portfolio/blanket loans aren't priced here yet — single-asset DSCR only." };
   const max = await constructiveMaxLoan(s);
   if (max && max.reason) return { lender: "Constructive Capital", eligible: false, reason: max.reason };
   if (!max || !max.amount) {
@@ -1557,7 +1559,7 @@ function rcnParse(s: Scenario, j: any, assumptions: string[]): LenderResult {
       price: 100 - Number(p.o_lender_points) * 100,
       dscr: p.o_dscr != null ? Math.round(p.o_dscr * 100) / 100 : null,
     }));
-    if (!opts.length) return { lender: L, eligible: false, source: "live", reason: (j && j.message && j.message !== "o" ? j.message : "RCN returned no rental pricing for this scenario."), assumptions };
+    if (!opts.length) return { lender: L, eligible: false, source: "live", reason: (j && j.message && String(j.message).length > 3 ? j.message : "RCN returned no rental pricing for this scenario" + (s.propertyType === "Mixed-Use" ? " (RCN's rental program doesn't take this mixed-use scenario)." : ".")), assumptions };
     const max = R.pricings[0].o_max_loan_amount;
     // RCN "Product Fee Sheet – Long Term Rental" (Lender Documents): $1,995 closing fee (not NY),
     // plus $129 desktop review + $60 tax cert + $15 flood cert paid in processing.
@@ -1565,7 +1567,7 @@ function rcnParse(s: Scenario, j: any, assumptions: string[]): LenderResult {
     return { lender: L, eligible: true, source: "live", options: opts, loanAmountUsed: s.loanAmount || max, maxLoanAmount: max, assumptions, compCaps: caps, fees: { lenderFee: 1995 } };
   }
   if (!R.o_max_loan_amount || !R.o_interest_rate) {
-    const why = (j && j.message) || ((j && j.minimum && j.minimum.length) ? JSON.stringify(j.minimum) : "") || "RCN's pricer returned no terms (common reasons: credit under 650, or leverage/ARV limits).";
+    const why = (j && j.message && String(j.message).length > 3 ? j.message : "") || ((j && j.minimum && j.minimum.length) ? JSON.stringify(j.minimum) : "") || "RCN's pricer returned no terms (common reasons: credit under 650, or leverage/ARV limits).";
     return { lender: L, eligible: false, source: "live", reason: why, assumptions };
   }
   const ladder = (R.suggested_rates || []).map((x: any) => ({ program: "RCN " + (x.points * 100).toFixed(2) + " pts", rate: Math.round(x.rate * 100000) / 1000, price: 100 + x.points * 100 }));
