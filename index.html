@@ -8060,6 +8060,36 @@ function applyRequiredDocs(leadId, opts){
   persist();
   return added;
 }
+// Texts + emails the borrower the exact documents needed, from their loan officer, with
+// the portal link. 2026-10-07: the request buttons used to LOG "emailed and texted" without
+// sending anything -- now the log only says what actually went out.
+function notifyBorrowerOfDocs(lead, names, isReminder){
+  if (!lead || !names.length || !sb) return Promise.resolve([]);
+  var lo = docLoanOfficer(lead);
+  var first = (lead.name||"").split(" ")[0];
+  var link = applicationLink(lead);
+  var list = names.map(function(n){ return "• " + n; }).join("\n");
+  var es = lead.preferredLanguage === "es";
+  var text = es
+    ? ((isReminder ? "Hola " + first + ", un recordatorio: todavía necesitamos " : "Hola " + first + ", para avanzar con su préstamo necesitamos ") + "lo siguiente:\n" + list + "\n\nPuede subirlos aquí: " + link + "\n\n— " + (lo.name||"Bridgepoint Lending"))
+    : ((isReminder ? "Hi " + first + ", quick reminder — we still need " : "Hi " + first + ", to keep your loan moving we need ") + "the following:\n" + list + "\n\nUpload them here: " + link + "\n\nA photo from your phone works fine. — " + (lo.name||"Bridgepoint Lending"));
+  var subject = es ? (isReminder ? "Recordatorio: documentos pendientes" : "Documentos para su préstamo") : (isReminder ? "Reminder: documents still needed" : "Documents needed for your loan");
+  var calls = [];
+  if (lead.phone) calls.push(sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name } })
+    .then(function(r){ return { ch:"text", ok: !(r.error || !r.data || !r.data.ok) }; }).catch(function(){ return { ch:"text", ok:false }; }));
+  if (lead.email) calls.push(sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lead.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null } })
+    .then(function(r){ return { ch:"email", ok: !(r.error || !r.data || !r.data.ok) }; }).catch(function(){ return { ch:"email", ok:false }; }));
+  return Promise.all(calls).then(function(res){
+    var sent = res.filter(function(r){ return r.ok; }).map(function(r){ return r.ch; });
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"notify", author:"System",
+      text: sent.length ? ((isReminder ? "Reminded " : "Sent ") + lead.name + " the document list by " + sent.join(" + ") + " (" + names.length + " item" + (names.length>1?"s":"") + ")")
+        : ("Couldn't reach " + lead.name + " about the document request — " + (lead.phone || lead.email ? "send failed" : "no phone or email on file")) });
+    persist();
+    showToast(sent.length ? ((isReminder ? "Reminder sent" : "Requested — borrower notified") + " by " + sent.join(" + ")) : "Saved, but the borrower couldn't be notified — check their phone/email");
+    return sent;
+  });
+}
 function requestChecklistDoc(leadId, idx){
   var lead = leadById(leadId);
   if (!lead || !lead.documents[idx]) return;
@@ -8067,11 +8097,10 @@ function requestChecklistDoc(leadId, idx){
   if (doc.status !== "suggested") return;
   doc.status = "requested"; doc.requestedAt = todayISO();
   lead.activity = lead.activity || [];
-  var d = todayISO();
-  lead.activity.push({ date:d, type:"document", text:"Requested document: " + doc.name, author: currentUser().name });
-  lead.activity.push({ date:d, type:"notify", text:"Emailed and texted " + lead.name + " about the document request — now showing in their borrower portal.", author:"System" });
-  showToast("Requested " + doc.name + " — borrower notified by email & text");
+  lead.activity.push({ date:todayISO(), type:"document", text:"Requested document: " + doc.name, author: currentUser().name });
   persist();
+  if (doc.staffOnly) { showToast("Marked requested (staff item — borrower not contacted)"); return; }
+  notifyBorrowerOfDocs(lead, [doc.name], false);
 }
 function requestAllSuggestedDocs(leadId){
   var lead = leadById(leadId);
@@ -8080,7 +8109,8 @@ function requestAllSuggestedDocs(leadId){
   var d = todayISO();
   var names = [];
   docs.forEach(function(doc){
-    if (doc.status === "suggested"){
+    // Staff-only items (lender submission docs, mortgagee clause) are never asked of the borrower.
+    if (doc.status === "suggested" && !doc.staffOnly){
       doc.status = "requested"; doc.requestedAt = d;
       names.push(doc.name);
     }
@@ -8088,9 +8118,21 @@ function requestAllSuggestedDocs(leadId){
   if (!names.length){ showToast("Nothing left to request"); return; }
   lead.activity = lead.activity || [];
   lead.activity.push({ date:d, type:"document", text:"Requested " + names.length + " document(s): " + names.join(", "), author: currentUser().name });
-  lead.activity.push({ date:d, type:"notify", text:"Emailed and texted " + lead.name + " the document checklist — now showing in their borrower portal.", author:"System" });
-  showToast("Requested " + names.length + " document(s) — borrower notified by email & text");
   persist();
+  notifyBorrowerOfDocs(lead, names, false);
+}
+function docRemindedToday(lead){
+  var t = todayISO();
+  return (lead.activity||[]).some(function(a){ return a.date === t && /^Reminded .* the document list/.test(a.text||""); });
+}
+// One-click reminder for everything still outstanding (Processing Board "Send reminder").
+function chaseOutstandingDocs(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (docRemindedToday(lead)){ showToast("Already reminded today"); return; }
+  var names = (lead.documents||[]).filter(function(d){ return d.status === "requested" && !d.staffOnly; }).map(function(d){ return d.name; });
+  if (!names.length){ showToast("Nothing outstanding to chase"); return; }
+  notifyBorrowerOfDocs(lead, names, true).then(function(){ render(); });
 }
 function viewLeadDocument(leadId, idx){
   var lead = leadById(leadId);
@@ -10548,6 +10590,10 @@ function processingStatus(lead){
   else if (lead.outsideLender && !exported && s.docsIn >= Math.max(1, s.docsTotal - 1)) n = { text: "Export to " + lender + " (file is complete)", who: "erika", tab: "documents" };
   else if (title === "ordered" || ins === "ordered" || appr === "ordered") n = { text: "Waiting on " + [title==="ordered"?"title":null, ins==="ordered"?"insurance":null, appr==="ordered"?"appraisal":null].filter(Boolean).join(", "), who: "thirdparty", tab: "overview" };
   else { var nextSt = PROCESSING_STAGES[PROCESSING_STAGES.indexOf(lead.stage)+1]; n = { text: "Everything's in — move to " + (nextSt ? stageLabel(nextSt) : "Closed"), who: "erika", tab: "overview" }; }
+  // One-click actions right on the board (no need to open the file).
+  if (/^Request \d+ doc/.test(n.text)) n.quick = { action:"request-all-suggested-docs", label:"Request docs" };
+  else if (n.who === "borrower" && s.waiting > 0 && !docRemindedToday(lead)) n.quick = { action:"pb-chase-docs", label:"Send reminder" };
+  else if (n.who === "borrower" && s.waiting > 0) n.done = "Reminded today";
   s.next = n;
   // Urgency: close date first, then files gone quiet, then things Erika can act on.
   s.score = (s.toClose == null ? 40 : Math.max(0, 60 - s.toClose * 4)) + Math.min(30, (s.quiet||0) * 3) + (n.who === "erika" ? 15 : 0) + (s.conds ? 10 : 0) - (s.onHold ? 100 : 0);
@@ -10590,8 +10636,10 @@ function renderProcessingBoard(){
       '<td style="white-space:nowrap">' + closeTxt + '</td>' +
       '<td style="min-width:220px">' + checklist + '</td>' +
       '<td><div style="font-weight:600;color:' + (whoColor[s.next.who]||"inherit") + '">' + esc(s.next.text) + '</div>' +
-        '<div class="hint">' + ({ erika:"Your move", borrower:"Waiting on borrower", thirdparty:"Waiting on title / insurance / appraiser", none:"" })[s.next.who] + '</div></td>' +
-      '<td style="text-align:right;white-space:nowrap"><button class="btn btn-sm ' + (s.next.who === "erika" ? 'btn-primary' : 'btn-ghost') + '" data-action="select-lead" data-lead="' + l.id + '" data-tab="' + s.next.tab + '">Open ' + (s.next.tab === "documents" ? "Docs" : "File") + '</button></td>' +
+        '<div class="hint">' + ({ erika:"Your move", borrower:"Waiting on borrower", thirdparty:"Waiting on title / insurance / appraiser", none:"" })[s.next.who] + (s.next.done ? ' · ✓ ' + s.next.done : '') + '</div></td>' +
+      '<td style="text-align:right;white-space:nowrap">' +
+        (s.next.quick ? '<button class="btn btn-sm btn-primary" style="margin-right:4px" data-action="' + s.next.quick.action + '" data-lead="' + l.id + '">' + s.next.quick.label + '</button>' : '') +
+        '<button class="btn btn-sm ' + (s.next.who === "erika" && !s.next.quick ? 'btn-primary' : 'btn-ghost') + '" data-action="select-lead" data-lead="' + l.id + '" data-tab="' + s.next.tab + '">Open ' + (s.next.tab === "documents" ? "Docs" : "File") + '</button></td>' +
     '</tr>';
   }).join("");
   return '<div class="section"><div class="section-head"><h2>📋 Processing Board</h2><div class="hint">Every file in processing, most urgent first — the checklist shows what\'s in, the right column is the one thing that moves it.</div></div>' +
@@ -17975,6 +18023,7 @@ appEl.addEventListener("click", function(e){
     render();
   }
   else if (action === "pb-filter"){ ui.pbFilter = t.dataset.filter; render(); }
+  else if (action === "pb-chase-docs"){ chaseOutstandingDocs(t.dataset.lead); }
   else if (action === "select-lead-from-modal"){ if (t.dataset.lead){ ui.modal=null; ui.view="detail"; ui.selectedLeadId=t.dataset.lead; ui.activeTab="overview"; render(); } }
   else if (action === "go-to-contacts"){ ui.view="contacts"; ui.selectedLeadId=null; render(); }
   else if (action === "apply-loan-guideline-max"){
