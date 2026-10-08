@@ -14,7 +14,17 @@ type S = {
   rehabBudget: number | null; arv: number | null; entityType: string | null; citizenshipStatus: string | null;
   experienceDeals: number | null; termMonths: number | null; ruralStatus: string | null; currentLoanBalance: number | null;
   appraisalTransfer?: string | null; rehabScope?: string | null; decliningMarket?: string | null; vacationArea?: string | null;
+  monthsOwned?: number | null; priorImprovements?: number | null; rentEstimate?: number | null;
+  monthlyTaxes?: number | null; monthlyInsurance?: number | null; monthlyHoa?: number | null; rentalType?: string | null; numUnits?: number | null;
 };
+// Refinances (measured on LEND's quote tool 2026-10-07):
+//  - Limited cash-out (our "rate/term") prices exactly like a purchase: same tiers, rate, max.
+//  - Cash-out: rate +1.00 (any size/experience), 700+ FICO, base tier only, LTC 78%.
+//  - "Cost" = purchase price + documented improvements + remaining rehab; today's value and
+//    the payoff don't change it -- until the property is SEASONED, then today's value replaces
+//    price + improvements. Measured cutoff: owned 8.0 months -> price, 9.1 months -> value;
+//    we use 10+ months so a borderline file is never sized off value too early.
+export const LEND_REFI = { cashoutRateAdd: 1.0, seasonedMonths: 10 };
 
 export const LEND_FIT = {
   sheet: "5862", measured: "2026-10-07",
@@ -158,13 +168,68 @@ async function checkLendNc(s: S, out: any): Promise<any> {
   return out;
 }
 
+// Bridge Limited (no rehab), measured on LEND's quote tool 2026-10-07 (clean runs):
+//  - 700+ FICO, 3+ deals, $100k min, no declining markets; SFR/condo/2-4 the same.
+//  - Max: 70% (3-4 deals) / 75% (5+) of the lower of price or as-is value on a purchase or
+//    limited cash-out... refis 55% / 60% (of price, or today's value once seasoned).
+//  - Rate: 10.00 under $200k, 9.125 at $200k+ (purchase $210k @ 9.625 at 3 deals = 9.125 + 0.5),
+//    plus the rehab experience add-ons (3: +0.5, 4-6: +0.25, 7+: 0); cash-out +1.25.
+//  - Fee: max($2,500, 1%) + 0.25% at 3-4 deals + 0.50% on cash-out.
+// Bridge Choice (LEND's rental bridge) rejected every test scenario -> not priced.
+const LEND_BRIDGE = { minFico: 700, minExp: 3, ltv34: 70, ltv5: 75, refiLess: 15,
+  bands: [ { min: 0, rate: 10.0 }, { min: 200000, rate: 9.125 } ], cashoutRateAdd: 1.25, cashoutFeePct: 0.5, exp34FeePct: 0.25 };
+function checkLendBridge(s: S, out: any): any {
+  const no = (why: string) => { out.reason = why; return out; };
+  if ((s.entityType || "LLC") === "Individual") return no("LEND bridge loans require an entity borrower (LLC/LP/Corp).");
+  if (s.citizenshipStatus === "Foreign National") return no("LEND doesn't lend to foreign nationals on bridge loans.");
+  const fico = Number(s.creditScore || 0);
+  if (!fico) return no("Needs a credit score.");
+  if (fico < LEND_BRIDGE.minFico) return no("LEND's bridge program needs a 700+ FICO.");
+  const exp = Math.max(0, Math.floor(Number(s.experienceDeals || 0)));
+  if (exp < LEND_BRIDGE.minExp) return no("LEND's bridge program needs 3+ completed deals.");
+  const st = (s.propertyState || "").toUpperCase();
+  if (NO_STATES.includes(st)) return no("LEND doesn't lend in " + st + ".");
+  if (EXCEPTION_STATES.includes(st)) return no("LEND only lends in " + st + " by exception — not quotable.");
+  if (EXCEPTION_CITIES.some((re) => re.test(s.propertyAddress || ""))) return no("LEND only lends in this city by exception — not quotable.");
+  if (s.ruralStatus === "rural") return no("LEND only does rural properties by exception — not quotable.");
+  if (s.decliningMarket === "yes") return no("LEND's bridge program isn't available in declining markets.");
+  if (!OK_PROPERTY.includes(s.propertyType)) return no("LEND bridge loans are 1-4 unit residential only (no " + s.propertyType + ").");
+  if (s.appraisalTransfer === "yes") return no("LEND doesn't accept transferred appraisals.");
+  const price = Number(s.purchasePrice || 0), asIs = Number(s.currentValue || 0);
+  const refi = !!s.transactionType && s.transactionType !== "purchase";
+  const cashout = s.transactionType === "cashout";
+  const owned = s.monthsOwned == null ? null : Number(s.monthsOwned);
+  const seasoned = refi && owned != null && owned >= LEND_REFI.seasonedMonths && asIs > 0;
+  const basis = !refi ? (price && asIs ? Math.min(price, asIs) : (price || asIs)) : (seasoned ? asIs : (price || 0));
+  if (!basis) return no(refi ? "Needs the original purchase price." : "Needs the purchase price.");
+  let ltv = exp >= 5 ? LEND_BRIDGE.ltv5 : LEND_BRIDGE.ltv34;
+  if (refi) ltv -= LEND_BRIDGE.refiLess;
+  let max = Math.floor(basis * ltv / 100 + 1e-6);
+  if (s.loanAmount) max = Math.min(max, s.loanAmount);
+  if (max < 100000) return no("Below LEND's $100,000 minimum at " + ltv + "% of " + (seasoned || !refi ? "value" : "purchase price") + ".");
+  let rate = LEND_BRIDGE.bands[0].rate; for (const b of LEND_BRIDGE.bands) if (max >= b.min) rate = b.rate;
+  rate += exp >= 7 ? 0 : (LEND_FIT.expRate[String(exp)] ?? 0);
+  if (cashout) rate += LEND_BRIDGE.cashoutRateAdd;
+  rate = Math.round(rate * 1000) / 1000;
+  const fee = Math.max(2500, max * 0.01) + max * ((exp <= 4 ? LEND_BRIDGE.exp34FeePct : 0) + (cashout ? LEND_BRIDGE.cashoutFeePct : 0)) / 100;
+  out.eligible = true;
+  out.options = [{ program: "Bridge Limited · " + ltv + "% · 12-mo I/O", rate, price: 100 + fee / max * 100, loanAmount: max, lenderPoints: Math.round(fee / max * 100000) / 1000, lenderFee: fee, term: 12 }];
+  out.loanAmountUsed = max; out.maxLoanAmount = max; out.rehabHoldback = 0;
+  out.fees = { lenderFee: Math.round(fee) };
+  out.compCaps = { maxBrokerPoints: 5 };
+  if (refi && owned == null) out.assumptions.push("Months owned not entered: sized off the purchase price (LEND uses today's value only once seasoned).");
+  out.assumptions.push("LEND Bridge Limited, measured from LEND's own quote tool 2026-10-07. Their $1,295 processing + $500 closing are separate.");
+  return out;
+}
+
 export async function checkLend(s: S): Promise<any> {
   const L = "Lend Investors Capital";
   const out: any = { lender: L, eligible: false, source: "model", assumptions: [] as string[] };
   const no = (why: string) => { out.reason = why; return out; };
   const lt = s.loanType || "";
   if (lt === "Ground Up Construction") return checkLendNc(s, out);
-  if (lt !== "Fix & Flip") return no("LEND is priced here for fix & flip and ground-up only (their rental pricing wasn't competitive; bridge not measured yet).");
+  if (lt === "Bridge" || (lt === "Fix & Flip" && !Number(s.rehabBudget || 0))) return checkLendBridge(s, out);
+  if (lt !== "Fix & Flip") return no("LEND is priced here for fix & flip, bridge and ground-up only (their rental pricing wasn't competitive).");
   // ---- borrower
   if ((s.entityType || "LLC") === "Individual") return no("LEND rehab loans require an entity borrower (LLC/LP/Corp) — individuals aren't eligible.");
   if (s.citizenshipStatus === "Foreign National") return no("LEND doesn't lend to foreign nationals on rehab loans.");
@@ -188,8 +253,18 @@ export async function checkLend(s: S): Promise<any> {
   const refi = !!s.transactionType && s.transactionType !== "purchase";
   const cashout = s.transactionType === "cashout";
   if (!arv) return no("Needs the after-repair value.");
-  const basis = refi ? (asIs || price) : (price && asIs ? Math.min(price, asIs) : (price || asIs));
-  if (!basis) return no(refi ? "Needs the as-is value." : "Needs the purchase price.");
+  if (cashout && fico < 700) return no("LEND cash-out refinances need a 700+ FICO.");
+  // Refi cost basis (see LEND_REFI): seasoned = today's value; otherwise price + documented improvements.
+  const owned = s.monthsOwned == null ? null : Number(s.monthsOwned);
+  const seasoned = refi && owned != null && owned >= LEND_REFI.seasonedMonths && asIs > 0;
+  const improvements = refi ? Math.max(0, Number(s.priorImprovements || 0)) : 0;
+  let basis: number;
+  if (!refi) basis = price && asIs ? Math.min(price, asIs) : (price || asIs);
+  else if (seasoned) basis = asIs;
+  else basis = price ? price + improvements : 0;
+  if (!basis) return no(refi ? "Needs the original purchase price (or months owned, if seasoned 12+ months)." : "Needs the purchase price.");
+  if (refi && owned == null) out.assumptions.push("Months owned not entered: sized off the purchase price (LEND uses today's value only once seasoned " + LEND_REFI.seasonedMonths + "+ months).");
+  if (refi && !seasoned && improvements) out.assumptions.push("Includes $" + improvements.toLocaleString("en-US") + " of completed rehab in the cost basis — LEND needs it documented.");
   const cost = basis + rehab;
   const term = [12, 15, 18, 21, 24].includes(Number(s.termMonths)) ? Number(s.termMonths) : 12;
   if (term > 15) out.assumptions.push("Terms over 15 months need LEND management approval.");
@@ -216,7 +291,7 @@ export async function checkLend(s: S): Promise<any> {
     const amt = s.loanAmount ? Math.min(s.loanAmount, max) : max;
     if (amt < 100000) { firstReason = firstReason || "LEND's minimum loan is $100,000."; continue; }
     if (amt > 3000000) continue;
-    const rate = Math.round((lendRate(fit, amt, exp, fico) + (structural ? (fit.structuralRate ?? 0.25) : 0)) * 1000) / 1000;
+    const rate = Math.round((lendRate(fit, amt, exp, fico) + (structural ? (fit.structuralRate ?? 0.25) : 0) + (cashout ? LEND_REFI.cashoutRateAdd : 0)) * 1000) / 1000;
     const fee = lendFee(fit, amt, exp, fico, term);
     if (options.some((o) => o.loanAmount === amt && o.rate === rate)) continue;
     options.push({ program: (structural ? "Rehab Structural " : "Rehab Cosmetic ") + t.name + " · " + term + "-mo I/O", rate, price: 100 + fee / amt * 100, loanAmount: amt, lenderPoints: Math.round(fee / amt * 100000) / 1000, lenderFee: fee, term });

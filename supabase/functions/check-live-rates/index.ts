@@ -57,6 +57,8 @@ type Scenario = {
   decliningMarket?: string | null;     // "yes" = appraisal/area shows declining values
   vacationArea?: string | null;        // "yes" = vacation / resort area (LEND RTL)
   rentalType?: string | null;          // "ltr" | "str" (short-term rental) on DSCR
+  monthsOwned?: number | null;         // refi seasoning: months since purchase
+  priorImprovements?: number | null;   // RTL refi: documented rehab already completed ($)
 };
 
 type LenderResult = {

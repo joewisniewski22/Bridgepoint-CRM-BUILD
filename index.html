@@ -12822,8 +12822,8 @@ function buildPricerOutputHTML(lead, inputs){
 var LP_LIVE_TYPES = ["DSCR","Mixed-Use","Fix & Flip","Bridge","Ground Up Construction"];
 var LP_RTL = ["Fix & Flip","Bridge","Ground Up Construction"];
 var LP_ENTITY_TYPES = ["LLC","Individual","Corporation"];
-var LP_NUMERIC = ["numUnits","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
-var LP_SAVE_KEYS = ["transactionType","propertyType","numUnits","decliningMarket","vacationArea","rentalType","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
+var LP_NUMERIC = ["monthsOwned","priorImprovements","numUnits","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
+var LP_SAVE_KEYS = ["transactionType","propertyType","monthsOwned","priorImprovements","numUnits","decliningMarket","vacationArea","rentalType","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
 
 function lpEntry(key){
   ui.livePricer = ui.livePricer || {};
@@ -12899,6 +12899,10 @@ function lpGroups(key){
   }
   deal.push({ k:"appraisalTransfer", label:"Existing appraisal to transfer?", type:"select", opts:[["no","No — lender orders a new one"],["yes","Yes — borrower already has one"]], hint:"some lenders won't take a transfer" });
   if (refi) money.push({ k:"currentLoanBalance", label:"Existing Loan Payoff", type:"num", hint:"NextRes needs this on a refinance" });
+  // Refi sizing depends on how long they've owned it (seasoned = sized off today's
+  // value at some lenders) and on rehab money already spent (counts as cost).
+  if (refi) money.push({ k:"monthsOwned", label:"Months Owned", type:"num", req:true, min:0, max:600, hint:"since they bought it" });
+  if (refi && rtl) money.push({ k:"priorImprovements", label:"Rehab Already Completed ($)", type:"num", hint:"documented work done since purchase" });
   if (rtl) money.push({ k:"termMonths", label:"Term (months)", type:"num", req:true, min:6, max:36 });
   money.push({ k:"loanAmount", label:"Loan Amount", type:"num", hint:"optional — leave blank and each lender's maximum is found for you" });
   var groups = [{ title:"The deal", fields:deal }, { title:"Value & loan", fields:money }];
@@ -12979,6 +12983,8 @@ function lpScenario(key){
     liquidity: num("liquidity"),
     countryOfDomicile: g("countryOfDomicile"),
     currentLoanBalance: num("currentLoanBalance"),
+    monthsOwned: (g("transactionType") || "purchase") !== "purchase" ? num("monthsOwned") : null,
+    priorImprovements: rtl && (g("transactionType") || "purchase") !== "purchase" ? (num("priorImprovements") || 0) : 0,
     appraisalTransfer: g("appraisalTransfer") || "no",
     rehabScope: lt === "Fix & Flip" ? (g("rehabScope") || "cosmetic") : null
   };
