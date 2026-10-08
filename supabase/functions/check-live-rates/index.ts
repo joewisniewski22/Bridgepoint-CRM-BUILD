@@ -59,6 +59,7 @@ type Scenario = {
   rentalType?: string | null;          // "ltr" | "str" (short-term rental) on DSCR
   monthsOwned?: number | null;         // refi seasoning: months since purchase
   priorImprovements?: number | null;   // RTL refi: documented rehab already completed ($)
+  creditEvent?: string | null;         // "yes" = bankruptcy/foreclosure/short sale/60+ day late in 4 yrs
 };
 
 type LenderResult = {
@@ -1960,6 +1961,12 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
         ? "Baltimore City is deal-by-deal only at Constructive (65% LTV max on cash-out) — not quotable; bring it to Joe."
         : r.lender + " isn't lending in Baltimore City right now." };
   }
+  // Every quote here assumes a clean history (no bankruptcy/foreclosure/short sale/60+ day mortgage
+  // late in 4 years). A recent event changes eligibility and price lender by lender and isn't
+  // modeled -> not quotable automatically (Joe's scenario-runner rule).
+  if (r && r.eligible && (s as any).creditEvent === "yes") {
+    return { lender: r.lender, eligible: false, source: r.source, reason: "Recent credit event (bankruptcy, foreclosure, short sale or mortgage late) — " + r.lender + " needs a manual review; bring it to Joe." };
+  }
   // Non-permanent residents (visa holders): only lenders whose rules for them are verified quote.
   if (r && r.eligible && s.citizenshipStatus === "Non-Permanent Resident") {
     const rtl = RTL_AUTO_LOAN_TYPES.includes(s.loanType);
@@ -1967,7 +1974,8 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
       return { lender: r.lender, eligible: false, source: r.source, reason: r.lender + "'s rules for non-permanent residents (visa holders) aren't verified yet — not quotable; bring it to Joe." };
     }
     if (r.lender === "RCN Capital") r.assumptions = (r.assumptions || []).concat(["Non-permanent resident priced as a foreign national at RCN (stricter terms); confirm their visa policy."]);
-  }  if (!r || !r.eligible) return r;
+  }
+  if (!r || !r.eligible) return r;
   if (Array.isArray(r.options)) {
     r.options = r.options.filter((o) => o && isFinite(Number(o.rate)) && Number(o.rate) > 0 && (!o.loanAmount || o.loanAmount > 0));
     if (!r.options.length) return { ...r, eligible: false, options: [], reason: "No valid rate came back for this scenario." };

@@ -12825,7 +12825,7 @@ var LP_LIVE_TYPES = ["DSCR","Mixed-Use","Fix & Flip","Bridge","Ground Up Constru
 var LP_RTL = ["Fix & Flip","Bridge","Ground Up Construction"];
 var LP_ENTITY_TYPES = ["LLC","Individual","Corporation"];
 var LP_NUMERIC = ["monthsOwned","priorImprovements","numUnits","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
-var LP_SAVE_KEYS = ["transactionType","propertyType","plansReady","monthsOwned","priorImprovements","numUnits","decliningMarket","vacationArea","rentalType","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
+var LP_SAVE_KEYS = ["transactionType","propertyType","plansReady","creditEvent","monthsOwned","priorImprovements","numUnits","decliningMarket","vacationArea","rentalType","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
 
 function lpEntry(key){
   ui.livePricer = ui.livePricer || {};
@@ -12924,8 +12924,12 @@ function lpGroups(key){
   ];
   if (fn) borrower.push({ k:"countryOfDomicile", label:"Country of Citizenship", type:"text", req:true });
   if (fn && rtl) borrower.push({ k:"liquidity", label:"U.S. Bank Liquidity", type:"num", req:true, hint:"seasoned 60+ days" });
-  if (rtl) borrower.push({ k:"experienceDeals", label:"Completed Deals (3 yrs)", type:"num", req:true });
+  // Rental lenders use experience too (Velocity/NextRes "first-time investor", RCN rental pricing),
+  // so ask it on every loan type -- blank used to price DSCR borrowers as first-timers.
+  borrower.push({ k:"experienceDeals", label: rtl ? "Completed Deals (3 yrs)" : "Investment Properties Owned / Deals Done (3 yrs)", type:"num", req:true });
   borrower.push({ k:"entityType", label:"Borrower Entity", type:"select", opts:LP_ENTITY_TYPES.map(function(t){ return [t, t]; }) });
+  // Every lender's quote assumes a clean history; a recent event changes eligibility and price.
+  borrower.push({ k:"creditEvent", label:"Bankruptcy, foreclosure, short sale or 60+ day mortgage late in the last 4 years?", type:"select", opts:[["no","No"],["yes","Yes"]] });
   groups.push({ title:"Borrower", fields:borrower });
   return groups;
 }
@@ -12964,6 +12968,7 @@ function lpScenario(key){
     decliningMarket: g("decliningMarket") || "no",
     vacationArea: rtl ? (g("vacationArea") || "no") : "no",
     plansReady: lt === "Ground Up Construction" ? (g("plansReady") || "no") : null,
+    creditEvent: g("creditEvent") || "no",
     rentalType: rtl ? null : (g("rentalType") || "ltr"),
     creditScore: num("creditScore"),
     purchasePrice: num("purchasePrice"),
@@ -13181,6 +13186,7 @@ function lpOptLabel(results, ri, canSee){
 // Plain decline reasons for an LO, from every lender's "no", most common first.
 var LP_DECLINE_CATS = [
   [/not enough information|needs the |needs a |needs monthly|missing/i, null],
+  [/credit event|bankruptcy|foreclosure/i, function(){ return "A recent bankruptcy, foreclosure, short sale or mortgage late needs a manual review — bring it to Joe."; }],
   [/credit|fico/i, function(sc){ return "Credit score is too low for this loan" + (sc.creditScore ? " (" + sc.creditScore + " entered)." : "."); }],
   [/rural/i, function(){ return "Rural properties aren't eligible."; }],
   [/individual|entit(y|ies)/i, function(){ return "The borrower needs to close in an LLC or corporation, not as an individual."; }],
