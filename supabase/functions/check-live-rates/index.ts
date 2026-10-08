@@ -675,7 +675,10 @@ function nextresExperience(deals: number | null): { experience: string; how: num
 
 // Shared by DSCR and RTL -- both hit the same endpoint and come back in
 // the same Prices -> Programs -> Prices[] shape.
-async function callNextresPriceLoan(body: Record<string, unknown>, assumptions: string[]): Promise<LenderResult> {
+// rtl: NextRes quotes fix & flip / bridge / GUC as a discount price (96 = the borrower pays
+// 4 points), but the pricer's RTL convention is 100 + lender points (104 = 4 points to lender).
+// Found 10/8 on Frank Obando's file: shown as "-4 pts to lender", understating cost by 8 pts.
+async function callNextresPriceLoan(body: Record<string, unknown>, assumptions: string[], rtl = false): Promise<LenderResult> {
   const res = await fetch("https://api.commercial.nextres.com/loan/priceLoan", {
     method: "POST",
     headers: {
@@ -704,10 +707,11 @@ async function callNextresPriceLoan(body: Record<string, unknown>, assumptions: 
   for (const product of prices) {
     for (const program of (product.Programs || [])) {
       for (const row of (program.Prices || [])) {
+        const raw = row.LockTermPrices && row.LockTermPrices[0] ? parseFloat(row.LockTermPrices[0].Price) : row.BaseRate;
         options.push({
           program: program.ProgramName + (product.InterestOnly ? " (IO)" : ""),
           rate: row.Rate,
-          price: row.LockTermPrices && row.LockTermPrices[0] ? parseFloat(row.LockTermPrices[0].Price) : row.BaseRate,
+          price: rtl ? Math.round((200 - raw) * 1000) / 1000 : raw,
           dscr: row.Dscr != null ? row.Dscr : null,
         });
       }
@@ -799,7 +803,7 @@ async function checkNextresRtl(s: Scenario): Promise<LenderResult> {
     body.rehabBudget = fmtMoney(s.rehabBudget);
     body.constructionReserve = Math.round(s.rehabBudget || 0);
   }
-  return callNextresPriceLoan(body, assumptions);
+  return callNextresPriceLoan(body, assumptions, true);
 }
 
 // NextRes's API only prices a loan amount you hand it -- it never says what

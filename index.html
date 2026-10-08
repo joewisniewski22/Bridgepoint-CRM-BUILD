@@ -8837,6 +8837,7 @@ function applyAchAndRtlAppPatch(leadId, achData, rtlData, dscrData){
     }
   }
   if (rtlData){
+    if (lead.rtlApp && lead.rtlApp.gucBuilds != null && rtlData.gucBuilds == null) rtlData.gucBuilds = lead.rtlApp.gucBuilds;
     lead.rtlApp = rtlData;
     if (rtlData.signatureDataUrl){
       uploadGeneratedPdfDocument(leadId, RTL_APPLICATION_DOC_NAME, buildRtlApplicationPdfBlob(lead), { staffOnly:true, actorLabel: lead.name });
@@ -13477,7 +13478,12 @@ function lpPortfolioHTML(key){
 }
 var LP_RTL = ["Fix & Flip","Bridge","Ground Up Construction"];
 var LP_ENTITY_TYPES = ["LLC","Individual","Corporation"];
-var LP_NUMERIC = ["monthsOwned","priorImprovements","numUnits","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
+var LP_NUMERIC = ["monthsOwned","priorImprovements","numUnits","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","gucBuilds","termMonths","liquidity"];
+// Ground-up builds completed (Joe 2026-10-08: "ask very specifically how many ground ups they've
+// completed"). Its own answer, kept in the file's rtl_app data -- never borrowed from the general
+// deal count, so 13 flips can't be priced as 13 ground-up builds.
+function lpGucBuildsOnFile(lead){ var v = lead && lead.rtlApp && lead.rtlApp.gucBuilds; return (v === undefined || v === "") ? null : v; }
+function lpStoreGucBuilds(lead, v){ if (v === undefined) return false; lead.rtlApp = Object.assign({}, lead.rtlApp || {}, { gucBuilds: v }); return true; }
 var LP_SAVE_KEYS = ["transactionType","propertyType","plansReady","creditEvent","monthsOwned","priorImprovements","numUnits","decliningMarket","vacationArea","rentalType","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
 
 function lpEntry(key){
@@ -13500,6 +13506,7 @@ function lpValue(key, k){
   // a question -- never pre-fill it, or the pricer prices that amount instead
   // of finding each lender's maximum.
   if (k === "loanAmount") return null;
+  if (k === "gucBuilds") return lpGucBuildsOnFile(leadById(key));
   var l = leadById(key);
   var v = l ? l[k] : null;
   return v === undefined ? null : v;
@@ -13596,7 +13603,8 @@ function lpGroups(key){
   if (fn && rtl) borrower.push({ k:"liquidity", label:"U.S. Bank Liquidity", type:"num", req:true, hint:"seasoned 60+ days" });
   // Rental lenders use experience too (Velocity/NextRes "first-time investor", RCN rental pricing),
   // so ask it on every loan type -- blank used to price DSCR borrowers as first-timers.
-  borrower.push({ k:"experienceDeals", label: rtl ? "Completed Deals (3 yrs)" : "Investment Properties Owned / Deals Done (3 yrs)", type:"num", req:true });
+  if (lt === "Ground Up Construction") borrower.push({ k:"gucBuilds", label:"Ground-Up Builds Completed (last 3 years)", type:"num", req:true, min:0, max:100, hint:"new construction from the ground up only — flips, rehabs and additions don't count; 0 = first-time builder" });
+  else borrower.push({ k:"experienceDeals", label: rtl ? "Completed Deals (3 yrs)" : "Investment Properties Owned / Deals Done (3 yrs)", type:"num", req:true });
   borrower.push({ k:"entityType", label:"Borrower Entity", type:"select", opts:LP_ENTITY_TYPES.map(function(t){ return [t, t]; }) });
   // Every lender's quote assumes a clean history; a recent event changes eligibility and price.
   borrower.push({ k:"creditEvent", label:"Bankruptcy, foreclosure, short sale or 60+ day mortgage late in the last 4 years?", type:"select", opts:[["no","No"],["yes","Yes"]] });
@@ -13678,7 +13686,7 @@ function lpScenarioBase(key){
     arv: rtl ? num("arv") : null,
     entityType: g("entityType") || "LLC",
     citizenshipStatus: g("citizenshipStatus") || "US Citizen",
-    experienceDeals: num("experienceDeals"),
+    experienceDeals: lt === "Ground Up Construction" ? num("gucBuilds") : num("experienceDeals"),
     rentEstimate: rtl ? null : num("rentEstimate"),
     monthlyTaxes: rtl ? null : num("monthlyTaxes"),
     monthlyInsurance: rtl ? null : num("monthlyInsurance"),
@@ -14145,6 +14153,7 @@ function lpSelectOption(key, ri, oi, spreadPts){
   if (!lead || !canEditApplication(lead)){ showToast("You can't change this file's terms"); return; }
   Object.keys(en.edits).forEach(function(k){ if (LP_SAVE_KEYS.indexOf(k) !== -1) lead[k] = en.edits[k]; });
   if (Array.isArray(en.edits.portfolioProperties)) lead.dscrApp = Object.assign({}, lead.dscrApp || {}, { portfolioPricing: en.edits.portfolioProperties });
+  lpStoreGucBuilds(lead, en.edits.gucBuilds);
   syncUnitTotal(lead);
   en.edits = {};
   // Same cap logic as lpRenderResults: points over the lender's broker-point
@@ -14204,6 +14213,7 @@ function lpSaveInputs(key){
     lead.dscrApp = Object.assign({}, lead.dscrApp || {}, { portfolioPricing: en.edits.portfolioProperties });
     n++;
   }
+  if (lpStoreGucBuilds(lead, en.edits.gucBuilds)) n++;
   syncUnitTotal(lead);
   en.edits = {};
   lead.activity = lead.activity || [];
@@ -18922,6 +18932,7 @@ function createLeadFromScenario(data){
     propertyCount: sc.portfolioProperties ? sc.portfolioProperties.length : sp.propertyCount,
     // Carry the newer pricer answers and the portfolio property list onto the file.
     dscrApp: sp.loanType === "Portfolio/Blanket" ? { portfolioPricing: lpPortfolio("standalone") } : null,
+    rtlApp: sp.loanType === "Ground Up Construction" && sp.gucBuilds != null ? { gucBuilds: sp.gucBuilds } : null,
     numUnits: nn(sc.numUnits), rentalType: sc.rentalType || null, decliningMarket: sc.decliningMarket || null, vacationArea: sc.vacationArea || null,
     creditEvent: sc.creditEvent || null, monthsOwned: nn(sc.monthsOwned), priorImprovements: nn(sc.priorImprovements), plansReady: sc.plansReady || null,
     activity:[{ date:d, type:"note", text:"Lead created from the Pricer (" + sp.loanType + " scenario)", author: currentUser().name }]
