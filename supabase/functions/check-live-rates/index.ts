@@ -60,6 +60,7 @@ type Scenario = {
   monthsOwned?: number | null;         // refi seasoning: months since purchase
   priorImprovements?: number | null;   // RTL refi: documented rehab already completed ($)
   creditEvent?: string | null;         // "yes" = bankruptcy/foreclosure/short sale/60+ day late in 4 yrs
+  ltrMarketRent?: number | null;       // STR only: long-term market rent (appraisal rent schedule)
 };
 
 type LenderResult = {
@@ -1790,6 +1791,24 @@ function rcnBuildRequest(s: Scenario, assumptions: string[]): Record<string, unk
     else base.arv = (s.arv || asis).toFixed(2);
   } else {
     if (!s.rentEstimate) return "Needs the monthly rent.";
+    // Short-term rental: sent the way RCN's own calculator sends it (unit "Leased (STR)",
+    // lease_type STR). RCN's server sizes it on 80% of the STR rent (its sizer: units_info.js;
+    // the "lower of market rent" check is commented out) and caps STR at 75% -- verified
+    // 2026-10-08: two different market rents returned the identical quote.
+    if ((s as any).rentalType === "str") {
+      const ltrMkt = Number((s as any).ltrMarketRent || 0) || s.rentEstimate;
+      const useRent = s.rentEstimate * 0.8;
+      assumptions.push("Short-term rental: RCN counts 80% of the STR rent (" + fmtMoney(Math.round(useRent)) + "/mo here) and caps STR leverage at 75%.");
+      Object.assign(base, {
+        loan_term: "", completed_flips: "", interest_type: "", ir_selection: "", amortization_type: "FRM", prepayment_period: RCN_PREPAY[s.prepayTerm || "5yr"] || "60", io_period: "NOIO",
+        completed_rehab: "0.00", hard_costs: "0.00", soft_costs: "0.00", rehab_costs: "0.00", unit_count: 1, broker_rebate: "0",
+        estimated_taxes: String(Math.round((s.monthlyTaxes || 0) * 12)), insurance_premium: String(Math.round((s.monthlyInsurance || 0) * 12)), flood_insurance: "0", hoa_dues: String(Math.round((s.monthlyHoa || 0) * 12)),
+        portfolio_properties: { units: { units: [{ leasing_status: "Leased (STR)", actual_rent: s.rentEstimate, market_rent: ltrMkt }] } },
+        vacant_units: 0, lease_type: "STR", gross_rent: useRent, gr_period: "M",
+      });
+      (base as any).__strExact = true;
+      return base;
+    }
     Object.assign(base, {
       loan_term: "", completed_flips: "", interest_type: "", ir_selection: "", amortization_type: "FRM", prepayment_period: RCN_PREPAY[s.prepayTerm || "5yr"] || "60", io_period: "NOIO",
       completed_rehab: "0.00", hard_costs: "0.00", soft_costs: "0.00", rehab_costs: "0.00", unit_count: 1, broker_rebate: "0",
@@ -1968,9 +1987,12 @@ async function checkRcnRaw(s: Scenario): Promise<LenderResult> {
   const assumptions: string[] = [];
   const req = rcnBuildRequest(s, assumptions);
   if (typeof req === "string") return { lender: "RCN Capital", eligible: false, reason: req };
+  const strExact = !!(req as any).__strExact; delete (req as any).__strExact;
   try {
     const j = await rcnCalculate(req);
-    return rcnParse(s, j, assumptions);
+    const out = rcnParse(s, j, assumptions);
+    if (strExact) (out as any).strPriced = true;
+    return out;
   } catch (err) {
     const why = String((err as Error).message || err);
     if (RTL_AUTO_LOAN_TYPES.includes(s.loanType) && s.loanType !== "Ground Up Construction") {
@@ -2067,7 +2089,7 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
       r.assumptions = ["Short-term rental at Constructive: full recourse, 1.15 min DSCR on 12-month STR history (or long-term comparable rent), active STR listing and 2 months of platform deposits required."].concat(r.assumptions || []);
     } else if (r.lender === "NextRes") {
       r.assumptions = ["Short-term rental priced by NextRes's own engine (short-term rental flag on)."].concat(r.assumptions || []);
-    } else if (!(r.lender === "A&D Mortgage" && (r as any).strPriced)) {
+    } else if (!((r.lender === "A&D Mortgage" || r.lender === "RCN Capital") && (r as any).strPriced)) {
       (r as any).strUnverified = true;
       r.assumptions = ["Short-term rental: confirm " + r.lender + " takes STRs and how it counts the rent before quoting."].concat(r.assumptions || []);
     }
