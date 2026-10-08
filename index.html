@@ -13578,7 +13578,7 @@ function lpGroups(key){
     if (lt === "Fix & Flip") money.push({ k:"rehabScope", label:"Rehab Scope", type:"select", opts:[["cosmetic","Cosmetic (no structural work)"],["structural","Structural (gut, additions, conversions, fire/water)"]], hint:"lenders price these differently" });
   }
   deal.push({ k:"appraisalTransfer", label:"Existing appraisal to transfer?", type:"select", opts:[["no","No — lender orders a new one"],["yes","Yes — borrower already has one"]], hint:"some lenders won't take a transfer" });
-  if (refi) money.push({ k:"currentLoanBalance", label:"Existing Loan Payoff", type:"num", hint:"NextRes needs this on a refinance" });
+  if (refi) money.push({ k:"currentLoanBalance", label:"Existing Loan Payoff", type:"num", hint:"the current payoff — needed to size a refinance" });
   // Refi sizing depends on how long they've owned it (seasoned = sized off today's
   // value at some lenders) and on rehab money already spent (counts as cost).
   if (refi) money.push({ k:"monthsOwned", label:"Months Owned", type:"num", req:true, min:0, max:600, hint:"since they bought it" });
