@@ -8812,6 +8812,8 @@ function applyAchAndRtlAppPatch(leadId, achData, rtlData, dscrData){
     }
   }
   if (dscrData){
+    // Keep the pricer's saved portfolio list -- the application form doesn't carry it.
+    if (lead.dscrApp && lead.dscrApp.portfolioPricing && !dscrData.portfolioPricing) dscrData.portfolioPricing = lead.dscrApp.portfolioPricing;
     lead.dscrApp = dscrData;
     if (dscrData.signatureDataUrl){
       uploadGeneratedPdfDocument(leadId, DSCR_APPLICATION_DOC_NAME, buildDscrApplicationPdfBlob(lead), { staffOnly:true, actorLabel: lead.name });
@@ -12835,6 +12837,9 @@ var LP_PF_TYPES = ["SFR","Townhome","Condo","2-4 Unit"];
 function lpPortfolioDefault(key){
   var lead = leadOrNull(key), rows = [];
   var normType = function(t){ return t === "Duplex" ? "2-4 Unit" : (LP_PF_TYPES.indexOf(t) !== -1 ? t : "SFR"); };
+  // A list saved from the pricer wins over rebuilding it from the application.
+  var saved = lead && lead.dscrApp && lead.dscrApp.portfolioPricing;
+  if (Array.isArray(saved) && saved.length) return saved.map(function(p){ return Object.assign({}, p); });
   if (lead){
     rows.push({ address: lead.propertyAddress || "", propertyType: normType(lead.propertyType), units: lead.numUnits || 1,
       purchasePrice: lead.purchasePrice || null, currentValue: lead.currentValue || lead.purchasePrice || null, payoff: lead.currentLoanBalance || null,
@@ -13551,6 +13556,7 @@ function lpSelectOption(key, ri, oi, spreadPts){
   var lead = leadById(key);
   if (!lead || !canEditApplication(lead)){ showToast("You can't change this file's terms"); return; }
   Object.keys(en.edits).forEach(function(k){ if (LP_SAVE_KEYS.indexOf(k) !== -1) lead[k] = en.edits[k]; });
+  if (Array.isArray(en.edits.portfolioProperties)) lead.dscrApp = Object.assign({}, lead.dscrApp || {}, { portfolioPricing: en.edits.portfolioProperties });
   syncUnitTotal(lead);
   en.edits = {};
   // Same cap logic as lpRenderResults: points over the lender's broker-point
@@ -13604,6 +13610,12 @@ function lpSaveInputs(key){
   if (!lead || !canEditApplication(lead)) return;
   var n = 0;
   Object.keys(en.edits).forEach(function(k){ if (LP_SAVE_KEYS.indexOf(k) !== -1){ lead[k] = en.edits[k]; n++; } });
+  // Portfolio property list (rents, taxes, insurance...) lives in the file's application data
+  // (dscr_app column) so it comes back pre-filled next time (Joe 2026-10-08).
+  if (Array.isArray(en.edits.portfolioProperties)){
+    lead.dscrApp = Object.assign({}, lead.dscrApp || {}, { portfolioPricing: en.edits.portfolioProperties });
+    n++;
+  }
   syncUnitTotal(lead);
   en.edits = {};
   lead.activity = lead.activity || [];
