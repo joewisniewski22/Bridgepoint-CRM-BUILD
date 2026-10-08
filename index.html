@@ -10550,10 +10550,19 @@ function briefQuoteResults(lead){
   en.data.forEach(function(r, ri){
     if (!r.eligible) return;
     (r.options||[]).forEach(function(o, oi){
-      rows.push({ ri:ri, oi:oi, lender: canSee ? r.lender : ("Option " + "ABCDEFGH".charAt(ri)), rate:o.rate, price:o.price, amt:r.loanAmountUsed, io: rtl || /\(IO\)$/.test(o.program) });
+      rows.push({ ri:ri, oi:oi, lender: lpOptLabel(en.data, ri, canSee), rate:o.rate, price:o.price, amt:r.loanAmountUsed, io: rtl || /\(IO\)$/.test(o.program) });
     });
   });
-  if (!rows.length) return '<div class="hint" style="padding:10px 0">No lender fits this scenario as entered. Adjust the numbers above (or open the full pricer in the file for the reasons).</div>';
+  if (!rows.length){
+    // Joe 2026-10-07: when a loan kicks back, tell the LO why, right here on the call.
+    var why = canSee
+      ? en.data.filter(function(r){ return !r.unavailable && r.reason; }).map(function(r){ return r.lender + ": " + lpReasonFor(r, canSee); })
+      : lpLoDeclineReasons(sc, en.data);
+    var fixes = lpViabilityTips(sc, en.data);
+    return '<div class="hint" style="padding:10px 0;color:var(--c-rust)"><b>⚠ This loan can\'t be placed as entered.</b></div>' +
+      (why.length ? '<div class="footnote"><b>Why:</b><br>' + why.map(esc).join("<br>") + '</div>' : '') +
+      (fixes.length ? '<div class="footnote" style="padding-top:6px"><b>What could make it work:</b><br>' + fixes.map(esc).join("<br>") + '</div>' : '');
+  }
   var show;
   if (rtl){
     var byLender = {};
@@ -13010,7 +13019,9 @@ function lpRenderResults(key){
   var fileLo = lpIsStandalone(key) ? currentUser().id : (leadOrNull(key) || {}).assignedTo;
   var yspToCompany = !(fileLo === "owner" || fileLo === "lo-fiore");
   var cards = en.data.map(function(r, ri){
-    var label = canSee ? r.lender : ("Lender " + letters.charAt(ri));
+    // LOs only ever see accepted options (Joe 2026-10-07).
+    if (!r.eligible && !canSee) return "";
+    var label = lpOptLabel(en.data, ri, canSee);
     var amt = r.loanAmountUsed;
     var caps = r.compCaps || {};
     // Points above the lender's cap (Kiavi: 3) can only be earned as yield
@@ -13026,7 +13037,7 @@ function lpRenderResults(key){
     var head = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div class="rail-title" style="margin:0">' + esc(label) + '</div>' +
       (r.eligible ? '<span class="badge badge-forest">Eligible</span>' : (r.unavailable ? '<span class="badge badge-neutral">Unavailable</span>' : '<span class="badge badge-rust">Not eligible</span>')) + '</div>';
     if (!r.eligible){
-      return '<div class="panel panel-pad" style="margin-top:12px">' + head + '<div class="footnote" style="padding-top:8px;color:' + (r.unavailable ? 'var(--ink-muted)' : 'var(--c-rust)') + '">' + esc(canSee || !r.unavailable ? (r.reason || "Doesn't fit this lender's guidelines.") : "Not available right now.") + '</div></div>';
+      return '<div class="panel panel-pad" style="margin-top:12px">' + head + '<div class="footnote" style="padding-top:8px;color:' + (r.unavailable ? 'var(--ink-muted)' : 'var(--c-rust)') + '">' + esc(lpReasonFor(r, canSee)) + '</div></div>';
     }
     // Lender's rate sheet is behind (A&D: daily refresh failed, usually an expired login).
     // The login fix is shown only to Joe/Fiore/Erika -- LOs just see the warning (Joe 2026-10-07).
@@ -13094,19 +13105,80 @@ function lpRenderResults(key){
   if (!anyEligible){
     // Joe 2026-10-06: if NO lender we use will do the deal, say so plainly and
     // say what would change that.
-    var reasons = en.data.filter(function(r){ return !r.unavailable && r.reason; }).map(function(r, i){ return (canSee ? r.lender : ("Lender " + letters.charAt(en.data.indexOf(r)))) + ": " + r.reason; });
+    // Staff see each lender's reason; LOs get one plain list (no lenders mentioned).
+    var reasons = canSee
+      ? en.data.filter(function(r){ return !r.unavailable && r.reason; }).map(function(r){ return r.lender + ": " + lpReasonFor(r, canSee); })
+      : lpLoDeclineReasons(sc, en.data);
     var tips = lpViabilityTips(sc, en.data);
     none = '<div class="panel panel-pad" style="margin-top:12px;border:2px solid var(--c-rust);background:var(--c-rust-bg, #fbeee9)">' +
-      '<div class="rail-title" style="margin:0;color:var(--c-rust)">⚠ This deal isn\'t viable as submitted</div>' +
-      '<div class="footnote" style="padding-top:6px">None of our lenders will do this scenario as entered.</div>' +
+      '<div class="rail-title" style="margin:0;color:var(--c-rust)">⚠ This loan can\'t be placed as entered</div>' +
+      '<div class="footnote" style="padding-top:6px">' + (canSee ? 'None of our lenders will do this scenario as entered.' : 'We can\'t do this loan as it\'s set up right now.') + '</div>' +
+      (reasons.length ? '<div style="padding-top:8px"><b>Why:</b><ul style="margin:4px 0 0 18px">' + reasons.map(function(t){ return '<li>' + esc(t) + '</li>'; }).join("") + '</ul></div>' : '') +
       (tips.length ? '<div style="padding-top:8px"><b>What could make it work:</b><ul style="margin:4px 0 0 18px">' + tips.map(function(t){ return '<li>' + esc(t) + '</li>'; }).join("") + '</ul></div>' : '') +
-      (reasons.length ? '<div class="footnote" style="padding-top:8px">' + reasons.map(esc).join("<br>") + '</div>' : '') +
       '</div>';
   }
   var best = anyEligible ? lpBestTerms(en.data, rtl, canSee, letters, sc) + lpSpreadPanel(key, en.data, sc, canSee, letters, yspToCompany) : '';
   return banner + none + best + cards + footer;
 }
 function leadOrNull(key){ return lpIsStandalone(key) ? null : leadById(key); }
+// Joe 2026-10-07: when a loan kicks back, tell the LO why -- but most LOs don't
+// know we place loans with outside lenders, so LOs never see per-lender
+// declines. Only when NO lender will place the deal do they get one plain
+// list of reasons (no lender names, no "this lender", no portal steps).
+// Joe/Fiore/Erika keep the per-lender reasons with names.
+function lpReasonFor(r, canSee){
+  var t = String((r && r.reason) || "");
+  if (r && r.unavailable && !canSee) return "Not available right now.";
+  return t || "Doesn't fit this lender's guidelines.";
+}
+// What an LO calls a lender's result: "Option A, B..." lettered over the
+// ACCEPTED results only (Joe 2026-10-07: LOs only see loans that will be
+// accepted, never declines or gaps that hint at several outside lenders).
+function lpOptLabel(results, ri, canSee){
+  if (canSee) return results[ri].lender;
+  var n = 0;
+  for (var i = 0; i < ri; i++) if (results[i] && results[i].eligible) n++;
+  return "Option " + "ABCDEFGHIJ".charAt(n);
+}
+// Plain decline reasons for an LO, from every lender's "no", most common first.
+var LP_DECLINE_CATS = [
+  [/not enough information|needs the |needs a |needs monthly|missing/i, null],
+  [/credit|fico/i, function(sc){ return "Credit score is too low for this loan" + (sc.creditScore ? " (" + sc.creditScore + " entered)." : "."); }],
+  [/rural/i, function(){ return "Rural properties aren't eligible."; }],
+  [/individual|entit(y|ies)/i, function(){ return "The borrower needs to close in an LLC or corporation, not as an individual."; }],
+  [/foreign|itin|non-permanent|citizen/i, function(sc){ return "The borrower's citizenship/residency status" + (sc.citizenshipStatus ? " (" + sc.citizenshipStatus + ")" : "") + " isn't eligible for this loan."; }],
+  [/dscr|cover the payment|rent/i, function(){ return "The rent doesn't cover the payment enough (DSCR too low) at this loan amount."; }],
+  [/minimum|at least \$|under \$|below/i, function(){ return "The loan amount is below the minimum for this loan type."; }],
+  [/maximum|max loan|over \$|exceeds|1,500,000|2,000,000/i, function(){ return "The loan amount is above the maximum for this loan type."; }],
+  [/approved|state|baltimore|philadelphia|detroit|cleveland|indianapolis|market|zip|county|area|location|declining/i, function(sc){ return "The property's location" + (sc.propertyState ? " (" + sc.propertyState + ")" : "") + " isn't one we can lend in for this loan type."; }],
+  [/mixed|multifamily|5\+|units|condo|land|property type|doesn't lend on|townhome|hotel|manufactured/i, function(sc){ return "This property type" + (sc.propertyType ? " (" + sc.propertyType + ")" : "") + " isn't eligible for this loan type."; }],
+  [/ltv|ltc|leverage|arv|loan-to|of value|of purchase|cash.?out/i, function(){ return "Too much leverage requested — the loan is too large for the value/cost of this deal."; }],
+  [/experience|completed|flips|projects/i, function(){ return "The borrower needs more completed projects for this loan."; }],
+  [/rehab|holdback|budget/i, function(){ return "The rehab budget is too large for this deal."; }],
+  [/appraisal transfer/i, function(){ return "A transferred appraisal can't be used — a new appraisal is required."; }],
+  [/term/i, function(){ return "The requested loan term isn't available for this loan type."; }]
+];
+function lpLoDeclineReasons(sc, results){
+  var counts = {}, order = [], missing = [];
+  results.forEach(function(r){
+    if (!r || r.eligible || r.unavailable || !r.reason) return;
+    var t = String(r.reason);
+    for (var i = 0; i < LP_DECLINE_CATS.length; i++){
+      if (!LP_DECLINE_CATS[i][0].test(t)) continue;
+      if (!LP_DECLINE_CATS[i][1]){ var m = t.replace(/^.*?(needs?|missing)\s*/i, "").replace(/\.$/, ""); if (missing.indexOf(m) === -1) missing.push(m); return; }
+      if (!(i in counts)){ counts[i] = 0; order.push(i); }
+      counts[i]++;
+      return;
+    }
+    if (!("x" in counts)){ counts.x = 0; order.push("x"); }
+    counts.x++;
+  });
+  var out = order.sort(function(a, b){ return counts[b] - counts[a]; }).map(function(i){
+    return i === "x" ? "It falls outside our lending guidelines as entered — ask Joe to review it." : LP_DECLINE_CATS[i][1](sc);
+  });
+  if (missing.length) out.unshift("Missing information: " + missing.join(", ") + ".");
+  return out;
+}
 // Plain-language fixes for a scenario no lender takes, read from the
 // lenders' own reasons plus the obvious levers (credit, leverage, rehab size).
 function lpViabilityTips(sc, results){
@@ -13155,7 +13227,7 @@ function lpBestTerms(results, rtl, canSee, letters, sc){
     });
   });
   if (!lowest) return '';
-  var nm = function(ri){ return canSee ? results[ri].lender : ("Lender " + letters.charAt(ri)); };
+  var nm = function(ri){ return lpOptLabel(results, ri, canSee); };
   return '<div class="panel panel-pad" style="margin-top:12px;background:var(--c-forest-bg)">' +
     '<div class="rail-title" style="margin:0">Best terms for this deal</div>' +
     '<div style="display:flex;gap:24px;flex-wrap:wrap;padding-top:6px">' +
@@ -13302,7 +13374,7 @@ function lpCompetitiveSpread(results, sc){
 function lpSpreadPanel(key, results, sc, canSee, letters, yspToCompany){
   var s = lpCompetitiveSpread(results, sc);
   if (!s) return '';
-  var nm = function(ri){ return canSee ? results[ri].lender : ("Lender " + letters.charAt(ri)); };
+  var nm = function(ri){ return lpOptLabel(results, ri, canSee); };
   var f = function(x){ return (Math.round(x * 1000) / 1000).toFixed(3).replace(/0+$/, "").replace(/\.$/, "") + "%"; };
   var btn = (lpIsStandalone(key) || canEditApplication(leadOrNull(key)))
     ? '<button class="btn btn-sm btn-primary" type="button" data-action="lp-select" data-lp="' + esc(key) + '" data-r="' + s.winner + '" data-o="' + s.oi + '" data-spread="' + s.ysp + '">Apply with spread</button>' : '';
