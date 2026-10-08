@@ -50,6 +50,33 @@ function pickSpanishAdLO(): string {
   return "lo-fanis";
 }
 
+// English Facebook lead forms (2026-10-08): the same HighLevel relay, with
+// "&lang=en" (and optionally "&program=dscr|fixflip") on the webhook URL in the
+// English workflow. Routed with the same rotation as the English landing pages
+// (ad-lead-intake's pickEnglishAdLO): 30% Joe, the rest split Fiore/Taeya/Theresa,
+// counted over every English ad lead since ROUTING_START.
+const ROUTING_START = "2026-10-03";
+const ROUTE_TARGETS: Array<{ id: string; weight: number }> = [
+  { id: "owner", weight: 0.30 },
+  { id: "lo-fiore", weight: 0.70 / 3 },
+  { id: "lo-taeya", weight: 0.70 / 3 },
+  { id: "lo-theresa", weight: 0.70 / 3 },
+];
+async function pickEnglishAdLO(): Promise<string> {
+  const { data } = await sb.from("leads").select("assigned_to")
+    .gte("created_at", ROUTING_START).or("source.like.Meta Ads*,source.like.Website*Quote Form,source.like.Website*Application,source.like.Website*Deal Analyzer").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
+  const counts: Record<string, number> = {};
+  (data || []).forEach((r: Record<string, unknown>) => { counts[r.assigned_to as string] = (counts[r.assigned_to as string] || 0) + 1; });
+  const total = (data || []).length;
+  let best = ROUTE_TARGETS[0], bestDeficit = -Infinity;
+  for (const r of ROUTE_TARGETS) {
+    const deficit = r.weight * (total + 1) - (counts[r.id] || 0);
+    if (deficit > bestDeficit + 1e-9) { best = r; bestDeficit = deficit; }
+  }
+  return best.id;
+}
+const PROGRAM_LOAN_TYPE: Record<string, string> = { dscr: "DSCR", fixflip: "Fix & Flip", bridge: "Bridge", ground: "Ground Up Construction" };
+
 function firstOf(obj: Record<string, unknown>, ...keys: string[]): string | null {
   for (const k of keys) {
     const v = obj[k];
@@ -109,6 +136,9 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: "forbidden" }), { status: 403, headers: CORS_HEADERS });
   }
 
+  const en = url.searchParams.get("lang") === "en";
+  const programParam = PROGRAM_LOAN_TYPE[String(url.searchParams.get("program") || "").toLowerCase()] || null;
+
   try {
     const body = await req.json();
 
@@ -118,8 +148,26 @@ Deno.serve(async (req: Request) => {
       [firstName, lastName].filter(Boolean).join(" ") || "HighLevel Lead";
     const email = firstOf(body, "email", "email_address");
     const phone = firstOf(body, "phone", "phone_number", "phoneNumber");
-    const sourceTag = firstOf(body, "source", "lead_source", "contact_source") || "Meta Ads";
-    const assignedTo = pickSpanishAdLO();
+
+    // English forms: a repeat submission within 30 days attaches to the existing file
+    // instead of creating a duplicate (same rule as the landing pages).
+    if (en && (email || phone)) {
+      const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      const digits = (phone || "").replace(/\D/g, "").slice(-10);
+      const { data: recent } = await sb.from("leads").select("id,phone,email,activity,assigned_to,name").gte("created_at", since);
+      const existing = (recent || []).find((l: Record<string, unknown>) =>
+        (digits.length === 10 && ((l.phone as string) || "").replace(/\D/g, "").slice(-10) === digits) || (!!email && ((l.email as string) || "").toLowerCase() === email.toLowerCase()));
+      if (existing) {
+        const today0 = new Date().toISOString().slice(0, 10);
+        const act = (existing.activity as unknown[]) || [];
+        act.push({ date: today0, type: "note", text: "Filled out the English Facebook lead form again — already on file, no duplicate created.", author: "System" });
+        await sb.from("leads").update({ activity: act }).eq("id", existing.id as string);
+        if (existing.assigned_to) await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: existing.assigned_to, lead_id: existing.id, kind: "hot-lead", text: (existing.name as string) + " just filled out the Facebook lead form again — they're actively shopping", date: today0, read: false });
+        return new Response(JSON.stringify({ ok: true, repeat: true, leadId: existing.id }), { headers: CORS_HEADERS });
+      }
+    }
+
+    const assignedTo = en ? await pickEnglishAdLO() : pickSpanishAdLO();
 
     // --- Structured field extraction -------------------------------------
     const propertyAddress = firstOf(body, "Property Address");
@@ -145,6 +193,10 @@ Deno.serve(async (req: Request) => {
       const attribution = (body as Record<string, any>).contact?.attributionSource || (body as Record<string, any>).attributionSource || {};
       loanType = normalizeLoanType(JSON.stringify(attribution));
     }
+    if (!loanType && programParam) loanType = programParam;
+    // English forms: "Meta Ads — <type> Lead Form" so the English rotation, follow-up nags and
+    // reports (which match source "Meta Ads*") all count these leads.
+    const sourceTag = en ? ("Meta Ads — " + (loanType || "Facebook") + " Lead Form") : (firstOf(body, "source", "lead_source", "contact_source") || "Meta Ads");
 
     // Qualifying answers that don't map to a dedicated CRM column -- kept
     // as one short readable note instead of the old raw-JSON dump.
@@ -165,8 +217,9 @@ Deno.serve(async (req: Request) => {
     const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
     const today = new Date().toISOString().slice(0, 10);
     const activity: Record<string, string>[] = [
-      { date: today, type: "note", text: "Lead captured from GoHighLevel via webhook (Spanish Facebook ad) — auto-routed to " + assignedTo, author: "System" },
+      { date: today, type: "note", text: "Lead captured from GoHighLevel via webhook (" + (en ? "English" : "Spanish") + " Facebook ad) — auto-routed to " + assignedTo, author: "System" },
     ];
+    if (en) activity.push({ date: today, type: "system", text: "Contact consent: submitted Bridgepoint's Facebook lead form, which carries the call/text/email consent disclaimer.", author: "System" });
     if (qualifyingNotes.length) {
       activity.push({ date: today, type: "note", text: "Facebook form answers — " + qualifyingNotes.join(" · "), author: "System" });
     }
@@ -184,7 +237,7 @@ Deno.serve(async (req: Request) => {
       // pre-approval, portal invite) branches on this flag, so tagging it
       // here is what actually makes first contact and everything after go
       // out in Spanish instead of silently defaulting to English.
-      preferred_language: "es",
+      preferred_language: en ? "en" : "es",
       // Enrolls this lead directly in the existing ai-lead-engage automation
       // (same system startAiEngagement() enrolls client-created leads into --
       // see index.html). Skipping the "awaiting_language" handshake that
@@ -204,7 +257,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const link = CRM_URL + "?lead=" + id;
-    const alertText = "🔥 New Facebook lead (Spanish ad): " + fullName + " — open & dial: " + link;
+    const alertText = "🔥 New Facebook lead (" + (en ? (loanType || "English") + " form" : "Spanish ad") + "): " + fullName + " — open & dial: " + link;
     await sb.from("notifications").insert({
       id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: assignedTo, lead_id: id,
       kind: "hot-lead", text: alertText, date: today, read: false,
@@ -243,7 +296,24 @@ Deno.serve(async (req: Request) => {
         if (!loanAmount) missing.push("el monto exacto de préstamo que busca");
         if (!creditScore) missing.push("su puntaje de crédito aproximado");
 
-        const prompt = "Eres " + assignee.name + ", oficial de préstamos de Bridgepoint Lending (préstamos de negocio para bienes raíces de inversión, no residenciales). " +
+        const knownEn: string[] = [];
+        if (loanType) knownEn.push("Loan type: " + loanType);
+        if (loanAmount) knownEn.push("Loan amount: about $" + loanAmount.toLocaleString());
+        if (creditScore) knownEn.push("Credit score: about " + creditScore);
+        if (propertyAddress) knownEn.push("Property: " + propertyAddress);
+        if (experienceDeals != null) knownEn.push("Experience: " + experienceDeals + " deal(s)");
+        const missingEn: string[] = [];
+        if (!propertyAddress) missingEn.push("the property address (if they have one)");
+        if (!loanAmount) missingEn.push("roughly how much they need to borrow");
+        if (!creditScore) missingEn.push("their approximate credit score");
+        const prompt = en ? ("You are " + assignee.name + ", a loan officer at Bridgepoint Lending (business-purpose loans for real estate investors, not owner-occupied homes). " +
+          "A real estate investor just submitted our Facebook lead form. Write a short first message (max 4 sentences, works as a text or email), warm and professional, plain English, no emojis. " +
+          "Thank them, briefly confirm what we already know, ask for at most 1-2 important missing details, and invite them to book a quick call here: " + bookingLink + ". " +
+          "Don't invent facts. No promises of approval, no rates.\n\n" +
+          "Client: " + fullName + "\n" +
+          (knownEn.length ? ("Already known:\n- " + knownEn.join("\n- ") + "\n") : "") +
+          (missingEn.length ? ("Missing, ask for at most 2:\n- " + missingEn.join("\n- ") + "\n") : "") +
+          "\nReply with ONLY the message text, no quotes or explanation.") : "Eres " + assignee.name + ", oficial de préstamos de Bridgepoint Lending (préstamos de negocio para bienes raíces de inversión, no residenciales). " +
           "Un cliente potencial de un anuncio de Facebook en español acaba de enviar este formulario. Escríbele un primer mensaje corto (máximo 4-5 oraciones, apto para SMS o email), cálido y profesional, en ESPAÑOL. " +
           "Agradécele su interés, confirma brevemente lo que ya sabemos, pide como máximo 1-2 datos importantes que falten, e invítalo a agendar una llamada rápida con este enlace: " + bookingLink + ". " +
           "No inventes datos que no se te dieron. No uses jerga legal ni promesas de aprobación.\n\n" +
@@ -270,7 +340,7 @@ Deno.serve(async (req: Request) => {
             sendCalls.push(fetch(SUPABASE_URL + "/functions/v1/send-email", {
               method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
               body: JSON.stringify({
-                leadId: id, to: email, subject: "Bridgepoint Lending — Su solicitud de préstamo",
+                leadId: id, to: email, subject: en ? "Bridgepoint Lending — your loan request" : "Bridgepoint Lending — Su solicitud de préstamo",
                 text: message, fromName: assignee.name, fromAddress: assignee.email, fromUserId: assignee.id, fromPhotoUrl: assignee.photo_url || null, initiatedBy: "ai",
               }),
             }).catch(() => {}));
