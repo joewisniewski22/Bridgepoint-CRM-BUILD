@@ -965,24 +965,56 @@ const KIAVI_BRIDGE = {
   first: { "760": { 65: 10.00, 75: 11.00 }, "700": { 65: 10.50, 75: 11.50 }, "680": { 65: 11.00, 70: 11.70 } },
   pro:   { "760": { 65: 8.95, 75: 10.25 },  "700": { 65: 9.50, 75: 10.75 },  "680": { 65: 9.95, 70: 10.50 } },
 };
-// Rental 30-yr fixed: Kiavi prices in points and rounds the rate UP to the
-// next 1/8, so this is a fitted "pre-rounding" rate. Rate = ceil8(B[fico|ltv]
-// + prepay + property + loan size + DSCR, the last four by LTV band
-// lo<=60 / m1<=65 / mid<=70 / hi<=75). Fitted 2026-10-06 on 400 live Kiavi
-// quotes; on 40 untouched quotes: 98% within 1/8, 50% exact -> shown as an
-// estimate (+/-0.125%).
-const KIAVI_RENTAL_FIT = {"B":{"660|50":7.5,"660|55":7.595,"660|60":7.575,"660|65":7.625,"680|50":7.445,"680|55":7.5,"680|60":7.475,"680|65":7.625,"680|70":7.85,"700|50":7.28,"700|55":7.345,"700|60":7.345,"700|65":7.45,"700|70":7.53,"700|75":7.75,"720|50":7.185,"720|55":7.25,"720|60":7.345,"720|65":7.345,"720|70":7.405,"720|75":7.625,"740|50":7.26,"740|55":7.25,"740|60":7.25,"740|65":7.325,"740|70":7.4,"740|75":7.6,"760|50":7.25,"760|55":7.25,"760|60":7.25,"760|65":7.26,"760|70":7.375,"760|75":7.54,"780|50":7.22,"780|55":7.22,"780|60":7.25,"780|65":7.25,"780|70":7.325,"780|75":7.56,"800|50":7.19,"800|55":7.19,"800|60":7.27,"800|65":7.36,"800|70":7.35,"800|75":7.54},"ppp":{"none":{"lo":0.18,"m1":0.18,"mid":0.18,"hi":0.18},"1yr":{"lo":0.15,"m1":0.15,"mid":0.1,"hi":0.15},"2yr":{"lo":0.07,"m1":0.085,"mid":0.07,"hi":0.07},"3yr":{"lo":0,"m1":0,"mid":0,"hi":0},"5yr":{"lo":-0.1,"m1":-0.12,"mid":-0.1,"hi":-0.125}},"pt":{"single-family":{"lo":0,"m1":0,"mid":0,"hi":0},"condo":{"lo":0.05,"m1":0.01,"mid":0.025,"hi":0.05},"2-4plex":{"lo":0.15,"m1":0.15,"mid":0.15,"hi":0.155}},"z":{"z1":{"lo":0.2,"m1":0.155,"mid":0.2,"hi":0.2},"z2":{"lo":0.1,"m1":0.1,"mid":0.08,"hi":0.13},"z3":{"lo":0,"m1":0,"mid":0,"hi":0},"z4":{"lo":0,"m1":0,"mid":-0.045,"hi":0},"z5":{"lo":-0.04,"m1":0,"mid":-0.05,"hi":-0.05},"z6":{"lo":-0.1,"m1":-0.1,"mid":-0.1,"hi":-0.125}},"d":{"d1":{"lo":0.05,"m1":0.08,"mid":0.05,"hi":0.05},"d2":{"lo":0.04,"m1":0.04,"mid":0.04,"hi":0.04},"d3":{"lo":0.02,"m1":0.02,"mid":0.02,"hi":0.02},"d4":{"lo":0,"m1":0,"mid":0,"hi":0}}};
-const KIAVI_RENTAL_LTV_TIERS = [50, 55, 60, 65, 70, 75];
-function kiaviRentalRate(fico, ltvTier, ppp, unit, loan, dscr) {
-  const ft = String(Math.min(800, Math.max(660, Math.floor(fico / 20) * 20)));
-  const b = KIAVI_RENTAL_FIT.B[ft + "|" + ltvTier];
-  if (b == null) return null;
-  const band = ltvTier <= 60 ? "lo" : ltvTier <= 65 ? "m1" : ltvTier <= 70 ? "mid" : "hi";
-  const z = loan < 125000 ? "z1" : loan < 200000 ? "z2" : loan < 350000 ? "z3" : loan < 500000 ? "z4" : loan < 1000000 ? "z5" : "z6";
-  const d = dscr < 1.05 ? "d1" : dscr < 1.1 ? "d2" : dscr < 1.15 ? "d3" : "d4";
-  const pt = unit === "condo" ? "condo" : unit === "2-4plex" ? "2-4plex" : "single-family";
-  const v = b + KIAVI_RENTAL_FIT.ppp[ppp][band] + KIAVI_RENTAL_FIT.pt[pt][band] + KIAVI_RENTAL_FIT.z[z][band] + KIAVI_RENTAL_FIT.d[d][band];
-  return Math.ceil(v * 8 - 1e-6) / 8;
+// Rental (DSCR) -- rebuilt 2026-10-07 from Kiavi's own pricing query
+// (RentalLoanScenarioResults). Kiavi prices in points: each rate has a price on
+// one ladder, the deal's adjustments (LLPAs) add up to a cost in points, and
+// the par rate is the lowest rate whose price covers that cost (plus any YSP).
+// LLPAs are by LTV tier (<=50/55/60/65/70/75/80): FICO base, prepay (3 yr = 0),
+// property type, loan size (<150k / <250k / base), DSCR (<1.00 / <1.10 / <1.15
+// / base) and cash-out. Least-squares fit on 785 live quotes: 97.5% exact rate
+// on held-out deals (5-fold), 99.7% within 1/8, 100% exact in the 80% tier. The 60% tier
+// was then re-measured directly (one factor at a time) because the fit left it noisy.
+// Other products are the 30-yr fixed's price plus a flat adjustment (zero
+// variance in 186 quotes): 5/1 ARM -0.375, 7/1 ARM -0.25, interest-only
+// +0.25 (<=60% LTV) / +0.50 (65-70%) / +0.625 (75%); IO stops at 75% LTV.
+// Rules from Kiavi's engine: min loan $100,000, max $1,500,000, FICO 660+,
+// DSCR 0.80+, max LTV 65% (FICO <680 or DSCR <1.00) / 70% (680-699) / 75%
+// (700+) / 80% (700+, SFR purchase, DSCR >= 1.10); max loan floors to $250;
+// cash-out max $500,000 cash in hand; rate floor 7.125%. Rate/term refis
+// (no cash out) price as purchases; any cash out takes the cash-out LLPA;
+// seasoning doesn't change price. The ladder moves with Kiavi's rate sheet --
+// re-pull it (research\kiavi\rental_model_2026-10-07.json has the method).
+const KIAVI_RENTAL_SNAPSHOT = "2026-10-07";
+const KIAVI_RENTAL_LADDER = {"7.125":-0.68,"7.25":0,"7.375":0.6175,"7.5":1.2331,"7.625":1.9931,"7.75":2.2897,"7.875":2.662,"8":3.037,"8.25":3.5648,"8.375":3.9388,"8.5":4.2495,"8.625":4.562,"8.75":4.8745,"8.875":5.1188,"9":5.367,"9.125":5.617,"9.25":5.867,"9.375":6.117,"9.5":6.2988,"9.625":6.4845,"9.75":6.672,"9.875":6.8595,"10":7.047,"10.125":7.2345};
+const KIAVI_RENTAL_LLPA = {"B|660|50":0.951,"B|660|55":1.201,"B|660|60":1.326,"B|660|65":1.576,"B|680|50":0.7009,"B|680|55":0.826,"B|680|60":1.076,"B|680|65":1.326,"B|680|70":1.951,"B|700|50":-0.0491,"B|700|55":0.0759,"B|700|60":0.201,"B|700|65":0.5759,"B|700|70":0.826,"B|700|75":1.576,"B|700|80":3.451,"B|720|50":-0.5491,"B|720|55":-0.2991,"B|720|60":-0.174,"B|720|65":0.2009,"B|720|70":0.3259,"B|720|75":1.076,"B|720|80":2.326,"B|740|50":-0.5491,"B|740|55":-0.2991,"B|740|60":-0.174,"B|740|65":-0.0491,"B|740|70":0.0759,"B|740|75":0.951,"B|740|80":1.701,"B|760|50":-0.6741,"B|760|55":-0.4241,"B|760|60":-0.299,"B|760|65":-0.1741,"B|760|70":-0.0491,"B|760|75":0.826,"B|760|80":1.576,"B|780|50":-0.6741,"B|780|55":-0.4241,"B|780|60":-0.299,"B|780|65":-0.1741,"B|780|70":-0.0491,"B|780|75":0.826,"B|780|80":1.576,"B|800|50":-0.6741,"B|800|55":-0.4241,"B|800|60":-0.299,"B|800|65":-0.1741,"B|800|70":-0.0491,"B|800|75":0.826,"B|800|80":1.576,"d|da|50":0.75,"d|da|55":0.75,"d|da|60":1.25,"d|da|65":1.25,"d|db|50":0.25,"d|db|55":0.25,"d|db|60":0.25,"d|db|65":0.25,"d|db|70":0.5,"d|db|75":0.5,"d|dc|50":0.25,"d|dc|55":0.25,"d|dc|60":0.25,"d|dc|65":0.25,"d|dc|70":0.25,"d|dc|75":0.25,"d|dc|80":0.25,"pp|0|50":1,"pp|0|55":1,"pp|0|60":1,"pp|0|65":1,"pp|0|70":1,"pp|0|75":1,"pp|0|80":1,"pp|1|50":0.75,"pp|1|55":0.75,"pp|1|60":0.75,"pp|1|65":0.75,"pp|1|70":0.75,"pp|1|75":0.75,"pp|1|80":0.75,"pp|2|50":0.5,"pp|2|55":0.5,"pp|2|60":0.5,"pp|2|65":0.5,"pp|2|70":0.5,"pp|2|75":0.5,"pp|2|80":0.5,"pp|5|50":-0.5,"pp|5|55":-0.5,"pp|5|60":-0.5,"pp|5|65":-0.5,"pp|5|70":-0.5,"pp|5|75":-0.5,"pp|5|80":-0.5,"pt|2-4plex|50":0.375,"pt|2-4plex|55":0.375,"pt|2-4plex|60":0.5,"pt|2-4plex|65":0.5,"pt|2-4plex|70":0.625,"pt|2-4plex|75":0.875,"pt|condo|50":0,"pt|condo|55":0,"pt|condo|60":0,"pt|condo|65":0,"pt|condo|70":0.125,"pt|condo|75":0.375,"refi|50":0.25,"refi|55":0.25,"refi|60":0.375,"refi|65":0.375,"refi|70":0.625,"refi|75":0.875,"z|z1|50":1,"z|z1|55":1,"z|z1|60":1,"z|z1|65":1,"z|z1|70":1,"z|z1|75":1,"z|z1|80":1,"z|z2|50":0.25,"z|z2|55":0.25,"z|z2|60":0.25,"z|z2|65":0.25,"z|z2|70":0.25,"z|z2|75":0.25,"z|z2|80":0.25};
+const KIAVI_RENTAL_PRODUCT_ADJ = { fixed: 0, arm5: -0.375, arm7: -0.25 };
+function kiaviRentalIoAdj(ltvTier) { return ltvTier <= 60 ? 0.25 : ltvTier <= 70 ? 0.5 : 0.625; }
+const KIAVI_RENTAL_MIN_LOAN = 100000;
+const KIAVI_RENTAL_MAX_LOAN = 1500000;
+const KIAVI_RENTAL_MAX_CASHOUT = 500000;
+// 1e-7 slack: floating-point division can put an exact boundary loan (e.g. 55.0000001%) in the next tier.
+function kiaviRentalLtvTier(l) { l = l - 1e-7; return l <= 50 ? 50 : l <= 55 ? 55 : l <= 60 ? 60 : l <= 65 ? 65 : l <= 70 ? 70 : l <= 75 ? 75 : 80; }
+// Total LLPA in points for one deal (null if Kiavi has no price for that combination).
+function kiaviRentalCost(fico, ltv, ppYears, unit, loan, dscr, cashOut) {
+  const t = kiaviRentalLtvTier(ltv);
+  const ft = fico >= 800 ? 800 : fico >= 780 ? 780 : fico >= 760 ? 760 : fico >= 740 ? 740 : fico >= 720 ? 720 : fico >= 700 ? 700 : fico >= 680 ? 680 : 660;
+  const base = KIAVI_RENTAL_LLPA["B|" + ft + "|" + t];
+  if (base == null) return null;
+  let c = base;
+  if (ppYears !== 3) c += KIAVI_RENTAL_LLPA["pp|" + ppYears + "|" + t] || 0;
+  if (unit !== "single-family") c += KIAVI_RENTAL_LLPA["pt|" + unit + "|" + t] || 0;
+  const z = loan < 150000 ? "z1" : loan < 250000 ? "z2" : null;
+  if (z) c += KIAVI_RENTAL_LLPA["z|" + z + "|" + t] || 0;
+  const d = dscr < 1.0 ? "da" : dscr < 1.1 ? "db" : dscr < 1.15 ? "dc" : null;
+  if (d) c += KIAVI_RENTAL_LLPA["d|" + d + "|" + t] || 0;
+  if (cashOut) c += KIAVI_RENTAL_LLPA["refi|" + t] || 0;
+  return c;
+}
+// Lowest ladder rate whose price covers the cost plus any YSP taken (points).
+function kiaviRentalRateFor(cost, ysp) {
+  const rungs = Object.keys(KIAVI_RENTAL_LADDER).map(Number).sort(function (a, b) { return a - b; });
+  for (const r of rungs) if (KIAVI_RENTAL_LADDER[String(r)] - cost >= (ysp || 0) - 1e-6) return r;
+  return null;
 }
 const KIAVI_STATE_ADJ_HM = { TX: -0.5 };
 const KIAVI_STATE_ADJ_HM_PRO = { TX: -0.25 };
@@ -1003,7 +1035,6 @@ function kiaviTerm(months) {
 }
 function kiaviHmFee(loan) { return loan < 150000 ? 3500 : Math.round(loan * 0.01); }
 function kiaviHmFicoTier(f) { return f >= 760 ? "760" : f >= 700 ? "700" : f >= 680 ? "680" : null; }
-function kiaviRentalFicoTier(f) { return f >= 760 ? "760" : f >= 740 ? "740" : f >= 720 ? "720" : f >= 700 ? "700" : f >= 680 ? "680" : f >= 660 ? "660" : null; }
 function kiaviRound8(r) { return Math.round(r * 8) / 8; }
 
 // Plain-object version used by the edge function and the accuracy test.
@@ -1117,59 +1148,86 @@ function kiaviRentalDscr(loan, rate, s, io) {
 }
 function kiaviRental(s, out, unit, st) {
   if (unit === "multifamily") { out.reason = "Kiavi's rental program doesn't take 5+ unit multifamily."; return out; }
-  const tier = kiaviRentalFicoTier(s.creditScore);
-  if (!tier) { out.reason = "Kiavi rentals need at least a 660 credit score."; return out; }
-  const refi = s.transactionType !== "purchase";
-  const value = refi ? (s.currentValue || s.purchasePrice) : Math.min(s.purchasePrice || Infinity, s.currentValue || Infinity);
-  if (!value || !isFinite(value)) { out.reason = refi ? "Needs the current value." : "Needs the purchase price."; return out; }
+  const fico = s.creditScore;
+  if (fico < 660) { out.reason = "Kiavi rentals need at least a 660 credit score."; return out; }
+  const purchase = s.transactionType === "purchase";
+  const value = purchase ? Math.min(s.purchasePrice || Infinity, s.currentValue || Infinity) : (s.currentValue || s.purchasePrice);
+  if (!value || !isFinite(value)) { out.reason = purchase ? "Needs the purchase price." : "Needs the current value."; return out; }
   if (!s.rentEstimate) { out.reason = "Needs the monthly rent to size a Kiavi rental."; return out; }
-  // Accuracy test 2026-10-06: every 80% request came back "we can authorize
-  // up to" exactly 75% of value, so 75% is the real purchase ceiling.
-  let maxLtv = tier === "660" ? 65 : tier === "680" ? 70 : 75;
-  if (s.transactionType === "cashout") { maxLtv = Math.min(maxLtv, 75); out.assumptions.push("Cash-out assumed 75% max LTV and 90+ days of ownership (Kiavi requires 90 days seasoning)."); }
-  let ppp = s.prepayTerm || "5yr";
-  if (ppp === "4yr") { ppp = "3yr"; out.assumptions.push("Kiavi doesn't offer a 4-year prepay; priced at 3 years."); }
-  if (!KIAVI_RENTAL_FIT.ppp[ppp]) ppp = "3yr";
+  const ppYears = ({ "5yr": 5, "4yr": 3, "3yr": 3, "2yr": 2, "1yr": 1, none: 0 })[s.prepayTerm || "5yr"];
+  if (ppYears == null) { out.reason = "Unknown prepay term."; return out; }
+  if (s.prepayTerm === "4yr") out.assumptions.push("Kiavi doesn't offer a 4-year prepay; priced at 3 years.");
+  const payoff = s.currentLoanBalance;
+  const hasPayoff = !purchase && payoff != null && payoff >= 0;
+  if (!purchase && !hasPayoff) out.assumptions.push(s.transactionType === "cashout" ? "No payoff balance on file: priced as cash-out; Kiavi caps cash in hand at $500,000." : "No payoff balance on file: priced as rate/term (no cash out). Any cash out prices as cash-out on Kiavi.");
+  // Max LTV for this deal at a given DSCR (Kiavi's engine, 2026-10-07).
+  function capFor(dscr) {
+    if (dscr < 0.8) return 0;
+    if (dscr < 1.0 || fico < 680) return 65;
+    if (fico < 700) return 70;
+    return purchase && unit === "single-family" && dscr >= 1.1 ? 80 : 75;
+  }
+  // Price one loan amount. DSCR depends on the rate and the rate (via the DSCR
+  // LLPA and the DSCR-based LTV cap) on the DSCR, so walk the ladder up and take
+  // the lowest rate whose price covers the adjustments computed AT THAT RATE's
+  // DSCR (iterating can flip-flop at a band edge and under-quote; caught in the
+  // 10/7 fresh-deal test). Kiavi takes ONE DSCR for all products (its calculator
+  // input), so IO and ARMs price off the 30-yr fixed's DSCR (fixedDscr); the
+  // option still shows its own payment coverage.
+  function priceAt(loan, adj, io, fixedDscr) {
+    const ltv = loan / value * 100;
+    const tier = kiaviRentalLtvTier(ltv);
+    if (io && tier > 75) return null;
+    const cashOut = !purchase && (hasPayoff ? loan > payoff + 0.5 : s.transactionType === "cashout");
+    const extra = adj + (io ? kiaviRentalIoAdj(tier) : 0);
+    const rungs = Object.keys(KIAVI_RENTAL_LADDER).map(Number).sort(function (a, b) { return a - b; });
+    for (const r of rungs) {
+      const own = kiaviRentalDscr(loan, r, s, io);
+      const d = fixedDscr != null ? fixedDscr : own;
+      if (tier > capFor(d)) continue;
+      const cost = kiaviRentalCost(fico, ltv, ppYears, unit, loan, d, cashOut);
+      if (cost == null) continue;
+      if (KIAVI_RENTAL_LADDER[String(r)] - (cost + extra) >= -1e-6) return { rate: r, dscr: Math.round(own * 100) / 100, raw: own, cashOut };
+    }
+    return null;
+  }
   const opts = [];
-  let maxLoanFound = 0;
-  for (let i = KIAVI_RENTAL_LTV_TIERS.length - 1; i >= 0; i--) {
-    const t = KIAVI_RENTAL_LTV_TIERS[i];
-    if (t > maxLtv) continue;
-    let loan = Math.floor(value * t / 100 / 500) * 500;
+  const seen = {};
+  let maxLoanFound = 0, capNote = "";
+  for (const t of [80, 75, 70, 65, 60, 55, 50]) {
+    let loan = Math.floor(value * t / 100 / 250 + 1e-9) * 250;
+    if (loan > KIAVI_RENTAL_MAX_LOAN) { loan = KIAVI_RENTAL_MAX_LOAN; capNote = "Capped at Kiavi's $1,500,000 rental maximum."; }
+    if (hasPayoff && loan > payoff + KIAVI_RENTAL_MAX_CASHOUT) { loan = Math.floor((payoff + KIAVI_RENTAL_MAX_CASHOUT) / 250) * 250; capNote = "Capped at Kiavi's $500,000 maximum cash out."; }
     if (s.loanAmount && loan > s.loanAmount) continue;
-    if (loan > 1500000) loan = 1500000;
-    if (loan < KIAVI_MIN_LOAN) continue;
-    // DSCR depends on the rate and the rate (slightly) on DSCR: price at
-    // DSCR 1.25 first, then reprice with the resulting DSCR.
-    let rate = kiaviRentalRate(s.creditScore, t, ppp, unit, loan, 1.25);
-    if (rate == null) continue;
-    if (refi) rate = kiaviRound8(rate + 0.125);
-    let dscr = kiaviRentalDscr(loan, rate, s, false);
-    if (dscr < 0.8) continue;
-    if (dscr < 1.0 && t > 65) continue; // DSCR under 1.00 caps Kiavi at 65%
-    const r2 = kiaviRentalRate(s.creditScore, t, ppp, unit, loan, dscr);
-    if (r2 != null) { rate = refi ? kiaviRound8(r2 + 0.125) : r2; dscr = kiaviRentalDscr(loan, rate, s, false); }
+    if (loan < KIAVI_RENTAL_MIN_LOAN || seen[loan]) continue;
+    const fx = priceAt(loan, KIAVI_RENTAL_PRODUCT_ADJ.fixed, false);
+    if (!fx) continue;
+    seen[loan] = true;
+    const lt = kiaviRentalLtvTier(loan / value * 100);
     maxLoanFound = Math.max(maxLoanFound, loan);
-    opts.push({ program: "30-yr fixed · " + t + "% LTV", rate, price: 100, dscr: Math.round(dscr * 100) / 100, loanAmount: loan });
-    if (t <= 75) {
-      const ioRate = kiaviRound8(rate + (t > 65 ? 0.125 : 0));
-      opts.push({ program: "30-yr fixed IO · " + t + "% LTV (IO)", rate: ioRate, price: 100, dscr: Math.round(kiaviRentalDscr(loan, ioRate, s, true) * 100) / 100, loanAmount: loan });
+    opts.push({ program: "30-yr fixed · " + lt + "% LTV", rate: fx.rate, price: 100, dscr: fx.dscr, loanAmount: loan });
+    const io = priceAt(loan, KIAVI_RENTAL_PRODUCT_ADJ.fixed, true, fx.raw);
+    if (io) opts.push({ program: "30-yr fixed IO · " + lt + "% LTV (IO)", rate: io.rate, price: 100, dscr: io.dscr, loanAmount: loan });
+    if (loan === maxLoanFound) {
+      const a7 = priceAt(loan, KIAVI_RENTAL_PRODUCT_ADJ.arm7, false, fx.raw), a5 = priceAt(loan, KIAVI_RENTAL_PRODUCT_ADJ.arm5, false, fx.raw);
+      if (a7) opts.push({ program: "7/1 ARM · " + lt + "% LTV", rate: a7.rate, price: 100, dscr: a7.dscr, loanAmount: loan });
+      if (a5) opts.push({ program: "5/1 ARM · " + lt + "% LTV", rate: a5.rate, price: 100, dscr: a5.dscr, loanAmount: loan });
     }
   }
-  if (!opts.length) { out.reason = "No Kiavi rental tier fits: check credit (660+), DSCR (0.80+, 1.00+ above 65% LTV) and the $100k minimum loan."; return out; }
+  if (!opts.length) { out.reason = "No Kiavi rental tier fits: needs 660+ credit, DSCR 0.80+ (1.00+ above 65% LTV), and a $100,000-$1,500,000 loan."; return out; }
   out.eligible = true;
-  if (out.options && out.options.some(function (o: any) { return (o.loanAmount || out.loanAmountUsed || Infinity) < 100000; })) out.assumptions.push("Kiavi's minimum dropped to $75,000 (10/6); pricing under $100,000 is extended from the $100k+ data — confirm on Kiavi.");
   out.options = opts;
   out.loanAmountUsed = maxLoanFound;
   out.maxLoanAmount = maxLoanFound;
   out.fees = { lenderFee: 0 };
   out.compCaps.yspRatePerPoint = 0.25; // rental YSP is price-based: about +0.125-0.25% rate per point
   out.compCaps.maxYsp = KIAVI_MAX_YSP_RENTAL;
-  out.rateTolerance = 0.125;
-  out.assumptions.push("Kiavi rental rate is an ESTIMATE, accurate to within 0.125% (tested 98%); confirm on Kiavi before quoting exact. Rates as of " + KIAVI_SNAPSHOT + " (rate sheet moves). 5/1 and 7/1 ARMs are typically 0.125% lower. No Kiavi origination fee on rentals.");
+  if (capNote) out.assumptions.push(capNote);
+  out.assumptions.push("Kiavi rental priced from Kiavi's own rate ladder and adjustments as of " + KIAVI_RENTAL_SNAPSHOT + " (97.5% exact rate on untested deals, 99.7% within 0.125%). No Kiavi origination fee on rentals.");
+  const ageDays = (Date.now() - Date.parse(KIAVI_RENTAL_SNAPSHOT + "T12:00:00Z")) / 86400000;
+  if (ageDays > 7) out.assumptions.unshift("Kiavi rental rates are " + Math.floor(ageDays) + " days old — Kiavi's rate sheet may have moved; confirm on Kiavi before quoting.");
   return out;
-}
-// END KIAVI MODEL
+}// END KIAVI MODEL
 
 // ---------------------------------------------------------------------
 // A&D Mortgage DSCR -- researched MODEL (2026-10-06, Quick Pricer Pro via
