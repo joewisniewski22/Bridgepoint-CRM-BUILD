@@ -1119,7 +1119,11 @@ function kiaviHm(s, out, unit, st) {
     if (funded < rehab) out.assumptions.push("Kiavi funds $" + Math.round(funded).toLocaleString("en-US") + " of the $" + Math.round(rehab).toLocaleString("en-US") + " rehab" + (s.creditScore < 720 ? " (35% of purchase / $200k max under a 720 credit score)" : " ($300k max)") + "; the borrower covers the rest.");
     // 2-4 units: 85% max at 700+, 80% under 700.
     const capTier = unit === "2-4plex" ? (s.creditScore >= 700 ? 85 : 80) : 90;
-    const arvCap = s.arv * 0.75;
+    // ARV cap 75%, but 70% in Florida under a 720 FICO (Kiavi engine, 2026-10-07:
+    // "ARV LTV ... must be no more than 70%" at 690-719 in FL only; 720+ = 75%).
+    const arvPct = (st === "FL" && s.creditScore < 720) ? 0.70 : 0.75;
+    const arvCap = s.arv * arvPct;
+    if (arvPct < 0.75) out.assumptions.push("Florida under a 720 credit score: Kiavi caps fix & flip at 70% of ARV.");
     for (let i = KIAVI_HM_LTC_TIERS.length - 1; i >= 0; i--) {
       const t = KIAVI_HM_LTC_TIERS[i];
       if (t > capTier) continue;
@@ -1136,7 +1140,7 @@ function kiaviHm(s, out, unit, st) {
       if (opts.some(function (o) { return o.loanAmount === total; })) continue;
       opts.push({ program: term + "-mo · " + KIAVI_HM_LTC_TIERS[idx] + "% of " + (refi ? "value" : "purchase"), rate, price: 100 + kiaviHmFee(total, pro) / total * 100, loanAmount: total });
     }
-    if (!opts.length) { out.reason = "Below Kiavi's $100,000 minimum loan or over 75% of ARV at every leverage tier."; return out; }
+    if (!opts.length) { out.reason = "Below Kiavi's $100,000 minimum loan or over " + Math.round(arvPct * 100) + "% of ARV at every leverage tier."; return out; }
   }
   if (s.loanAmount) {
     // Caller asked for a specific amount: keep only the option at or under it.
