@@ -1697,9 +1697,10 @@ async function rcnCalculate(data: Record<string, unknown>): Promise<any> {
 }
 
 const RCN_PROPERTY_TYPE: Record<string, string> = { "SFR": "6", "Duplex": "14", "2-4 Unit": "14", "Condo": "2", "Multifamily 5+": "9", "Mixed-Use": "8" };
-// Non-permanent residents (visa holders): RCN's request has no confirmed code, so they price as
-// foreign nationals (stricter = never an overpromise); the gate notes it.
-const RCN_CITIZENSHIP: Record<string, string> = { "US Citizen": "0", "Foreign National": "1", "Permanent Resident": "2", "ITIN": "4", "Non-Permanent Resident": "1" };
+// RCN's own citizenship list (calculator, read 2026-10-08): 0 US Citizen, 1 Foreign National,
+// 2 Permanent Resident, 3 Non-Perm (FICO), 4 Non-Perm (No FICO). There is NO ITIN option
+// (ITIN used to be sent as 4 = non-perm without FICO -- wrong); checkRcn declines ITIN.
+const RCN_CITIZENSHIP: Record<string, string> = { "US Citizen": "0", "Foreign National": "1", "Permanent Resident": "2", "Non-Permanent Resident": "3" };
 const RCN_PREPAY: Record<string, string> = { "5yr": "60", "3yr": "36", "2yr": "24", "1yr": "12", "none": "0" };
 // RCN's overlays are zip-based; when the address has no zip, use the state's
 // largest metro so at least the state rules apply (and say so).
@@ -1710,7 +1711,55 @@ function zipFromAddress(a: string | null): string | null {
 }
 function rcnFlips(d: number | null): string { const n = d || 0; return n >= 10 ? "10" : n >= 5 ? "5" : n >= 3 ? "3" : n >= 1 ? "1" : "0"; }
 
+// RCN "Long Term Rental (Portfolio)" (program 6). Request shape captured from RCN's own calculator
+// 2026-10-08: totals across the properties + portfolio_properties[] (one object per property, its
+// units' rents). Needs 2+ properties. RCN's state ids are alphabetical by state name.
+const RCN_STATE_ID: Record<string, string> = { AL:"1",AK:"2",AZ:"3",AR:"4",CA:"5",CO:"6",CT:"7",DE:"8",DC:"9",FL:"10",GA:"11",HI:"12",ID:"13",IL:"14",IN:"15",IA:"16",KS:"17",KY:"18",LA:"19",ME:"20",MD:"21",MA:"22",MI:"23",MN:"24",MS:"25",MO:"26",MT:"27",NE:"28",NV:"29",NH:"30",NJ:"31",NM:"32",NY:"33",NC:"34",ND:"35",OH:"36",OK:"37",OR:"38",PA:"39",RI:"40",SC:"41",SD:"42",TN:"43",TX:"44",UT:"45",VT:"46",VA:"47",WA:"48",WV:"49",WI:"50",WY:"51" };
+const RCN_PORTFOLIO_TYPE: Record<string, string> = { "SFR": "6", "Townhome": "7", "Condo": "2", "2-4 Unit": "14", "Duplex": "14" };
+type PortfolioProp = { address?: string; state?: string; zip?: string; city?: string; propertyType?: string; units?: number; purchasePrice?: number; currentValue?: number; payoff?: number; rent?: number; monthlyTaxes?: number; monthlyInsurance?: number; monthlyHoa?: number; completedRehab?: number };
+function rcnPortfolioRequest(s: Scenario, assumptions: string[]): Record<string, unknown> | string {
+  const props: PortfolioProp[] = ((s as any).portfolioProperties || []).filter((p: PortfolioProp) => p && (p.currentValue || p.purchasePrice));
+  if (props.length < 2) return "RCN portfolio loans need at least 2 properties.";
+  const loanTypeId = s.transactionType === "cashout" ? "3" : s.transactionType === "ratetermrefi" ? "2" : "1";
+  const sum = (f: (p: PortfolioProp) => number) => props.reduce((a, p) => a + (f(p) || 0), 0);
+  const list: Record<string, unknown>[] = [];
+  for (const p of props) {
+    const st = (p.state || "").toUpperCase();
+    const ct = RCN_PORTFOLIO_TYPE[p.propertyType || "SFR"];
+    if (!ct) return "RCN portfolios take SFR, townhome, condo and 2-4 unit properties (not " + p.propertyType + ").";
+    if (!RCN_STATE_ID[st]) return "Each portfolio property needs a state (" + (p.address || "a property") + " has none).";
+    const units = ct === "14" ? Math.min(4, Math.max(2, Number(p.units) || 2)) : 1;
+    const rent = Number(p.rent || 0);
+    if (!rent) return "Each portfolio property needs its monthly rent (" + (p.address || "a property") + ").";
+    const value = Number(p.currentValue || p.purchasePrice || 0), price = Number(p.purchasePrice || value);
+    const unitRows = Array.from({ length: units }, () => ({ leasing_status: "Leased (LTR)", actual_rent: rent / units, market_rent: rent / units }));
+    const row: Record<string, unknown> = {
+      address: p.address || "", address2: "", zipcode: p.zip || "", city: p.city || "", state: RCN_STATE_ID[st], state_abbr: st,
+      collateral_type: ct, estimated_taxes: Math.round((p.monthlyTaxes || 0) * 12), insurance_premium: Math.round((p.monthlyInsurance || 0) * 12),
+      flood_insurance: 0, hoa_dues: Math.round((p.monthlyHoa || 0) * 12), estimated_payoff: Math.round(p.payoff || 0),
+      purchase_price: Math.round(price), asis_value: Math.round(value), acquisition: "", verified_rehab: Math.round(p.completedRehab || 0),
+      units: unitRows, gross_rent: rent, gr_period: "M", warrantable: "1",
+    };
+    unitRows.forEach((u, i) => { row["unit_" + (i + 1) + "_leasing_status"] = u.leasing_status; row["unit_" + (i + 1) + "_actual_rent"] = u.actual_rent; row["unit_" + (i + 1) + "_market_rent"] = u.market_rent; });
+    list.push(row);
+  }
+  assumptions.push("RCN portfolio of " + props.length + " properties; every unit assumed leased long-term at the rent entered.");
+  return {
+    lender_pricing_program_id: "6", lender_pricing_loan_type_id: loanTypeId, property_type_id: 6, mhv_exception: 0, rate_lock_type: "0",
+    loan_term: "", completed_flips: "", heavy_rehab_experience: "0", guc_experience: "0", commercial_experience: "0", residential_experience: "0", outstanding_mtg: "0",
+    foreign_national: RCN_CITIZENSHIP[s.citizenshipStatus || "US Citizen"] || "0", credit_score: String(s.creditScore || ""), zipcode: "", as_stabilized_value: "0.00",
+    estimated_payoff: sum((p) => p.payoff || 0), broker_rebate: "0", interest_type: "", ir_selection: "", amortization_type: "FRM",
+    prepayment_period: RCN_PREPAY[s.prepayTerm || "5yr"] || "60", io_period: "NOIO", completed_rehab: sum((p) => p.completedRehab || 0),
+    hard_costs: "0.00", soft_costs: "0.00", rehab_costs: "0.00", interest_rate: "", unit_count: 1, loan_stage: "", property_expenses: "0.00",
+    estimated_taxes: sum((p) => (p.monthlyTaxes || 0) * 12), flood_insurance: 0, hoa_dues: sum((p) => (p.monthlyHoa || 0) * 12),
+    amount_requested: (s.loanAmount || 0).toFixed(2), exit_strategy: "", lender_a_points: 0, rehab_needed: "0",
+    portfolio_properties: list, lease_type: "LTR", purchase_price: sum((p) => p.purchasePrice || p.currentValue || 0), asis_value: sum((p) => p.currentValue || p.purchasePrice || 0),
+    insurance_premium: sum((p) => (p.monthlyInsurance || 0) * 12), gross_rent: sum((p) => p.rent || 0), gr_period: "M",
+  };
+}
+
 function rcnBuildRequest(s: Scenario, assumptions: string[]): Record<string, unknown> | string {
+  if (s.loanType === "Portfolio/Blanket") return rcnPortfolioRequest(s, assumptions);
   const isRtl = RTL_AUTO_LOAN_TYPES.includes(s.loanType);
   const program = s.loanType === "Fix & Flip" ? "1" : s.loanType === "Bridge" ? "2" : s.loanType === "Ground Up Construction" ? "5" : "3";
   const loanTypeId = s.transactionType === "cashout" ? "3" : s.transactionType === "ratetermrefi" ? "2" : "1";
@@ -1874,6 +1923,20 @@ async function checkRcn(s: Scenario): Promise<LenderResult> {
   // Joe 2026-10-07: "RCN does not do rural at all" -- any loan type. Blocked before quoting,
   // even though RCN's own calculator will still return a price for a rural flag.
   if (s.ruralStatus === "rural") return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN doesn't lend on rural properties." };
+  if (s.citizenshipStatus === "ITIN") return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN has no ITIN borrower program." };
+  if (s.loanType === "Portfolio/Blanket") {
+    // Each property must clear RCN's rental geo overlays (do-not-lend zips; DSCR/value floors).
+    const props: any[] = (s as any).portfolioProperties || [];
+    for (const p of props) {
+      const area = p && p.zip ? RCN_LTR_ZIP.get(String(p.zip)) : null;
+      if (area && RCN_LTR_AREAS[area] && !RCN_LTR_AREAS[area].permitted) return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN isn't lending in " + area + " (" + (p.address || p.zip) + ") on rentals." };
+      if (area && RCN_LTR_AREAS[area] && RCN_LTR_AREAS[area].minValue && Number(p.currentValue || p.purchasePrice || 0) < (RCN_LTR_AREAS[area].minValue as number)) return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN needs a " + fmtMoney(RCN_LTR_AREAS[area].minValue as number) + "+ value in " + area + " (" + (p.address || p.zip) + ")." };
+    }
+    const r = await checkRcnRaw(s);
+    if (r.eligible && props.some((p) => p && !p.zip)) r.assumptions = (r.assumptions || []).concat(["Some properties have no zip — RCN's city-level overlays weren't checked for them."]);
+    if (r.eligible) r.assumptions = (r.assumptions || []).concat(["Rural status isn't checked per property on portfolios — RCN doesn't lend on rural."]);
+    return r;
+  }
   // Joe 2026-10-07: "RCN starts mixed uses at 250k" -- RCN's own calculator still prices smaller ones.
   const RCN_MIXED_MIN = 250000;
   if (s.propertyType === "Mixed-Use" && s.loanAmount && s.loanAmount < RCN_MIXED_MIN) return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN's mixed-use loans start at $250,000." };
@@ -1981,7 +2044,11 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
     if (r.lender === "Kiavi" || /^Lend/.test(r.lender) || (r.lender === "Constructive Capital" && rtl)) {
       return { lender: r.lender, eligible: false, source: r.source, reason: r.lender + "'s rules for non-permanent residents (visa holders) aren't verified yet — not quotable; bring it to Joe." };
     }
-    if (r.lender === "RCN Capital") r.assumptions = (r.assumptions || []).concat(["Non-permanent resident priced as a foreign national at RCN (stricter terms); confirm their visa policy."]);
+  }
+  // Portfolio / blanket: only RCN's portfolio program is wired; everyone else would price the
+  // summed totals as one property (NextRes would), so they decline here.
+  if (r && r.eligible && s.loanType === "Portfolio/Blanket" && r.lender !== "RCN Capital") {
+    return { lender: r.lender, eligible: false, source: r.source, reason: r.lender + " portfolio/blanket loans aren't priced here yet." };
   }
   if (!r || !r.eligible) return r;
   if (Array.isArray(r.options)) {

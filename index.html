@@ -12827,7 +12827,61 @@ function buildPricerOutputHTML(lead, inputs){
 --------------------------------------------------------------------- */
 // Mixed-Use is a long-term rental loan on a mixed-use building: priced as DSCR
 // with the property type forced to Mixed-Use (Velocity, RCN $250k+).
-var LP_LIVE_TYPES = ["DSCR","Mixed-Use","Fix & Flip","Bridge","Ground Up Construction"];
+var LP_LIVE_TYPES = ["DSCR","Mixed-Use","Portfolio/Blanket","Fix & Flip","Bridge","Ground Up Construction"];
+// Portfolio / blanket (Joe 2026-10-08: build it with RCN): one row per property, priced through
+// RCN's portfolio program. Rows pre-fill from the file (property #1) + the application's
+// Multi-Pack Addendum (properties #2+); RCN needs 2+ properties.
+var LP_PF_TYPES = ["SFR","Townhome","Condo","2-4 Unit"];
+function lpPortfolioDefault(key){
+  var lead = leadOrNull(key), rows = [];
+  var normType = function(t){ return t === "Duplex" ? "2-4 Unit" : (LP_PF_TYPES.indexOf(t) !== -1 ? t : "SFR"); };
+  if (lead){
+    rows.push({ address: lead.propertyAddress || "", propertyType: normType(lead.propertyType), units: lead.numUnits || 1,
+      purchasePrice: lead.purchasePrice || null, currentValue: lead.currentValue || lead.purchasePrice || null, payoff: lead.currentLoanBalance || null,
+      rent: lead.rentEstimate || null, monthlyTaxes: lead.monthlyTaxes || null, monthlyInsurance: lead.monthlyInsurance || null, monthlyHoa: lead.monthlyHoa || null });
+    ((lead.dscrApp || {}).multiPack || []).forEach(function(p){
+      rows.push({ address: p.address || "", propertyType: normType(p.propertyType), units: 1, purchasePrice: p.purchasePrice || null, currentValue: p.asIsValue || p.purchasePrice || null });
+    });
+  }
+  while (rows.length < 2) rows.push({ address: "", propertyType: "SFR", units: 1 });
+  return rows;
+}
+function lpPortfolio(key){
+  var v = lpValue(key, "portfolioProperties");
+  if (!Array.isArray(v)){ v = lpPortfolioDefault(key); if (lpIsStandalone(key)) lpSetValue(key, "portfolioProperties", v); }
+  return v;
+}
+function lpSetPortfolio(key, rows){ lpSetValue(key, "portfolioProperties", rows); render(); }
+function lpPortfolioMissing(key){
+  var rows = lpPortfolio(key), out = [];
+  if (rows.length < 2) out.push("at least 2 properties");
+  rows.forEach(function(p, i){
+    var n = "Property " + (i + 1);
+    if (!p.address || !stateFromAddress(p.address)) out.push(n + " address with state");
+    if (!(p.currentValue || p.purchasePrice)) out.push(n + " value");
+    if (!p.rent) out.push(n + " rent");
+  });
+  return out;
+}
+function lpPortfolioHTML(key){
+  var rows = lpPortfolio(key), refi = (lpValue(key, "transactionType") || "purchase") !== "purchase";
+  var inp = function(i, col, val, ph){ return '<input class="input" type="' + (col === "address" ? "text" : "number") + '" step="any" placeholder="' + esc(ph || "") + '" data-action="lp-pf" data-lp="' + esc(key) + '" data-row="' + i + '" data-col="' + col + '" value="' + esc(val == null ? "" : val) + '">'; };
+  var cell = function(label, html){ return '<div class="form-row"><label>' + esc(label) + '</label>' + html + '</div>'; };
+  var cards = rows.map(function(p, i){
+    var typeSel = '<select class="select" data-action="lp-pf" data-lp="' + esc(key) + '" data-row="' + i + '" data-col="propertyType">' + LP_PF_TYPES.map(function(t){ return '<option value="' + t + '"' + (p.propertyType === t ? " selected" : "") + '>' + t + '</option>'; }).join("") + '</select>';
+    return '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>Property ' + (i + 1) + '</b>' +
+        (rows.length > 2 ? '<button type="button" class="btn btn-sm btn-ghost" data-action="lp-pf-del" data-lp="' + esc(key) + '" data-row="' + i + '">Remove</button>' : '') + '</div>' +
+      cell("Address (street, city, ST ZIP)", inp(i, "address", p.address, "123 Main St, Tampa, FL 33604")) +
+      '<div class="form-two">' + cell("Property Type", typeSel) + (p.propertyType === "2-4 Unit" ? cell("Units", inp(i, "units", p.units || 2)) : '') +
+        cell("Purchase Price", inp(i, "purchasePrice", p.purchasePrice)) + cell(refi ? "Current Value" : "As-Is Value", inp(i, "currentValue", p.currentValue)) +
+        (refi ? cell("Existing Payoff", inp(i, "payoff", p.payoff)) : '') + cell("Monthly Rent (all units)", inp(i, "rent", p.rent)) +
+        cell("Monthly Taxes", inp(i, "monthlyTaxes", p.monthlyTaxes)) + cell("Monthly Insurance", inp(i, "monthlyInsurance", p.monthlyInsurance)) +
+        cell("Monthly HOA", inp(i, "monthlyHoa", p.monthlyHoa)) + '</div></div>';
+  }).join("");
+  return '<div style="grid-column:1/-1">' + cards + '<button type="button" class="btn btn-sm" data-action="lp-pf-add" data-lp="' + esc(key) + '">+ Add property</button>' +
+    '<div class="footnote" style="padding-top:6px">Every unit is priced as leased long-term at the rent entered. Totals are added up for you.</div></div>';
+}
 var LP_RTL = ["Fix & Flip","Bridge","Ground Up Construction"];
 var LP_ENTITY_TYPES = ["LLC","Individual","Corporation"];
 var LP_NUMERIC = ["monthsOwned","priorImprovements","numUnits","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
@@ -12878,6 +12932,22 @@ function lpGroups(key){
   var txnOpts = TRANSACTION_TYPES.map(function(t){ return [t.key, t.label]; });
   // Commercial only on rental (DSCR) loans -- Velocity's bridge/rehab programs are residential.
   var propOpts = PROPERTY_TYPES.filter(function(t){ return t !== "Land" && !(rtl && COMMERCIAL_PROPERTY_TYPES.indexOf(t) !== -1); }).map(function(t){ return [t, t]; });
+  if (lt === "Portfolio/Blanket"){
+    var pDeal = [];
+    if (lpIsStandalone(key)) pDeal.push({ k:"loanType", label:"Loan Type", type:"select", opts:LP_LIVE_TYPES.map(function(t){ return [t, t]; }) });
+    pDeal.push({ k:"transactionType", label:"Transaction", type:"select", opts:txnOpts });
+    pDeal.push({ k:"prepayTerm", label:"Prepayment Penalty", type:"select", opts:PREPAY_TERMS.map(function(t){ return [t.key, t.label]; }) });
+    if (refi) pDeal.push({ k:"monthsOwned", label:"Months Owned", type:"num", req:true, min:0, max:600, hint:"since they bought them" });
+    pDeal.push({ k:"loanAmount", label:"Loan Amount", type:"num", hint:"optional — leave blank to find the maximum" });
+    var pBorrower = [
+      { k:"creditScore", label:"Credit Score", type:"num", req:true, min:300, max:850 },
+      { k:"citizenshipStatus", label:"Citizenship", type:"select", req:true, blank:true, opts:CITIZENSHIP_STATUSES.map(function(t){ return [t, t]; }) },
+      { k:"experienceDeals", label:"Investment Properties Owned / Deals Done (3 yrs)", type:"num", req:true },
+      { k:"entityType", label:"Borrower Entity", type:"select", opts:LP_ENTITY_TYPES.map(function(t){ return [t, t]; }) },
+      { k:"creditEvent", label:"Bankruptcy, foreclosure, short sale or 60+ day mortgage late in the last 4 years?", type:"select", opts:[["no","No"],["yes","Yes"]] }
+    ];
+    return [{ title:"The loan", fields:pDeal }, { title:"Properties", fields:[{ k:"portfolioProperties", label:"Properties", type:"portfolio" }] }, { title:"Borrower", fields:pBorrower }];
+  }
   var deal = [];
   var mixedLoan = lt === "Mixed-Use";
   var pt = mixedLoan ? "Mixed-Use" : g("propertyType");
@@ -12944,6 +13014,7 @@ function lpMissing(key){
   var out = [];
   lpGroups(key).forEach(function(grp){
     grp.fields.forEach(function(f){
+      if (f.type === "portfolio"){ lpPortfolioMissing(key).forEach(function(m){ out.push(m); }); return; }
       if (!f.req) return;
       var v = lpValue(key, f.k);
       if (lpBlank(v) || (f.k === "creditScore" && v < 300)) out.push(f.label);
@@ -12952,6 +13023,35 @@ function lpMissing(key){
   return out;
 }
 function lpScenario(key){
+  var sc = lpScenarioBase(key);
+  if (sc.loanType !== "Portfolio/Blanket") return sc;
+  // Portfolio: per-property rows for RCN + totals so the rest of the pricer (LTV, basis) reads right.
+  var rows = lpPortfolio(key).map(function(p){
+    var addr = String(p.address || "");
+    var zipM = /\b(\d{5})(?:-\d{4})?\b(?!.*\b\d{5}\b)/.exec(addr);
+    var parts = addr.split(",").map(function(x){ return x.trim(); });
+    return { address: parts[0] || addr, city: parts.length >= 3 ? parts[parts.length - 2] : "", state: stateFromAddress(addr) || "", zip: zipM ? zipM[1] : "",
+      propertyType: p.propertyType || "SFR", units: p.propertyType === "2-4 Unit" ? (Number(p.units) || 2) : 1,
+      purchasePrice: Number(p.purchasePrice) || null, currentValue: Number(p.currentValue) || null, payoff: Number(p.payoff) || 0,
+      rent: Number(p.rent) || 0, monthlyTaxes: Number(p.monthlyTaxes) || 0, monthlyInsurance: Number(p.monthlyInsurance) || 0, monthlyHoa: Number(p.monthlyHoa) || 0 };
+  });
+  var sum = function(f){ return rows.reduce(function(a, r){ return a + (f(r) || 0); }, 0); };
+  sc.portfolioProperties = rows;
+  sc.propertyAddress = (lpPortfolio(key)[0] || {}).address || sc.propertyAddress;
+  sc.propertyState = rows[0] ? rows[0].state : sc.propertyState;
+  sc.propertyType = "SFR";
+  sc.numUnits = sum(function(r){ return r.units; });
+  sc.purchasePrice = sum(function(r){ return r.purchasePrice || r.currentValue; }) || null;
+  sc.currentValue = sum(function(r){ return r.currentValue || r.purchasePrice; }) || null;
+  sc.currentLoanBalance = sum(function(r){ return r.payoff; });
+  sc.rentEstimate = sum(function(r){ return r.rent; }) || null;
+  sc.monthlyTaxes = sum(function(r){ return r.monthlyTaxes; });
+  sc.monthlyInsurance = sum(function(r){ return r.monthlyInsurance; });
+  sc.monthlyHoa = sum(function(r){ return r.monthlyHoa; });
+  sc.rentalType = "ltr";
+  return sc;
+}
+function lpScenarioBase(key){
   var g = function(k){ return lpValue(key, k); };
   var lt = g("loanType") || "DSCR";
   var rtl = LP_RTL.indexOf(lt) !== -1;
@@ -13011,6 +13111,7 @@ function lpPoints(key){
 }
 
 function lpFieldHTML(key, f){
+  if (f.type === "portfolio") return lpPortfolioHTML(key);
   var v = lpValue(key, f.k);
   var label = esc(f.label) + (f.req ? ' <span style="color:var(--c-rust)">*</span>' : '') + (f.hint ? ' <span class="hint">(' + esc(f.hint) + ')</span>' : '');
   if (f.k === "propertyAddress" && !lpIsStandalone(key)){
@@ -18837,6 +18938,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }
   else if (action === "lp-run"){ lpRun(t.dataset.lp); }
+  else if (action === "lp-pf-add"){ lpSetPortfolio(t.dataset.lp, lpPortfolio(t.dataset.lp).concat([{ address:"", propertyType:"SFR", units:1 }])); }
+  else if (action === "lp-pf-del"){ var pfRows = lpPortfolio(t.dataset.lp).slice(); pfRows.splice(parseInt(t.dataset.row, 10), 1); lpSetPortfolio(t.dataset.lp, pfRows); }
   else if (action === "lp-select"){ lpSelectOption(t.dataset.lp, parseInt(t.dataset.r, 10), parseInt(t.dataset.o, 10), parseFloat(t.dataset.spread || "0") || 0); }
   else if (action === "lp-reset"){ lpResetInputs(t.dataset.lp); }
   else if (action === "lp-save-inputs"){ lpSaveInputs(t.dataset.lp); }
@@ -19052,6 +19155,13 @@ appEl.addEventListener("change", function(e){
     }
   } else if (action === "lp-field"){
     lpHandleField(t.dataset.lp, t.dataset.field, t.value);
+  } else if (action === "lp-pf"){
+    var pfAll = lpPortfolio(t.dataset.lp).slice(), pfI = parseInt(t.dataset.row, 10), pfCol = t.dataset.col;
+    var pfRow = Object.assign({}, pfAll[pfI] || {});
+    if (pfCol === "address" || pfCol === "propertyType") pfRow[pfCol] = t.value;
+    else { var pfN = parseFloat(String(t.value).replace(/,/g, "")); pfRow[pfCol] = isNaN(pfN) ? null : pfN; }
+    pfAll[pfI] = pfRow;
+    lpSetPortfolio(t.dataset.lp, pfAll);
   } else if (action === "lp-points"){
     if (lpIsStandalone(t.dataset.lp)){ lpSetValue("standalone", "pointsCharged", t.value === "" ? null : Number(t.value)); render(); }
     else { setPointsCharged(t.dataset.lp, t.value); render(); }
