@@ -4295,7 +4295,7 @@ function buildTermSheet(lead, langOverride){
     }
     lines.push("");
     lines.push("PROPIEDAD");
-    lines.push("Dirección: " + (lead.propertyAddress || "Por determinar"));
+    lines.push("Dirección: " + (lead.propertyAddress || "Por determinar")); portfolioDocLines(lead, "es").forEach(function(x){ lines.push(x); });
     lines.push("Tipo de Propiedad: " + (tr(lead.propertyType, "es") || "Por determinar"));
     lines.push("Estrategia de Salida: " + (tr(lead.exitStrategy, "es") || "Por determinar"));
     lines.push("");
@@ -4353,7 +4353,7 @@ function buildTermSheet(lead, langOverride){
     }
     lines.push("");
     lines.push("PROPERTY");
-    lines.push("Address: " + (lead.propertyAddress || "TBD"));
+    lines.push("Address: " + (lead.propertyAddress || "TBD")); portfolioDocLines(lead, "en").forEach(function(x){ lines.push(x); });
     lines.push("Property Type: " + (lead.propertyType || "TBD"));
     lines.push("Exit Strategy: " + (lead.exitStrategy || "TBD"));
     lines.push("");
@@ -4383,6 +4383,23 @@ function buildTermSheet(lead, langOverride){
 // ones an LO happened to attach a file to. Same principle as everywhere
 // else in this app: never forward a raw outside document to the borrower
 // (or fail silently) when we can generate our own from the real numbers.
+// Portfolio / blanket documents list every property (from the pricer's saved list, else the
+// application's Multi-Pack Addendum) right under the main address.
+function portfolioDocLines(lead, lang){
+  if (!lead || lead.loanType !== "Portfolio/Blanket") return [];
+  var d = lead.dscrApp || {};
+  var rows = (d.portfolioPricing && d.portfolioPricing.length) ? d.portfolioPricing
+    : [{ address: lead.propertyAddress, propertyType: lead.propertyType, currentValue: lead.currentValue || lead.purchasePrice }].concat((d.multiPack || []).map(function(p){ return { address: p.address, propertyType: p.propertyType, currentValue: p.asIsValue || p.purchasePrice }; }));
+  if (rows.length < 2) return [];
+  var es = lang === "es";
+  var out = [(es ? "Propiedades del portafolio (" : "Properties in this portfolio (") + rows.length + "):"];
+  rows.forEach(function(p, i){
+    var units = Number(p.units) > 1 ? " (" + p.units + (es ? " unidades" : " units") + ")" : "";
+    var val = p.currentValue || p.purchasePrice;
+    out.push("  " + (i + 1) + ". " + (p.address || (es ? "Por determinar" : "TBD")) + " — " + (es ? (tr(p.propertyType || "", "es") || p.propertyType || "") : (p.propertyType || "")) + units + (val ? " — " + (es ? "Valor " : "Value ") + fmtUSD(val) : ""));
+  });
+  return out;
+}
 function buildTermSheetFromOption(lead, option, langOverride){
   var lang = langOverride || lead.preferredLanguage || "en";
   var today = todayISO();
@@ -4405,7 +4422,7 @@ function buildTermSheetFromOption(lead, option, langOverride){
     if (option.ltv != null) lines.push("Relación Préstamo-Valor: " + option.ltv + "%");
     lines.push("");
     lines.push("PROPIEDAD");
-    lines.push("Dirección: " + (lead.propertyAddress || "Por determinar"));
+    lines.push("Dirección: " + (lead.propertyAddress || "Por determinar")); portfolioDocLines(lead, "es").forEach(function(x){ lines.push(x); });
     lines.push("Tipo de Propiedad: " + (tr(lead.propertyType, "es") || "Por determinar"));
     lines.push("");
     if (option.cashToClose != null){
@@ -4432,7 +4449,7 @@ function buildTermSheetFromOption(lead, option, langOverride){
     if (option.ltv != null) lines.push("Loan-to-Value: " + option.ltv + "%");
     lines.push("");
     lines.push("PROPERTY");
-    lines.push("Address: " + (lead.propertyAddress || "TBD"));
+    lines.push("Address: " + (lead.propertyAddress || "TBD")); portfolioDocLines(lead, "en").forEach(function(x){ lines.push(x); });
     lines.push("Property Type: " + (lead.propertyType || "TBD"));
     lines.push("");
     if (option.cashToClose != null){
@@ -4510,7 +4527,7 @@ function buildLenderSummary(lead){
   lines.push("Prepayment Structure: " + (PREPAY_TERMS.filter(function(t){ return t.key===lead.prepayTerm; })[0]||{}).label || (lead.prepayTerm || "TBD"));
   lines.push("");
   lines.push("PROPERTY");
-  lines.push("Address: " + (lead.propertyAddress || "TBD"));
+  lines.push("Address: " + (lead.propertyAddress || "TBD")); portfolioDocLines(lead, "en").forEach(function(x){ lines.push(x); });
   lines.push("Property Type: " + (lead.propertyType || "TBD"));
   if (lead.propertyType === "Mixed-Use") lines.push("Units: " + (unitBreakdownText(lead) || "TBD — residential/commercial split not on file"));
   if (isDscr){
@@ -11034,7 +11051,8 @@ function generateStandalonePricerTermSheet(){
     loanAmount: sel.result.loanAmountUsed, rate: sel.option.rate, pointsCharged: sc.pointsCharged || 0,
     lenderFeeOverride: (sel.result.fees && sel.result.fees.lenderFee != null) ? sel.result.fees.lenderFee : null,
     processingFeeOverride: null, underwritingFeeOverride: null,
-    commitmentFeeOverride: null, commitmentFeeRefundable: false, preferredLanguage: "en"
+    commitmentFeeOverride: null, commitmentFeeRefundable: false, preferredLanguage: "en",
+    dscrApp: sc.portfolioProperties ? { portfolioPricing: lpPortfolio("standalone") } : null
   };
   var ltvBasis = lpBasis(sc);
   if (ltvBasis) fakeLead.ltv = Math.round((fakeLead.loanAmount / ltvBasis) * 1000) / 10;
@@ -18331,7 +18349,11 @@ function createLeadFromScenario(data){
     outsideLender: (sel && canManageOutsideLender() && String(sel.result.lender).indexOf("Constructive") !== 0) ? sel.result.lender : null,
     callAttempts:[], documents:[], thirdParties:[], applicationToken: randomToken(),
     citizenshipStatus: sc.citizenshipStatus, countryOfDomicile: sc.countryOfDomicile || null, transactionType: sc.transactionType, prepayTerm: sc.prepayTerm,
-    propertyCount: sp.propertyCount,
+    propertyCount: sc.portfolioProperties ? sc.portfolioProperties.length : sp.propertyCount,
+    // Carry the newer pricer answers and the portfolio property list onto the file.
+    dscrApp: sp.loanType === "Portfolio/Blanket" ? { portfolioPricing: lpPortfolio("standalone") } : null,
+    numUnits: nn(sc.numUnits), rentalType: sc.rentalType || null, decliningMarket: sc.decliningMarket || null, vacationArea: sc.vacationArea || null,
+    creditEvent: sc.creditEvent || null, monthsOwned: nn(sc.monthsOwned), priorImprovements: nn(sc.priorImprovements), plansReady: sc.plansReady || null,
     activity:[{ date:d, type:"note", text:"Lead created from the Pricer (" + sp.loanType + " scenario)", author: currentUser().name }]
   };
   state.leads.unshift(lead);
