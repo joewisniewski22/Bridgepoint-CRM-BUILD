@@ -288,7 +288,7 @@ Deno.serve(async (req: Request) => {
   // ---- admin actions (shared secret) ----
   // forms: list the Page's lead forms. test-lead: fire a Meta test lead on one form
   // (replaces any earlier test lead on it) so the whole pipe can be checked.
-  if (body.action === "forms" || body.action === "test-lead") {
+  if (body.action === "forms" || body.action === "test-lead" || body.action === "backfill") {
     if (!(await authorized(body))) return json({ error: "not_authorized" }, 403);
     const pt = await pageToken(META_PAGE_ID);
     if (!pt) return json({ error: "no_page_token" }, 500);
@@ -298,6 +298,65 @@ Deno.serve(async (req: Request) => {
     }
     const formId = String(body.formId || "");
     if (!/^\d+$/.test(formId)) return json({ error: "formId required" }, 400);
+    if (body.action === "backfill") {
+      // Joe 2026-10-08: "have the facebook leads all land directly to our crm including the
+      // existing spanish ones". Pull the form's lead history from Meta and compare with every
+      // file in the CRM (any age) by phone/email. dryRun lists what's missing; otherwise the
+      // missing ones are imported QUIETLY: no LO alert, no AI text (they're old), routed the
+      // same way as live leads, with a note saying they came from the form history.
+      const all: any[] = [];
+      let next = GRAPH + "/" + formId + "/leads?fields=id,created_time,field_data,ad_name,campaign_name,is_organic&limit=100&access_token=" + encodeURIComponent(pt);
+      for (let i = 0; next && i < 30; i++) {
+        const pg = await fetch(next).then((r) => r.json()).catch(() => null);
+        if (!pg || !pg.data) break;
+        all.push(...pg.data);
+        next = pg.paging && pg.paging.next ? pg.paging.next : "";
+      }
+      const form = await fetch(GRAPH + "/" + formId + "?fields=name,locale&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch(() => ({}));
+      const formName: string = (form && form.name) || "";
+      const spanish = /^es/i.test((form && form.locale) || "") || /spanish|español|espanol/i.test(formName);
+      const { data: crm } = await sb.from("leads").select("id, phone, email");
+      const phones = new Set((crm || []).map((l: any) => digits10(l.phone)).filter((d: string) => d && d.length === 10));
+      const emails = new Set((crm || []).map((l: any) => String(l.email || "").toLowerCase()).filter(Boolean));
+      const missing = all.filter((ld) => {
+        const f: Field[] = ld.field_data || [];
+        if (f.some((x) => (x.values || []).some((v) => /test lead|dummy data/i.test(String(v))))) return false;
+        const p = digits10(fv(f, "phone_number", "phone", "número_de_teléfono") || ""), e = String(fv(f, "email", "correo_electrónico", "correo_electronico") || "").toLowerCase();
+        return !((p && p.length === 10 && phones.has(p)) || (e && emails.has(e)));
+      });
+      const summary = { form: formName, spanish, totalAtMeta: all.length, alreadyInCrm: all.length - missing.length, missing: missing.length,
+        oldest: all.length ? all[all.length - 1].created_time : null, newest: all.length ? all[0].created_time : null,
+        missingList: missing.map((ld) => { const f: Field[] = ld.field_data || []; return { created: ld.created_time, name: fv(f, "full_name", "nombre_completo") || "", hasPhone: !!fv(f, "phone_number", "phone"), hasEmail: !!fv(f, "email") }; }) };
+      if (body.dryRun !== false) return json(summary);
+      const today = new Date().toISOString().slice(0, 10);
+      const imported: string[] = [];
+      for (const ld of missing.slice().reverse()) {
+        const f: Field[] = ld.field_data || [];
+        const name = fv(f, "full_name", "nombre_completo") || [fv(f, "first_name"), fv(f, "last_name")].filter(Boolean).join(" ") || "Facebook Lead";
+        const email = fv(f, "email", "correo_electrónico", "correo_electronico"), phone = fv(f, "phone_number", "phone", "número_de_teléfono");
+        const dedicated = new Set(["full_name", "first_name", "last_name", "email", "phone_number", "phone", "nombre_completo"]);
+        const answers = f.filter((x) => !dedicated.has(x.name.toLowerCase()) && x.values && x.values.length).map((x) => x.name.replace(/_/g, " ") + ": " + x.values.join(", "));
+        const assignee = spanish ? SPANISH_LO : await pickEnglishAdLO();
+        const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
+        const submitted = String(ld.created_time || "").slice(0, 10);
+        const activity: Record<string, string>[] = [
+          { date: today, type: "note", author: "System", text: "Imported from Facebook form history (\"" + formName + "\", submitted " + submitted + (ld.campaign_name ? ", campaign " + ld.campaign_name : "") + ") — this lead never reached the CRM. Routed to " + assignee + ". No automatic messages sent; reach out personally." },
+          { date: today, type: "note", author: "System", text: "TCPA consent recorded — agreed to the contact disclaimer on Facebook form \"" + formName + "\" on " + submitted },
+        ];
+        if (answers.length) activity.push({ date: today, type: "note", author: "System", text: (spanish ? "Respuestas del formulario — " : "Form answers — ") + answers.join(" · ") });
+        const { error } = await sb.from("leads").insert({
+          id, name, email: email || null, phone: phone || null, source: spanish ? "Facebook" : "Meta Ads — Lead Form", loan_type: loanTypeFrom(f, formName),
+          stage: "new", status: "active", assigned_to: assignee, created_at: submitted || today, created_at_ts: ld.created_time ? new Date(ld.created_time).toISOString() : new Date().toISOString(),
+          preferred_language: spanish ? "es" : "en", automation_paused: true, entity_type: "LLC", application_token: crypto.randomUUID(), activity,
+        });
+        if (!error) imported.push(id);
+      }
+      if (imported.length) {
+        const assignee = spanish ? SPANISH_LO : "owner";
+        await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: assignee, lead_id: imported[0], kind: "hot-lead", text: imported.length + " older Facebook leads that never reached the CRM were just added to your list (marked \"Imported from Facebook form history\") — no automatic messages were sent.", date: today, read: false });
+      }
+      return json({ ...summary, missingList: undefined, imported: imported.length });
+    }
     const existing = await fetch(GRAPH + "/" + formId + "/test_leads?access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch(() => null);
     for (const t of (existing && existing.data) || []) await fetch(GRAPH + "/" + t.id + "?access_token=" + encodeURIComponent(pt), { method: "DELETE" }).catch(() => null);
     const made = await fetch(GRAPH + "/" + formId + "/test_leads", { method: "POST", body: new URLSearchParams({ access_token: pt }) }).then((r) => r.json()).catch((e) => String(e));
