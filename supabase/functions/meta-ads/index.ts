@@ -260,6 +260,8 @@ Deno.serve(async (req: Request) => {
       };
       if (dailyBudgetCents) params.daily_budget = String(dailyBudgetCents);
       if (body.promotedObject) params.promoted_object = JSON.stringify(body.promotedObject);
+      // "ON_AD" = instant-form lead ads (2026-10-08).
+      if (typeof body.destinationType === "string" && /^[A-Z_]+$/.test(body.destinationType)) params.destination_type = body.destinationType;
       const result = await graphFetch("/" + actAccount() + "/adsets", params, "POST");
       if (!result.ok) return new Response(JSON.stringify({ error: "meta_error", detail: result.data }), { status: 502, headers: CORS_HEADERS });
       return new Response(JSON.stringify({ ok: true, result: result.data }), { headers: CORS_HEADERS });
@@ -279,12 +281,15 @@ Deno.serve(async (req: Request) => {
       if (!adsetId || !name || !pageId || !linkUrl || !message || !headline || !imageHash) {
         return new Response(JSON.stringify({ error: "missing_fields", detail: "adsetId, name, pageId, linkUrl, message, headline and imageHash are required" }), { status: 400, headers: CORS_HEADERS });
       }
+      // leadGenFormId (2026-10-08): the CTA opens that instant form instead of the website
+      // (leads then arrive through meta-leads-webhook).
+      const leadGenFormId: string | null = /^\d+$/.test(String(body.leadGenFormId || "")) ? String(body.leadGenFormId) : null;
       const objectStorySpec = {
         page_id: pageId,
         link_data: {
           link: linkUrl, message, name: headline, description,
           image_hash: imageHash,
-          call_to_action: { type: ctaType, value: { link: linkUrl } },
+          call_to_action: { type: ctaType, value: leadGenFormId ? { lead_gen_form_id: leadGenFormId, link: linkUrl } : { link: linkUrl } },
         },
       };
       const creativeResult = await graphFetch("/" + actAccount() + "/adcreatives", {

@@ -288,10 +288,28 @@ Deno.serve(async (req: Request) => {
   // ---- admin actions (shared secret) ----
   // forms: list the Page's lead forms. test-lead: fire a Meta test lead on one form
   // (replaces any earlier test lead on it) so the whole pipe can be checked.
+  // create-form: a new instant form on the Page from a full spec (name, questions, privacy
+  // URL, consent disclaimer, thank-you page). Forms don't spend money or show to anyone
+  // until an ad uses them.
+  if (body.action === "create-form") {
+    if (!(await authorized(body))) return json({ error: "not_authorized" }, 403);
+    const pt = await pageToken(META_PAGE_ID);
+    if (!pt) return json({ error: "no_page_token" }, 500);
+    const spec = body.spec || {};
+    const params: Record<string, string> = {};
+    for (const [k, v] of Object.entries(spec)) params[k] = typeof v === "string" ? v : JSON.stringify(v);
+    params.access_token = pt;
+    const made = await fetch(GRAPH + "/" + META_PAGE_ID + "/leadgen_forms", { method: "POST", body: new URLSearchParams(params) }).then((r) => r.json()).catch((e) => String(e));
+    return json(made);
+  }
   if (body.action === "forms" || body.action === "test-lead" || body.action === "backfill") {
     if (!(await authorized(body))) return json({ error: "not_authorized" }, 403);
     const pt = await pageToken(META_PAGE_ID);
     if (!pt) return json({ error: "no_page_token" }, 500);
+    if (body.action === "forms" && /^\d+$/.test(String(body.formId || ""))) {
+      const one = await fetch(GRAPH + "/" + body.formId + "?fields=name,status,locale,questions,privacy_policy_url,legal_content,context_card,thank_you_page,is_optimized_for_quality,leads_count&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch((e) => String(e));
+      return json(one);
+    }
     if (body.action === "forms") {
       const f = await fetch(GRAPH + "/" + META_PAGE_ID + "/leadgen_forms?fields=id,name,locale,status,leads_count,created_time&limit=50&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch((e) => String(e));
       return json(f);
