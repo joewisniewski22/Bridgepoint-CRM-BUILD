@@ -1956,9 +1956,10 @@ async function checkRcn(s: Scenario): Promise<LenderResult> {
     if (r.eligible) r.assumptions = (r.assumptions || []).concat(["Rural status isn't checked per property on portfolios — RCN doesn't lend on rural."]);
     return r;
   }
-  // Joe 2026-10-07: "RCN starts mixed uses at 250k" -- RCN's own calculator still prices smaller ones.
-  const RCN_MIXED_MIN = 250000;
-  if (s.propertyType === "Mixed-Use" && s.loanAmount && s.loanAmount < RCN_MIXED_MIN) return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN's mixed-use loans start at $250,000." };
+  // Joe 2026-10-08 (from RCN's AE): "as a general rule RCN does nothing with mixed use properties" --
+  // no rental, flip, bridge or ground-up, even though RCN's calculator still prices them.
+  // (Supersedes 10/7 "RCN starts mixed uses at 250k".)
+  if (s.propertyType === "Mixed-Use" || s.loanType === "Mixed-Use" || (s as any).numCommercialUnits > 0) return { lender: "RCN Capital", eligible: false, source: "model", reason: "RCN doesn't lend on mixed-use properties." };
   // RCN Product Summary (Lender Documents, rev 10/21/25, read 2026-10-07).
   const L = "RCN Capital";
   const big = s.propertyType === "Mixed-Use" || s.propertyType === "Multifamily 5+";

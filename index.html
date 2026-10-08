@@ -2073,9 +2073,11 @@ function evaluateRcnFit(lead){
   // Fix & Flip, Ground Up, DSCR and Portfolio columns cover 1-4 family, condos,
   // townhomes and 5+ unit apartments only. Found on the Tapia file, which sat
   // with RCN at $117K as a 3-unit mixed-use fix and flip and never should have.
-  var isMixedUse = lead.propertyType === "Mixed-Use";
-  if (isMixedUse && type !== "Bridge"){
-    reasons.push("RCN doesn't list mixed-use properties in its " + (type === "Fix & Flip" ? "Fix & Flip" : type) + " program — mixed-use appears only in its 5+ unit Stabilized Bridge program");
+  // Joe 2026-10-08, from RCN's AE: "as a general rule RCN does nothing with mixed use
+  // properties" -- every program, bridge included, even when RCN's calculator prices it.
+  var isMixedUse = lead.propertyType === "Mixed-Use" || lead.loanType === "Mixed-Use" || (lead.numCommercialUnits || 0) > 0;
+  if (isMixedUse){
+    reasons.push("RCN doesn't lend on mixed-use properties (any program)");
   }
   var isFN = lead.citizenshipStatus === "Foreign National";
   var txnKey = lead.transactionType === "cashout" ? "cashOut" : (lead.transactionType === "ratetermrefi" ? "rateTerm" : "purchase");
@@ -2133,16 +2135,7 @@ function evaluateRcnFit(lead){
   } else if (type === "Fix & Flip" || type === "Bridge"){
     program = "RCN Bridge (9–18mo Fix & Flip/Rehab)";
     if ((lead.creditScore||0) < 650) reasons.push("Below RCN's 650 minimum FICO for Bridge");
-    // Mixed-use is only an RCN product as 5+ unit multifamily-style collateral.
-    var mixedBridge = isMixedUse && type === "Bridge";
-    var treatAsMulti = isMulti || mixedBridge;
-    if (mixedBridge){
-      if (lead.numUnits && lead.numUnits < 5) reasons.push("RCN lists mixed-use only in its 5+ unit Stabilized Bridge program, and this building has " + lead.numUnits + " units");
-      else notes.push("RCN lists mixed-use only under Stabilized Bridge Multi-Family (5+ units): $250K–$3M loans, $75K per unit minimum value — checked as multifamily here, confirm unit count with RCN");
-      var mixedUnits = lead.numUnits || 0;
-      var mixedBasis = lead.currentValue || lead.purchasePrice;
-      if (mixedUnits && mixedBasis && mixedBasis / mixedUnits < 75000) reasons.push("Below RCN's $75,000-per-unit minimum property value for mixed-use (" + fmtUSD(Math.round(mixedBasis / mixedUnits)) + " per unit)");
-    }
+    var treatAsMulti = isMulti;
     var bridgeMin = treatAsMulti ? 250000 : 70000, bridgeMax = treatAsMulti ? 3000000 : 2000000;
     if (lead.loanAmount && (lead.loanAmount < bridgeMin || lead.loanAmount > bridgeMax)) reasons.push("Outside RCN's " + fmtUSD(bridgeMin) + "–" + fmtUSD(bridgeMax) + " loan size range for this property type");
     var bucketTable = treatAsMulti ? RCN_RTL_MATRIX.multi : RCN_RTL_MATRIX["1-4"];
@@ -13423,7 +13416,7 @@ function buildPricerOutputHTML(lead, inputs){
    pricer below -- there's no live lender check for it.
 --------------------------------------------------------------------- */
 // Mixed-Use is a long-term rental loan on a mixed-use building: priced as DSCR
-// with the property type forced to Mixed-Use (Velocity, RCN $250k+).
+// with the property type forced to Mixed-Use (Velocity; RCN does no mixed-use, Joe 10/8).
 var LP_LIVE_TYPES = ["DSCR","Mixed-Use","Portfolio/Blanket","Fix & Flip","Bridge","Ground Up Construction"];
 // Portfolio / blanket (Joe 2026-10-08: build it with RCN): one row per property, priced through
 // RCN's portfolio program. Rows pre-fill from the file (property #1) + the application's
