@@ -53,6 +53,10 @@ type Scenario = {
   currentLoanBalance: number | null;   // existing lien payoff -- only matters on a refinance
   appraisalTransfer?: string | null;   // "yes" = borrower already has an appraisal to transfer (RCN/LEND refuse)
   rehabScope?: string | null;          // "cosmetic" | "structural" (gut, additions, conversions, fire/water)
+  numUnits?: number | null;            // total units (mixed-use = residential + commercial)
+  decliningMarket?: string | null;     // "yes" = appraisal/area shows declining values
+  vacationArea?: string | null;        // "yes" = vacation / resort area (LEND RTL)
+  rentalType?: string | null;          // "ltr" | "str" (short-term rental) on DSCR
 };
 
 type LenderResult = {
@@ -747,7 +751,7 @@ async function checkNextresRtl(s: Scenario): Promise<LenderResult> {
     firstTimeHomeInvestor: !s.experienceDeals || s.experienceDeals === 0,
     ruralProperty: s.ruralStatus === "rural",
     isMultipleProperties: false,
-    decliningMarketProperty: false,
+    decliningMarketProperty: s.decliningMarket === "yes",
     isNewConstructionProperty: isGuc,
     isPropertyInLeasableState: false,
     borrowerFirstName: s.guarantorFirstName || "",
@@ -873,7 +877,7 @@ async function checkNextresAt(s: Scenario): Promise<LenderResult> {
     firstTimeHomeInvestor: !s.experienceDeals || s.experienceDeals === 0,
     ruralProperty: s.ruralStatus === "rural",
     isMultipleProperties: false,
-    decliningMarketProperty: false,
+    decliningMarketProperty: s.decliningMarket === "yes",
     isNewConstructionProperty: false,
     isPropertyInLeasableState: true,
     isShortTermRental: false,
@@ -1871,7 +1875,12 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
     r.options = r.options.filter((o) => o && isFinite(Number(o.rate)) && Number(o.rate) > 0 && (!o.loanAmount || o.loanAmount > 0));
     if (!r.options.length) return { ...r, eligible: false, options: [], reason: "No valid rate came back for this scenario." };
   }
-  if (s.appraisalTransfer === "yes") {
+  // Short-term rentals (Airbnb/VRBO) have their own lender rules (rent from AirDNA/
+  // 12-mo history, rate add-ons, some lenders exclude them). Not scrubbed per lender
+  // yet -> unknown policy = flag "confirm" (Joe's scenario-runner rule).
+  if (s.rentalType === "str" && /DSCR|Portfolio/i.test(s.loanType)) {
+    r.assumptions = ["Short-term rental: confirm " + r.lender + " takes STRs and how it counts the rent before quoting."].concat(r.assumptions || []);
+  }  if (s.appraisalTransfer === "yes") {
     const pol = APPRAISAL_TRANSFER[r.lender] || "unknown";
     if (pol === "no") return { lender: r.lender, eligible: false, source: r.source, reason: r.lender + " doesn't accept transferred appraisals — they'd need to order a new one." };
     r.assumptions = (r.assumptions || []).concat([pol === "yes" ? (APPRAISAL_TRANSFER_NOTE[r.lender] || r.lender + " accepts transferred appraisals.") : "Confirm " + r.lender + " will accept the existing appraisal as a transfer."]);

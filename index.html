@@ -12817,11 +12817,13 @@ function buildPricerOutputHTML(lead, inputs){
    (canManageOutsideLender). Portfolio/Blanket still uses the legacy
    pricer below -- there's no live lender check for it.
 --------------------------------------------------------------------- */
-var LP_LIVE_TYPES = ["DSCR","Fix & Flip","Bridge","Ground Up Construction"];
+// Mixed-Use is a long-term rental loan on a mixed-use building: priced as DSCR
+// with the property type forced to Mixed-Use (Velocity, RCN $250k+).
+var LP_LIVE_TYPES = ["DSCR","Mixed-Use","Fix & Flip","Bridge","Ground Up Construction"];
 var LP_RTL = ["Fix & Flip","Bridge","Ground Up Construction"];
 var LP_ENTITY_TYPES = ["LLC","Individual","Corporation"];
-var LP_NUMERIC = ["numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
-var LP_SAVE_KEYS = ["transactionType","propertyType","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
+var LP_NUMERIC = ["numUnits","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
+var LP_SAVE_KEYS = ["transactionType","propertyType","numUnits","decliningMarket","vacationArea","rentalType","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
 
 function lpEntry(key){
   ui.livePricer = ui.livePricer || {};
@@ -12868,14 +12870,25 @@ function lpGroups(key){
   var txnOpts = TRANSACTION_TYPES.map(function(t){ return [t.key, t.label]; });
   var propOpts = PROPERTY_TYPES.filter(function(t){ return t !== "Land"; }).map(function(t){ return [t, t]; });
   var deal = [];
+  var mixedLoan = lt === "Mixed-Use";
+  var pt = mixedLoan ? "Mixed-Use" : g("propertyType");
   if (lpIsStandalone(key)) deal.push({ k:"loanType", label:"Loan Type", type:"select", opts:LP_LIVE_TYPES.map(function(t){ return [t, t]; }) });
   deal.push({ k:"transactionType", label:"Transaction", type:"select", opts:txnOpts });
-  deal.push({ k:"propertyType", label:"Property Type", type:"select", opts:propOpts });
+  if (!mixedLoan) deal.push({ k:"propertyType", label:"Property Type", type:"select", opts:propOpts, hint:"townhomes/PUDs = SFR" });
   deal.push({ k:"propertyAddress", label:"Property Address", type:"text", req:true, hint:"state is read from this" });
-  if (g("propertyType") === "Mixed-Use"){
+  if (pt === "Mixed-Use"){
     deal.push({ k:"numResidentialUnits", label:"Residential Units", type:"num", req:true, min:0, max:20 });
     deal.push({ k:"numCommercialUnits", label:"Commercial Units", type:"num", req:true, min:0, max:20 });
+  } else if (pt === "2-4 Unit"){
+    deal.push({ k:"numUnits", label:"Number of Units", type:"select", opts:[["2","2"],["3","3"],["4","4"]] });
+  } else if (pt === "Multifamily 5+"){
+    deal.push({ k:"numUnits", label:"Number of Units", type:"num", req:true, min:5, max:200, hint:"5–8 and 9+ price differently" });
   }
+  // Lender rules that depend on the market (LEND, Constructive, NextRes) -- the
+  // appraisal's "declining" box, and vacation/second-home areas (LEND).
+  deal.push({ k:"decliningMarket", label:"Declining market?", type:"select", opts:[["no","No — stable or increasing"],["yes","Yes — values declining"]], hint:"per the appraisal / area data" });
+  if (rtl) deal.push({ k:"vacationArea", label:"Vacation / resort area?", type:"select", opts:[["no","No"],["yes","Yes"]] });
+  if (!rtl) deal.push({ k:"rentalType", label:"Rental Type", type:"select", opts:[["ltr","Long-term rental (12-mo lease)"],["str","Short-term rental (Airbnb/VRBO)"]], hint:"short-term rentals have their own lender rules" });
   var money = [];
   money.push({ k:"purchasePrice", label: refi ? "Original Purchase Price" : "Purchase Price", type:"num", req: (!refi || rtl), hint: refi ? (rtl ? "what they paid" : "optional on a refinance") : null });
   money.push({ k:"currentValue", label: rtl ? "Current / As-Is Value" : "Current Property Value", type:"num", req: refi, hint: refi ? "refinance leverage is measured against this" : "leave blank to use the purchase price" });
@@ -12929,12 +12942,21 @@ function lpScenario(key){
   var nameParts = lead && lead.name ? String(lead.name).trim().split(/\s+/) : [];
   var range = LOAN_TYPE_TERM_RANGE[lt];
   var num = function(k){ var v = g(k); return lpBlank(v) ? null : Number(v); };
+  // Mixed-Use loan type = a DSCR loan on a mixed-use building.
+  var mixedLoan = lt === "Mixed-Use";
+  var pt = mixedLoan ? "Mixed-Use" : (g("propertyType") || "SFR");
+  var units = pt === "Mixed-Use" ? ((num("numResidentialUnits") || 0) + (num("numCommercialUnits") || 0)) || null
+    : pt === "Duplex" ? 2 : (pt === "2-4 Unit" || pt === "Multifamily 5+") ? num("numUnits") : 1;
   return {
-    loanType: lt,
+    loanType: mixedLoan ? "DSCR" : lt,
     transactionType: g("transactionType") || "purchase",
     propertyAddress: addr,
     propertyState: stateFromAddress(addr) || "",
-    propertyType: g("propertyType") || "SFR",
+    propertyType: pt,
+    numUnits: units,
+    decliningMarket: g("decliningMarket") || "no",
+    vacationArea: rtl ? (g("vacationArea") || "no") : "no",
+    rentalType: rtl ? null : (g("rentalType") || "ltr"),
     creditScore: num("creditScore"),
     purchasePrice: num("purchasePrice"),
     currentValue: num("currentValue"),
@@ -13104,6 +13126,8 @@ function lpRenderResults(key){
     : 'Best par rate is the lowest rate across all lenders that still prices at 100 or better — no points cost to the borrower. Price is the lender\'s own price for that rate: above 100 earns yield spread, below 100 costs points. Est. revenue = your ' + points + '% origination + yield spread (negative if priced below par). "Best for us" is the highest-price option — not necessarily the lowest rate for the borrower.') +
     ' Checked live ' + (en.ranAt ? new Date(en.ranAt).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "") + '.</div>';
   var banner = stale ? '<div class="hint" style="color:var(--c-rust);padding:10px 0 0">You\'ve changed something since these were checked — check live rates again to refresh them.</div>' : '';
+  // Short-term rental rules aren't confirmed per lender yet -- say so in plain terms.
+  if (sc.rentalType === "str" && anyEligibleCheck(en.data)) banner += '<div class="hint" style="color:#6b4e00;padding:10px 0 0">⚠ Short-term rental: these terms need to be confirmed before you quote them — ask Joe.</div>';
   var none = '';
   if (!anyEligible){
     // Joe 2026-10-06: if NO lender we use will do the deal, say so plainly and
@@ -13124,6 +13148,7 @@ function lpRenderResults(key){
   return banner + none + best + cards + footer;
 }
 function leadOrNull(key){ return lpIsStandalone(key) ? null : leadById(key); }
+function anyEligibleCheck(results){ return (results || []).some(function(r){ return r && r.eligible; }); }
 // Joe 2026-10-07: when a loan kicks back, tell the LO why -- but most LOs don't
 // know we place loans with outside lenders, so LOs never see per-lender
 // declines. Only when NO lender will place the deal do they get one plain
