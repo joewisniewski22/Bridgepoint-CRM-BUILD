@@ -288,6 +288,14 @@ Deno.serve(async (req: Request) => {
   // ---- admin actions (shared secret) ----
   // forms: list the Page's lead forms. test-lead: fire a Meta test lead on one form
   // (replaces any earlier test lead on it) so the whole pipe can be checked.
+  // stats: follower counts for the growth plan (Page + linked Instagram).
+  if (body.action === "stats") {
+    if (!(await authorized(body))) return json({ error: "not_authorized" }, 403);
+    const pt = await pageToken(META_PAGE_ID);
+    const page = await fetch(GRAPH + "/" + META_PAGE_ID + "?fields=name,fan_count,followers_count,instagram_business_account{username,followers_count,follows_count,media_count}&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch((e) => String(e));
+    const posts = await fetch(GRAPH + "/" + META_PAGE_ID + "/posts?fields=created_time,message,shares&limit=25&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch((e) => String(e));
+    return json({ page, recentPosts: posts && posts.data ? posts.data.map((p: any) => ({ t: p.created_time, shares: p.shares ? p.shares.count : 0, msg: String(p.message || "").slice(0, 80) })) : posts });
+  }
   // create-form: a new instant form on the Page from a full spec (name, questions, privacy
   // URL, consent disclaimer, thank-you page). Forms don't spend money or show to anyone
   // until an ad uses them.

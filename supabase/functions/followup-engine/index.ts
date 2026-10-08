@@ -329,6 +329,9 @@ function candidates(l, tasksByLead, now) {
     const anchor = dateOf(l.preapproval_sent_at);
     out.push({ sit: "preapproved", anchor, idx: done("preapproved", anchor), anchorMs: dateNoonMs(anchor) });
   }
+  // A future callback pauses the calling cadence until then (same rule as the CRM's call
+  // queue, computeQueueForLeads) -- Joe 10/8: "not called or put on a call list until Monday".
+  if (l.next_follow_up_at && new Date(l.next_follow_up_at).getTime() > Date.now()) return out;
   if (stage === "qualifying" || (connectedAttempts(l).length && (stage === "new" || stage === "attempting"))) {
     const anchor = lastConnectDate(l) || dateOf(l.last_contact_at) || createdDate;
     if (!l.application_sent_at && !l.termsheet_sent_at) out.push({ sit: "connected", anchor, idx: done("connected", anchor), anchorMs: dateNoonMs(anchor) });
