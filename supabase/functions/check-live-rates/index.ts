@@ -1772,7 +1772,9 @@ function rcnBuildRequest(s: Scenario, assumptions: string[]): Record<string, unk
   const asis = (s.transactionType !== "purchase" ? s.currentValue : (s.currentValue || s.purchasePrice)) || s.purchasePrice || 0;
   const base: Record<string, unknown> = {
     lender_pricing_program_id: program, lender_pricing_loan_type_id: loanTypeId, property_type_id: pt,
-    mhv_exception: "0", rate_lock_type: "0", heavy_rehab_experience: "0", guc_experience: "0", commercial_experience: "0", residential_experience: "0",
+    // Ground-up: send the builder's real experience. RCN's engine (tested 10/8) takes first-time
+    // builders at +0.50% rate and a slightly smaller advance; 1+ builds get its best pricing.
+    mhv_exception: "0", rate_lock_type: "0", heavy_rehab_experience: "0", guc_experience: s.loanType === "Ground Up Construction" ? String(Math.max(0, Math.min(10, Number(s.experienceDeals) || 0))) : "0", commercial_experience: "0", residential_experience: "0",
     outstanding_mtg: "0", foreign_national: RCN_CITIZENSHIP[s.citizenshipStatus || "US Citizen"] || "0", credit_score: String(s.creditScore || ""), zipcode: zip,
     asis_value: asis.toFixed(2), as_stabilized_value: "0.00", purchase_price: (s.purchasePrice || asis).toFixed(2),
     estimated_payoff: (s.currentLoanBalance || 0).toFixed(2), interest_rate: "", loan_stage: "", property_expenses: "0.00",
