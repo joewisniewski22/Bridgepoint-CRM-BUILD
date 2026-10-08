@@ -227,6 +227,8 @@ export async function checkLend(s: S): Promise<any> {
   const out: any = { lender: L, eligible: false, source: "model", assumptions: [] as string[] };
   const no = (why: string) => { out.reason = why; return out; };
   const lt = s.loanType || "";
+  // Joe 2026-10-08: "LEND doesn't do mixed use either" -- any program, any commercial unit.
+  if (lt === "Mixed-Use" || s.propertyType === "Mixed-Use" || Number((s as any).numCommercialUnits || 0) > 0) return no("LEND doesn't lend on mixed-use properties.");
   if (lt === "Ground Up Construction") return checkLendNc(s, out);
   if (lt === "Bridge" || (lt === "Fix & Flip" && !Number(s.rehabBudget || 0))) return checkLendBridge(s, out);
   if (lt !== "Fix & Flip") return no("LEND is priced here for fix & flip, bridge and ground-up only (their rental pricing wasn't competitive).");
