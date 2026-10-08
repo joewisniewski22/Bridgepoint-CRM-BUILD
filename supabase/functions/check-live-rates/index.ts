@@ -389,7 +389,12 @@ async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?
     if (!limitsRaw) return null;
     const limits: RtlLimits = { ...limitsRaw };
     const notes: string[] = [];
-    if (isGuc) notes.push("Initial " + limits.iltc + "% of land assumes a clear exit, detailed scope, and plans & permits imminent — otherwise 50%.");
+    // Ground Up Matrix 1.1.26: the 65%/70% initial advance needs stamped plans & permits imminent
+    // (plus a clear exit and full scope); otherwise 50%. Only assume it when the LO says plans are ready.
+    if (isGuc) {
+      if ((s as any).plansReady === "yes") notes.push("Initial " + limits.iltc + "% of land assumes stamped plans, permits imminent, a clear exit and a full scope of work.");
+      else { limits.iltc = 50; notes.push("Initial advance 50% of land (plans & permits not ready — 65%/70% once they are)."); }
+    }
     if (experienceTier(s.experienceDeals) === "11+" && band === "5+") notes.push("Priced in the 5+ band — V7's 11+ band is only light rehab $20k-$150k, 700+ FICO, SFR purchases.");
     if (profile === "heavy") notes.push("Heavy rehab may need a feasibility study / project review.");
     if (!isGuc && profile !== "bridge" && s.arv && s.arv < 1.15 * ((s.purchasePrice || 0) + rehabOf(s))) notes.push("ARV is under 115% of purchase + rehab — Constructive's written guidelines require at least " + fmtMoney(1.15 * ((s.purchasePrice || 0) + rehabOf(s))) + "; expect pushback.");
@@ -399,6 +404,8 @@ async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?
     if (state === "NY") candidates.push([-15, "New York"]);
     if (s.transactionType === "cashout") candidates.push([-5, "cash-out"]);
     if (s.citizenshipStatus === "Foreign National") candidates.push([-5, "foreign national"]);
+    // Ground Up Matrix 1.1.26: FL and TX -5% on initial LTC, total LTC and LTARV (non-cumulative).
+    if (isGuc && (state === "FL" || state === "TX")) candidates.push([-5, state]);
     const [adj, why] = candidates.reduce((a, b) => (b[0] < a[0] ? b : a));
     if (adj) {
       for (const k of ["ltc", "iltc", "ltarv", "totalLtc"] as const) if (limits[k] != null) limits[k] = (limits[k] as number) + adj;
@@ -428,11 +435,22 @@ async function constructiveMaxLoan(s: Scenario): Promise<{ amount: number; note?
     const rural = s.ruralStatus === "rural";
     const tierRow = DSCR_LTV_BY_FICO.find((t) => (s.creditScore as number) >= t.minFico) || DSCR_LTV_BY_FICO[DSCR_LTV_BY_FICO.length - 1];
     const key = s.transactionType === "cashout" ? "cashOut" : (s.transactionType === "ratetermrefi" ? "rateTerm" : "purchase");
-    const maxLtv = rural ? 65 : tierRow[key];
+    let maxLtv = rural ? 65 : tierRow[key];
+    // Short-term rentals: DSCR Guidelines App. G (bplhub DSCR-STR Guidelines, read 2026-10-07).
+    const str = (s as any).rentalType === "str";
+    if (str) {
+      const f = s.creditScore as number;
+      const row = f >= 720 ? { purchase: 80, rateTerm: 75, cashOut: 75 } : f >= 700 ? { purchase: 75, rateTerm: 75, cashOut: 70 } : f >= 680 ? { purchase: 70, rateTerm: 75, cashOut: 0 } : null;
+      if (!row || !row[key]) return { amount: 0, note: "", reason: !row ? "Constructive short-term rentals need a 680+ FICO." : "No cash-out on Constructive short-term rentals under a 700 FICO." } as any;
+      maxLtv = Math.min(maxLtv, row[key]);
+      const strMax = f >= 720 ? 2000000 : f >= 700 ? 1500000 : 1000000;
+      if (basis * maxLtv / 100 > 1500000) maxLtv = Math.min(maxLtv, Math.max(65, 1500000 / basis * 100 - 1e-9));
+      if (basis * maxLtv / 100 > strMax) maxLtv = strMax / basis * 100;
+    }
     const ltvCap = basis * (maxLtv / 100);
     let dscrCap = Infinity;
     if (s.rentEstimate) {
-      const minDscr = constructiveMinDscr(s.creditScore, maxLtv, ltvCap, stateFromAddress(s.propertyAddress), rural);
+      const minDscr = str ? Math.max(1.15, constructiveMinDscr(s.creditScore, maxLtv, ltvCap, stateFromAddress(s.propertyAddress), rural)) : constructiveMinDscr(s.creditScore, maxLtv, ltvCap, stateFromAddress(s.propertyAddress), rural);
       const trial = await checkConstructiveAt({ ...s, loanAmount: Math.min(ltvCap, MAX_LOAN_SANITY_CEILING), rentEstimate: null });
       const rate = trial.eligible && trial.options && trial.options.length ? trial.options[0].rate : 7.5;
       const r = rate / 100 / 12;
@@ -1610,7 +1628,9 @@ async function rcnCalculate(data: Record<string, unknown>): Promise<any> {
 }
 
 const RCN_PROPERTY_TYPE: Record<string, string> = { "SFR": "6", "Duplex": "14", "2-4 Unit": "14", "Condo": "2", "Multifamily 5+": "9", "Mixed-Use": "8" };
-const RCN_CITIZENSHIP: Record<string, string> = { "US Citizen": "0", "Foreign National": "1", "Permanent Resident": "2", "ITIN": "4" };
+// Non-permanent residents (visa holders): RCN's request has no confirmed code, so they price as
+// foreign nationals (stricter = never an overpromise); the gate notes it.
+const RCN_CITIZENSHIP: Record<string, string> = { "US Citizen": "0", "Foreign National": "1", "Permanent Resident": "2", "ITIN": "4", "Non-Permanent Resident": "1" };
 const RCN_PREPAY: Record<string, string> = { "5yr": "60", "3yr": "36", "2yr": "24", "1yr": "12", "none": "0" };
 // RCN's overlays are zip-based; when the address has no zip, use the state's
 // largest metro so at least the state rules apply (and say so).
@@ -1872,7 +1892,14 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
         ? "Baltimore City is deal-by-deal only at Constructive (65% LTV max on cash-out) — not quotable; bring it to Joe."
         : r.lender + " isn't lending in Baltimore City right now." };
   }
-  if (!r || !r.eligible) return r;
+  // Non-permanent residents (visa holders): only lenders whose rules for them are verified quote.
+  if (r && r.eligible && s.citizenshipStatus === "Non-Permanent Resident") {
+    const rtl = RTL_AUTO_LOAN_TYPES.includes(s.loanType);
+    if (r.lender === "Kiavi" || /^Lend/.test(r.lender) || (r.lender === "Constructive Capital" && rtl)) {
+      return { lender: r.lender, eligible: false, source: r.source, reason: r.lender + "'s rules for non-permanent residents (visa holders) aren't verified yet — not quotable; bring it to Joe." };
+    }
+    if (r.lender === "RCN Capital") r.assumptions = (r.assumptions || []).concat(["Non-permanent resident priced as a foreign national at RCN (stricter terms); confirm their visa policy."]);
+  }  if (!r || !r.eligible) return r;
   if (Array.isArray(r.options)) {
     r.options = r.options.filter((o) => o && isFinite(Number(o.rate)) && Number(o.rate) > 0 && (!o.loanAmount || o.loanAmount > 0));
     if (!r.options.length) return { ...r, eligible: false, options: [], reason: "No valid rate came back for this scenario." };
@@ -1881,7 +1908,16 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
   // 12-mo history, rate add-ons, some lenders exclude them). Not scrubbed per lender
   // yet -> unknown policy = flag "confirm" (Joe's scenario-runner rule).
   if (s.rentalType === "str" && /DSCR|Portfolio/i.test(s.loanType)) {
-    r.assumptions = ["Short-term rental: confirm " + r.lender + " takes STRs and how it counts the rent before quoting."].concat(r.assumptions || []);
+    if (r.lender === "Constructive Capital") {
+      // DSCR Guidelines App. G: SFR/PUD only, no foreign nationals, $150k-$2M (leverage/DSCR applied in sizing).
+      if (s.propertyType !== "SFR") return { lender: r.lender, eligible: false, source: r.source, reason: "Constructive short-term rentals are SFR/townhome/PUD only (no condos, 2-4 units, 5+ or mixed-use)." };
+      if (s.citizenshipStatus === "Foreign National") return { lender: r.lender, eligible: false, source: r.source, reason: "Foreign nationals aren't eligible for Constructive short-term rentals." };
+      if ((r.maxLoanAmount || r.loanAmountUsed || 0) < 150000) return { lender: r.lender, eligible: false, source: r.source, reason: "Constructive short-term rentals start at $150,000." };
+      r.assumptions = ["Short-term rental at Constructive: full recourse, 1.15 min DSCR on 12-month STR history (or long-term comparable rent), active STR listing and 2 months of platform deposits required."].concat(r.assumptions || []);
+    } else if (!(r.lender === "A&D Mortgage" && (r as any).strPriced)) {
+      (r as any).strUnverified = true;
+      r.assumptions = ["Short-term rental: confirm " + r.lender + " takes STRs and how it counts the rent before quoting."].concat(r.assumptions || []);
+    }
   }  if (s.appraisalTransfer === "yes") {
     const pol = APPRAISAL_TRANSFER[r.lender] || "unknown";
     if (pol === "no") return { lender: r.lender, eligible: false, source: r.source, reason: r.lender + " doesn't accept transferred appraisals — they'd need to order a new one." };

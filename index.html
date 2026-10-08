@@ -681,7 +681,9 @@ function pricingPropertyType(pt){
   return pt === "Duplex" ? "2-4 Unit" : pt;
 }
 var EXIT_STRATEGIES = ["Sell","Refinance to DSCR","Hold/Rent","1031 Exchange"];
-var CITIZENSHIP_STATUSES = ["US Citizen","Permanent Resident","Foreign National","ITIN"];
+// Non-Permanent Resident = in the US on a visa (no green card) -- lenders treat these differently
+// from permanent residents and from foreign nationals.
+var CITIZENSHIP_STATUSES = ["US Citizen","Permanent Resident","Non-Permanent Resident","Foreign National","ITIN"];
 // Client's communication language, set per lead in the rail. Drives live
 // translation of ad-hoc texts (see translate-message + send-text/receive-text)
 // -- separate from lead.preferredLanguage's older en/es-only role of picking
@@ -12823,7 +12825,7 @@ var LP_LIVE_TYPES = ["DSCR","Mixed-Use","Fix & Flip","Bridge","Ground Up Constru
 var LP_RTL = ["Fix & Flip","Bridge","Ground Up Construction"];
 var LP_ENTITY_TYPES = ["LLC","Individual","Corporation"];
 var LP_NUMERIC = ["monthsOwned","priorImprovements","numUnits","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","loanAmount","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","termMonths","liquidity"];
-var LP_SAVE_KEYS = ["transactionType","propertyType","monthsOwned","priorImprovements","numUnits","decliningMarket","vacationArea","rentalType","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
+var LP_SAVE_KEYS = ["transactionType","propertyType","plansReady","monthsOwned","priorImprovements","numUnits","decliningMarket","vacationArea","rentalType","numResidentialUnits","numCommercialUnits","creditScore","purchasePrice","currentValue","currentLoanBalance","rentEstimate","monthlyTaxes","monthlyInsurance","monthlyHoa","rehabBudget","arv","experienceDeals","citizenshipStatus","countryOfDomicile","entityType","prepayTerm","termMonths","liquidity"];
 
 function lpEntry(key){
   ui.livePricer = ui.livePricer || {};
@@ -12888,6 +12890,7 @@ function lpGroups(key){
   // appraisal's "declining" box, and vacation/second-home areas (LEND).
   deal.push({ k:"decliningMarket", label:"Declining market?", type:"select", opts:[["no","No — stable or increasing"],["yes","Yes — values declining"]], hint:"per the appraisal / area data" });
   if (rtl) deal.push({ k:"vacationArea", label:"Vacation / resort area?", type:"select", opts:[["no","No"],["yes","Yes"]] });
+  if (lt === "Ground Up Construction") deal.push({ k:"plansReady", label:"Plans & permits ready?", type:"select", opts:[["no","No — still in design"],["yes","Yes — stamped plans, permits imminent"]], hint:"bigger land advance once ready" });
   if (!rtl) deal.push({ k:"rentalType", label:"Rental Type", type:"select", opts:[["ltr","Long-term rental (12-mo lease)"],["str","Short-term rental (Airbnb/VRBO)"]], hint:"short-term rentals have their own lender rules" });
   var money = [];
   money.push({ k:"purchasePrice", label: refi ? "Original Purchase Price" : "Purchase Price", type:"num", req: (!refi || rtl), hint: refi ? (rtl ? "what they paid" : "optional on a refinance") : null });
@@ -12960,6 +12963,7 @@ function lpScenario(key){
     numUnits: units,
     decliningMarket: g("decliningMarket") || "no",
     vacationArea: rtl ? (g("vacationArea") || "no") : "no",
+    plansReady: lt === "Ground Up Construction" ? (g("plansReady") || "no") : null,
     rentalType: rtl ? null : (g("rentalType") || "ltr"),
     creditScore: num("creditScore"),
     purchasePrice: num("purchasePrice"),
@@ -13133,7 +13137,7 @@ function lpRenderResults(key){
     ' Checked live ' + (en.ranAt ? new Date(en.ranAt).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "") + '.</div>';
   var banner = stale ? '<div class="hint" style="color:var(--c-rust);padding:10px 0 0">You\'ve changed something since these were checked — check live rates again to refresh them.</div>' : '';
   // Short-term rental rules aren't confirmed per lender yet -- say so in plain terms.
-  if (sc.rentalType === "str" && anyEligibleCheck(en.data)) banner += '<div class="hint" style="color:#6b4e00;padding:10px 0 0">⚠ Short-term rental: these terms need to be confirmed before you quote them — ask Joe.</div>';
+  if (sc.rentalType === "str" && (en.data || []).some(function(r){ return r && r.eligible && r.strUnverified; })) banner += '<div class="hint" style="color:#6b4e00;padding:10px 0 0">⚠ Short-term rental: some of these terms aren't confirmed for short-term rentals yet — ask Joe before quoting.</div>';
   var none = '';
   if (!anyEligible){
     // Joe 2026-10-06: if NO lender we use will do the deal, say so plainly and
