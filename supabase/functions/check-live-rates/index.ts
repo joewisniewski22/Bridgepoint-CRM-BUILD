@@ -1369,6 +1369,7 @@ function adAdjust(s: AdIn, ficoGrid: any = AD_FIT.fico): number | null {
   let adj = base;
   for (const k of adKeys(s)) adj += adMain(k, s);
   // Cash-out under a 700 FICO costs extra (measured 10/8/26, US and FN alike): -0.125 to 65% CLTV, -0.25 at 70%.
+  if (s.fico < 700 && s.purpose === "cashout") adj += adCltvBucket(s.cltv) <= 65 ? -0.125 : -0.25;
   return Math.round(adj * 1000) / 1000;
 }
 // Every main adjustment was measured directly in single-factor sweeps
@@ -1419,6 +1420,8 @@ const AD_CIT_TABLES: Record<string, AdCitTable> = {
 function adCitAdjust(s: AdIn): number | null {
   const T = AD_CIT_TABLES[s.cit]; if (!T) return null;
   if (T.noStates.indexOf(s.st) !== -1 || AD_NO_STATES.indexOf(s.st) !== -1) return null;
+  // Same layered "no"s as US borrowers (random test: the only misses were these, FN with DSCR < 1.00).
+  if (s.dscr < 1.0 && (s.fico < 680 || s.pt === "condo" || s.pt === "condotel")) return null;
   const ci = AD_CLTV_COLS.indexOf(adCltvBucket(s.cltv));
   const fk = String(Math.min(780, Math.floor(s.fico / 20) * 20));
   const row = T.grid[fk]; if (!row || ci < 0) return null;
@@ -1431,6 +1434,7 @@ function adCitAdjust(s: AdIn): number | null {
   const ab = adAmtBand(s.amt); if (ab !== "a1") keys.push(ab);
   if (s.st === "NY") keys.push("ny");
   for (const k of keys) { const v = (T.fac[k] || [])[ci]; if (v == null) return null; adj += v; }
+  if (s.fico < 700 && s.purpose === "cashout") adj += adCltvBucket(s.cltv) <= 65 ? -0.125 : -0.25;
   if (s.amt > adMaxLoan(s.fico, s.cltv, s.purpose)) return null;
   return Math.round(adj * 1000) / 1000;
 }
