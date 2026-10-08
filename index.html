@@ -13137,7 +13137,7 @@ function lpRenderResults(key){
     ' Checked live ' + (en.ranAt ? new Date(en.ranAt).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "") + '.</div>';
   var banner = stale ? '<div class="hint" style="color:var(--c-rust);padding:10px 0 0">You\'ve changed something since these were checked — check live rates again to refresh them.</div>' : '';
   // Short-term rental rules aren't confirmed per lender yet -- say so in plain terms.
-  if (sc.rentalType === "str" && (en.data || []).some(function(r){ return r && r.eligible && r.strUnverified; })) banner += '<div class="hint" style="color:#6b4e00;padding:10px 0 0">⚠ Short-term rental: some of these terms aren't confirmed for short-term rentals yet — ask Joe before quoting.</div>';
+  if (sc.rentalType === "str" && (en.data || []).some(function(r){ return r && r.eligible && r.strUnverified; })) banner += '<div class="hint" style="color:#6b4e00;padding:10px 0 0">⚠ Short-term rental: some of these terms are not confirmed for short-term rentals yet — ask Joe before quoting.</div>';
   var none = '';
   if (!anyEligible){
     // Joe 2026-10-06: if NO lender we use will do the deal, say so plainly and
