@@ -759,7 +759,7 @@ async function checkNextresRtl(s: Scenario): Promise<LenderResult> {
     experience: exp.experience,
     howManyExperiences: exp.how,
     propertyType: NEXTRES_PROPERTY_TYPE[s.propertyType] || "SFR-Detached",
-    numberOfUnits: s.propertyType === "Duplex" || s.propertyType === "2-4 Unit" ? 2 : 1,
+    numberOfUnits: s.propertyType === "Duplex" ? 2 : s.propertyType === "2-4 Unit" ? Math.min(4, Math.max(2, Number((s as any).numUnits) || 2)) : 1,
     bankruptcy: "null-null-null",
     foreclosure: "null-null",
     deedInLieu: "null-null",
@@ -888,7 +888,7 @@ async function checkNextresAt(s: Scenario): Promise<LenderResult> {
     asIsValue: fmtMoney(s.currentValue || s.purchasePrice),
     closingCostEstimate: fmtMoney((s.loanAmount || 0) * 0.02),
     propertyType: NEXTRES_PROPERTY_TYPE[s.propertyType] || "SFR-Detached",
-    numberOfUnits: s.propertyType === "Duplex" || s.propertyType === "2-4 Unit" ? 2 : 1,
+    numberOfUnits: s.propertyType === "Duplex" ? 2 : s.propertyType === "2-4 Unit" ? Math.min(4, Math.max(2, Number((s as any).numUnits) || 2)) : 1,
     prepaymentPenalty: NEXTRES_PREPAY[s.prepayTerm || "5yr"] || "60-5/5/5/5/5",
     residency: NEXTRES_CITIZENSHIP[s.citizenshipStatus || "US Citizen"] || "US Citizen",
     amortizationType: "Fixed",
@@ -900,7 +900,7 @@ async function checkNextresAt(s: Scenario): Promise<LenderResult> {
     decliningMarketProperty: s.decliningMarket === "yes",
     isNewConstructionProperty: false,
     isPropertyInLeasableState: true,
-    isShortTermRental: false,
+    isShortTermRental: (s as any).rentalType === "str",
     bankruptcy: "null-null-null",
     foreclosure: "null-null",
     deedInLieu: "null-null",
@@ -1316,7 +1316,11 @@ function adKeys(s: AdIn): string[] {
 // logged-in A&D session in the Claude app). It replaces the base ladder (B)
 // and the credit x CLTV grid (fico) when present; everything else stays the
 // measured structure above. Cached per function instance for 10 minutes.
-let adSnapCache: { at: number; B: any; fico: any; asOf: string | null; captured: string | null } | null = null;
+// Foreign nationals price off their OWN base ladder (measured 2026-10-08, sheet 10/07/26 1:58 PM;
+// consistent across 5 scenarios): up to 2 pts worse than the US ladder at low rates, slightly better
+// higher up, and it stops at 10.25%. The daily refresh re-measures it into the snapshot as Bfn.
+const AD_FN_B: Record<string, number> = {"6.875":-0.625,"6.99":-1,"7.125":-1.375,"7.25":-1.75,"7.375":-2.125,"7.49":-2.375,"7.625":-2.625,"7.75":-2.875,"7.875":-3,"7.99":-3.125,"8.125":-3.25,"8.25":-3.375,"8.375":-3.5,"8.49":-3.625,"8.625":-3.75,"8.75":-3.875,"8.875":-4,"8.99":-4.125,"9.125":-4.25,"9.25":-4.375,"9.375":-4.5,"9.49":-4.625,"9.625":-4.75,"9.75":-4.875,"9.99":-5,"10.125":-5.125,"10.25":-5.25};
+let adSnapCache: { at: number; B: any; Bfn: any; fico: any; asOf: string | null; captured: string | null } | null = null;
 async function adSnapshot() {
   if (adSnapCache && Date.now() - adSnapCache.at < 600000) return adSnapCache;
   let row: any = null;
@@ -1324,7 +1328,7 @@ async function adSnapshot() {
     const r = await fetch(SUPABASE_URL_RCN + "/rest/v1/lender_pricing_snapshots?lender=eq.ad&select=data,sheet_as_of,captured_at", { headers: { apikey: SERVICE_KEY_RCN, Authorization: "Bearer " + SERVICE_KEY_RCN } }).catch(() => null);
     if (r && r.ok) { const rows = await r.json().catch(() => []); row = rows && rows[0]; }
   }
-  adSnapCache = { at: Date.now(), B: (row && row.data && row.data.B) || AD_FIT.B, fico: (row && row.data && row.data.fico) || AD_FIT.fico, asOf: row ? row.sheet_as_of : AD_SNAPSHOT, captured: row ? row.captured_at : null };
+  adSnapCache = { at: Date.now(), B: (row && row.data && row.data.B) || AD_FIT.B, Bfn: (row && row.data && row.data.Bfn) || AD_FN_B, fico: (row && row.data && row.data.fico) || AD_FIT.fico, asOf: row ? row.sheet_as_of : AD_SNAPSHOT, captured: row ? row.captured_at : null };
   return adSnapCache;
 }
 // A&D DSCR Matrix 10/01/2026: max loan amount by credit tier and HCLTV.
@@ -1364,7 +1368,7 @@ function adAdjust(s: AdIn, ficoGrid: any = AD_FIT.fico): number | null {
   if (s.amt > adMaxLoan(s.fico, s.cltv, s.purpose)) return null;
   let adj = base;
   for (const k of adKeys(s)) adj += adMain(k, s);
-  if (s.fico < 680 && s.purpose === "cashout") adj -= 0.125;
+  // Cash-out under a 700 FICO costs extra (measured 10/8/26, US and FN alike): -0.125 to 65% CLTV, -0.25 at 70%.
   return Math.round(adj * 1000) / 1000;
 }
 // Every main adjustment was measured directly in single-factor sweeps
@@ -1387,6 +1391,49 @@ function adMain(k: string, s: AdIn): number {
   return t[a] ? t[a](c) : 0;
 }
 const AD_FN_INTERACT = { "fnpu|50": 0.125, "fnpt|75": -0.25, "fnpt|50": 0.125, "fnpu|70": 0.25, "fnpt|55": 0.125 };
+// Foreign national (A&D citizenship 157) and ITIN (158) -- measured directly 2026-10-07 on A&D's
+// pricing service as their OWN grids (not US + offset, which only matched 32-50%): total
+// adjustment = grid[fico][cltv] + factor[cltv] for each non-base factor, measured at 740 FICO.
+// null = A&D doesn't offer it. CLTV columns: 50,55,60,65,70,75,80. Condo values are Florida's
+// (the sweep ran in Tampa; FL condos price worst), so other states are conservative.
+const AD_CLTV_COLS = [50, 55, 60, 65, 70, 75, 80];
+type AdCitTable = { grid: Record<string, Array<number | null>>; fac: Record<string, Array<number | null>>; noStates: string[] };
+const AD_CIT_TABLES: Record<string, AdCitTable> = {
+  fn: {
+    grid: { "660": [-2.125,-2.125,-2.75,-3.25,null,null,null], "680": [-1.875,-1.875,-2.125,-2.625,-2.875,-4.375,null], "700": [-1.625,-1.625,-2,-2.5,-2.75,-4.125,null], "720": [-1.5,-1.5,-1.625,-2,-2.5,-3.875,null], "740": [-1.375,-1.375,-1.5,-1.625,-1.875,-3.125,null], "760": [-1.125,-1.125,-1.375,-1.5,-1.625,-2.875,null], "780": [-1.125,-1.125,-1.375,-1.5,-1.625,-2.875,null] },
+    fac: { d2: [-0.375,-0.375,-0.375,-0.375,-0.375,-0.375,null], d3: [-0.375,-0.375,-0.375,-0.375,-0.375,-0.375,null], d4: [-0.625,-0.625,-0.875,-1.125,-1.375,null,null], d5: [-1.625,-1.625,-1.875,-2.125,null,null,null],
+      rt: [0,0,0,0,0,0,null], cashout: [-0.375,-0.375,-0.375,-0.5,-0.75,null,null], condo: [-0.5,-0.5,-0.5,-0.5,-0.5,-0.75,null], "2-4": [-0.375,-0.375,-0.5,-0.5,-0.5,-0.5,null], rural: [-0.5,-0.5,-0.5,-0.5,-0.5,-0.625,null],
+      none: [-1.5,-1.5,-1.5,-1.5,-1.5,-1.5,null], "1yr": [-1,-1,-1,-1,-1,-1,null], "2yr": [-0.5,-0.5,-0.5,-0.5,-0.5,-0.5,null], "4yr": [0.25,0.25,0.25,0.25,0.25,0.25,null], "5yr": [0.375,0.375,0.375,0.375,0.375,0.375,null],
+      a0: [-0.25,-0.25,-0.25,-0.25,-0.25,-0.25,null], a2: [-0.25,-0.25,-0.25,-0.25,-0.25,null,null], a3: [-0.75,-0.75,-0.75,null,null,null,null], a4: [-1,-1,null,null,null,null,null], ny: [0,0,0,0,-0.25,-0.5,null] },
+    noStates: [],
+  },
+  itin: {
+    grid: { "700": [-1.625,-1.625,-1.75,-2,-2.5,null,null], "720": [-1.375,-1.375,-1.5,-1.75,-2.125,null,null], "740": [-1.25,-1.25,-1.375,-1.5,-1.875,null,null], "760": [-1.125,-1.125,-1.25,-1.375,-1.625,null,null], "780": [-1,-1,-1.125,-1.25,-1.5,null,null] },
+    fac: { d2: [-0.25,-0.25,-0.25,-0.25,-0.25,null,null], d3: [-0.25,-0.25,-0.25,-0.25,-0.25,null,null], d4: [null,null,null,null,null,null,null], d5: [null,null,null,null,null,null,null],
+      rt: [0,0,0,0,0,null,null], cashout: [null,null,null,null,null,null,null], condo: [-0.5,-0.5,-0.5,-0.5,-0.5,null,null], "2-4": [-0.375,-0.375,-0.5,-0.5,-0.5,null,null], rural: [-0.5,-0.5,-0.5,-0.5,-0.5,null,null],
+      none: [-1.5,-1.5,-1.5,-1.5,-1.5,null,null], "1yr": [-1,-1,-1,-1,-1,null,null], "2yr": [-0.5,-0.5,-0.5,-0.5,-0.5,null,null], "4yr": [0.25,0.25,0.25,0.25,0.25,null,null], "5yr": [0.375,0.375,0.375,0.375,0.375,null,null],
+      a0: [-0.25,-0.25,-0.25,-0.25,-0.25,null,null], a2: [0,0,0,0,0,null,null], a3: [null,null,null,null,null,null,null], a4: [null,null,null,null,null,null,null], ny: [0,0,0,0,0,null,null] },
+    noStates: [],
+  },
+};
+function adCitAdjust(s: AdIn): number | null {
+  const T = AD_CIT_TABLES[s.cit]; if (!T) return null;
+  if (T.noStates.indexOf(s.st) !== -1 || AD_NO_STATES.indexOf(s.st) !== -1) return null;
+  const ci = AD_CLTV_COLS.indexOf(adCltvBucket(s.cltv));
+  const fk = String(Math.min(780, Math.floor(s.fico / 20) * 20));
+  const row = T.grid[fk]; if (!row || ci < 0) return null;
+  let adj = row[ci]; if (adj == null) return null;
+  const keys: string[] = [];
+  const db = adDscrBand(s.dscr); if (db !== "d1") keys.push(db);
+  if (s.purpose === "cashout") keys.push("cashout"); else if (s.purpose === "rt") keys.push("rt");
+  if (s.pt === "condo" || s.pt === "2-4" || s.pt === "rural") keys.push(s.pt);
+  if (s.ppp !== "3yr") keys.push(s.ppp);
+  const ab = adAmtBand(s.amt); if (ab !== "a1") keys.push(ab);
+  if (s.st === "NY") keys.push("ny");
+  for (const k of keys) { const v = (T.fac[k] || [])[ci]; if (v == null) return null; adj += v; }
+  if (s.amt > adMaxLoan(s.fico, s.cltv, s.purpose)) return null;
+  return Math.round(adj * 1000) / 1000;
+}
 function adLadder(adj: number, lenderPaid: boolean, B: any = AD_FIT.B): Array<[number, number]> {
   return Object.entries(B).map(([r, b]) => [Number(r), Math.max(-AD_MAX_CREDIT, Math.round(((b as number) - adj) * 1000) / 1000) + (lenderPaid ? AD_LPC : 0)] as [number, number]).sort((a, b) => a[0] - b[0]);
 }
@@ -1409,9 +1456,8 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
   if (!pt) return { lender: L, eligible: false, source: "model", reason: "A&D's DSCR program doesn't take " + s.propertyType + " properties." };
   const cit = s.citizenshipStatus === "Foreign National" ? "fn" : s.citizenshipStatus === "ITIN" ? "itin" : s.citizenshipStatus === "Non-Permanent Resident" ? "np" : "us";
   if (!s.creditScore || s.creditScore < 620) return { lender: L, eligible: false, source: "model", reason: "A&D needs at least a 620 credit score." };
-  // Scenario-runner rule (Joe 10/7): A&D foreign-national / ITIN pricing only matched A&D 32-50% of the
-  // time in testing, so no price is shown until it's re-measured -- confirm those on AIM.
-  if (cit === "fn" || cit === "itin") return { lender: L, eligible: false, source: "model", reason: "A&D " + (cit === "fn" ? "foreign-national" : "ITIN") + " pricing isn't verified to our accuracy bar yet — price it on A&D's AIM pricer." };
+  // Foreign national / ITIN: priced from their own measured grids (AD_CIT_TABLES, 2026-10-07).
+  if (cit === "fn" && !s.creditScore) return { lender: L, eligible: false, source: "model", reason: "A&D foreign nationals need a U.S. credit score on this program." };
   const refi = s.transactionType !== "purchase";
   const value = refi ? (s.currentValue || s.purchasePrice) : Math.min(s.purchasePrice || Infinity, s.currentValue || Infinity);
   if (!value || !isFinite(value)) return { lender: L, eligible: false, source: "model", reason: refi ? "Needs the current value." : "Needs the purchase price." };
@@ -1443,7 +1489,9 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
     return pppAsked;
   };
   const escrow = (s.monthlyTaxes || 0) + (s.monthlyInsurance || 0) + (s.monthlyHoa || 0);
+  const strD = (s as any).rentalType === "str";
   const snap = await adSnapshot();
+  const ladB = cit === "fn" ? snap.Bfn : snap.B;
   const ageDays = snap.captured ? (Date.now() - new Date(snap.captured).getTime()) / 86400000 : null;
   // Highest CLTV A&D will do on this deal: try 80 down to 50; DSCR depends on
   // the par rate, which depends on the DSCR band -- iterate twice.
@@ -1451,18 +1499,33 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
   for (const cltv of tiers) {
     const loan = s.loanAmount || Math.floor(value * cltv / 100 / 500) * 500;
     if (loan < 75000) continue;
-    let dscr = 1.3, adj: number | null = null, par = 0;
     const ppp = pppFor(loan);
-    for (let i = 0; i < 3; i++) {
-      adj = adAdjust({ fico: s.creditScore, cltv, dscr, ppp, purpose, pt, cit, amt: loan, st }, snap.fico);
-      if (adj == null) break;
-      const lad = adLadder(adj, false, snap.B);
-      par = (lad.find((x) => x[1] <= 0) || lad[lad.length - 1])[0];
-      dscr = (s.rentEstimate || 0) / (adMonthlyPI(loan, par) + escrow);
+    const adjAt = (dscr: number): number | null => {
+      const ain: AdIn = { fico: s.creditScore, cltv, dscr, ppp, purpose, pt: s.ruralStatus === "rural" && pt === "sfr" ? "rural" : pt, cit, amt: loan, st };
+      let a = (cit === "fn" || cit === "itin") ? adCitAdjust(ain) : adAdjust(ain, snap.fico);
+      // Short-term rental (A&D "Short Term Rental" flag, measured 2026-10-07): flat by CLTV, no
+      // interaction with any other factor, same eligibility. FN/ITIN + STR wasn't measured.
+      if (a != null && strD && cit !== "fn" && cit !== "itin") { const cb = adCltvBucket(cltv); a = Math.round((a + (cb <= 70 ? -0.25 : cb <= 75 ? -1.5 : -2.5)) * 1000) / 1000; }
+      return a;
+    };
+    // Par = the lowest rate that prices at par using the adjustments at THAT rate's own DSCR
+    // (iterating could settle on a DSCR from a different rate and quote a deal A&D declines,
+    // e.g. a foreign-national condo whose DSCR falls under 1.00 at par -- found 10/8/26).
+    // If eligibility fails at that DSCR, this CLTV tier is out.
+    let adj: number | null = null;
+    const rates = Object.keys(ladB).map(Number).sort((a, b) => a - b);
+    for (const r of rates) {
+      const a = adjAt((s.rentEstimate || 0) / (adMonthlyPI(loan, r) + escrow));
+      if (a == null) { adj = null; break; }
+      adj = a;
+      if ((ladB as any)[String(r)] - a <= 0) break;
     }
     if (adj == null) continue;
-    const bp = adLadder(adj, false, snap.B).filter((x) => x[1] <= 2.0 && x[1] >= -AD_MAX_CREDIT).slice(0, 7);
-    const lp = adLadder(adj, true, snap.B).filter((x) => x[1] <= 2.0).slice(0, 5);
+    // Show a window of rates centred on par (first rate that costs nothing). Taking the 7 cheapest
+    // rates under 2 points hid par on heavily adjusted deals (FN, STR, low DSCR) -- found 10/8/26.
+    const around = (rows: Array<[number, number]>, before: number, n: number) => { const pi = rows.findIndex((x) => x[1] <= 0); const st = Math.max(0, (pi < 0 ? rows.length - 1 : pi) - before); return rows.slice(st, st + n); };
+    const bp = around(adLadder(adj, false, ladB).filter((x) => x[1] <= 2.0 && x[1] >= -AD_MAX_CREDIT), 3, 7);
+    const lp = around(adLadder(adj, true, ladB).filter((x) => x[1] <= 2.0), 2, 5);
     const pmtD = (rate: number) => Math.round((s.rentEstimate || 0) / (adMonthlyPI(loan, rate) + escrow) * 100) / 100;
     const options = bp.map(([rate, d]) => ({ program: "30-yr fixed · Borrower Paid", rate, price: 100 - d, dscr: pmtD(rate), creditToBorrower: d < 0 }))
       .concat(lp.map(([rate, d]) => ({ program: "30-yr fixed · Lender Paid (A&D pays " + AD_LPC + "%)", rate, price: 100 - d, dscr: pmtD(rate), revenuePts: AD_LPC })));
@@ -1474,7 +1537,8 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
     // A&D "Fees Information" (wholesale, effective 12/26): Non-QM underwriting fee $1,595; plus
     // $80 tax service, $6.95 flood cert, $24.95 MERS (the CRM adds those as lender charges).
     const res: LenderResult = { lender: L, eligible: true, source: "model", options: options as any, loanAmountUsed: loan, maxLoanAmount: loan, assumptions, fees: { lenderFee: 1595 } };
-    if (cit !== "us") { res.rateTolerance = 0.25; assumptions.unshift("Foreign national / ITIN pricing at A&D is only accurate to about 0.25% here — confirm with A&D."); }
+    if (strD && cit !== "fn" && cit !== "itin") { (res as any).strPriced = true; assumptions.push("Short-term rental priced with A&D's STR adjustment (-0.25 to 70% CLTV, -1.5 at 75%, -2.5 at 80%)."); }
+    if (cit === "fn" || cit === "itin") assumptions.push((cit === "fn" ? "Foreign national" : "ITIN") + " pricing from A&D's own grid (measured 10/7/26; base ladder refreshes daily, this grid doesn't — re-measure if A&D changes its FN/ITIN pricing).");
     // A&D reprices every business day; the refresh job runs each weekday morning and fails
     // when the AIM login has expired. More than 1 business day old = flag it loudly.
     const bizOld = adBusinessDaysOld(snap.captured);
@@ -1914,6 +1978,8 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
       if (s.citizenshipStatus === "Foreign National") return { lender: r.lender, eligible: false, source: r.source, reason: "Foreign nationals aren't eligible for Constructive short-term rentals." };
       if ((r.maxLoanAmount || r.loanAmountUsed || 0) < 150000) return { lender: r.lender, eligible: false, source: r.source, reason: "Constructive short-term rentals start at $150,000." };
       r.assumptions = ["Short-term rental at Constructive: full recourse, 1.15 min DSCR on 12-month STR history (or long-term comparable rent), active STR listing and 2 months of platform deposits required."].concat(r.assumptions || []);
+    } else if (r.lender === "NextRes") {
+      r.assumptions = ["Short-term rental priced by NextRes's own engine (short-term rental flag on)."].concat(r.assumptions || []);
     } else if (!(r.lender === "A&D Mortgage" && (r as any).strPriced)) {
       (r as any).strUnverified = true;
       r.assumptions = ["Short-term rental: confirm " + r.lender + " takes STRs and how it counts the rent before quoting."].concat(r.assumptions || []);
