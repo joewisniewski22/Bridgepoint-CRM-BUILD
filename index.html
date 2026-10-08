@@ -4047,12 +4047,15 @@ function lenderFeeForLead(lead){
   if (lead.lenderFeeOverride != null) return lead.lenderFeeOverride;
   if (lead.outsideLender === AD_LENDER) return AD_UW_FEE_NON_QM;
   // Other placed lenders' published fees (Joe 2026-10-06: their fees belong on the term sheet):
-  // RCN Product Fee Sheets: $1,995 closing fee (RTL and rental). Kiavi: fix & flip/bridge
-  // origination $3,500 under $150k, else 1%; no Kiavi fee on rentals.
+  // RCN Product Fee Sheets: $1,995 closing fee (RTL and rental). Kiavi fix & flip/bridge
+  // origination (its pricing engine, 2026-10-07): first-time $3,500 under $150k else 1%;
+  // experienced (3+ flips) the greater of $1,500 or 1%. No Kiavi fee on rentals.
   if (/RCN/i.test(lead.outsideLender || "")) return 1995;
   if (/Kiavi/i.test(lead.outsideLender || "")){
     if (/DSCR|Portfolio/i.test(lead.loanType || "")) return 0;
-    return lead.loanAmount ? (lead.loanAmount < 150000 ? 3500 : Math.round(lead.loanAmount * 0.01)) : 3500;
+    var kPro = Number(lead.experienceDeals || 0) >= 3;
+    if (!lead.loanAmount) return kPro ? 1500 : 3500;
+    return kPro ? Math.max(1500, Math.round(lead.loanAmount * 0.01)) : (lead.loanAmount < 150000 ? 3500 : Math.round(lead.loanAmount * 0.01));
   }
   try {
     var result = evaluatePricing(lead, {});
