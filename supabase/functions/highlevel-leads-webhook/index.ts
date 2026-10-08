@@ -151,8 +151,10 @@ Deno.serve(async (req: Request) => {
 
     // English forms: a repeat submission within 30 days attaches to the existing file
     // instead of creating a duplicate (same rule as the landing pages).
-    if (en && (email || phone)) {
-      const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    // Spanish too (10/8): Meta now also delivers every Facebook lead straight to the CRM
+    // (meta-leads-webhook), so while HighLevel stays connected the same lead arrives twice.
+    if (email || phone) {
+      const since = new Date(Date.now() - (en ? 30 : 3) * 86400000).toISOString().slice(0, 10);
       const digits = (phone || "").replace(/\D/g, "").slice(-10);
       const { data: recent } = await sb.from("leads").select("id,phone,email,activity,assigned_to,name").gte("created_at", since);
       const existing = (recent || []).find((l: Record<string, unknown>) =>
@@ -160,9 +162,9 @@ Deno.serve(async (req: Request) => {
       if (existing) {
         const today0 = new Date().toISOString().slice(0, 10);
         const act = (existing.activity as unknown[]) || [];
-        act.push({ date: today0, type: "note", text: "Filled out the English Facebook lead form again — already on file, no duplicate created.", author: "System" });
+        act.push({ date: today0, type: "note", text: en ? "Filled out the English Facebook lead form again — already on file, no duplicate created." : "HighLevel relayed this Facebook lead too — already on file (it came in directly from Meta), no duplicate created.", author: "System" });
         await sb.from("leads").update({ activity: act }).eq("id", existing.id as string);
-        if (existing.assigned_to) await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: existing.assigned_to, lead_id: existing.id, kind: "hot-lead", text: (existing.name as string) + " just filled out the Facebook lead form again — they're actively shopping", date: today0, read: false });
+        if (en && existing.assigned_to) await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: existing.assigned_to, lead_id: existing.id, kind: "hot-lead", text: (existing.name as string) + " just filled out the Facebook lead form again — they're actively shopping", date: today0, read: false });
         return new Response(JSON.stringify({ ok: true, repeat: true, leadId: existing.id }), { headers: CORS_HEADERS });
       }
     }

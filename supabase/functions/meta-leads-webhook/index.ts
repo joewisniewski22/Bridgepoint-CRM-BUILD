@@ -112,6 +112,20 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const today = new Date().toISOString().slice(0, 10);
   const label = spanish ? "Facebook" : "Meta Ads — " + (loanType || "Lead Form");
 
+  // Meta test leads (Lead Ads Testing Tool / POST {form}/test_leads) carry placeholder
+  // answers like "<test lead: dummy data for email>". Record them so the pipe can be
+  // verified end to end, but as spam with automation off: no LO alert, no texts, no AI.
+  const isTest = fields.some((f) => (f.values || []).some((v) => /test lead|dummy data/i.test(String(v))));
+  if (isTest) {
+    await sb.from("leads").insert({
+      id: "LTEST" + crypto.randomUUID().slice(0, 6).toUpperCase(), name: "TEST — Facebook form " + (formName || formId), source: label, loan_type: loanType,
+      stage: "spam", status: "spam", assigned_to: "owner", created_at: today, created_at_ts: new Date().toISOString(),
+      preferred_language: spanish ? "es" : "en", automation_paused: true, entity_type: "LLC", application_token: crypto.randomUUID(),
+      activity: [{ date: today, type: "note", author: "System", text: "Meta TEST lead (leadgen " + leadgenId + ") — pipe verified; would have routed to " + (spanish ? SPANISH_LO : "the English rotation") + ". No alerts or messages sent." }],
+    });
+    return;
+  }
+
   // Already on file (same phone/email in the last 3 days)? Note it, don't duplicate.
   const since = new Date(Date.now() - 3 * 86400000).toISOString();
   const { data: recent } = await sb.from("leads").select("id, phone, email, activity, assigned_to").gte("created_at_ts", since);
@@ -272,6 +286,23 @@ Deno.serve(async (req: Request) => {
   try { body = await req.json(); } catch (_) { return json({ ok: true, note: "payload not processed" }); }
 
   // ---- admin actions (shared secret) ----
+  // forms: list the Page's lead forms. test-lead: fire a Meta test lead on one form
+  // (replaces any earlier test lead on it) so the whole pipe can be checked.
+  if (body.action === "forms" || body.action === "test-lead") {
+    if (!(await authorized(body))) return json({ error: "not_authorized" }, 403);
+    const pt = await pageToken(META_PAGE_ID);
+    if (!pt) return json({ error: "no_page_token" }, 500);
+    if (body.action === "forms") {
+      const f = await fetch(GRAPH + "/" + META_PAGE_ID + "/leadgen_forms?fields=id,name,locale,status,leads_count,created_time&limit=50&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch((e) => String(e));
+      return json(f);
+    }
+    const formId = String(body.formId || "");
+    if (!/^\d+$/.test(formId)) return json({ error: "formId required" }, 400);
+    const existing = await fetch(GRAPH + "/" + formId + "/test_leads?access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch(() => null);
+    for (const t of (existing && existing.data) || []) await fetch(GRAPH + "/" + t.id + "?access_token=" + encodeURIComponent(pt), { method: "DELETE" }).catch(() => null);
+    const made = await fetch(GRAPH + "/" + formId + "/test_leads", { method: "POST", body: new URLSearchParams({ access_token: pt }) }).then((r) => r.json()).catch((e) => String(e));
+    return json({ deletedOld: ((existing && existing.data) || []).length, created: made });
+  }
   if (body.action === "status" || body.action === "setup") {
     if (!(await authorized(body))) return json({ error: "not_authorized" }, 403);
     const appToken = META_APP_ID + "|" + META_APP_SECRET;
@@ -284,7 +315,10 @@ Deno.serve(async (req: Request) => {
       const cb = SUPABASE_URL + "/functions/v1/meta-leads-webhook";
       out.appSubscription = await fetch(GRAPH + "/" + META_APP_ID + "/subscriptions", { method: "POST", body: new URLSearchParams({ object: "page", callback_url: cb, fields: "leadgen,feed,messages", verify_token: META_VERIFY_TOKEN, include_values: "true", access_token: appToken }) }).then((r) => r.json()).catch((e) => String(e));
       out.igSubscription = await fetch(GRAPH + "/" + META_APP_ID + "/subscriptions", { method: "POST", body: new URLSearchParams({ object: "instagram", callback_url: cb, fields: "comments,messages", verify_token: META_VERIFY_TOKEN, include_values: "true", access_token: appToken }) }).then((r) => r.json()).catch((e) => String(e));
-      if (pt) out.pageSubscription = await fetch(GRAPH + "/" + META_PAGE_ID + "/subscribed_apps", { method: "POST", body: new URLSearchParams({ subscribed_fields: "leadgen,feed,messages", access_token: pt }) }).then((r) => r.json()).catch((e) => String(e));
+      // Messenger ("messages") needs pages_messaging, which the token doesn't have (10/8) --
+      // subscribe what it can: lead forms + page comments. Pass body.fields to override.
+      const pageFields = typeof body.fields === "string" && /^[a-z_,]+$/.test(body.fields) ? body.fields : "leadgen,feed";
+      if (pt) out.pageSubscription = await fetch(GRAPH + "/" + META_PAGE_ID + "/subscribed_apps", { method: "POST", body: new URLSearchParams({ subscribed_fields: pageFields, access_token: pt }) }).then((r) => r.json()).catch((e) => String(e));
     }
     out.appSubscriptions = await fetch(GRAPH + "/" + META_APP_ID + "/subscriptions?access_token=" + encodeURIComponent(appToken)).then((r) => r.json()).catch(() => null);
     if (pt) out.pageSubscribedApps = await fetch(GRAPH + "/" + META_PAGE_ID + "/subscribed_apps?access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch(() => null);
