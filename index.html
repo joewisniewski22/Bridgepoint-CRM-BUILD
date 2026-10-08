@@ -969,9 +969,11 @@ function lenderKeyForLead(lead){
   if (/Kiavi/i.test(ol)) return "kiavi";
   if (/A&D/i.test(ol)) return "ad";
   if (/NextRes/i.test(ol)) return "nextres";
+  if (/Velocity/i.test(ol)) return "velocity";
+  if (/Lend Investors|^LEND\b/i.test(ol)) return "lend";
   return null;
 }
-var LENDER_DOC_LABEL = { constructive:"Constructive", rcn:"RCN", kiavi:"Kiavi", ad:"A&D", nextres:"NextRes" };
+var LENDER_DOC_LABEL = { constructive:"Constructive", rcn:"RCN", kiavi:"Kiavi", ad:"A&D", nextres:"NextRes", velocity:"Velocity", lend:"LEND" };
 var LENDER_DOC_PACKS = {
   constructive: function(lead){
     var rtl = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
@@ -1079,8 +1081,26 @@ var LENDER_DOC_PACKS = {
     if (st && ["AK","AR","KS","MI","MN","NM","RI"].indexOf(st) !== -1) items.push({ name:"No prepay allowed in " + st + " — buydown required (price it with no prepay)", staffOnly:true });
     return items;
   },
-  nextres: function(lead){ return []; }
+  nextres: function(lead){ return []; },
+  // Velocity: public forms (velocitymortgage.com/resources, read 2026-10-08) -- LLC/Entity
+  // Document Checklist + Evidence of Insurance Request (1-4). No written guidelines exist;
+  // eligibility comes from Velocity's own pricing engine.
+  velocity: function(lead){
+    var items = [
+      { name:"Insurance on an ACORD form: dwelling = replacement cost or loan amount, $300,000 liability, 12 months loss of rents, Special/DP3 all perils, no co-insurance, deductible max lesser of $10,000 / 5%, A or A- carrier, 438 BFU clause", staffOnly:true,
+        note:"Mortgagee AND loss payee: Velocity Commercial Capital, LLC ISAOA ATIMA, P.O. Box 7089, Westlake Village, CA 91359-7089 — plus servicer PHH Mortgage Services ISAOA ATIMA, P.O. Box 5954, Springfield, OH 45501-5954." },
+      { name:"Title commitment (Velocity title request form)", staffOnly:true },
+      { name:"Certificate of Good Standing dated within 60 days of closing" },
+      { name:"Member list showing every member / manager and ownership %" }
+    ];
+    var st = stateFromAddress(lead.propertyAddress);
+    if (lead.entityType && lead.entityType !== "Individual") items.push({ name:"Certificate of Authority + Good Standing in the property's state" + (st ? " (" + st + ")" : "") + " if the entity was formed in another state" });
+    return items;
+  },
+  lend: function(lead){ return []; }
 };
+// Lenders whose own submission checklist hasn't been loaded -- the virtual underwriter says so.
+var LENDER_PACK_PENDING = { nextres:true, lend:true };
 function lenderDocPack(lead){
   var key = lenderKeyForLead(lead);
   var fn = key && LENDER_DOC_PACKS[key];
@@ -8358,6 +8378,7 @@ function requestAiDocReview(lead, doc){
   } }).then(function(res){
     if (res.error || !res.data || !res.data.ok) return;
     doc.aiReview = { status: res.data.status, note: res.data.note, reviewedAt: todayISO(), dismissed:false };
+    if (res.data.facts){ doc.aiFacts = res.data.facts; doc.aiFactsPath = doc.storagePath; }
     lead.activity = lead.activity || [];
     lead.activity.push({
       date: todayISO(), type:"note",
@@ -8956,6 +8977,7 @@ function scanAllDocuments(leadId){
     } }).then(function(res){
       if (res.error || !res.data || !res.data.ok) return false;
       d.aiReview = { status: res.data.status, note: res.data.note, reviewedAt: todayISO(), dismissed:false };
+      if (res.data.facts){ d.aiFacts = res.data.facts; d.aiFactsPath = d.storagePath; }
       return res.data.status === "flag";
     }).catch(function(){ return false; });
   });
@@ -8986,6 +9008,557 @@ function dismissAiFlag(leadId, idx){
   if (!lead || !lead.documents[idx] || !lead.documents[idx].aiReview) return;
   lead.documents[idx].aiReview.dismissed = true;
   persist();
+}
+/* ---------------------------------------------------------------------
+   Virtual Underwriter (Joe 2026-10-08): "address any potential flags and
+   hand in complete, ready to clear underwriting files to each lender."
+   Staff only (Joe, Fiore, Erika -- canManageOutsideLender), because it names
+   the lender. One run:
+     1. reads the key facts off every received document (review-document),
+     2. re-runs the placed lender's live rules (check-live-rates) at the file's
+        loan amount on the numbers the documents actually show -- contract
+        price, appraised value / ARV, lease or market rent, payoff,
+     3. checks the lender's document list + open AI document flags,
+     4. cross-checks the documents against the file and each other (names,
+        entity, addresses, dates, insurance, funds to close),
+   then lists every flag with the fix. "Ready" = no lender stops, no open
+   fixes, and a staff sign-off. It's a pre-submission check on the lender's
+   own rules, not an approval -- the lender's underwriter makes the call.
+   Results live in public.lead_underwriting (staff-only RLS), not on the lead.
+--------------------------------------------------------------------- */
+var VU_LENDER_RX = { constructive:/Constructive/i, rcn:/RCN/i, kiavi:/Kiavi/i, ad:/A&D/i, nextres:/NextRes/i, velocity:/Velocity/i, lend:/Lend Investors|^LEND\b/i };
+var VU_LENDER_NAME = { constructive:"Constructive Capital", rcn:"RCN Capital", kiavi:"Kiavi", ad:"A&D Mortgage", nextres:"NextRes", velocity:"Velocity", lend:"LEND" };
+var VU_AREAS = ["Lender fit","Verified numbers","Documents","Cross-checks","Funds to close","Insurance"];
+function vuState(leadId){ ui.vu = ui.vu || {}; return ui.vu[leadId] || (ui.vu[leadId] = { loaded:false, loading:false, running:false, data:null }); }
+function vuLenderKey(lead){ return lenderKeyForLead(lead) || "constructive"; }
+function vuLoad(leadId){
+  var st = vuState(leadId);
+  if (!sb || st.loading) return;
+  st.loading = true;
+  sb.from("lead_underwriting").select("data").eq("lead_id", leadId).maybeSingle().then(function(res){
+    st.loading = false; st.loaded = true;
+    st.data = (res.data && res.data.data) || null;
+    render();
+  }).catch(function(){ st.loading = false; st.loaded = true; render(); });
+}
+function vuLoadAll(){
+  if (!sb || ui.vuAllLoading || ui.vuAll) return;
+  ui.vuAllLoading = true;
+  sb.from("lead_underwriting").select("lead_id, data").then(function(res){
+    ui.vuAllLoading = false;
+    ui.vuAll = {};
+    (res.data || []).forEach(function(r){ ui.vuAll[r.lead_id] = r.data; });
+    render();
+  }).catch(function(){ ui.vuAllLoading = false; ui.vuAll = {}; });
+}
+function vuSave(leadId, data){
+  vuState(leadId).data = data;
+  if (ui.vuAll) ui.vuAll[leadId] = data;
+  if (!sb) return Promise.resolve();
+  return sb.from("lead_underwriting").upsert({ lead_id: leadId, data: data, updated_at: new Date().toISOString() }).then(function(res){
+    if (res.error) showToast("Couldn't save the underwriter results — " + res.error.message);
+  });
+}
+function vuDocs(lead){ return (lead.documents||[]).filter(function(d){ return d.status === "received" && d.storagePath && !d.isTermSheetOption; }); }
+function vuFacts(lead, kind){ return vuDocs(lead).filter(function(d){ return d.aiFacts && d.aiFacts.kind === kind; }).map(function(d){ return { doc:d, f:d.aiFacts }; }); }
+// Changes to the terms, lender or documents make an earlier run out of date.
+function vuFingerprint(lead){
+  return [lead.loanAmount, lead.rate, lead.outsideLender || "", lead.purchasePrice, lead.currentValue, lead.arv, lead.rentEstimate,
+    vuDocs(lead).map(function(d){ return d.storagePath + (d.aiReview && d.aiReview.dismissed ? "~" : ""); }).sort().join("|")].join("#");
+}
+// Checklist items that only apply to some files.
+function vuDocApplies(lead, name){
+  var n = String(name).toLowerCase(), purchase = !lead.transactionType || lead.transactionType === "purchase";
+  var entity = !!(lead.entityType && lead.entityType !== "Individual");
+  if (purchase && /refinance only|payoff statement|payoff letter|owned under 12 months/.test(n)) return false;
+  if (!entity && /closing in an entity|entity was formed|member list|good standing|ein letter/.test(n)) return false;
+  if (/5-20 unit/.test(n) && !/5\+/.test(lead.propertyType || "")) return false;
+  return true;
+}
+// Only truly unknown conditions stay "confirm" -- entity / refi / unit-count ones are decided above.
+function vuDocOptional(name){ return /if applicable|\(if (?!closing in an entity)/i.test(name); }
+// A received document of the right kind satisfies a differently-worded checklist item
+// (e.g. the lender's "Fully executed purchase contract" vs our "Purchase Contract").
+var VU_COVERED_BY = [[/purchase contract/i, "purchase_contract"], [/title commitment/i, "title"], [/tri-merge|credit report/i, "credit_report"], [/good standing/i, "good_standing"],
+  [/^appraisal report/i, "appraisal"], [/lease agreement|leases for/i, "lease"], [/payoff/i, "payoff"], [/hazard insurance|landlord \/ hazard|proof of hazard/i, "insurance"], [/ein letter/i, "ein_letter"]];
+function vuDocCovered(lead, name){
+  var hit = VU_COVERED_BY.filter(function(p){ return p[0].test(name); })[0];
+  return !!hit && vuFacts(lead, hit[1]).length > 0;
+}
+// Who gets it: third parties (title, insurance, appraiser) vs the borrower.
+function vuDocFix(name, meta, optional){
+  if (meta && meta.staffOnly) return "Staff task — order or complete it.";
+  if (optional) return "Collect it, or waive it on the Documents tab if it doesn't apply.";
+  if (/title|cpl|closing protection|appraisal|flood|tax cert|insurance/i.test(name)) return "Order it from the title company / insurance agent / appraiser.";
+  return "Request it from the borrower on the Documents tab.";
+}
+// Reads facts off any received document that doesn't have them yet (3 at a time).
+function vuReadFacts(lead){
+  var todo = vuDocs(lead).filter(function(d){ return !d.aiFacts || d.aiFactsPath !== d.storagePath; });
+  var i = 0;
+  var ctx = { borrowerName: lead.name, loanType: lead.loanType, loanAmount: lead.loanAmount, propertyAddress: lead.propertyAddress, ltv: lead.ltv, citizenshipStatus: lead.citizenshipStatus };
+  function next(){
+    if (i >= todo.length) return Promise.resolve(todo.length);
+    var batch = todo.slice(i, i + 3); i += 3;
+    return Promise.all(batch.map(function(d){
+      return sb.functions.invoke("review-document", { body: { path: d.storagePath, docName: d.name, context: ctx } }).then(function(res){
+        if (!res.data || !res.data.ok) return;
+        if (res.data.facts){ d.aiFacts = res.data.facts; d.aiFactsPath = d.storagePath; }
+        if (!d.aiReview) d.aiReview = { status: res.data.status, note: res.data.note, reviewedAt: todayISO(), dismissed:false };
+      }).catch(function(){});
+    })).then(next);
+  }
+  return next();
+}
+function vuDocValues(lead){
+  var pos = function(x){ return x != null && x > 0; };
+  var min = function(arr){ arr = arr.filter(pos); return arr.length ? Math.min.apply(null, arr) : null; };
+  var latest = function(list, field){
+    var rows = list.filter(function(x){ return pos(x.f[field]); }).sort(function(a, b){ return String(a.f.documentDate || "").localeCompare(String(b.f.documentDate || "")); });
+    return rows.length ? rows[rows.length - 1].f[field] : null;
+  };
+  var appr = vuFacts(lead, "appraisal");
+  var leaseRent = vuFacts(lead, "lease").reduce(function(a, x){ return a + (x.f.monthlyRent || 0); }, 0) || null;
+  return {
+    contractPrice: latest(vuFacts(lead, "purchase_contract"), "purchasePrice"),
+    appraisedValue: min(appr.map(function(x){ return x.f.appraisedValue; })),
+    appraisedArv: min(appr.map(function(x){ return x.f.arv; })),
+    marketRent: min(appr.map(function(x){ return x.f.marketRent; })),
+    leaseRent: leaseRent,
+    payoff: latest(vuFacts(lead, "payoff"), "payoffAmount") || latest(vuFacts(lead, "mortgage_statement"), "payoffAmount")
+  };
+}
+// The pricer scenario for this file (ignoring unsaved pricer edits), at the file's
+// loan amount, with any number the documents show lower/different swapped in.
+function vuScenario(lead, v){
+  var en = lpEntry(lead.id), saved = en.edits, sc;
+  en.edits = {};
+  try { sc = lpScenario(lead.id); } finally { en.edits = saved; }
+  sc.loanAmount = lead.loanAmount || null;
+  var used = [];
+  if (lead.loanType === "Portfolio/Blanket") return { sc: sc, used: used };
+  var purchase = sc.transactionType === "purchase";
+  if (purchase && v.contractPrice && sc.purchasePrice && Math.abs(v.contractPrice - sc.purchasePrice) > 1){
+    used.push({ label:"Purchase price", file: sc.purchasePrice, doc: v.contractPrice, src:"purchase contract" });
+    sc.purchasePrice = v.contractPrice;
+  }
+  var baseVal = sc.currentValue || sc.purchasePrice;
+  if (v.appraisedValue && (!baseVal || v.appraisedValue < baseVal - 1)){
+    used.push({ label:"As-is value", file: baseVal, doc: v.appraisedValue, src:"appraisal" });
+    sc.currentValue = v.appraisedValue;
+  }
+  if (sc.arv && v.appraisedArv && v.appraisedArv < sc.arv - 1){
+    used.push({ label:"ARV", file: sc.arv, doc: v.appraisedArv, src:"appraisal" });
+    sc.arv = v.appraisedArv;
+  }
+  if (sc.rentEstimate){
+    var rents = [];
+    if (v.leaseRent) rents.push({ amt: v.leaseRent, src:"lease(s)" });
+    if (v.marketRent) rents.push({ amt: v.marketRent, src:"appraisal market rent" });
+    rents.sort(function(a, b){ return a.amt - b.amt; });
+    if (rents.length && rents[0].amt < sc.rentEstimate - 1){
+      used.push({ label:"Monthly rent", file: sc.rentEstimate, doc: rents[0].amt, src: rents[0].src });
+      sc.rentEstimate = rents[0].amt;
+    }
+  }
+  if (!purchase && v.payoff && v.payoff > (sc.currentLoanBalance || 0) + 1){
+    used.push({ label:"Payoff", file: sc.currentLoanBalance || 0, doc: v.payoff, src:"payoff / mortgage statement" });
+    sc.currentLoanBalance = v.payoff;
+  }
+  return { sc: sc, used: used };
+}
+function vuInsuranceRule(key, lead){
+  var rtl = LP_RTL.indexOf(lead.loanType) !== -1;
+  if (key === "velocity") return { liability:300000, rentLoss:12, velocityDeductible:true, src:"Velocity's insurance requirements" };
+  if (key === "constructive") return rtl ? { liability:300000, src:"Constructive's RTL checklist" } : { rentLoss:6, src:"Constructive's DSCR checklist" };
+  return { src:"" };
+}
+// Every flag carries one-click fixes (Joe 2026-10-08: "easy to use and easy to address any
+// concerns"). Act types: request (checklist doc), ask (new borrower request, lender-neutral
+// wording), na, update (file field -> document value, then re-run), dismissFlag, pricer,
+// docs, rerun, copy (text for an agent / title).
+var VU_FIELD = { "Purchase price":"purchasePrice", "As-is value":"currentValue", "ARV":"arv", "Monthly rent":"rentEstimate", "Payoff":"currentLoanBalance" };
+function vuItemId(i){ var s = i.area + "|" + i.text, h = 0; for (var k = 0; k < s.length; k++){ h = (h * 31 + s.charCodeAt(k)) | 0; } return "i" + (h >>> 0).toString(36); }
+function vuEvaluate(lead, results, built, key){
+  var items = [];
+  var add = function(sev, area, text, fix, acts){ items.push({ sev:sev, area:area, text:text, fix:fix || "", acts:acts || [] }); };
+  var lenderName = VU_LENDER_NAME[key] || lead.outsideLender || "the lender";
+  var rtl = LP_RTL.indexOf(lead.loanType) !== -1;
+  var purchase = !lead.transactionType || lead.transactionType === "purchase";
+  var rate = function(x){ return fmtPct(Math.round(x * 1000) / 1000); };
+  var PRICER = { t:"pricer", label:"Open Pricer" }, DOCS = { t:"docs", label:"Open Documents" };
+  var ask = function(doc, label){ return { t:"ask", doc:doc, label: label || "Ask borrower" }; };
+  var copy = function(text, label){ return { t:"copy", text:text, label: label || "Copy request" }; };
+
+  // 1. Lender fit -- the lender's own rules on the verified numbers.
+  if (!lead.loanAmount) add("stop", "Lender fit", "No loan amount on the file.", "Run the Pricer and apply an option first.", [PRICER]);
+  else if (!results) add("check", "Lender fit", "Couldn't reach the pricer to re-check " + lenderName + "'s rules.", "Run the underwriter again in a minute.", [{ t:"rerun", label:"Try again" }]);
+  else {
+    var rx = VU_LENDER_RX[key];
+    var r = results.filter(function(x){ return rx && rx.test(x.lender || ""); })[0];
+    var others = results.filter(function(x){ return x !== r && x.eligible && !x.unavailable && (x.maxLoanAmount || x.loanAmountUsed || 0) >= lead.loanAmount * 0.999; }).map(function(x){ return x.lender; });
+    if (!r) add("check", "Lender fit", lenderName + " didn't return a result for this scenario.", "Check the Pricer.", [PRICER]);
+    else if (r.unavailable) add("check", "Lender fit", lenderName + " couldn't be checked live: " + (r.reason || "unavailable") + ".", "Re-run once the lender connection is back (it may need a portal sign-in).", [{ t:"rerun", label:"Try again" }]);
+    else if (!r.eligible) add("stop", "Lender fit", lenderName + " declines this file on the verified numbers: " + (r.reason || "no reason given"),
+      others.length ? ("Fix that, or re-place the file — these lenders take it at this amount: " + others.join(", ") + ".") : "Fix that first — no other lender takes it at this amount either.", [PRICER]);
+    else {
+      var max = r.maxLoanAmount || r.loanAmountUsed || null;
+      if (max && lead.loanAmount > max + 1) add("stop", "Lender fit", "Loan amount " + fmtUSD(lead.loanAmount) + " is over " + lenderName + "'s max of " + fmtUSD(max) + " on the verified numbers.", "Lower the loan to " + fmtUSD(max) + " or less and re-send terms, or re-place the file" + (others.length ? " — will take it as is: " + others.join(", ") : "") + ".", [PRICER]);
+      else add("ok", "Lender fit", lenderName + " takes this file at " + fmtUSD(lead.loanAmount) + (max ? " (max " + fmtUSD(max) + ")" : "") + " on the verified numbers.");
+      var opts = (r.options || []).filter(function(o){ return (o.loanAmount || r.loanAmountUsed || 0) >= lead.loanAmount * 0.999; });
+      var best = opts.reduce(function(b, o){ return !b || o.rate < b.rate ? o : b; }, null);
+      if (best && lead.rate != null && lead.rate < best.rate - 0.0005) add("fix", "Lender fit", "The file's rate is " + rate(lead.rate) + " but " + lenderName + "'s best rate at this amount is now " + rate(best.rate) + ".", "Re-price and re-send the term sheet before submitting.", [PRICER]);
+      if (r.strUnverified) add("check", "Lender fit", "Short-term rental: " + lenderName + "'s STR rules aren't verified.", "Confirm with the AE that they take STRs and how they count the rent.");
+      (r.assumptions || []).forEach(function(a){
+        if (/\bconfirm\b/i.test(a) && !/^Short-term rental: confirm/.test(a)) add("check", "Lender fit", a, "Confirm with the AE before submitting.");
+      });
+    }
+  }
+  built.used.forEach(function(u){
+    add("fix", "Verified numbers", u.label + ": the file says " + fmtUSD(u.file) + ", the " + u.src + " shows " + fmtUSD(u.doc) + ". The lender check above used " + fmtUSD(u.doc) + ".", "Update the file to " + fmtUSD(u.doc) + " so the terms and the documents match (then re-send terms if they changed).",
+      VU_FIELD[u.label] ? [{ t:"update", field: VU_FIELD[u.label], value: u.doc, label:"Update file to " + fmtUSD(u.doc) }] : []);
+  });
+
+  // 2. Documents -- the lender's checklist + open AI flags.
+  // When the lender has its own (stricter) version of a standard item, list only the lender's.
+  var patIdx = function(n){ for (var p = 0; p < VU_COVERED_BY.length; p++) if (VU_COVERED_BY[p][0].test(n)) return p; return -1; };
+  var lenderNames = lenderDocPack(lead).map(function(x){ return x.name; });
+  var lenderPats = lenderNames.map(patIdx).filter(function(p){ return p !== -1; });
+  missingRequiredDocs(lead).filter(function(n){
+    return vuDocApplies(lead, n) && !vuDocCovered(lead, n) && !(lenderNames.indexOf(n) === -1 && lenderPats.indexOf(patIdx(n)) !== -1);
+  }).forEach(function(n){
+    var meta = lenderDocMeta(lead, n), optional = vuDocOptional(n), fix = vuDocFix(n, meta, optional);
+    var third = /title company|insurance agent/.test(fix), staff = meta && meta.staffOnly;
+    var acts = staff || third ? [DOCS] : [{ t:"request", doc:n, label:"Ask borrower" }];
+    if (optional || staff) acts.push({ t:"na", doc:n, label: optional ? "Doesn't apply" : "Mark N/A" });
+    add(optional ? "check" : "fix", "Documents", (optional ? "Not on file (only needed if it applies): " : "Missing: ") + n, fix, acts);
+  });
+  if (LENDER_PACK_PENDING[key]) add("check", "Documents", lenderName + "'s own submission checklist isn't loaded yet — only the standard Bridgepoint list was checked.", "Get the checklist from the AE and send it to Joe to load.");
+  (lead.documents || []).forEach(function(d, idx){
+    if (d.status === "received" && d.aiReview && d.aiReview.status === "flag" && !d.aiReview.dismissed) add("fix", "Documents", d.name + " — " + d.aiReview.note, "Get a corrected document, or clear the flag if it's fine.", [{ t:"dismissFlag", idx: idx, label:"It's fine — clear flag" }, ask("Corrected / complete copy of: " + d.name, "Ask for a corrected copy")]);
+  });
+  vuDocs(lead).forEach(function(d){ if (!d.aiFacts) add("check", "Documents", "Couldn't read " + d.name + " automatically (file type or scan quality).", "Look it over by hand.", [DOCS]); });
+
+  // 3. Cross-checks -- documents vs the file and each other.
+  var normEnt = function(s){ return String(s || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\b(llc|l l c|inc|corp|corporation|co|ltd|lp|llp|company|the)\b/g, " ").replace(/\s+/g, " ").trim(); };
+  var ent = normEnt(lead.entityLegalName);
+  var lastNames = [lead.guarantorLastName, lead.coLastName, String(lead.name || "").trim().split(/\s+/).pop()].filter(function(s){ return s && s.length > 1; }).map(function(s){ return s.toLowerCase(); });
+  var personHit = function(names){ return (names || []).some(function(n){ return lastNames.some(function(l){ return n.toLowerCase().indexOf(l) !== -1; }); }); };
+  var entityHit = function(names){ return !!ent && (names || []).some(function(n){ var e = normEnt(n); return e === ent || (ent.length > 3 && (e.indexOf(ent) !== -1 || ent.indexOf(e) !== -1) && e.length > 3); }); };
+  var now = new Date();
+  var daysOld = function(iso){ return iso ? Math.floor((now - new Date(iso + "T00:00:00")) / 86400000) : null; };
+  var addrKey = function(a){ var m = /^\s*(\d+[A-Za-z]?)\s+(?:[NSEW]\.?\s+)?([A-Za-z0-9]+)/.exec(String(a || "")); return m ? (m[1] + " " + m[2]).toLowerCase() : null; };
+  var subj = lead.loanType === "Portfolio/Blanket" ? null : addrKey(lead.propertyAddress);
+  vuDocs(lead).forEach(function(d){
+    var f = d.aiFacts; if (!f) return;
+    var age = daysOld(f.documentDate);
+    if (subj && f.propertyAddress && ["purchase_contract","appraisal","insurance","title","lease","payoff","mortgage_statement"].indexOf(f.kind) !== -1){
+      var k = addrKey(f.propertyAddress);
+      if (k && k !== subj) add("fix", "Cross-checks", d.name + " shows the property as \"" + f.propertyAddress + "\" — the file's address is " + lead.propertyAddress + ".", "Get it corrected, or fix the file's address if the file is wrong.",
+        [copy("Please correct the property address on the " + d.name + " to: " + lead.propertyAddress + ".", "Copy correction request"), DOCS]);
+    }
+    if (f.kind === "id"){
+      if (f.expirationDate && daysOld(f.expirationDate) > 0) add("fix", "Cross-checks", d.name + " expired " + fmtDate(f.expirationDate) + ".", "Get an unexpired ID.", [ask("Current, unexpired government-issued photo ID")]);
+      if (f.personNames.length && lastNames.length && !personHit(f.personNames)) add("fix", "Cross-checks", "Name on " + d.name + " (" + f.personNames.join(", ") + ") doesn't match the borrower.", "Confirm who the guarantor is and get the right ID.", [ask("Government-issued photo ID for " + (lead.guarantorFirstName ? lead.guarantorFirstName + " " + (lead.guarantorLastName || "") : lead.name))]);
+    } else if (f.kind === "bank_statement"){
+      if (age != null && age > 60) add("fix", "Cross-checks", d.name + " is dated " + fmtDate(f.documentDate) + " (" + age + " days old) — lenders want statements within 60 days.", "Request the most recent statement.", [ask("Most recent bank statement (dated within the last 60 days)")]);
+      var holders = f.personNames.concat(f.entityNames);
+      if (holders.length && !personHit(f.personNames) && !entityHit(f.entityNames)) add("check", "Cross-checks", d.name + " is in the name of " + holders.join(", ") + " — not the borrower or the borrowing entity.", "Most lenders need an access letter from the account owner, or a statement in the borrower's name.", [ask("Signed letter from " + holders[0] + " confirming you have full access to the funds in that account")]);
+    } else if (f.kind === "purchase_contract"){
+      if (f.signed === false) add("fix", "Cross-checks", d.name + " isn't fully signed.", "Get the fully executed contract with all addenda.", [ask("Fully signed purchase contract with all addenda")]);
+      var buyers = f.personNames.concat(f.entityNames);
+      if (buyers.length && !personHit(f.personNames) && !entityHit(f.entityNames)) add("check", "Cross-checks", "Buyer on " + d.name + " is " + buyers.join(", ") + " — not the borrower or the borrowing entity.", "If it's being assigned, get the executed assignment; otherwise an addendum adding the borrowing entity.", [ask("Executed assignment of contract, or an addendum adding " + (lead.entityLegalName || "your LLC") + " as the buyer")]);
+    } else if (f.kind === "appraisal"){
+      if (age != null && age > 120) add("check", "Cross-checks", d.name + " is " + age + " days old.", "Most lenders need a recertification after 120 days.");
+    } else if (f.kind === "entity_docs" || f.kind === "ein_letter"){
+      if (!lead.entityLegalName && f.entityNames.length) add("fix", "Cross-checks", "The file has no entity legal name; " + d.name + " shows " + f.entityNames.join(", ") + ".", "Enter the entity legal name on the file.", [{ t:"update", field:"entityLegalName", value: f.entityNames[0], label:"Set entity to " + f.entityNames[0] }]);
+      else if (ent && f.entityNames.length && !entityHit(f.entityNames)) add("fix", "Cross-checks", d.name + " is for " + f.entityNames.join(", ") + " — the file's entity is " + lead.entityLegalName + ".", "Get the right entity's documents, or correct the file.",
+        [ask("Formation documents / operating agreement for " + lead.entityLegalName), { t:"update", field:"entityLegalName", value: f.entityNames[0], label:"File is wrong — use " + f.entityNames[0] }]);
+    } else if (f.kind === "good_standing"){
+      var gsMax = key === "velocity" ? 60 : 90;
+      if (age != null && age > gsMax) add(key === "velocity" ? "fix" : "check", "Cross-checks", d.name + " is dated " + fmtDate(f.documentDate) + " (" + age + " days old).", "Order a fresh certificate" + (key === "velocity" ? " — Velocity needs it within 60 days of closing." : " — most lenders want it recent."), [ask("Certificate of Good Standing dated within the last 30 days")]);
+    } else if (f.kind === "title"){
+      if (key === "ad" && age != null && age > 90) add("fix", "Cross-checks", d.name + " is " + age + " days old — A&D needs the title commitment under 90 days.", "Ask title for an updated commitment.", [copy("Please send an updated title commitment (dated within the last 30 days) for " + lead.propertyAddress + ".", "Copy request for title")]);
+    } else if (f.kind === "credit_report"){
+      if (age != null && age > 90) add("check", "Cross-checks", d.name + " is " + age + " days old.", "Re-pull before submitting if the lender's limit is shorter (A&D: 60 days at submission).");
+    }
+  });
+
+  // 4. Insurance -- lender-specific minimums; one "Copy request for agent" with every change.
+  var ins = vuFacts(lead, "insurance"), rule = vuInsuranceRule(key, lead);
+  ins.forEach(function(x){
+    var f = x.f, nm = x.doc.name, asks = [];
+    var agent = function(){ return copy("Please update the insurance for " + lead.propertyAddress + ": " + asks.join("; ") + ". Send the updated evidence of insurance when ready. Thank you!", "Copy request for agent"); };
+    if (f.dwellingCoverage && lead.loanAmount && f.dwellingCoverage < lead.loanAmount) add("check", "Insurance", nm + ": dwelling coverage " + fmtUSD(f.dwellingCoverage) + " is below the loan amount " + fmtUSD(lead.loanAmount) + ".", "Fine only if it's 100% replacement cost — get the insurer's replacement-cost estimate, or raise coverage.",
+      [copy("Please confirm the dwelling coverage on the policy for " + lead.propertyAddress + " is 100% replacement cost (send the replacement-cost estimate), or raise it to at least " + fmtUSD(lead.loanAmount) + ".", "Copy request for agent")]);
+    var fixes = [];
+    if (rule.liability && f.liabilityCoverage != null && f.liabilityCoverage < rule.liability){ asks.push("liability of at least " + fmtUSD(rule.liability) + " per occurrence"); fixes.push(nm + ": liability " + fmtUSD(f.liabilityCoverage) + " — " + rule.src + " require " + fmtUSD(rule.liability) + "."); }
+    if (!rtl && rule.rentLoss && f.rentLossMonths != null && f.rentLossMonths < rule.rentLoss){ asks.push(rule.rentLoss + " months loss of rents"); fixes.push(nm + ": " + f.rentLossMonths + " months loss of rents — " + rule.src + " require " + rule.rentLoss + "."); }
+    if (rule.velocityDeductible && f.deductible != null && f.dwellingCoverage){
+      var dMax = Math.min(10000, f.dwellingCoverage * 0.05);
+      if (f.deductible > dMax){ asks.push("a deductible no higher than " + fmtUSD(dMax)); fixes.push(nm + ": deductible " + fmtUSD(f.deductible) + " — Velocity's max is " + fmtUSD(dMax) + " (lesser of $10,000 or 5% of dwelling)."); }
+    }
+    if (f.expirationDate && daysOld(f.expirationDate) > -30){ asks.push("a renewal / new term covering at least 12 months from closing"); fixes.push(nm + " expires " + fmtDate(f.expirationDate) + "."); }
+    fixes.forEach(function(t){ add("fix", "Insurance", t, "Send the agent one request with every change.", [agent()]); });
+    if (rule.liability && f.liabilityCoverage == null) add("check", "Insurance", nm + ": liability coverage isn't shown — " + rule.src + " require " + fmtUSD(rule.liability) + ".", "Confirm it with the agent.", [copy("Please confirm the liability coverage (per occurrence) on the policy for " + lead.propertyAddress + " — it needs to be at least " + fmtUSD(rule.liability) + ".", "Copy request for agent")]);
+    if (!rtl && rule.rentLoss && f.rentLossMonths == null) add("check", "Insurance", nm + ": loss-of-rents coverage isn't shown — " + rule.src + " require " + rule.rentLoss + " months.", "Confirm it with the agent.", [copy("Please confirm the policy for " + lead.propertyAddress + " includes " + rule.rentLoss + " months loss of rents.", "Copy request for agent")]);
+  });
+
+  // 5. Funds to close (estimate) -- verified balances vs cash needed + reserves.
+  var stmts = vuFacts(lead, "bank_statement").filter(function(x){ return x.f.endingBalance != null; });
+  var byHolder = {};
+  stmts.forEach(function(x){
+    var h = (x.f.personNames.concat(x.f.entityNames)).join("|").toLowerCase() + "#" + (x.doc.name || "");
+    if (!byHolder[h] || String(x.f.documentDate || "") > String(byHolder[h].f.documentDate || "")) byHolder[h] = x;
+  });
+  var verified = Object.keys(byHolder).reduce(function(a, h){ return a + (byHolder[h].f.endingBalance || 0); }, 0);
+  if (lead.loanAmount){
+    var price = (built.used.filter(function(u){ return u.label === "Purchase price"; })[0] || {}).doc || lead.purchasePrice || 0;
+    var cash = purchase ? Math.max(0, price + (rtl ? (lead.rehabBudget || 0) : 0) - lead.loanAmount) : 0;
+    var closing = Math.round(lead.loanAmount * (lead.pointsCharged || 0) / 100 + (purchase ? price : lead.loanAmount) * 0.03);
+    var reserves = 0, resNote = "";
+    if (key === "ad" && lead.rate){
+      var months = lead.loanAmount > 2000000 ? 12 : lead.loanAmount > 1000000 ? 6 : 3;
+      var pitia = (monthlyPayment(lead.loanAmount, lead.rate, 360) || 0) + (lead.monthlyTaxes || 0) + (lead.monthlyInsurance || 0) + (lead.monthlyHoa || 0);
+      reserves = Math.round(months * pitia); resNote = " + " + months + " months A&D reserves " + fmtUSD(reserves);
+    }
+    var need = cash + closing + reserves;
+    var basis = (purchase ? "down payment" + (rtl ? " + rehab not covered by the loan" : "") + " " + fmtUSD(cash) + " + " : "") + "~3% closing costs + points " + fmtUSD(closing) + resNote;
+    if (!stmts.length) add(need > 0 ? "check" : "ok", "Funds to close", "No bank balance could be read off the documents — estimated need is " + fmtUSD(need) + " (" + basis + ").", "Get current statements showing the funds.", need > 0 ? [ask("Most recent 2 months of bank statements (all pages) showing funds for closing")] : []);
+    else if (verified < need) add("fix", "Funds to close", "Verified balances " + fmtUSD(verified) + " vs about " + fmtUSD(need) + " needed (" + basis + ").", "Get statements for the rest of the funds (or partner / gift funds the lender accepts), or restructure the deal.",
+      [ask("Statements for additional accounts showing at least " + fmtUSD(Math.ceil((need - verified) / 1000) * 1000) + " more available for closing")]);
+    else add("ok", "Funds to close", "Verified balances " + fmtUSD(verified) + " cover the estimated " + fmtUSD(need) + " (" + basis + ").");
+    if (lead.liquidity && stmts.length && verified < lead.liquidity * 0.8) add("check", "Funds to close", "Application says " + fmtUSD(lead.liquidity) + " liquid; statements show " + fmtUSD(verified) + ".", "Ask the borrower for the other accounts.", [ask("Statements for the other accounts listed on your application")]);
+  }
+  items.forEach(function(i){ i.id = vuItemId(i); });
+  return items;
+}
+// Open counts after the staff's "reviewed" checks and overrides.
+function vuTally(d){
+  var items = (d && d.items) || [], acks = (d && d.acks) || {}, ovr = (d && d.overrides) || {};
+  var n = function(f){ return items.filter(f).length; };
+  var stops = n(function(i){ return i.sev === "stop"; });
+  var fixes = n(function(i){ return i.sev === "fix" && !ovr[i.id]; });
+  var checks = n(function(i){ return i.sev === "check" && !acks[i.id]; });
+  return { stops: stops, fixes: fixes, checks: checks, status: stops ? "blocked" : (fixes || checks) ? "conditions" : "ready" };
+}
+function vuRun(leadId){
+  var lead = leadById(leadId), st = vuState(leadId);
+  if (!lead || !sb || !canManageOutsideLender() || st.running) return;
+  st.running = true; st.error = null; render();
+  var key = vuLenderKey(lead), built, prev = st.data;
+  vuReadFacts(lead).then(function(n){
+    if (n) persist();
+    built = vuScenario(lead, vuDocValues(lead));
+    return sb.functions.invoke("check-live-rates", { body: { lead: built.sc } }).then(function(res){
+      return (res.error || !res.data || !res.data.ok) ? null : res.data.results;
+    }).catch(function(){ return null; });
+  }).then(function(results){
+    var items = vuEvaluate(lead, results, built, key);
+    // Keep the staff's reviewed / override / already-asked marks for items that are still there.
+    var keep = function(map){ var out = {}; items.forEach(function(i){ if (map && map[i.id]) out[i.id] = map[i.id]; }); return out; };
+    var data = { ranAt: new Date().toISOString(), ranBy: currentUser().name, lenderKey: key, lenderName: VU_LENDER_NAME[key] || lead.outsideLender,
+      loanAmount: lead.loanAmount, rate: lead.rate, fp: vuFingerprint(lead), items: items,
+      acks: keep(prev && prev.acks), overrides: keep(prev && prev.overrides), actioned: keep(prev && prev.actioned), signoff: null };
+    var t = vuTally(data); data.status = t.status;
+    st.running = false;
+    return vuSave(leadId, data).then(function(){ render(); });
+  }).catch(function(){
+    st.running = false; st.error = "The underwriter hit an error — try again."; render();
+  });
+}
+function vuItem(leadId, itemId){ var d = vuState(leadId).data; return d && (d.items || []).filter(function(i){ return i.id === itemId; })[0]; }
+function vuMark(leadId, map, itemId, val){
+  var d = vuState(leadId).data; if (!d) return;
+  d[map] = d[map] || {};
+  if (val) d[map][itemId] = val; else delete d[map][itemId];
+  d.status = vuTally(d).status;
+  vuSave(leadId, d).then(function(){ render(); });
+}
+function vuDocIdx(lead, name, meta){
+  lead.documents = lead.documents || [];
+  var low = String(name).toLowerCase();
+  for (var i = 0; i < lead.documents.length; i++) if ((lead.documents[i].name || "").toLowerCase() === low) return i;
+  var doc = { name:name, status:"suggested" };
+  if (meta){ doc.lenderKey = meta.lenderKey; if (meta.staffOnly) doc.staffOnly = true; if (meta.note) doc.lenderNote = meta.note; }
+  lead.documents.push(doc);
+  return lead.documents.length - 1;
+}
+// New borrower request (portal + email/text) with plain, lender-neutral wording.
+function vuAskBorrower(lead, names){
+  lead.documents = lead.documents || [];
+  var d = todayISO();
+  names.forEach(function(n){
+    var idx = vuDocIdx(lead, n, null), doc = lead.documents[idx];
+    if (doc.status !== "received"){ doc.status = "requested"; doc.requestedAt = d; }
+  });
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:d, type:"document", text:"Requested " + names.length + " document(s): " + names.join(", "), author: currentUser().name });
+  persist();
+  return notifyBorrowerOfDocs(lead, names, false);
+}
+function vuAct(leadId, itemId, ai){
+  var lead = leadById(leadId), item = vuItem(leadId, itemId);
+  if (!lead || !item || !canManageOutsideLender()) return;
+  var a = (item.acts || [])[ai]; if (!a) return;
+  var done = function(what){ vuMark(leadId, "actioned", itemId, { what: what, by: currentUser().name, at: todayISO() }); };
+  if (a.t === "request"){
+    var idx = vuDocIdx(lead, a.doc, lenderDocMeta(lead, a.doc)), doc = lead.documents[idx];
+    if (doc.status === "suggested") requestChecklistDoc(leadId, idx);
+    else { notifyBorrowerOfDocs(lead, [doc.name], true); persist(); }
+    showToast("Asked the borrower for it"); done("Asked borrower");
+  } else if (a.t === "ask"){
+    vuAskBorrower(lead, [a.doc]); showToast("Sent to the borrower's portal + email/text"); done("Asked borrower");
+  } else if (a.t === "na"){
+    markDocNA(leadId, vuDocIdx(lead, a.doc, lenderDocMeta(lead, a.doc)));
+    vuMark(leadId, "overrides", itemId, { by: currentUser().name, at: todayISO(), note:"Marked N/A" });
+  } else if (a.t === "update"){
+    var old = lead[a.field];
+    lead[a.field] = a.value;
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type:"system", text:"Updated " + a.field.replace(/([A-Z])/g, " $1").toLowerCase() + " from " + (typeof old === "number" ? fmtUSD(old) : (old || "blank")) + " to " + (typeof a.value === "number" ? fmtUSD(a.value) : a.value) + " to match the documents.", author: currentUser().name });
+    if (typeof refreshGuidelineCheck === "function") refreshGuidelineCheck(lead);
+    persist();
+    showToast("File updated — re-checking");
+    vuRun(leadId);
+  } else if (a.t === "dismissFlag"){
+    dismissAiFlag(leadId, a.idx);
+    vuMark(leadId, "overrides", itemId, { by: currentUser().name, at: todayISO(), note:"AI flag cleared" });
+  } else if (a.t === "pricer"){ ui.activeTab = "scenario"; render(); }
+  else if (a.t === "docs"){ ui.activeTab = "documents"; render(); }
+  else if (a.t === "rerun"){ vuRun(leadId); }
+  else if (a.t === "copy"){
+    var ok = function(){ showToast("Copied — paste it into your email or text"); done("Request copied"); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(a.text).then(ok, function(){ window.prompt("Copy this:", a.text); done("Request copied"); });
+    else { window.prompt("Copy this:", a.text); done("Request copied"); }
+  }
+}
+// "Ask the borrower for everything" -- one message with every borrower item still open.
+function vuAskAll(leadId){
+  var lead = leadById(leadId), d = vuState(leadId).data;
+  if (!lead || !d) return;
+  var names = [], ids = [];
+  (d.items || []).forEach(function(i){
+    // Fixes only -- "only if it applies" items and confirms stay a judgment call.
+    if (i.sev !== "fix" || (d.overrides || {})[i.id] || (d.actioned || {})[i.id]) return;
+    var a = (i.acts || []).filter(function(x){ return x.t === "ask" || x.t === "request"; })[0];
+    if (a && names.indexOf(a.doc) === -1){ names.push(a.doc); ids.push(i.id); }
+  });
+  if (!names.length){ showToast("Nothing left to ask the borrower for"); return; }
+  lead.documents = lead.documents || [];
+  names.forEach(function(n){ vuDocIdx(lead, n, lenderDocMeta(lead, n)); });
+  vuAskBorrower(lead, names);
+  d.actioned = d.actioned || {};
+  ids.forEach(function(id){ d.actioned[id] = { what:"Asked borrower", by: currentUser().name, at: todayISO() }; });
+  vuSave(leadId, d).then(function(){ showToast("Sent " + names.length + " item(s) to the borrower in one message"); render(); });
+}
+function vuOverride(leadId, itemId){
+  var note = window.prompt("Why is this OK to submit as is? (saved with your name)");
+  if (!note || !note.trim()) return;
+  vuMark(leadId, "overrides", itemId, { by: currentUser().name, at: todayISO(), note: note.trim() });
+}
+function vuSignOff(leadId){
+  var lead = leadById(leadId), st = vuState(leadId), d = st.data;
+  if (!lead || !d || !canManageOutsideLender()) return;
+  if (vuTally(d).status !== "ready" || d.fp !== vuFingerprint(lead)){ showToast("Re-run the underwriter first — it has to be current and clear"); return; }
+  d.signoff = { by: currentUser().name, at: new Date().toISOString() };
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text:"Underwriting pre-check signed off — file ready to submit.", author: currentUser().name });
+  persist();
+  vuSave(leadId, d).then(function(){ showToast("Signed off — ready to submit"); render(); });
+}
+// Processing Board chip (staff only) -- click opens the file's Underwriter tab.
+function vuBoardChip(lead){
+  if (!canManageOutsideLender() || !ui.vuAll) return "";
+  var d = ui.vuAll[lead.id], chip;
+  if (!d) chip = pbChip("todo", "Underwriter: not run");
+  else if (d.fp !== vuFingerprint(lead)) chip = pbChip("ordered", "Underwriter: re-run");
+  else {
+    var t = vuTally(d);
+    chip = t.status === "ready" ? pbChip(d.signoff ? "done" : "ordered", d.signoff ? "Underwriter: ready" : "Underwriter: sign off")
+      : pbChip("todo", t.stops ? "Underwriter: lender stop" : ("Underwriter: " + (t.fixes + t.checks) + " open"));
+  }
+  return '<a href="#" data-action="select-lead" data-lead="' + lead.id + '" data-tab="underwriter" style="text-decoration:none">' + chip + '</a>';
+}
+function vuWho(i){
+  var a = i.acts || [];
+  if (a.some(function(x){ return x.t === "ask" || x.t === "request"; })) return "borrower";
+  if (a.some(function(x){ return x.t === "copy"; }) || /title company|insurance agent|appraiser/i.test(i.fix)) return "third";
+  return "you";
+}
+function renderTabUnderwriter(lead){
+  if (!canManageOutsideLender()) return '<div class="empty">Staff only.</div>';
+  var st = vuState(lead.id);
+  if (!st.loaded && !st.loading) vuLoad(lead.id);
+  var key = vuLenderKey(lead), lenderName = VU_LENDER_NAME[key] || lead.outsideLender || "the lender";
+  var d = st.data;
+  var stale = !!d && (d.fp !== vuFingerprint(lead) || d.lenderKey !== key);
+  // Opening the tab runs it (once per visit) when it's never run or out of date.
+  if (st.loaded && !st.running && !st.autoRan && (!d || stale) && lead.loanAmount){ st.autoRan = true; setTimeout(function(){ vuRun(lead.id); }, 0); }
+  var runBtn = '<button class="btn ' + (d && !stale ? 'btn-ghost btn-sm' : 'btn-primary') + '" type="button" data-action="vu-run" data-lead="' + lead.id + '"' + (st.running ? ' disabled' : '') + '>' + (st.running ? 'Checking the file…' : (d ? '↻ Re-check' : 'Run underwriter')) + '</button>';
+  var head = '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">' +
+    '<div><div class="rail-title" style="margin:0">Underwriter — submitting to ' + esc(lenderName) + '</div>' +
+    '<div class="hint" style="margin-top:2px">Checks the file the way ' + esc(lenderName) + '\'s underwriter will. Every flag has a button to fix it. Staff only.</div></div>' + runBtn + '</div>';
+  if (st.running) head += '<div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--c-forest-bg)">Reading the documents and re-checking ' + esc(lenderName) + '\'s rules… (up to a minute on a big file)</div>';
+  if (st.error) head += '<div class="footnote" style="padding-top:8px;color:var(--c-rust)">' + esc(st.error) + '</div>';
+  if (!d) return head + (st.running ? '' : (st.loading ? '<div class="empty">Loading…</div>' : '<div class="empty" style="margin-top:12px">' + (lead.loanAmount ? 'Not run on this file yet.' : 'Apply terms from the Pricer first, then run the underwriter.') + '</div>'));
+  var t = vuTally(d), acks = d.acks || {}, ovr = d.overrides || {}, actioned = d.actioned || {};
+  var open = (d.items || []).filter(function(i){ return (i.sev === "stop") || (i.sev === "fix" && !ovr[i.id]) || (i.sev === "check" && !acks[i.id]); });
+  var banner = t.status === "ready"
+    ? ['#e6f4ea', '#1e6b35', d.signoff ? ('✓ Ready to submit to ' + d.lenderName + ' — signed off by ' + d.signoff.by + ' ' + fmtDate(d.signoff.at.slice(0, 10))) : ('✓ Everything is clear for ' + d.lenderName + ' — sign off below to mark it ready.')]
+    : t.stops ? ['#fbe9e7', '#9a2b1a', '⛔ ' + d.lenderName + ' won\'t take this file as it stands — see "Lender fit" first.']
+    : ['#fff4d6', '#6b4e00', open.length + ' thing' + (open.length === 1 ? '' : 's') + ' left before this goes to ' + d.lenderName + '.'];
+  var out = head + '<div style="margin-top:12px;padding:12px 14px;border-radius:8px;background:' + banner[0] + ';color:' + banner[1] + ';font-weight:600;font-size:15px">' + esc(banner[2]) + '</div>';
+  if (stale && !st.running) out += '<div class="footnote" style="padding-top:6px;color:var(--c-rust)">Something changed since the last check (' + fmtDate(d.ranAt.slice(0, 10)) + ') — press Re-check.</div>';
+  // Who has to move: one line, plus a single "ask the borrower for everything" button.
+  if (open.length && t.status !== "ready"){
+    var who = { borrower:0, third:0, you:0 };
+    open.forEach(function(i){ if (i.sev === "check") return; who[vuWho(i)]++; });
+    var askable = open.filter(function(i){ return i.sev === "fix" && vuWho(i) === "borrower" && !actioned[i.id]; }).length;
+    var parts = [];
+    if (who.borrower) parts.push(who.borrower + ' from the borrower');
+    if (who.third) parts.push(who.third + ' from title / insurance / appraiser');
+    if (who.you) parts.push(who.you + ' for you');
+    if (t.checks) parts.push(t.checks + ' to confirm');
+    out += '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px">' +
+      '<div class="hint" style="margin:0">' + esc(parts.join(' · ')) + '</div>' +
+      (askable ? '<button class="btn btn-sm btn-primary" type="button" data-action="vu-ask-all" data-lead="' + lead.id + '">Ask the borrower for all ' + askable + ' in one message</button>' : '') + '</div>';
+  }
+  var icon = { stop:['⛔','#9a2b1a'], fix:['⚠','#8a5a00'], check:['?','#5b6b7a'], ok:['✓','#1e6b35'] };
+  var btn = function(action, label, extra, primary){ return '<button class="btn btn-sm ' + (primary ? 'btn-primary' : 'btn-ghost') + '" type="button" data-action="' + action + '" data-lead="' + lead.id + '"' + extra + '>' + esc(label) + '</button>'; };
+  var rowHTML = function(i){
+    var resolved = (i.sev === "fix" && ovr[i.id]) || (i.sev === "check" && acks[i.id]);
+    var ic = resolved ? icon.ok : (icon[i.sev] || icon.check);
+    var buttons = '';
+    if (!resolved && i.sev !== "ok"){
+      buttons = (i.acts || []).map(function(a, ai){ return btn("vu-act", a.label, ' data-item="' + i.id + '" data-ai="' + ai + '"', ai === 0); }).join(" ");
+      if (i.sev === "check") buttons += ' ' + btn("vu-ack", "Reviewed — OK", ' data-item="' + i.id + '"', !(i.acts || []).length);
+      if (i.sev === "fix") buttons += ' ' + btn("vu-override", "OK as is…", ' data-item="' + i.id + '"');
+    } else if (resolved){
+      buttons = btn(i.sev === "check" ? "vu-ack-undo" : "vu-override-undo", "Undo", ' data-item="' + i.id + '"');
+    }
+    var meta = resolved ? (i.sev === "check" ? 'Reviewed by ' + acks[i.id].by + ' ' + fmtDate(acks[i.id].at) : 'OK\'d by ' + ovr[i.id].by + ' ' + fmtDate(ovr[i.id].at) + (ovr[i.id].note ? ' — ' + ovr[i.id].note : ''))
+      : actioned[i.id] ? ('✓ ' + actioned[i.id].what + ' ' + fmtDate(actioned[i.id].at) + ' by ' + actioned[i.id].by + ' — waiting on it; re-check when it comes in') : '';
+    return '<div style="display:flex;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;' + (resolved ? 'opacity:.6' : '') + '">' +
+      '<div style="font-weight:700;color:' + ic[1] + ';min-width:16px">' + ic[0] + '</div>' +
+      '<div style="flex:1"><div>' + esc(i.text) + '</div>' +
+        (i.fix && !resolved && i.sev !== "ok" ? '<div class="hint" style="margin-top:2px">' + esc(i.fix) + '</div>' : '') +
+        (meta ? '<div class="hint" style="margin-top:2px;color:#1e6b35">' + esc(meta) + '</div>' : '') +
+        (buttons ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' + buttons + '</div>' : '') +
+      '</div></div>';
+  };
+  var order = { stop:0, fix:1, check:2, ok:3 };
+  var rank = function(i){ return ((i.sev === "fix" && ovr[i.id]) || (i.sev === "check" && acks[i.id])) ? 4 : order[i.sev]; };
+  VU_AREAS.forEach(function(area){
+    var list = (d.items || []).filter(function(i){ return i.area === area; });
+    if (!list.length) return;
+    list.sort(function(a, b){ return rank(a) - rank(b); });
+    var openN = list.filter(function(i){ return rank(i) < 3; }).length;
+    out += '<div class="rail-title" style="margin:16px 0 6px">' + esc(area) + (openN ? ' <span class="hint">· ' + openN + ' open</span>' : ' <span class="hint" style="color:#1e6b35">· all clear</span>') + '</div>' + list.map(rowHTML).join("");
+  });
+  if (t.status === "ready" && !d.signoff && !stale) out += '<div style="margin-top:14px"><button class="btn btn-primary" type="button" data-action="vu-signoff" data-lead="' + lead.id + '">✓ Sign off — ready to submit to ' + esc(d.lenderName) + '</button></div>';
+  out += '<div class="footnote" style="padding-top:12px">Last checked ' + fmtDate(d.ranAt.slice(0, 10)) + ' by ' + esc(d.ranBy || "") + '. "Ask borrower" sends the request to their portal by email/text (no lender names). "OK as is…" saves your reason. This is a pre-submission check against the lender\'s own rules and your documents — not an approval. Funds to close is an estimate (≈3% closing costs).</div>';
+  return out;
 }
 function aiFlaggedDocs(){
   var out = [];
@@ -10789,7 +11362,8 @@ function pbChip(state, label){
   return '<span title="' + esc(label) + ': ' + (state === "done" ? "received" : state === "ordered" ? "ordered / waiting" : "not started") + '" style="display:inline-block;padding:1px 6px;border-radius:999px;background:' + c[0] + ';color:' + c[1] + ';font-size:11px;font-weight:600;margin:1px 2px;white-space:nowrap">' + c[2] + ' ' + esc(label) + '</span>';
 }
 function renderProcessingBoard(){
-  var leads = state.leads.filter(function(l){ return l.status === "active" && PROCESSING_STAGES.indexOf(l.stage) !== -1 && processorOwns(l); });
+  if (canManageOutsideLender()) vuLoadAll();
+  var leads =state.leads.filter(function(l){ return l.status === "active" && PROCESSING_STAGES.indexOf(l.stage) !== -1 && processorOwns(l); });
   var rows = leads.map(function(l){ return { lead: l, s: processingStatus(l) }; });
   var filt = ui.pbFilter || myPrefs().boardDefaultFilter || "all";
   var qd = myPrefs().quietDays || 5, hideChk = myPrefs().boardHiddenChecks || [];
@@ -10817,7 +11391,8 @@ function renderProcessingBoard(){
     var checklist = (showChk("Docs") ? pbChip(docsState, "Docs " + s.docsIn + "/" + s.docsTotal) : "") + (showChk("Title") ? pbChip(s.title, "Title") : "") + (showChk("Insurance") ? pbChip(s.ins, "Insurance") : "") +
       (l.loanType !== "Bridge" && showChk("Appraisal") ? pbChip(s.appr, "Appraisal") : "") +
       (l.outsideLender && showChk("Lender") ? pbChip(s.exported ? "done" : "todo", "Sent to " + s.lender) : "") +
-      (s.conds && showChk("Conditions") ? pbChip("todo", s.conds + " condition" + (s.conds>1?"s":"")) : "");
+      (s.conds && showChk("Conditions") ? pbChip("todo", s.conds + " condition" + (s.conds>1?"s":"")) : "") +
+      (showChk("Underwriter") ? vuBoardChip(l) : "");
     return '<tr>' +
       '<td><a href="#" data-action="select-lead" data-lead="' + l.id + '" style="font-weight:600">' + esc(l.name) + '</a><div class="hint">' + esc((l.propertyAddress||"No address").split(",")[0]) + ' · ' + esc(l.loanType||"") + ' · ' + fmtUSD(l.loanAmount) + '</div><div class="hint">LO: ' + esc(userName(l.assignedTo)) + ' · ' + esc(stageLabel(l.stage)) + (s.quiet != null && s.quiet >= 5 ? ' · <span style="color:#9a2b1a">quiet ' + s.quiet + 'd</span>' : '') + '</div></td>' +
       '<td style="white-space:nowrap">' + closeTxt + '</td>' +
@@ -11937,10 +12512,12 @@ function renderLeadDetail(){
   var tabs = '<div class="tabs">' +
     tabBtn("overview","Overview") + tabBtn("scenario","Loan Scenario") + tabBtn("documents","Documents") +
     tabBtn("activity","Activity &amp; Calls") + tabBtn("thirdparties","Third Parties") +
+    (canManageOutsideLender() ? tabBtn("underwriter","Underwriter") : "") +
   '</div>';
 
   var tabContent = "";
   if (ui.activeTab === "scenario") tabContent = renderTabScenario(lead);
+  else if (ui.activeTab === "underwriter" && canManageOutsideLender()) tabContent = renderTabUnderwriter(lead);
   else if (ui.activeTab === "documents") tabContent = renderTabDocuments(lead);
   else if (ui.activeTab === "activity") tabContent = renderTabActivity(lead);
   else if (ui.activeTab === "thirdparties") tabContent = renderTabThirdParties(lead);
@@ -18856,6 +19433,14 @@ appEl.addEventListener("click", function(e){
   else if (action === "view-uw-condition-file"){ viewUnderwritingConditionFile(t.dataset.lead, t.dataset.condid, t.dataset.borrower==="1"); }
   else if (action === "ai-review-doc"){ runAiDocReview(t.dataset.lead, parseInt(t.dataset.idx,10)); render(); }
   else if (action === "scan-all-documents"){ scanAllDocuments(t.dataset.lead); render(); }
+  else if (action === "vu-run"){ vuRun(t.dataset.lead); }
+  else if (action === "vu-signoff"){ vuSignOff(t.dataset.lead); }
+  else if (action === "vu-act"){ vuAct(t.dataset.lead, t.dataset.item, parseInt(t.dataset.ai, 10)); }
+  else if (action === "vu-ask-all"){ vuAskAll(t.dataset.lead); }
+  else if (action === "vu-ack"){ vuMark(t.dataset.lead, "acks", t.dataset.item, { by: currentUser().name, at: todayISO() }); }
+  else if (action === "vu-ack-undo"){ vuMark(t.dataset.lead, "acks", t.dataset.item, null); }
+  else if (action === "vu-override"){ vuOverride(t.dataset.lead, t.dataset.item); }
+  else if (action === "vu-override-undo"){ vuMark(t.dataset.lead, "overrides", t.dataset.item, null); }
   else if (action === "send-back-ai"){ sendBackToLOWithAiFindings(t.dataset.lead); render(); }
   else if (action === "clear-signature"){ clearSignaturePad(t.dataset.canvas); }
   else if (action === "run-guideline-check"){ runGuidelineCheck(t.dataset.lead); }

@@ -52,6 +52,48 @@ const DEFAULT_GUIDANCE = "Check the document looks complete, legible, and consis
 
 const TP_ROLES = ["Realtor", "Title Company", "Escrow Officer", "Insurance Agent", "Attorney", "Appraiser", "Lender Contact"];
 
+// Virtual underwriter (Joe 2026-10-08): the same call also reads the key facts off the
+// document so the CRM can cross-check documents against each other and against the
+// file (names, entity, dates, price, value, rent, balances, insurance) and re-run the
+// lender's rules on the verified numbers. Only what is actually printed -- never guessed.
+const FACT_KINDS = ["id", "bank_statement", "purchase_contract", "appraisal", "lease", "insurance", "entity_docs", "good_standing", "ein_letter", "title", "payoff", "mortgage_statement", "credit_report", "scope_of_work", "other"];
+const FACTS_KEYS = '"kind": "...", "personNames": [], "entityNames": [], "propertyAddress": "... or null", "documentDate": "YYYY-MM-DD or null", "expirationDate": "YYYY-MM-DD or null", "purchasePrice": null, "appraisedValue": null, "arv": null, "marketRent": null, "monthlyRent": null, "endingBalance": null, "dwellingCoverage": null, "liabilityCoverage": null, "rentLossMonths": null, "deductible": null, "payoffAmount": null, "rehabTotal": null, "signed": null';
+const FACTS_INSTRUCTIONS = "ALSO read these facts off the document for cross-checking (numbers as plain numbers, no $ or commas; null for anything not actually shown -- never guess):\n" +
+  "- kind: exactly one of " + FACT_KINDS.join(", ") + "\n" +
+  "- personNames: every individual named as a party (borrower, buyer, account holder, insured, member, tenant on a lease) -- not agents/notaries/staff\n" +
+  "- entityNames: every company/LLC named as a party (buyer, account holder, insured, the entity itself)\n" +
+  "- propertyAddress: the subject/real property address on it, if any\n" +
+  "- documentDate: the statement end date / effective date / issue date / report date\n" +
+  "- expirationDate: expiration of an ID, policy, or contract deadline if shown\n" +
+  "- purchasePrice (contract or appraisal sale price); appraisedValue (as-is market value); arv (after-repair / subject-to value); marketRent (appraiser's monthly market rent, all units); monthlyRent (lease rent per month)\n" +
+  "- endingBalance: the most recent ending/available balance on a bank or brokerage statement\n" +
+  "- dwellingCoverage, liabilityCoverage (per occurrence), rentLossMonths (loss of rents in months; convert a dollar limit only if months are stated), deductible\n" +
+  "- payoffAmount: payoff/total due on a payoff letter or principal balance on a mortgage statement\n" +
+  "- rehabTotal: total of a scope of work / rehab budget\n" +
+  "- signed: true if signed by the parties where signatures are expected, false if signature lines are blank, null if not applicable\n\n";
+
+function num(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : parseFloat(String(v).replace(/[$,\s]/g, ""));
+  return isFinite(n) ? n : null;
+}
+function cleanFacts(raw: any): Record<string, unknown> | null {
+  if (!raw || typeof raw !== "object") return null;
+  const str = (v: unknown, max = 200) => (typeof v === "string" && v.trim() && v.trim().toLowerCase() !== "null") ? v.trim().slice(0, max) : null;
+  const date = (v: unknown) => { const s = str(v, 20); return s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null; };
+  const names = (v: unknown) => Array.isArray(v) ? v.map((x) => str(x, 120)).filter(Boolean).slice(0, 8) : [];
+  return {
+    kind: FACT_KINDS.includes(raw.kind) ? raw.kind : "other",
+    personNames: names(raw.personNames), entityNames: names(raw.entityNames),
+    propertyAddress: str(raw.propertyAddress), documentDate: date(raw.documentDate), expirationDate: date(raw.expirationDate),
+    purchasePrice: num(raw.purchasePrice), appraisedValue: num(raw.appraisedValue), arv: num(raw.arv),
+    marketRent: num(raw.marketRent), monthlyRent: num(raw.monthlyRent), endingBalance: num(raw.endingBalance),
+    dwellingCoverage: num(raw.dwellingCoverage), liabilityCoverage: num(raw.liabilityCoverage), rentLossMonths: num(raw.rentLossMonths), deductible: num(raw.deductible),
+    payoffAmount: num(raw.payoffAmount), rehabTotal: num(raw.rehabTotal),
+    signed: raw.signed === true ? true : raw.signed === false ? false : null,
+  };
+}
+
 function corsJson(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: CORS_HEADERS });
 }
@@ -122,8 +164,9 @@ Deno.serve(async (req: Request) => {
         ? ('ADDITIONALLY, this document is supposed to be a voided check or wire/ACH instructions sheet. Read the actual printed/MICR-line bank details off it (do not guess) and include an "achFields" object with: accountHolderName (name printed on the check), bankName, bankCityState (city and state printed on the check, if shown), aba (the 9-digit routing/ABA number from the MICR line), accountNumber (the account number from the MICR line), and accountType ("Checking" or "Savings" if determinable, else null). Only fill a field you can actually read on the document -- use null for anything illegible, not shown, or if this document turns out not to actually be a check/wire-instructions sheet at all.\n\n')
         : ""
       ) +
+      FACTS_INSTRUCTIONS +
       "Look at the actual document above and respond with ONLY a JSON object (no markdown fences, no commentary) with exactly these keys:\n" +
-      '{"status": "clear" or "flag", "note": "one or two specific sentences explaining what you found", "contacts": [{"role": "...", "name": "...", "company": "... or null", "phone": "... or null", "email": "... or null"}]' +
+      '{"status": "clear" or "flag", "note": "one or two specific sentences explaining what you found", "facts": {' + FACTS_KEYS + '}, "contacts": [{"role": "...", "name": "...", "company": "... or null", "phone": "... or null", "email": "... or null"}]' +
       (isAchExtraction ? ', "achFields": {"accountHolderName": "... or null", "bankName": "... or null", "bankCityState": "... or null", "aba": "... or null", "accountNumber": "... or null", "accountType": "... or null"}' : "") +
       "}\n" +
       "Use \"flag\" if anything above needs a human's attention before this file can move forward; use \"clear\" only if the document genuinely looks complete and consistent.";
@@ -137,7 +180,7 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 600,
+        max_tokens: 1500,
         system: "You are a precise loan-document review assistant. Output ONLY valid JSON matching exactly what's requested -- no markdown code fences, no commentary, no preamble.",
         messages: [{ role: "user", content: [contentBlock, { type: "text", text: promptText }] }],
       }),
@@ -149,7 +192,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const raw = (aiData.content && aiData.content[0] && aiData.content[0].text) || "";
-    let parsed: { status?: string; note?: string; contacts?: unknown; achFields?: unknown } = {};
+    let parsed: { status?: string; note?: string; contacts?: unknown; achFields?: unknown; facts?: unknown } = {};
     try {
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw);
@@ -193,7 +236,7 @@ Deno.serve(async (req: Request) => {
       if (Object.values(achFields).every((v) => v === null)) achFields = null;
     }
 
-    return corsJson({ ok: true, status, note, contacts, achFields });
+    return corsJson({ ok: true, status, note, contacts, achFields, facts: cleanFacts(parsed.facts) });
   } catch (err) {
     console.log("review-document: server_error", String(err));
     return corsJson({ ok: true, status: "flag", note: "Automatic review hit an error — please check this document manually." });
