@@ -85,11 +85,16 @@ Deno.serve(async (req: Request) => {
       const campaignId: string | null = body.campaignId || null;
       const datePreset: string = body.datePreset || "last_30d"; // e.g. today, yesterday, last_7d, last_30d, this_month
       const path = campaignId ? "/" + campaignId + "/insights" : "/" + actAccount() + "/insights";
-      const result = await graphFetch(path, {
-        fields: "campaign_name,spend,impressions,clicks,cpc,cpm,ctr,actions",
+      // Optional breakdowns (e.g. "publisher_platform,platform_position", "device_platform", "age,gender")
+      // and level ("ad") for diagnosing where clicks come from. Read-only.
+      const q: Record<string, string> = {
+        fields: "campaign_name,ad_name,spend,impressions,clicks,cpc,cpm,ctr,actions",
         date_preset: datePreset,
-        level: campaignId ? "campaign" : "account",
-      });
+        level: body.level === "ad" ? "ad" : (campaignId ? "campaign" : "account"),
+        limit: "200",
+      };
+      if (typeof body.breakdowns === "string" && /^[a-z_,]+$/.test(body.breakdowns)) q.breakdowns = body.breakdowns;
+      const result = await graphFetch(path, q);
       if (!result.ok) return new Response(JSON.stringify({ error: "meta_error", detail: result.data }), { status: 502, headers: CORS_HEADERS });
       return new Response(JSON.stringify({ ok: true, insights: result.data.data }), { headers: CORS_HEADERS });
     }
