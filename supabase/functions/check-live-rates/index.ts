@@ -1948,6 +1948,8 @@ function isBaltimoreCity(s: Scenario): boolean {
   const a = s.propertyAddress || "";
   return /\bBaltimore,\s*MD\b/i.test(a) && !/county/i.test(a);
 }
+// Commercial property types the CRM offers (index.html COMMERCIAL_PROPERTY_TYPES) -- Velocity only.
+const COMMERCIAL_TYPES = ["Office", "Retail", "Warehouse", "Self-Storage", "Automotive", "Mobile Home Park", "Commercial Condo", "Day Care", "Mixed-Use (Commercial Heavy)"];
 function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
   // Joe 10/7: "I think NextRes does Baltimore" -- confirmed: NextRes's own quote engine prices Baltimore City
   // fix & flip (10.99%, 10/7); it won't price any Maryland DSCR (statewide, not Baltimore-specific).
@@ -1960,6 +1962,11 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
       reason: r.lender === "Constructive Capital"
         ? "Baltimore City is deal-by-deal only at Constructive (65% LTV max on cash-out) — not quotable; bring it to Joe."
         : r.lender + " isn't lending in Baltimore City right now." };
+  }
+  // Commercial property (Joe 10/8/26: offer it): only Velocity lends on these among our lenders.
+  // Others must decline -- NextRes would otherwise map an unknown type to SFR and misprice it.
+  if (r && r.eligible && COMMERCIAL_TYPES.includes(s.propertyType) && r.lender !== "Velocity") {
+    return { lender: r.lender, eligible: false, source: r.source, reason: r.lender + " doesn't lend on commercial property (" + s.propertyType + ")." };
   }
   // Every quote here assumes a clean history (no bankruptcy/foreclosure/short sale/60+ day mortgage
   // late in 4 years). A recent event changes eligibility and price lender by lender and isn't

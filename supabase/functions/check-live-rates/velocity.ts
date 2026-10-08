@@ -67,6 +67,9 @@ const VEL_PROPERTY: Record<string, string> = {
   "SFR": "SingleFamilyResidence", "Single Family": "SingleFamilyResidence", "Condo": "SingleFamilyCondo", "Townhome": "SingleFamilyPUD",
   "2-4 Unit": "2to4Units", "Duplex": "2to4Units", "Multifamily 5+": "5plusUnits", "Mixed-Use": "MixedUse",
   "Office": "Office", "Retail": "Retail", "Warehouse": "Warehouse", "Self-Storage": "Storage", "Storage": "Storage",
+  // Velocity's full PropertyType list (its reference API, 10/8/26) -- commercial added at Joe's OK.
+  "Automotive": "Automotive", "Mobile Home Park": "MobileHomePark", "Commercial Condo": "CommercialCondo",
+  "Day Care": "DayCare", "Mixed-Use (Commercial Heavy)": "Mixed Use - Commercial Heavy",
 };
 // Velocity's own values (portal code, 10/7/26): "US Citizen" | "Foreign National" (in the US, not a
 // permanent resident) | "Foreign Investor" (lives abroad, no US credit) | "Foreign Investor with Credit".

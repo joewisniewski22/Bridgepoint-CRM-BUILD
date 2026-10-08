@@ -672,7 +672,10 @@ function borrowerStageLabel(stageKey){
 var LOAN_TYPES = ["DSCR","Fix & Flip","Ground Up Construction","Portfolio/Blanket","Bridge","Mixed-Use"];
 var SOURCES = ["Meta Ads","Connected Investors","Referral","Repeat Client","Website","Self-Generated","LendingWise Import"];
 var ENTITY_TYPES = ["LLC","Individual","Corporation"];
-var PROPERTY_TYPES = ["SFR","Duplex","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Land"];
+// Commercial types (Joe 2026-10-08: offer them) -- only Velocity lends on these, on its
+// 30-yr rental program; names must match COMMERCIAL_TYPES in check-live-rates.
+var COMMERCIAL_PROPERTY_TYPES = ["Office","Retail","Warehouse","Self-Storage","Automotive","Mobile Home Park","Commercial Condo","Day Care","Mixed-Use (Commercial Heavy)"];
+var PROPERTY_TYPES = ["SFR","Duplex","2-4 Unit","Multifamily 5+","Mixed-Use","Condo","Land"].concat(COMMERCIAL_PROPERTY_TYPES);
 // Constructive's matrix lists Duplex as its own named property type, but
 // prices it identically to the broader 2-4 Unit tier (no separate LTV/fee
 // row) -- normalize before any pricing table lookup so it's purely a
@@ -1565,6 +1568,9 @@ function evaluatePortfolioPricing(lead, inputs){
   return base;
 }
 function evaluatePricing(lead, inputs){
+  // The in-house sheets are residential only; commercial is priced by the live pricer (Velocity).
+  var ptIn = (inputs && inputs.propertyType) || lead.propertyType;
+  if (COMMERCIAL_PROPERTY_TYPES.indexOf(ptIn) !== -1) return { ineligible:true, reason:"Commercial property isn't on our in-house rate sheet — use the live pricer (Check live rates)." };
   if (lead.loanType === "DSCR") return evaluateDscrPricing(lead, inputs);
   if (lead.loanType === "Portfolio/Blanket") return evaluatePortfolioPricing(lead, inputs);
   if (lead.loanType === "Fix & Flip" || lead.loanType === "Ground Up Construction" || lead.loanType === "Bridge"){
@@ -12870,7 +12876,8 @@ function lpGroups(key){
   var fn = g("citizenshipStatus") === "Foreign National";
   var needsRehab = lt !== "Bridge";
   var txnOpts = TRANSACTION_TYPES.map(function(t){ return [t.key, t.label]; });
-  var propOpts = PROPERTY_TYPES.filter(function(t){ return t !== "Land"; }).map(function(t){ return [t, t]; });
+  // Commercial only on rental (DSCR) loans -- Velocity's bridge/rehab programs are residential.
+  var propOpts = PROPERTY_TYPES.filter(function(t){ return t !== "Land" && !(rtl && COMMERCIAL_PROPERTY_TYPES.indexOf(t) !== -1); }).map(function(t){ return [t, t]; });
   var deal = [];
   var mixedLoan = lt === "Mixed-Use";
   var pt = mixedLoan ? "Mixed-Use" : g("propertyType");
