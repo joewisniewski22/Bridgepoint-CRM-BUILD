@@ -25,7 +25,21 @@
   var params = new URLSearchParams(location.search);
   ["utm_source","utm_medium","utm_campaign","utm_content","utm_term"].forEach(function(k){ if (params.get(k)) data[k] = params.get(k); });
 
+  // Funnel tracking (2026-10-08): which step each visitor reaches, so a form that
+  // loses people can't hide. Step 1-4 = quiz steps shown, 5 = pressed "Get my quote".
+  // Sends no personal info. Never blocks the form.
+  var session = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  var pinged = {};
+  function ping(step){
+    if (pinged[step]) return; pinged[step] = true;
+    try {
+      fetch(ENDPOINT, { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ping: true, step: step, program: program, session: session, utm_campaign: data.utm_campaign || "", utm_content: data.utm_content || "" }) }).catch(function(){});
+    } catch (e) {}
+  }
+
   function show(i){
+    ping(i + 1);
     idx = i;
     steps.forEach(function(s, n){ s.classList.toggle("on", n === i); });
     var pct = Math.round(((i) / (steps.length)) * 100);
@@ -76,6 +90,7 @@
   var form = root.querySelector("form");
   form.addEventListener("submit", function(e){
     e.preventDefault();
+    ping(5);
     if (!valid(idx)) return;
     var name = form.elements.name.value.trim(), phone = form.elements.phone.value.trim(), email = form.elements.email.value.trim();
     var digits = phone.replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
@@ -86,7 +101,9 @@
     var btn = form.querySelector("[type=submit]");
     btn.disabled = true; btn.textContent = "Sending…";
     var body = Object.assign({}, data, {
-      program: program, name: name, phone: phone, email: email, consent: true, website: form.elements.website.value,
+      program: program, name: name, phone: phone, email: email, consent: true, session: session,
+      // Hidden anti-spam field (renamed bp_hp 10/8 so phone AutoFill leaves it alone; old name still read for cached pages).
+      website: ((form.elements.bp_hp || form.elements.website || {}).value) || "",
       timeline: form.elements.timeline.value
     });
     fetch(ENDPOINT, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })

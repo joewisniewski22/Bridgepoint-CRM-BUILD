@@ -71,13 +71,41 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: CORS_HEADERS });
 }
 
+// Funnel + outcome log (2026-10-08, "why aren't we getting Facebook leads"): every landing-page
+// step reached and every submit outcome goes to ad_intake_log, so a dead form or a silent drop
+// can't hide again. Never blocks a lead.
+async function logIntake(row: Record<string, unknown>) {
+  try { await sb.from("ad_intake_log").insert(row); } catch (_) { /* tracking only */ }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+  let b: Record<string, unknown>;
+  try { b = await req.json(); } catch (_) { return json({ error: "invalid" }, 400); }
+  const base = { program: clean(b.program, 12) || null, session: clean(b.session, 40) || null, utm_campaign: clean(b.utm_campaign, 80) || null, utm_content: clean(b.utm_content, 80) || null, src: clean(b.src, 10) || "lp" };
+  // Step pings from the landing-page quiz: log only, nothing else happens.
+  if (b.ping === true) {
+    const step = Math.max(0, Math.min(9, parseInt(String(b.step), 10) || 0));
+    await logIntake({ ...base, kind: "step", step });
+    return json({ ok: true });
+  }
+  const res = await handle(b);
+  let outcome = "error";
+  try { const j = await res.clone().json(); outcome = j.ok ? (j.dropped ? "honeypot" : j.repeat ? "repeat" : "created") : (j.error === "invalid" ? "invalid: " + (j.detail || "") : (j.error || "error")); } catch (_) { /* keep "error" */ }
+  await logIntake({ ...base, kind: "submit", outcome: outcome.slice(0, 120), status: res.status });
+  if (outcome === "honeypot") return json({ ok: true });
+  return res;
+});
 
+async function handle(b: Record<string, unknown>): Promise<Response> {
   try {
-    const b = await req.json();
-    if (clean(b.website)) return json({ ok: true }); // honeypot: bots fill the hidden field, say "ok" and drop it
+    // Honeypot: bots fill the hidden "website" field. iPhone AutoFill can fill it too, so a
+    // submission that also answered the quiz (only possible with JavaScript, clicking through
+    // the steps) is a person -- keep it and note it instead of silently dropping a real lead.
+    const trapped = !!clean(b.website);
+    const answeredQuiz = !!(clean(b.goal, 20) || clean(b.propertyType, 40) || clean(b.credit, 20) || clean(b.tool, 12) || b.apply === true);
+    if (trapped && !answeredQuiz) return json({ ok: true, dropped: true });
 
     // Programs: the two Meta-ad landing pages send dscr | fixflip; the website quote form can also send
     // bridge | ground | portfolio (priced like the other short-term/portfolio files from the same fields).
@@ -187,6 +215,7 @@ Deno.serve(async (req: Request) => {
       { date: today, type: "note", text: "Landing page answers — " + (answers.join(" · ") || "none"), author: "System" },
       { date: today, type: "system", text: "TCPA consent recorded " + stamp + ": borrower checked the box agreeing to calls, texts and email from Bridgepoint Lending at " + phone + " / " + email + " (marketing, may be autodialed, not a condition of any loan; msg & data rates apply; reply STOP to opt out).", author: "System" },
     ];
+    if (trapped) activity.push({ date: today, type: "note", text: "Note: the form's hidden anti-spam field was filled (usually phone AutoFill) — they answered the quiz, so the lead was kept. Verify it's a real person.", author: "System" });
     const row: Record<string, unknown> = {
       id, name, email, phone, source: isSite ? ("Website — " + loanType + (isApply ? " Application" : isTool ? " Deal Analyzer" : " Quote Form")) : ("Meta Ads — " + loanType + " Landing Page"), loan_type: loanType, property_address: addressIn || null,
       stage: isApply ? "app_sent" : "new", status: "active", application_sent_at: isApply ? today : null, assigned_to: ASSIGNEE, created_at: today, created_at_ts: stamp,
@@ -262,4 +291,4 @@ Deno.serve(async (req: Request) => {
     console.error("ad-lead-intake: error", String(err));
     return json({ error: "server_error", detail: "Something went wrong — please try again." }, 500);
   }
-});
+}
