@@ -760,7 +760,7 @@ async function checkNextresRtl(s: Scenario): Promise<LenderResult> {
     experience: exp.experience,
     howManyExperiences: exp.how,
     propertyType: NEXTRES_PROPERTY_TYPE[s.propertyType] || "SFR-Detached",
-    numberOfUnits: s.propertyType === "Duplex" ? 2 : s.propertyType === "2-4 Unit" ? Math.min(4, Math.max(2, Number((s as any).numUnits) || 2)) : 1,
+    numberOfUnits: s.propertyType === "Duplex" ? 2 : s.propertyType === "2-4 Unit" ? Math.min(4, Math.max(2, Number((s as any).numUnits) || 2)) : (s.propertyType === "Multifamily 5+" || s.propertyType === "Mixed-Use") ? Math.max(s.propertyType === "Multifamily 5+" ? 5 : 2, Number((s as any).numUnits) || 0) : 1,
     bankruptcy: "null-null-null",
     foreclosure: "null-null",
     deedInLieu: "null-null",
@@ -889,7 +889,7 @@ async function checkNextresAt(s: Scenario): Promise<LenderResult> {
     asIsValue: fmtMoney(s.currentValue || s.purchasePrice),
     closingCostEstimate: fmtMoney((s.loanAmount || 0) * 0.02),
     propertyType: NEXTRES_PROPERTY_TYPE[s.propertyType] || "SFR-Detached",
-    numberOfUnits: s.propertyType === "Duplex" ? 2 : s.propertyType === "2-4 Unit" ? Math.min(4, Math.max(2, Number((s as any).numUnits) || 2)) : 1,
+    numberOfUnits: s.propertyType === "Duplex" ? 2 : s.propertyType === "2-4 Unit" ? Math.min(4, Math.max(2, Number((s as any).numUnits) || 2)) : (s.propertyType === "Multifamily 5+" || s.propertyType === "Mixed-Use") ? Math.max(s.propertyType === "Multifamily 5+" ? 5 : 2, Number((s as any).numUnits) || 0) : 1,
     prepaymentPenalty: NEXTRES_PREPAY[s.prepayTerm || "5yr"] || "60-5/5/5/5/5",
     residency: NEXTRES_CITIZENSHIP[s.citizenshipStatus || "US Citizen"] || "US Citizen",
     amortizationType: "Fixed",
@@ -1767,7 +1767,8 @@ function rcnParse(s: Scenario, j: any, assumptions: string[]): LenderResult {
       dscr: p.o_dscr != null ? Math.round(p.o_dscr * 100) / 100 : null,
     }));
     if (!opts.length) return { lender: L, eligible: false, source: "live", reason: (j && j.message && String(j.message).length > 3 ? j.message : "RCN returned no rental pricing for this scenario" + (s.propertyType === "Mixed-Use" ? " (RCN's rental program doesn't take this mixed-use scenario)." : ".")), assumptions };
-    const max = R.pricings[0].o_max_loan_amount;
+    // RCN returns float noise (e.g. 980000.0000000001) -- floor to the dollar.
+    const max = R.pricings[0].o_max_loan_amount != null ? Math.floor(Number(R.pricings[0].o_max_loan_amount) + 1e-6) : R.pricings[0].o_max_loan_amount;
     // RCN "Product Fee Sheet – Long Term Rental" (Lender Documents): $1,995 closing fee (not NY),
     // plus $129 desktop review + $60 tax cert + $15 flood cert paid in processing.
     assumptions.push("RCN fees: $1,995 closing fee" + ((s.propertyState || "").toUpperCase() === "NY" ? " (NY differs — confirm)" : "") + "; $204 paid in processing (desktop review, tax and flood certs).");
