@@ -95,7 +95,7 @@ const digits10 = (s: string | null) => (s || "").replace(/\D/g, "").slice(-10);
 async function processLeadgenId(leadgenId: string, pageId: string, formId: string, adId: string) {
   const token = await pageToken(pageId || META_PAGE_ID);
   if (!token) { console.error("meta-leads-webhook: no page token (needs leads_retrieval on the system user token)", leadgenId); return; }
-  const data = await fetch(GRAPH + "/" + leadgenId + "?fields=field_data,created_time,ad_name,campaign_name,form_id,is_organic&access_token=" + encodeURIComponent(token)).then((r) => r.json()).catch(() => null);
+  const data = await fetch(GRAPH + "/" + leadgenId + "?fields=field_data,created_time,ad_id,ad_name,campaign_name,form_id,is_organic&access_token=" + encodeURIComponent(token)).then((r) => r.json()).catch(() => null);
   if (!data || !data.field_data) { console.error("meta-leads-webhook: lead fetch failed", leadgenId, JSON.stringify(data)); return; }
   const form = await fetch(GRAPH + "/" + (formId || data.form_id) + "?fields=name,locale&access_token=" + encodeURIComponent(token)).then((r) => r.json()).catch(() => ({}));
   const formName: string = (form && form.name) || "";
@@ -139,7 +139,8 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const assignee = spanish ? SPANISH_LO : await pickEnglishAdLO();
   const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
   const activity: Record<string, string>[] = [
-    { date: today, type: "note", author: "System", text: "Lead captured from Facebook Instant Form \"" + (formName || formId) + "\"" + (data.campaign_name ? " · campaign " + data.campaign_name : "") + (data.ad_name ? " · ad " + data.ad_name : "") + " — routed to " + assignee + (spanish ? " (Spanish)" : "") },
+    // ad_id= lets the ad optimizer score each ad on real CRM outcomes (apps, closings).
+    { date: today, type: "note", author: "System", text: "Lead captured from Facebook Instant Form \"" + (formName || formId) + "\"" + (data.campaign_name ? " · campaign " + data.campaign_name : "") + (data.ad_name ? " · ad " + data.ad_name : "") + ((adId || data.ad_id) ? " · ad_id=" + (adId || data.ad_id) : "") + " — routed to " + assignee + (spanish ? " (Spanish)" : "") },
     // Our forms carry the text/call consent disclaimer; the follow-up engine keys off this note.
     { date: today, type: "note", author: "System", text: "TCPA consent recorded — agreed to the contact disclaimer on Facebook form \"" + (formName || formId) + "\"" },
   ];

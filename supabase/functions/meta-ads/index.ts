@@ -200,6 +200,14 @@ Deno.serve(async (req: Request) => {
     }
 
     // Change an existing ad set's optimization goal and/or targeting (e.g. placements).
+    // geo-search: Meta's location keys (e.g. US states) for targeting / exclusions. Read-only.
+    if (action === "geo-search") {
+      const q = String(body.q || "");
+      const result = await graphFetch("/search", { type: "adgeolocation", location_types: JSON.stringify([body.locationType || "region"]), country_code: body.countryCode || "US", q, limit: "5" });
+      if (!result.ok) return new Response(JSON.stringify({ error: "meta_error", detail: result.data }), { status: 502, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ ok: true, results: result.data.data }), { headers: CORS_HEADERS });
+    }
+
     if (action === "update-adset") {
       const adsetId: string = body.adsetId;
       if (!adsetId) return new Response(JSON.stringify({ error: "missing_fields", detail: "adsetId is required" }), { status: 400, headers: CORS_HEADERS });
@@ -289,7 +297,7 @@ Deno.serve(async (req: Request) => {
         link_data: {
           link: linkUrl, message, name: headline, description,
           image_hash: imageHash,
-          call_to_action: { type: ctaType, value: leadGenFormId ? { lead_gen_form_id: leadGenFormId, link: linkUrl } : { link: linkUrl } },
+          call_to_action: { type: ctaType, value: leadGenFormId ? { lead_gen_form_id: leadGenFormId, link: linkUrl } : ctaType === "LIKE_PAGE" ? { page: pageId } : { link: linkUrl } },
         },
       };
       const creativeResult = await graphFetch("/" + actAccount() + "/adcreatives", {

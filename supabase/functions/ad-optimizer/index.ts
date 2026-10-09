@@ -121,12 +121,15 @@ Deno.serve(async (req: Request) => {
 
     // ---- CRM outcomes by creative (utm_content) over the same 7 days ----
     const since = new Date(Date.now() - 7 * 86400000).toISOString();
-    const { data: crm } = await sb.from("leads").select("id,stage,status,first_attempt_at,call_attempts,activity,created_at_ts").like("source", "Meta Ads%Landing%").gte("created_at_ts", since > LAUNCH_DATE ? since : LAUNCH_DATE);
+    // Landing-page and website leads are keyed by utm_content; Facebook instant-form leads
+    // (10/8: the English campaign now uses forms) by the Meta ad id written on the lead.
+    const { data: crm } = await sb.from("leads").select("id,stage,status,first_attempt_at,call_attempts,activity,created_at_ts").or("source.like.Meta Ads*,source.like.Website*,source.eq.Facebook").neq("status", "spam").gte("created_at_ts", since > LAUNCH_DATE ? since : LAUNCH_DATE);
     const byContent: Record<string, { leads: number; called: number; apps: number; closed: number }> = {};
     for (const l of crm || []) {
-      const note = ((l.activity as Row[]) || []).find((a) => typeof a.text === "string" && a.text.indexOf("Lead captured from the") === 0);
+      const note = ((l.activity as Row[]) || []).find((a) => typeof a.text === "string" && (a.text.indexOf("Lead captured from") === 0));
       const m = note ? String(note.text).match(/content=([a-z0-9-]+)/) : null;
-      const key = m ? m[1] : "(unknown)";
+      const adm = note ? String(note.text).match(/ad_id=(\d+)/) : null;
+      const key = adm ? "ad:" + adm[1] : m ? m[1] : "(unknown)";
       const x = (byContent[key] = byContent[key] || { leads: 0, called: 0, apps: 0, closed: 0 });
       x.leads++;
       if ((l.call_attempts || []).length || l.first_attempt_at || (l.stage && l.stage !== "new")) x.called++;
@@ -156,8 +159,8 @@ Deno.serve(async (req: Request) => {
     const rows: Array<{ ad: Row; ins: Row | null; key: string; spend: number; clicks: number; imps: number; ctr: number; freq: number; leads: number; cpl: number; ageH: number }> = [];
     for (const ad of adsList.filter((a) => isManaged(a.campaign_id))) {
       const i = ins7.find((x) => x.ad_id === ad.id) || null;
-      const key = contentOfAd(ad);
-      const crmx = byContent[key] || { leads: 0, called: 0, apps: 0, closed: 0 };
+      const key = contentOfAd(ad) || ("ad:" + ad.id);
+      const crmx = byContent[key] || byContent["ad:" + ad.id] || { leads: 0, called: 0, apps: 0, closed: 0 };
       const spend = num(i?.spend);
       rows.push({ ad, ins: i, key, spend, clicks: num(i?.inline_link_clicks), imps: num(i?.impressions), ctr: num(i?.ctr), freq: num(i?.frequency), leads: crmx.leads, cpl: crmx.leads ? spend / crmx.leads : Infinity, ageH: (Date.now() - new Date(ad.created_time).getTime()) / 3600000 });
     }
