@@ -91,17 +91,29 @@ function loanTypeFrom(fields: Field[], formName: string): string | null {
   return null;
 }
 const digits10 = (s: string | null) => (s || "").replace(/\D/g, "").slice(-10);
+function translateAnswers(fields: Field[], questions: any[]): Field[] {
+  const byKey: Record<string, Record<string, string>> = {};
+  for (const q of questions || []) if (q && q.key && Array.isArray(q.options)) byKey[String(q.key).toLowerCase()] = Object.fromEntries(q.options.map((o: any) => [String(o.key), String(o.value)]));
+  return (fields || []).map((f) => {
+    const opts = byKey[String(f.name || "").toLowerCase()];
+    return opts ? { ...f, values: (f.values || []).map((v) => opts[String(v)] || v) } : f;
+  });
+}
+// Real Meta ad ids are long numbers; anything else (e.g. "1" from a test/organic event) is ignored.
+const realAdId = (...ids: unknown[]) => ids.map((x) => String(x || "")).find((x) => /^\d{10,}$/.test(x)) || "";
 
 async function processLeadgenId(leadgenId: string, pageId: string, formId: string, adId: string) {
   const token = await pageToken(pageId || META_PAGE_ID);
   if (!token) { console.error("meta-leads-webhook: no page token (needs leads_retrieval on the system user token)", leadgenId); return; }
   const data = await fetch(GRAPH + "/" + leadgenId + "?fields=field_data,created_time,ad_id,ad_name,campaign_name,form_id,is_organic&access_token=" + encodeURIComponent(token)).then((r) => r.json()).catch(() => null);
   if (!data || !data.field_data) { console.error("meta-leads-webhook: lead fetch failed", leadgenId, JSON.stringify(data)); return; }
-  const form = await fetch(GRAPH + "/" + (formId || data.form_id) + "?fields=name,locale&access_token=" + encodeURIComponent(token)).then((r) => r.json()).catch(() => ({}));
+  const form = await fetch(GRAPH + "/" + (formId || data.form_id) + "?fields=name,locale,questions&access_token=" + encodeURIComponent(token)).then((r) => r.json()).catch(() => ({}));
   const formName: string = (form && form.name) || "";
   const spanish = /^es/i.test((form && form.locale) || "") || /spanish|español|espanol/i.test(formName);
 
-  const fields: Field[] = data.field_data;
+  // Multiple-choice answers come back as the option KEY (e.g. "o4"), not its text (10/9:
+  // Smithie Lu's file read "credit score: o4"). Translate keys to the option text.
+  const fields: Field[] = translateAnswers(data.field_data, (form && form.questions) || []);
   const name = fv(fields, "full_name", "nombre_completo") || [fv(fields, "first_name"), fv(fields, "last_name")].filter(Boolean).join(" ") || "Facebook Lead";
   const email = fv(fields, "email", "correo_electrónico", "correo_electronico");
   const phone = fv(fields, "phone_number", "phone", "número_de_teléfono");
@@ -140,7 +152,7 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
   const activity: Record<string, string>[] = [
     // ad_id= lets the ad optimizer score each ad on real CRM outcomes (apps, closings).
-    { date: today, type: "note", author: "System", text: "Lead captured from Facebook Instant Form \"" + (formName || formId) + "\"" + (data.campaign_name ? " · campaign " + data.campaign_name : "") + (data.ad_name ? " · ad " + data.ad_name : "") + ((adId || data.ad_id) ? " · ad_id=" + (adId || data.ad_id) : "") + " — routed to " + assignee + (spanish ? " (Spanish)" : "") },
+    { date: today, type: "note", author: "System", text: "Lead captured from Facebook Instant Form \"" + (formName || formId) + "\"" + (data.campaign_name ? " · campaign " + data.campaign_name : "") + (data.ad_name ? " · ad " + data.ad_name : "") + (realAdId(data.ad_id, adId) ? " · ad_id=" + realAdId(data.ad_id, adId) : "") + " — routed to " + assignee + (spanish ? " (Spanish)" : "") },
     // Our forms carry the text/call consent disclaimer; the follow-up engine keys off this note.
     { date: today, type: "note", author: "System", text: "TCPA consent recorded — agreed to the contact disclaimer on Facebook form \"" + (formName || formId) + "\"" },
   ];
@@ -311,6 +323,41 @@ Deno.serve(async (req: Request) => {
     const made = await fetch(GRAPH + "/" + META_PAGE_ID + "/leadgen_forms", { method: "POST", body: new URLSearchParams(params) }).then((r) => r.json()).catch((e) => String(e));
     return json(made);
   }
+  // repair-answers: rewrite "Form answers / Respuestas" notes saved with option keys
+  // ("option_2", "o4") into the option text, using the form's own questions.
+  if (body.action === "repair-answers") {
+    if (!(await authorized(body))) return json({ error: "not_authorized" }, 403);
+    const pt = await pageToken(META_PAGE_ID);
+    const forms = await fetch(GRAPH + "/" + META_PAGE_ID + "/leadgen_forms?fields=id,name,questions&limit=50&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch(() => null);
+    const byLabel: Record<string, Record<string, string>> = {};
+    for (const fm of (forms && forms.data) || []) for (const q of fm.questions || []) {
+      if (!q || !q.key || !Array.isArray(q.options)) continue;
+      byLabel[String(q.key).replace(/_/g, " ").toLowerCase()] = Object.fromEntries(q.options.map((o: any) => [String(o.key), String(o.value)]));
+    }
+    const { data: leads } = await sb.from("leads").select("id, activity").or("source.eq.Facebook,source.like.Meta Ads*");
+    let fixed = 0;
+    for (const l of leads || []) {
+      let changed = false;
+      const act = ((l.activity as any[]) || []).map((a) => {
+        const t = String(a && a.text || "");
+        const m = t.match(/^(Form answers — |Respuestas del formulario — )(.*)$/s);
+        if (!m) return a;
+        const parts = m[2].split(" · ").map((p) => {
+          const i = p.lastIndexOf(": ");
+          if (i < 0) return p;
+          const opts = byLabel[p.slice(0, i).toLowerCase()];
+          if (!opts) return p;
+          const vals = p.slice(i + 2).split(", ").map((v) => opts[v] || v).join(", ");
+          return p.slice(0, i) + ": " + vals;
+        });
+        const nt = m[1] + parts.join(" · ");
+        if (nt !== t) { changed = true; return { ...a, text: nt }; }
+        return a;
+      });
+      if (changed) { await sb.from("leads").update({ activity: act }).eq("id", l.id); fixed++; }
+    }
+    return json({ questionsMapped: Object.keys(byLabel).length, leadsFixed: fixed });
+  }
   if (body.action === "forms" || body.action === "test-lead" || body.action === "backfill") {
     if (!(await authorized(body))) return json({ error: "not_authorized" }, 403);
     const pt = await pageToken(META_PAGE_ID);
@@ -339,7 +386,7 @@ Deno.serve(async (req: Request) => {
         all.push(...pg.data);
         next = pg.paging && pg.paging.next ? pg.paging.next : "";
       }
-      const form = await fetch(GRAPH + "/" + formId + "?fields=name,locale&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch(() => ({}));
+      const form = await fetch(GRAPH + "/" + formId + "?fields=name,locale,questions&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch(() => ({}));
       const formName: string = (form && form.name) || "";
       const spanish = /^es/i.test((form && form.locale) || "") || /spanish|español|espanol/i.test(formName);
       const { data: crm } = await sb.from("leads").select("id, phone, email");
@@ -358,7 +405,7 @@ Deno.serve(async (req: Request) => {
       const today = new Date().toISOString().slice(0, 10);
       const imported: string[] = [];
       for (const ld of missing.slice().reverse()) {
-        const f: Field[] = ld.field_data || [];
+        const f: Field[] = translateAnswers(ld.field_data || [], (form && form.questions) || []);
         const name = fv(f, "full_name", "nombre_completo") || [fv(f, "first_name"), fv(f, "last_name")].filter(Boolean).join(" ") || "Facebook Lead";
         const email = fv(f, "email", "correo_electrónico", "correo_electronico"), phone = fv(f, "phone_number", "phone", "número_de_teléfono");
         const dedicated = new Set(["full_name", "first_name", "last_name", "email", "phone_number", "phone", "nombre_completo"]);
