@@ -2634,7 +2634,7 @@ function renderStudio(){
     '</div>' +
     '<div class="hint" style="margin-bottom:16px">Record each script on your phone, then tap <b>Upload video</b> under it. Short and natural beats perfect — 30 to 45 seconds. Upload every take you like; Joe picks the best.</div>';
   if (d.status === "loading") return head + '<div class="empty">Loading your scripts…</div></div>';
-  if (d.status === "error") return head + '<div class="empty">Couldn't load the scripts — check your connection and refresh.</div></div>';
+  if (d.status === "error") return head + '<div class="empty">Couldn\'t load the scripts — check your connection and refresh.</div></div>';
   var scripts = d.scripts.filter(function(s){ return isOwner() || s.user_id === me.id; });
   if (!scripts.length) return head + '<div class="empty">No video scripts for you yet.</div></div>';
   var langName = { en:"English", es:"Spanish", vi:"Vietnamese" };
