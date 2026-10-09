@@ -2478,6 +2478,7 @@ try {
   var adLeadCampaign = qp.get("adlead");
   if (deepLinkLead) ui.pendingDeepLinkLead = deepLinkLead;
   if (qp.get("brief")) ui.pendingBrief = qp.get("brief");
+  if (qp.get("studio")) ui.studio = true;
   if (adLeadCampaign){
     ui.adLanding = { campaign: adLeadCampaign, status: "form" };
   } else if (qp.get("showcase")){
@@ -2605,6 +2606,107 @@ function outTodayButtonHTML(mobile){
   var out = !!me.outToday;
   var label = out ? "🔴 Out today — not getting new leads (tap when back)" : "🟢 Taking new leads today";
   return '<button type="button" data-action="toggle-out-today" title="Out today = the lead rotation skips you until tomorrow" style="display:block;width:100%;margin-top:8px;padding:' + (mobile ? "10px" : "8px") + ';border-radius:8px;border:1px solid ' + (out ? "#d33" : "var(--border-soft)") + ';background:' + (out ? "rgba(221,51,51,0.12)" : "transparent") + ';color:inherit;font-weight:600;text-align:left;cursor:pointer;font-size:13px">' + label + '</button>';
+}
+// ---- Video Studio (Joe 2026-10-09) -------------------------------------------------------
+// Taeya (English), Fanis (Spanish) and Theresa (Vietnamese) get their video scripts -- what to
+// say, what to wear, where to shoot -- at ?studio=1 and upload their takes from their phone.
+// Videos go to the private social-videos bucket under their own folder; Joe sees every upload.
+function studioLoad(){
+  if (!sb || (ui.studioData && ui.studioData.status !== "error")) return;
+  ui.studioData = { status:"loading", scripts:[], videos:[] };
+  Promise.all([
+    sb.from("video_scripts").select("*").eq("active", true).order("user_id").order("sort"),
+    sb.from("social_videos").select("*").order("created_at", { ascending:false })
+  ]).then(function(r){
+    if (r[0].error){ ui.studioData = { status:"error" }; render(); return; }
+    ui.studioData = { status:"ready", scripts: r[0].data || [], videos: r[1].data || [] };
+    render();
+  }, function(){ ui.studioData = { status:"error" }; render(); });
+}
+function renderStudio(){
+  var me = currentUser();
+  studioLoad();
+  var d = ui.studioData || { status:"loading" };
+  var head = '<div style="max-width:760px;margin:0 auto;padding:16px">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px">' +
+      '<h2 style="margin:0">🎬 Video Studio</h2>' +
+      '<button type="button" class="btn btn-sm btn-ghost" data-action="close-studio">← Back to CRM</button>' +
+    '</div>' +
+    '<div class="hint" style="margin-bottom:16px">Record each script on your phone, then tap <b>Upload video</b> under it. Short and natural beats perfect — 30 to 45 seconds. Upload every take you like; Joe picks the best.</div>';
+  if (d.status === "loading") return head + '<div class="empty">Loading your scripts…</div></div>';
+  if (d.status === "error") return head + '<div class="empty">Couldn't load the scripts — check your connection and refresh.</div></div>';
+  var scripts = d.scripts.filter(function(s){ return isOwner() || s.user_id === me.id; });
+  if (!scripts.length) return head + '<div class="empty">No video scripts for you yet.</div></div>';
+  var langName = { en:"English", es:"Spanish", vi:"Vietnamese" };
+  var lastUser = null;
+  var cards = scripts.map(function(s){
+    var takes = d.videos.filter(function(v){ return v.script_id === s.id; });
+    var u = userById(s.user_id);
+    var who = (isOwner() && s.user_id !== lastUser) ? ('<h3 style="margin:22px 0 8px">' + esc(u ? u.name : s.user_id) + ' — ' + (langName[s.lang] || s.lang) + '</h3>') : '';
+    lastUser = s.user_id;
+    var busy = ui.studioUploading && ui.studioUploading[s.id];
+    var block = function(label, text){ return text ? ('<div style="margin-top:10px"><div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">' + label + '</div><div style="white-space:pre-wrap;margin-top:2px">' + esc(text) + '</div></div>') : ''; };
+    return who + '<div class="panel panel-pad" style="margin-bottom:14px">' +
+      '<div style="font-weight:700;font-size:16px">' + s.sort + '. ' + esc(s.title) + '</div>' +
+      (s.hook ? ('<div style="margin-top:8px;padding:10px;border-radius:8px;background:rgba(0,0,0,0.04)"><div style="font-size:12px;font-weight:700;color:var(--brand)">SAY THIS IN THE FIRST 2 SECONDS</div><div style="font-size:17px;font-weight:600;margin-top:2px">' + esc(s.hook) + '</div></div>') : '') +
+      '<div style="margin-top:10px"><div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)">Script</div><div lang="' + esc(s.lang) + '" style="white-space:pre-wrap;font-size:17px;line-height:1.5;margin-top:2px">' + esc(s.script) + '</div></div>' +
+      block("What to wear", s.wardrobe) + block("Where to shoot", s.location) + block("How to film", s.shot_notes) +
+      '<div style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
+        (s.user_id === me.id ? (busy ? '<span class="hint">⏳ Uploading — keep this page open…</span>' :
+          ('<label class="btn btn-primary" style="cursor:pointer">⬆ Upload video<input type="file" accept="video/*" data-action="studio-upload" data-script="' + esc(s.id) + '" style="display:none"></label>')) : '') +
+        '<span class="hint">' + (takes.length ? (takes.length + ' take' + (takes.length === 1 ? "" : "s") + ' uploaded') : 'Nothing uploaded yet') + '</span>' +
+      '</div>' +
+      (isOwner() && takes.length ? takes.map(function(v){
+        return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border-soft);margin-top:6px;flex-wrap:wrap">' +
+          '<span class="hint">' + new Date(v.created_at).toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }) + (v.size_bytes ? (' · ' + Math.round(v.size_bytes / 1048576) + ' MB') : '') + ' · <b>' + esc(v.status) + '</b></span>' +
+          '<span style="display:flex;gap:6px"><button type="button" class="btn btn-sm" data-action="studio-watch" data-path="' + esc(v.path) + '">▶ Watch</button>' +
+          '<button type="button" class="btn btn-sm btn-ghost" data-action="studio-status" data-id="' + esc(v.id) + '" data-status="approved">✓ Approve</button>' +
+          '<button type="button" class="btn btn-sm btn-ghost" data-action="studio-status" data-id="' + esc(v.id) + '" data-status="redo">↺ Redo</button></span>' +
+        '</div>';
+      }).join("") : (takes.some(function(v){ return v.status === "redo"; }) ? '<div class="hint" style="margin-top:6px">↺ Joe asked for a new take of this one.</div>' : '')) +
+    '</div>';
+  }).join("");
+  return head + cards + '</div>';
+}
+function studioUpload(input){
+  var file = input.files && input.files[0], scriptId = input.dataset.script, me = currentUser();
+  if (!file || !sb) return;
+  if (file.size > 500 * 1048576){ showToast("That video is over 500 MB — record at 1080p instead of 4K and try again"); return; }
+  var script = (ui.studioData.scripts || []).filter(function(s){ return s.id === scriptId; })[0];
+  var ext = (String(file.name).match(/\.([a-z0-9]{2,5})$/i) || [,"mp4"])[1].toLowerCase();
+  var path = me.id + "/" + scriptId + "/" + Date.now() + "." + ext;
+  ui.studioUploading = ui.studioUploading || {}; ui.studioUploading[scriptId] = true; render();
+  sb.storage.from("social-videos").upload(path, file, { contentType: file.type || "video/mp4", upsert:false }).then(function(res){
+    if (res.error){ throw res.error; }
+    return sb.from("social_videos").insert({ script_id: scriptId, user_id: me.id, path: path, size_bytes: file.size }).select().single();
+  }).then(function(row){
+    delete ui.studioUploading[scriptId];
+    if (row && row.data) ui.studioData.videos.unshift(row.data);
+    notifyUser("owner", null, "video", "🎬 " + me.name + " uploaded a video: " + (script ? script.title : scriptId) + " — open the Video Studio to watch it");
+    showToast("Uploaded! Thank you — Joe will take a look");
+    render();
+  }).catch(function(err){
+    delete ui.studioUploading[scriptId];
+    console.error("studio upload", err);
+    showToast("Upload didn't finish — check your signal and try again");
+    render();
+  });
+}
+function studioWatch(path){
+  if (!sb || !path) return;
+  sb.storage.from("social-videos").createSignedUrl(path, 3600).then(function(r){
+    if (r.error || !r.data){ showToast("Couldn't open that video"); return; }
+    window.open(r.data.signedUrl, "_blank");
+  });
+}
+function studioSetStatus(id, status){
+  if (!sb || !isOwner()) return;
+  sb.from("social_videos").update({ status: status }).eq("id", id).then(function(r){
+    if (r.error){ showToast("Couldn't update"); return; }
+    (ui.studioData.videos || []).forEach(function(v){ if (v.id === id) v.status = status; });
+    showToast(status === "approved" ? "Approved" : "Marked for a redo");
+    render();
+  });
 }
 function toggleOutToday(){
   var me = currentUser();
@@ -9825,6 +9927,8 @@ function render(){
       app.innerHTML = renderPortal();
     } else if (ui.view === "brief"){
       app.innerHTML = renderBriefScreen();
+    } else if (ui.studio){
+      app.innerHTML = renderStudio();
     } else {
       app.innerHTML = isMobileMode() ? renderMobileShell() : renderShell();
     }
@@ -10352,6 +10456,7 @@ function renderShell(){
             '📅 Today\'s Schedule' + (myScheduleItems(currentUser().id, {todayOnly:true}).length ? (' <span style="background:rgba(255,255,255,0.25);border-radius:10px;padding:1px 8px;margin-left:4px">' + myScheduleItems(currentUser().id, {todayOnly:true}).length + '</span>') : '') +
           '</button>')) +
           outTodayButtonHTML(false) +
+          (isDemo() || isProcessor() ? '' : '<button type="button" class="btn btn-sm btn-ghost" style="display:block;width:100%;margin-top:8px" data-action="open-studio">🎬 Video Studio</button>') +
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">' +
             (isDemo() ? '<button class="btn btn-sm btn-primary" style="flex:1" data-action="restart-tour">▶ Replay Tour</button>' : '<button class="btn btn-sm" style="flex:1" data-action="open-modal" data-modal="changePin">Change PIN</button>') +
             (isDemo() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="editSignature">Signature</button>') +
@@ -10662,6 +10767,7 @@ function renderMobileShell(){
         '<button type="button" class="m-btn" style="min-height:40px" data-action="open-modal" data-modal="addLead">＋ Lead</button>' +
         '<button type="button" class="m-btn" style="min-height:40px" data-action="start-dialer">▶ Dialer</button></div></div>' +
       outTodayButtonHTML(true) +
+      '<button type="button" class="m-btn" style="display:block;width:100%;margin-top:8px;min-height:40px" data-action="open-studio">🎬 Video Studio — my scripts</button>' +
       '<div class="m-progress"><span style="width:' + pct + '%"></span></div>' +
       '<div class="m-tabs"><button type="button" class="m-tab' + (tab==="new" ? " on" : "") + '" data-action="m-tab" data-tab="new">New' + (uncontacted ? (' (' + uncontacted + ')') : '') + '</button>' +
         '<button type="button" class="m-tab' + (tab==="today" ? " on" : "") + '" data-action="m-tab" data-tab="today">Today</button>' +
@@ -19677,6 +19783,10 @@ appEl.addEventListener("click", function(e){
   else if (action === "generate-standalone-term-sheet"){ generateStandalonePricerTermSheet(); }
   else if (action === "logout"){ logout(); }
   else if (action === "toggle-out-today"){ toggleOutToday(); }
+  else if (action === "open-studio"){ ui.studio = true; ui.studioData = null; render(); window.scrollTo(0,0); }
+  else if (action === "close-studio"){ ui.studio = false; try { history.replaceState(null, "", location.pathname); } catch(e){} render(); }
+  else if (action === "studio-watch"){ studioWatch(t.dataset.path); }
+  else if (action === "studio-status"){ studioSetStatus(t.dataset.id, t.dataset.status); }
   else if (action === "restart-tour"){ ui.view = "tour"; ui.tourStep = 0; render(); }
   else if (action === "reset-portal-customization"){ resetPortalCustomization(); }
   else if (action === "tour-next"){ ui.tourStep = (ui.tourStep||0)+1; render(); }
@@ -19965,6 +20075,10 @@ var hideAllRevealedSsns = function(){
 document.addEventListener("pointerup", hideAllRevealedSsns);
 document.addEventListener("pointercancel", hideAllRevealedSsns);
 // Co-borrower toggle: "Yes" opens the full co-borrower section, "No" hides it (and saving clears it).
+appEl.addEventListener("change", function(e){
+  var t = e.target;
+  if (t && t.dataset && t.dataset.action === "studio-upload") studioUpload(t);
+});
 appEl.addEventListener("change", function(e){
   var t = e.target;
   if (!t || t.tagName !== "SELECT" || t.name !== "hasCoBorrower") return;
