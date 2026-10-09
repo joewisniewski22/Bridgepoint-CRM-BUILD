@@ -99,13 +99,16 @@ function translateAnswers(fields: Field[], questions: any[]): Field[] {
     return opts ? { ...f, values: (f.values || []).map((v) => opts[String(v)] || v) } : f;
   });
 }
+function consented(lead: any): boolean {
+  return Array.isArray(lead && lead.custom_disclaimer_responses) && lead.custom_disclaimer_responses.some((r: any) => r && (r.is_checked === true || r.is_checked === "1" || r.is_checked === 1));
+}
 // Real Meta ad ids are long numbers; anything else (e.g. "1" from a test/organic event) is ignored.
 const realAdId = (...ids: unknown[]) => ids.map((x) => String(x || "")).find((x) => /^\d{10,}$/.test(x)) || "";
 
 async function processLeadgenId(leadgenId: string, pageId: string, formId: string, adId: string) {
   const token = await pageToken(pageId || META_PAGE_ID);
   if (!token) { console.error("meta-leads-webhook: no page token (needs leads_retrieval on the system user token)", leadgenId); return; }
-  const data = await fetch(GRAPH + "/" + leadgenId + "?fields=field_data,created_time,ad_id,ad_name,campaign_name,form_id,is_organic&access_token=" + encodeURIComponent(token)).then((r) => r.json()).catch(() => null);
+  const data = await fetch(GRAPH + "/" + leadgenId + "?fields=field_data,created_time,ad_id,ad_name,campaign_name,form_id,is_organic,custom_disclaimer_responses&access_token=" + encodeURIComponent(token)).then((r) => r.json()).catch(() => null);
   if (!data || !data.field_data) { console.error("meta-leads-webhook: lead fetch failed", leadgenId, JSON.stringify(data)); return; }
   const form = await fetch(GRAPH + "/" + (formId || data.form_id) + "?fields=name,locale,questions&access_token=" + encodeURIComponent(token)).then((r) => r.json()).catch(() => ({}));
   const formName: string = (form && form.name) || "";
@@ -154,7 +157,11 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
     // ad_id= lets the ad optimizer score each ad on real CRM outcomes (apps, closings).
     { date: today, type: "note", author: "System", text: "Lead captured from Facebook Instant Form \"" + (formName || formId) + "\"" + (data.campaign_name ? " · campaign " + data.campaign_name : "") + (data.ad_name ? " · ad " + data.ad_name : "") + (realAdId(data.ad_id, adId) ? " · ad_id=" + realAdId(data.ad_id, adId) : "") + " — routed to " + assignee + (spanish ? " (Spanish)" : "") },
     // Our forms carry the text/call consent disclaimer; the follow-up engine keys off this note.
-    { date: today, type: "note", author: "System", text: "TCPA consent recorded — agreed to the contact disclaimer on Facebook form \"" + (formName || formId) + "\"" },
+    // Consent only when the person actually checked a consent box (10/9: older forms had none,
+    // but every lead used to be logged as consenting).
+    (consented(data)
+      ? { date: today, type: "note", author: "System", text: "TCPA consent recorded — checked the call/text/email consent box on Facebook form \"" + (formName || formId) + "\"" }
+      : { date: today, type: "note", author: "System", text: "No text-consent checkbox on Facebook form \"" + (formName || formId) + "\" — they asked us to contact them about a loan; confirm consent on the first call before any marketing texts." }),
   ];
   if (answers.length) activity.push({ date: today, type: "note", author: "System", text: (spanish ? "Respuestas del formulario — " : "Form answers — ") + answers.join(" · ") });
   const row: Record<string, unknown> = {
@@ -379,7 +386,7 @@ Deno.serve(async (req: Request) => {
       // missing ones are imported QUIETLY: no LO alert, no AI text (they're old), routed the
       // same way as live leads, with a note saying they came from the form history.
       const all: any[] = [];
-      let next = GRAPH + "/" + formId + "/leads?fields=id,created_time,field_data,ad_name,campaign_name,is_organic&limit=100&access_token=" + encodeURIComponent(pt);
+      let next = GRAPH + "/" + formId + "/leads?fields=id,created_time,field_data,ad_name,campaign_name,is_organic,custom_disclaimer_responses&limit=100&access_token=" + encodeURIComponent(pt);
       for (let i = 0; next && i < 30; i++) {
         const pg = await fetch(next).then((r) => r.json()).catch(() => null);
         if (!pg || !pg.data) break;
@@ -415,7 +422,9 @@ Deno.serve(async (req: Request) => {
         const submitted = String(ld.created_time || "").slice(0, 10);
         const activity: Record<string, string>[] = [
           { date: today, type: "note", author: "System", text: "Imported from Facebook form history (\"" + formName + "\", submitted " + submitted + (ld.campaign_name ? ", campaign " + ld.campaign_name : "") + ") — this lead never reached the CRM. Routed to " + assignee + ". No automatic messages sent; reach out personally." },
-          { date: today, type: "note", author: "System", text: "TCPA consent recorded — agreed to the contact disclaimer on Facebook form \"" + formName + "\" on " + submitted },
+          consented(ld)
+            ? { date: today, type: "note", author: "System", text: "TCPA consent recorded — checked the consent box on Facebook form \"" + formName + "\" on " + submitted }
+            : { date: today, type: "note", author: "System", text: "No text-consent checkbox on Facebook form \"" + formName + "\" — confirm consent on the first call before any marketing texts." },
         ];
         if (answers.length) activity.push({ date: today, type: "note", author: "System", text: (spanish ? "Respuestas del formulario — " : "Form answers — ") + answers.join(" · ") });
         const { error } = await sb.from("leads").insert({
