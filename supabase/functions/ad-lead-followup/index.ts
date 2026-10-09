@@ -137,7 +137,7 @@ const TOUCHES: Array<{ k: string; after: number; ch: "text" | "email"; subject?:
 ];
 
 async function generate(touch: typeof TOUCHES[number], l: Row, lo: Row): Promise<{ subject: string; body: string } | null> {
-  const bookingLink = CLIENT_URL + "?book=" + l.assigned_to;
+  const bookingLink = CLIENT_URL + "?book=" + l.assigned_to + "&forLead=" + l.id;
   const appLink = CLIENT_URL + "?apply=" + l.id + "&t=" + (l.application_token || "");
   const prompt = "You are " + lo.name + ", a loan officer at Bridgepoint Lending (business-purpose real estate investor loans, not consumer mortgages). " +
     "Write ONE " + (touch.ch === "text" ? "text message (max 2 short sentences, plain, friendly, no emojis)" : "short email (max 90 words, plain text, no markdown, sign off with just your first name)") + " to " + first(l.name) + ", an investor who filled out our " + (l.loan_type || "loan") + " web form " + Math.max(1, Math.round((Date.now() - new Date(l.created_at_ts).getTime()) / 86400000)) + " day(s) ago and hasn't gone further. " +

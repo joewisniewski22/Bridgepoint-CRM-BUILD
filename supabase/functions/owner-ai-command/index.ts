@@ -1,4 +1,4 @@
-﻿import { createClient as __guardCreateClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient as __guardCreateClient } from "https://esm.sh/@supabase/supabase-js@2";
 // AI command box, available to every staff member. Joe types a
 // plain-English request in his portal; Claude decides which of a small,
 // fixed set of real backend tools to call (look up closed deals, draft/
@@ -841,7 +841,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
           email: l.email || null, phone: phoneAllowed ? (l.phone || null) : null, loanType: l.loan_type || null,
           loId: l.assigned_to || null, loName: lo.name || "your Bridgepoint contact",
           loPhone: "(850) 279-8588", // the one company number -- never a personal cell
-          bookingLink: "https://app.bplending.com/?book=" + (l.assigned_to || "owner"),
+          bookingLink: "https://app.bplending.com/?book=" + (l.assigned_to || "owner") + "&forLead=" + l.id,
         };
       })
       .filter((r) => {

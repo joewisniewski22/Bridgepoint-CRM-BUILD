@@ -48,7 +48,7 @@ const CORS_HEADERS = {
 // next_ci_assignee(), 063_ci_routing_atomic.sql) is serialized by
 // Postgres's own row lock, so concurrent requests can't race anymore.
 async function pickCIOwnerOrFiore(): Promise<string> {
-  const { data, error } = await sb.rpc("next_ci_assignee");
+  const { data, error } = await sb.rpc("pick_rotation_lo", { p_pool: "ci" }); // 50/50, misses count, out-today skipped (097)
   if (error || !data) return "owner";
   return data as string;
 }
@@ -216,7 +216,7 @@ Deno.serve(async (req: Request) => {
     // --- AI first-contact message to the borrower, in English --------------
     if ((email || phone) && assignee) {
       try {
-        const bookingLink = CLIENT_URL + "?book=" + assignedTo;
+        const bookingLink = CLIENT_URL + "?book=" + assignedTo + "&forLead=" + id;
         const known: string[] = [];
         if (loanType) known.push("Loan type: " + loanType);
         if (loanAmount) known.push("Requested amount: approx. $" + loanAmount.toLocaleString());

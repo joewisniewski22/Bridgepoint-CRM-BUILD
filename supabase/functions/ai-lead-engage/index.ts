@@ -114,7 +114,7 @@ Deno.serve(async (req: Request) => {
       ? ("Additional guidance learned from real conversion data across all conversations, follow this: " + engagementConfig.messaging_guidance + " ")
       : "";
 
-    const bookingLink = CLIENT_URL + "?book=" + lead.assigned_to;
+    const bookingLink = CLIENT_URL + "?book=" + lead.assigned_to + "&forLead=" + leadId;
     const hasLoanType = !!lead.loan_type;
     const alreadyApplied = !!lead.application_sent_at;
     const systemPrompt =

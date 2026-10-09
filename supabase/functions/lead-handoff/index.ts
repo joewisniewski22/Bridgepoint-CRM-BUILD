@@ -6,7 +6,8 @@
 //   5 minutes, the lead moves to the next LO on the list, whose phone rings, and so on. If nobody
 //   in the pool calls it, it lands with Joe and he gets a text.
 //     English Facebook / website pool: Joe, Fiore, Taeya, Theresa (Joe 30%, the rest split 70%).
-//     Connected Investors / PrivateLenders pool: Joe and Fiore (50/50).
+//     Connected Investors / PrivateLenders pool: Joe and Fiore (50/50); if both miss it, it goes
+//     to Taeya / Theresa / Fanis on a rotation, then back to Joe as the last stop.
 // - Overnight (10pm-9am ET): the lead stays with the LO it was given to -- "not fair to take a lead
 //   cause it came over in middle of night". At 9am their phone rings for it; if it still hasn't
 //   been called by noon, Joe gets a text (alert only, nothing moves).
@@ -30,6 +31,10 @@ const POOLS: Record<string, string[]> = {
   english: ["owner", "lo-fiore", "lo-taeya", "lo-theresa"],
   ci: ["owner", "lo-fiore"],
 };
+// Joe 10/9: "if me and fiore miss our window ... have it go out to entire team on a rotation"
+// -- a Connected Investors lead both of them missed goes to the other LOs (any language; they
+// all speak English), same 5-minute rule, rotating who goes first.
+const OVERFLOW: Record<string, string[]> = { ci: ["lo-taeya", "lo-theresa", "lo-fanis"] };
 const INBOUND = /^(Facebook|Meta Ads|Website|Connected Investors|Private ?Lenders)/i;
 
 function et(d: Date) {
@@ -54,7 +59,7 @@ function dialed(l: any): boolean {
 const staffCache: Record<string, any> = {};
 async function staff(id: string) {
   if (!(id in staffCache)) {
-    const { data } = await sb.from("users").select("id,name,phone,email").eq("id", id).maybeSingle();
+    const { data } = await sb.from("users").select("id,name,phone,email,out_date").eq("id", id).maybeSingle();
     staffCache[id] = data || null;
   }
   return staffCache[id];
@@ -179,7 +184,24 @@ Deno.serve(async (req: Request) => {
     let next: string | null = null;
     for (let i = 1; i <= list.length; i++) {
       const cand = list[(start + i) % list.length];
-      if (!tried.includes(cand)) { next = cand; break; }
+      // LOs marked "out today" are skipped (Joe as the last stop never is).
+      const u = await staff(cand);
+      if (!tried.includes(cand) && !(u && u.out_date === t.date)) { next = cand; break; }
+    }
+    if (!next && OVERFLOW[row.pool]) {
+      const open: string[] = [];
+      for (const cand of OVERFLOW[row.pool]) {
+        const u = await staff(cand);
+        if (!tried.includes(cand) && !(u && u.out_date === t.date)) open.push(cand);
+      }
+      if (open.length) {
+        // Rotate: whoever has received the fewest overflow leads goes first.
+        const { data: got } = await sb.from("rotation_picks").select("lo").eq("pool", row.pool + "-overflow").in("lo", open);
+        const n: Record<string, number> = {};
+        (got || []).forEach((g: any) => { n[g.lo] = (n[g.lo] || 0) + 1; });
+        open.sort((a, b) => (n[a] || 0) - (n[b] || 0));
+        next = open[0];
+      }
     }
     let finalStop = false;
     if (!next) { finalStop = true; next = cur === "owner" ? null : "owner"; }
@@ -204,6 +226,13 @@ Deno.serve(async (req: Request) => {
     await note(l.id, "Not called within 5 minutes by " + fromName + " -- automatically passed to " + toName + (finalStop ? " (last stop)." : "."), next);
     await textStaff(cur, "Lead " + l.name + " was passed to " + toName + " -- not called within 5 minutes.", l.id);
     await textStaff(next, (finalStop ? "Nobody else called " : "Passed to you: ") + l.name + (finalStop ? " -- it's yours now. " : " wasn't called in 5 min. Call " + first + " now: ") + link, l.id);
+    if (!DRY) {
+      // The receiver's share counts this lead; the LO who missed it keeps theirs (Joe 10/9: missing leads costs you leads).
+      const overflow = (OVERFLOW[row.pool] || []).includes(next);
+      await sb.from("rotation_picks").insert({ pool: overflow ? row.pool + "-overflow" : row.pool, lo: next, kind: "handoff", lead_id: l.id });
+      // Any meeting the borrower already booked moves to the new LO's calendar.
+      await sb.from("appointments").update({ user_id: next }).eq("lead_id", l.id).eq("status", "scheduled").gt("start_at", now.toISOString());
+    }
     const r = await ring(l.id, "handoff");
     log.push({ lead: l.id, from: cur, to: next, final: finalStop, ring: r });
   }

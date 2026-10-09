@@ -541,7 +541,7 @@ No emojis anywhere. Return ONLY the JSON.`;
 
 // AI-written borrower touch
 async function makeTouch(touch, l, lo, sit, anchorLabel) {
-  const bookingLink = CLIENT_URL + "?book=" + l.assigned_to;
+  const bookingLink = CLIENT_URL + "?book=" + l.assigned_to + "&forLead=" + l.id;
   const appLink = CLIENT_URL + "?apply=" + l.id + "&t=" + (l.application_token || "");
   const lang = l.preferred_language === "es" ? "Spanish" : "English";
   const exp = l.termsheet_sent_at ? addDays(dateOf(l.termsheet_sent_at), 15) : null;

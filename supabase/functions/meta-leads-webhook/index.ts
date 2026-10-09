@@ -35,25 +35,11 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 // English ad-lead routing (Joe, 2026-10-03): 30% to Joe, the rest split evenly
 // between Fiore, Taeya and Theresa. Deterministic: each new lead goes to whoever is
 // furthest below their target share of the ad leads created since ROUTING_START.
-const ROUTING_START = "2026-10-03";
-const ROUTE_TARGETS: Array<{ id: string; weight: number }> = [
-  { id: "owner", weight: 0.30 },
-  { id: "lo-fiore", weight: 0.70 / 3 },
-  { id: "lo-taeya", weight: 0.70 / 3 },
-  { id: "lo-theresa", weight: 0.70 / 3 },
-];
 async function pickEnglishAdLO(): Promise<string> {
-  const { data } = await sb.from("leads").select("assigned_to")
-    .gte("created_at", ROUTING_START).or("source.like.Meta Ads*,source.like.Website*").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
-  const counts: Record<string, number> = {};
-  (data || []).forEach((r: Record<string, unknown>) => { counts[r.assigned_to as string] = (counts[r.assigned_to as string] || 0) + 1; });
-  const total = (data || []).length;
-  let best = ROUTE_TARGETS[0], bestDeficit = -Infinity;
-  for (const r of ROUTE_TARGETS) {
-    const deficit = r.weight * (total + 1) - (counts[r.id] || 0);
-    if (deficit > bestDeficit + 1e-9) { best = r; bestDeficit = deficit; }
-  }
-  return best.id;
+  // One shared rotation (pick_rotation_lo, migration 097): weighted shares, missed leads count
+  // against the LO who missed them, out-today LOs skipped.
+  const { data, error } = await sb.rpc("pick_rotation_lo", { p_pool: "english" });
+  return !error && data ? (data as string) : "owner";
 }
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "GET, POST, OPTIONS" };
@@ -183,7 +169,7 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   // Instant AI first contact to the borrower, from their LO.
   if (lo && ANTHROPIC_API_KEY && (phone || email)) {
     try {
-      const booking = CLIENT_URL + "?book=" + assignee;
+      const booking = CLIENT_URL + "?book=" + assignee + "&forLead=" + id;
       const first = name.split(/\s+/)[0];
       const prompt = spanish
         ? "Eres " + lo.name + ", oficial de préstamos de Bridgepoint Lending (préstamos de negocio para inversionistas de bienes raíces, no residenciales). Un cliente acaba de llenar nuestro formulario de Facebook. Escríbele un primer mensaje corto (máximo 3-4 oraciones), cálido, en ESPAÑOL, sin emojis, sin prometer aprobación ni tasas. Agradécele por su nombre, muestra que leíste sus respuestas e invítalo a agendar una llamada rápida aquí: " + booking + " — o que responda con la dirección de la propiedad.\n\nNombre: " + first + "\nRespuestas:\n- " + (answers.join("\n- ") || "(ninguna)") + "\n\nResponde SOLO con el texto del mensaje."

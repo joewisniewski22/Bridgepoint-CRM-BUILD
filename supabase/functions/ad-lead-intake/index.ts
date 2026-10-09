@@ -28,25 +28,11 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 // new lead goes to whoever is furthest below their target share of the ad
 // leads created since ROUTING_START. (Spanish-ad leads are routed separately
 // in highlevel-leads-webhook.)
-const ROUTING_START = "2026-10-03";
-const ROUTE_TARGETS: Array<{ id: string; weight: number }> = [
-  { id: "owner", weight: 0.30 },
-  { id: "lo-fiore", weight: 0.70 / 3 },
-  { id: "lo-taeya", weight: 0.70 / 3 },
-  { id: "lo-theresa", weight: 0.70 / 3 },
-];
 async function pickEnglishAdLO(client: ReturnType<typeof createClient>): Promise<string> {
-  const { data } = await client.from("leads").select("assigned_to")
-    .gte("created_at", ROUTING_START).or("source.like.Meta Ads*,source.like.Website*Quote Form,source.like.Website*Application,source.like.Website*Deal Analyzer").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
-  const counts: Record<string, number> = {};
-  (data || []).forEach((r: Record<string, unknown>) => { counts[r.assigned_to as string] = (counts[r.assigned_to as string] || 0) + 1; });
-  const total = (data || []).length;
-  let best = ROUTE_TARGETS[0], bestDeficit = -Infinity;
-  for (const r of ROUTE_TARGETS) {
-    const deficit = r.weight * (total + 1) - (counts[r.id] || 0);
-    if (deficit > bestDeficit + 1e-9) { best = r; bestDeficit = deficit; }
-  }
-  return best.id;
+  // One shared rotation (pick_rotation_lo, migration 097): weighted shares, missed leads count
+  // against the LO who missed them, out-today LOs skipped.
+  const { data, error } = await client.rpc("pick_rotation_lo", { p_pool: "english" });
+  return !error && data ? (data as string) : "owner";
 }
 
 const CORS_HEADERS = {
@@ -261,7 +247,7 @@ async function handle(b: Record<string, unknown>): Promise<Response> {
     // --- AI first contact (English), consent recorded above ----------------
     if (lo && !isApply) {
       try {
-        const bookingLink = CLIENT_URL + "?book=" + ASSIGNEE;
+        const bookingLink = CLIENT_URL + "?book=" + ASSIGNEE + "&forLead=" + id;
         const known: string[] = ["Loan type: " + loanType].concat(answers);
         if (propertyType) known.push("Property: " + propertyType);
         if (valueAmt) known.push((goal === "purchase" ? "Purchase price" : "Property value") + ": about $" + Math.round(valueAmt).toLocaleString());

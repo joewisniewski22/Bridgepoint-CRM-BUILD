@@ -55,25 +55,11 @@ function pickSpanishAdLO(): string {
 // English workflow. Routed with the same rotation as the English landing pages
 // (ad-lead-intake's pickEnglishAdLO): 30% Joe, the rest split Fiore/Taeya/Theresa,
 // counted over every English ad lead since ROUTING_START.
-const ROUTING_START = "2026-10-03";
-const ROUTE_TARGETS: Array<{ id: string; weight: number }> = [
-  { id: "owner", weight: 0.30 },
-  { id: "lo-fiore", weight: 0.70 / 3 },
-  { id: "lo-taeya", weight: 0.70 / 3 },
-  { id: "lo-theresa", weight: 0.70 / 3 },
-];
 async function pickEnglishAdLO(): Promise<string> {
-  const { data } = await sb.from("leads").select("assigned_to")
-    .gte("created_at", ROUTING_START).or("source.like.Meta Ads*,source.like.Website*Quote Form,source.like.Website*Application,source.like.Website*Deal Analyzer").in("assigned_to", ROUTE_TARGETS.map((r) => r.id));
-  const counts: Record<string, number> = {};
-  (data || []).forEach((r: Record<string, unknown>) => { counts[r.assigned_to as string] = (counts[r.assigned_to as string] || 0) + 1; });
-  const total = (data || []).length;
-  let best = ROUTE_TARGETS[0], bestDeficit = -Infinity;
-  for (const r of ROUTE_TARGETS) {
-    const deficit = r.weight * (total + 1) - (counts[r.id] || 0);
-    if (deficit > bestDeficit + 1e-9) { best = r; bestDeficit = deficit; }
-  }
-  return best.id;
+  // One shared rotation (pick_rotation_lo, migration 097): weighted shares, missed leads count
+  // against the LO who missed them, out-today LOs skipped.
+  const { data, error } = await sb.rpc("pick_rotation_lo", { p_pool: "english" });
+  return !error && data ? (data as string) : "owner";
 }
 const PROGRAM_LOAN_TYPE: Record<string, string> = { dscr: "DSCR", fixflip: "Fix & Flip", bridge: "Bridge", ground: "Ground Up Construction" };
 
@@ -286,7 +272,7 @@ Deno.serve(async (req: Request) => {
     // necessarily looked at the lead yet.
     if ((email || phone) && assignee) {
       try {
-        const bookingLink = CLIENT_URL + "?book=" + assignedTo;
+        const bookingLink = CLIENT_URL + "?book=" + assignedTo + "&forLead=" + id;
         const known: string[] = [];
         if (loanType) known.push("Tipo de préstamo: " + loanType);
         if (loanAmount) known.push("Monto solicitado: aprox. $" + loanAmount.toLocaleString());

@@ -81,7 +81,7 @@ Deno.serve(async (req: Request) => {
     const first = ((lead.name as string) || "").trim().split(" ")[0] || "there";
     const loName = ((staff.name as string) || "your loan officer").trim();
     const loanType = lead.loan_type ? (lead.loan_type as string) + " loan" : "loan";
-    const book = CLIENT_URL + "?book=" + staffId;
+    const book = CLIENT_URL + "?book=" + staffId + "&forLead=" + leadId;
 
     let message =
       "Hey " + first + ", it's " + loName + " with Bridgepoint Lending following up on your " + loanType + " inquiry — sorry I missed you! " +

@@ -2597,6 +2597,27 @@ function isDemo(){ return isDemoAccountId(ui.viewAs); }
 function isProcessor(){ var u = userById(ui.viewAs); return !!(u && u.role==="processor"); }
 function isLO(){ var u = userById(ui.viewAs); return !!(u && u.role==="loan_officer"); }
 function currentUser(){ return userById(ui.viewAs) || { id:"owner", name:"Joe", role:"owner" }; }
+// "I'm out today" (Joe 2026-10-09): an LO who is out is skipped by the lead rotation and the
+// 5-minute handoff for the rest of the day (resets itself at midnight ET). LOs and Joe only.
+function outTodayButtonHTML(mobile){
+  var me = currentUser();
+  if (isDemo() || !(me.role === "owner" || me.role === "loan_officer")) return "";
+  var out = !!me.outToday;
+  var label = out ? "🔴 Out today — not getting new leads (tap when back)" : "🟢 Taking new leads today";
+  return '<button type="button" data-action="toggle-out-today" title="Out today = the lead rotation skips you until tomorrow" style="display:block;width:100%;margin-top:8px;padding:' + (mobile ? "10px" : "8px") + ';border-radius:8px;border:1px solid ' + (out ? "#d33" : "var(--border-soft)") + ';background:' + (out ? "rgba(221,51,51,0.12)" : "transparent") + ';color:inherit;font-weight:600;text-align:left;cursor:pointer;font-size:13px">' + label + '</button>';
+}
+function toggleOutToday(){
+  var me = currentUser();
+  if (!sb) return;
+  var goingOut = !me.outToday;
+  if (goingOut && !confirm("Mark yourself out for today? New leads will go to the rest of the team until tomorrow.")) return;
+  sb.rpc("set_out_today", { p_out: goingOut }).then(function(res){
+    if (res.error){ showToast("Couldn't update — try again"); return; }
+    me.outToday = goingOut;
+    showToast(goingOut ? "You're out for today — new leads go to the team" : "You're back in the lead rotation");
+    render();
+  }, function(){ showToast("Couldn't update — try again"); });
+}
 function canEditApplication(lead){
   return stageIndex(lead.stage) < stageIndex("processing") || isOwner() || isProcessor();
 }
@@ -10309,6 +10330,7 @@ function renderShell(){
           (isDemo() ? '' : ('<button type="button" data-action="open-modal" data-modal="todaysSchedule" style="display:block;width:100%;margin-top:10px;padding:10px;border-radius:8px;border:none;background:var(--brand);color:#fff;font-weight:700;text-align:left;cursor:pointer">' +
             '📅 Today\'s Schedule' + (myScheduleItems(currentUser().id, {todayOnly:true}).length ? (' <span style="background:rgba(255,255,255,0.25);border-radius:10px;padding:1px 8px;margin-left:4px">' + myScheduleItems(currentUser().id, {todayOnly:true}).length + '</span>') : '') +
           '</button>')) +
+          outTodayButtonHTML(false) +
           '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">' +
             (isDemo() ? '<button class="btn btn-sm btn-primary" style="flex:1" data-action="restart-tour">▶ Replay Tour</button>' : '<button class="btn btn-sm" style="flex:1" data-action="open-modal" data-modal="changePin">Change PIN</button>') +
             (isDemo() ? '' : '<button class="btn btn-sm btn-ghost" style="flex:1" data-action="open-modal" data-modal="editSignature">Signature</button>') +
@@ -10618,6 +10640,7 @@ function renderMobileShell(){
         '<div style="display:flex;gap:6px"><button type="button" class="m-btn" style="min-height:40px" data-action="m-refresh" aria-label="Refresh">↻</button>' +
         '<button type="button" class="m-btn" style="min-height:40px" data-action="open-modal" data-modal="addLead">＋ Lead</button>' +
         '<button type="button" class="m-btn" style="min-height:40px" data-action="start-dialer">▶ Dialer</button></div></div>' +
+      outTodayButtonHTML(true) +
       '<div class="m-progress"><span style="width:' + pct + '%"></span></div>' +
       '<div class="m-tabs"><button type="button" class="m-tab' + (tab==="new" ? " on" : "") + '" data-action="m-tab" data-tab="new">New' + (uncontacted ? (' (' + uncontacted + ')') : '') + '</button>' +
         '<button type="button" class="m-tab' + (tab==="today" ? " on" : "") + '" data-action="m-tab" data-tab="today">Today</button>' +
@@ -15533,6 +15556,16 @@ function modalMySchedule(){
 }
 function loadPublicBooking(userId){
   if (!sb){ ui.publicBooking.status = "invalid"; render(); return; }
+  // Links carry &forLead= (2026-10-09): book with whoever owns the lead NOW, so a lead the
+  // 5-minute handoff passed to another LO books on the new LO's calendar.
+  if (ui.publicBooking.leadId && !ui.publicBooking.ownerChecked){
+    ui.publicBooking.ownerChecked = true;
+    sb.rpc("booking_owner", { p_lead: ui.publicBooking.leadId }).then(function(r){
+      if (r && r.data && typeof r.data === "string") ui.publicBooking.userId = r.data;
+      loadPublicBooking(ui.publicBooking.userId);
+    }, function(){ loadPublicBooking(userId); });
+    return;
+  }
   sb.rpc("list_users").then(function(res){
     var u = (res.data||[]).filter(function(x){ return x.id===userId; })[0];
     if (!u){ ui.publicBooking.status = "invalid"; render(); return; }
@@ -19622,6 +19655,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "lp-send-term-sheet"){ promptSendTermSheet(t.dataset.lp); }
   else if (action === "generate-standalone-term-sheet"){ generateStandalonePricerTermSheet(); }
   else if (action === "logout"){ logout(); }
+  else if (action === "toggle-out-today"){ toggleOutToday(); }
   else if (action === "restart-tour"){ ui.view = "tour"; ui.tourStep = 0; render(); }
   else if (action === "reset-portal-customization"){ resetPortalCustomization(); }
   else if (action === "tour-next"){ ui.tourStep = (ui.tourStep||0)+1; render(); }
