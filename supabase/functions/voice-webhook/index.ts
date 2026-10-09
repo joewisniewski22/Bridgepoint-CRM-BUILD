@@ -94,6 +94,7 @@ interface CallState {
   vmTarget?: { kind: "staff" | "all_los" | "owner"; staffId?: string | null; label: string };
   pairId?: string;                  // direct_dial_leg: which pair this leg belongs to
   role?: "destination" | "staff";   // direct_dial_leg: which side of the pair this leg is
+  announce?: string;                // ringing_staff: custom prompt (new-lead auto-ring, 2026-10-09)
 }
 
 function last10(phone: string | null | undefined): string {
@@ -393,7 +394,8 @@ Deno.serve(async (req: Request) => {
         // The staff member's cell picked up. Ask them to press 1 before dialing the client, so
         // a voicemail answering their phone never connects the client to it (2026-10-07).
         const who = state.leadName ? state.leadName : "your client";
-        await gather(callControlId, "Bridgepoint call to " + who + ". Press 1 to connect.", "1", { ...state, stage: "staff_confirm" });
+        const prompt = state.announce ? (state.announce + " Press 1 to call them now.") : ("Bridgepoint call to " + who + ". Press 1 to connect.");
+        await gather(callControlId, prompt, "1", { ...state, stage: "staff_confirm" });
       } else if (state.stage === "answering_inbound") {
         const nextState: CallState = { ...state, stage: "connecting_staff", originalCallControlId: callControlId };
         await saveTransferState(payload.call_session_id as string, nextState);

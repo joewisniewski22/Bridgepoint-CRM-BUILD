@@ -57,7 +57,9 @@ Deno.serve(async (req: Request) => {
 
   try {
     // targetName: who's being called when it isn't a lead (inter-office calls, 2026-10-07).
-    const { leadId, phone, userId, direct, targetName } = await req.json();
+    // announce (2026-10-09): custom words the rep hears before "Press 1 to connect" -- the
+    // new-lead auto-ring says "New Facebook lead: Maria, DSCR rental, Florida."
+    const { leadId, phone, userId, direct, targetName, announce } = await req.json();
     if ((!leadId && !phone) || !userId) {
       return new Response(JSON.stringify({ error: "leadId or phone, plus userId, required" }), { status: 400, headers: CORS_HEADERS });
     }
@@ -145,6 +147,7 @@ Deno.serve(async (req: Request) => {
     const clientState = btoa(JSON.stringify({
       v: 1, stage: "ringing_staff", leadId: matchedLeadId, userId,
       leadPhone: destE164, leadName: leadName, staffName: staff.name,
+      announce: typeof announce === "string" && announce.trim() ? announce.trim().slice(0, 220) : undefined,
     }));
 
     const res = await fetch("https://api.telnyx.com/v2/calls", {
@@ -155,6 +158,8 @@ Deno.serve(async (req: Request) => {
         to: staffE164,
         from: TELNYX_FROM_NUMBER,
         client_state: clientState,
+        // Auto-ring for a new lead: stop ringing before the rep's voicemail answers (most pick up ~25s).
+        ...(announce ? { timeout_secs: 22 } : {}),
       }),
     });
     const data = await res.json();
