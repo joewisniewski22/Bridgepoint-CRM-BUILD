@@ -461,6 +461,8 @@ Deno.serve(async (req: Request) => {
           // early_media: the rep hears the client ringing / their voicemail greeting (Joe heard silence 2026-10-07);
           // 45s so voicemail (often ~30s) picks up before we give up.
           await telnyxAction(callControlId, "transfer", { to: state.leadPhone, from: TELNYX_FROM_NUMBER, timeout_secs: 45, early_media: true, client_state: encodeState(nextState) });
+          // The LO is dialing the borrower right now -- stops the 5-minute lead handoff (lead-handoff).
+          if (state.leadId) await sb.from("leads").update({ lo_dialed_at: new Date().toISOString() }).eq("id", state.leadId);
         } else {
           // No key press: a voicemail or pocket answer -- don't dial the client.
           await telnyxAction(callControlId, "hangup", {});

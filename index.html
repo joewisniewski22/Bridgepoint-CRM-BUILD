@@ -6924,6 +6924,8 @@ function placeSoftphoneCall(leadId, displayName, e164){
     telnyxActiveCall = telnyxClient.newCall({ destinationNumber: e164, callerNumber: TELNYX_CRM_NUMBER, clientState: stateForWebhook });
     ui.softphoneCall.callId = telnyxActiveCall && telnyxActiveCall.id;
     ui.softphoneCall.startedAt = Date.now();
+    // Marks the lead as called the moment the LO dials -- stops the 5-minute lead handoff.
+    if (leadId && sb) sb.from("leads").update({ lo_dialed_at: new Date().toISOString() }).eq("id", leadId).then(function(){}, function(){});
   } catch(err){
     console.error("softphone: newCall failed", err);
     abortStuckCall("Couldn't start the call — check that this site is allowed to use your microphone, then try again.");

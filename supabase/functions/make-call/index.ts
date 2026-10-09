@@ -140,6 +140,8 @@ Deno.serve(async (req: Request) => {
       await sb.from("voice_direct_dial_pairs").insert({
         id: pairId, staff_call_control_id: staffCallControlId, destination_call_control_id: destCallControlId,
       });
+      // The borrower's phone is ringing now -- stops the 5-minute lead handoff (lead-handoff).
+      if (matchedLeadId) await sb.from("leads").update({ lo_dialed_at: new Date().toISOString() }).eq("id", matchedLeadId);
 
       return new Response(JSON.stringify({ ok: true, destCallControlId, staffCallControlId, matchedLeadId }), { headers: CORS_HEADERS });
     }

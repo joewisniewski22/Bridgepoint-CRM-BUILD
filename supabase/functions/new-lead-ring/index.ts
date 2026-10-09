@@ -2,8 +2,8 @@
 // rings to connect, similar to how we set up the app phone system for the mobile app").
 //
 // A database trigger on public.leads (migration 095) calls this for every new lead. If it's a
-// real inbound lead with a phone, assigned to an LO with a cell on file, and it's 8am-8pm
-// Mon-Sat in the LO's own time zone, it starts the existing "call my cell first" flow
+// real inbound lead with a phone, assigned to an LO with a cell on file, and it's 9am-10pm
+// Eastern (any day), it starts the existing "call my cell first" flow
 // (make-call sequential mode): the LO's cell rings from the company number, they hear
 // "New Facebook lead: Maria, DSCR rental, Florida. Press 1 to call them now.", and pressing 1
 // connects them to the borrower (voice-webhook). No key press = nothing reaches the borrower.
@@ -33,35 +33,42 @@ Deno.serve(async (req: Request) => {
   if (!auth || body.secret !== auth.secret) return json({ error: "not_authorized" }, 403);
   const leadId = String(body.leadId || "");
   if (!leadId) return json({ error: "leadId required" }, 400);
+  // lead-handoff (2026-10-09) re-rings for a lead passed to the next LO ("handoff") or one that
+  // waited overnight ("morning"); those skip the brand-new and one-ring-per-lead checks.
+  const handoff = body.handoff === true;
+  const reason = String(body.reason || "");
 
   // Let the intake finish (assignment, notes) before reading the file.
-  await new Promise((r) => setTimeout(r, 4000));
-  const { data: lead } = await sb.from("leads").select("id,name,phone,source,status,stage,assigned_to,loan_type,property_address,first_attempt_at,automation_paused,preferred_language,created_at_ts").eq("id", leadId).maybeSingle();
+  if (!handoff) await new Promise((r) => setTimeout(r, 4000));
+  const { data: lead } = await sb.from("leads").select("id,name,phone,source,status,stage,assigned_to,loan_type,property_address,lo_dialed_at,automation_paused,preferred_language,created_at_ts").eq("id", leadId).maybeSingle();
   const skip = (why: string) => json({ ok: true, skipped: why });
   if (!lead) return skip("no_lead");
   if (!RING_SOURCES.test(String(lead.source || "")) || /referral partner/i.test(String(lead.source || ""))) return skip("source " + lead.source);
   // Only brand-new leads: a backfill/import of older form leads must never ring anyone.
-  if (!lead.created_at_ts || Date.now() - new Date(lead.created_at_ts).getTime() > 15 * 60000) return skip("not_new");
+  if (!handoff && (!lead.created_at_ts || Date.now() - new Date(lead.created_at_ts).getTime() > 15 * 60000)) return skip("not_new");
   if (lead.status !== "active" || /^TEST/i.test(String(lead.name || ""))) return skip("not_active_or_test");
   if (!lead.phone || String(lead.phone).replace(/\D/g, "").length < 10) return skip("no_phone");
-  if (lead.first_attempt_at) return skip("already_called");
+  if (lead.lo_dialed_at) return skip("already_called");
   if (!lead.assigned_to) return skip("unassigned");
 
   const { data: staff } = await sb.from("users").select("id,name,phone").eq("id", lead.assigned_to).maybeSingle();
   if (!staff || !staff.phone) return skip("lo_has_no_cell");
-  const { data: rule } = await sb.from("availability_rules").select("timezone").eq("user_id", staff.id).limit(1);
-  const tz = (rule && rule[0] && rule[0].timezone) || "America/New_York";
-  const t = localNow(tz);
-  if (t.dow === "Sun" || t.minutes < 8 * 60 || t.minutes >= 20 * 60) return skip("outside_hours " + tz);
+  // Joe's lead hours (2026-10-09): 9am-10pm Eastern, every day.
+  const t = localNow("America/New_York");
+  if (t.minutes < 9 * 60 || t.minutes >= 22 * 60) return skip("outside_hours");
 
-  // One ring per lead, ever.
-  const { error: claimErr } = await sb.from("lead_ring_log").insert({ lead_id: leadId, user_id: staff.id });
-  if (claimErr) return skip("already_rang");
+  // One automatic new-lead ring per lead; handoff/morning rings are rationed by lead-handoff.
+  if (handoff) await sb.from("lead_ring_log").upsert({ lead_id: leadId, user_id: staff.id, created_at: new Date().toISOString() });
+  else {
+    const { error: claimErr } = await sb.from("lead_ring_log").insert({ lead_id: leadId, user_id: staff.id });
+    if (claimErr) return skip("already_rang");
+  }
 
   const first = String(lead.name || "a new lead").trim().split(/\s+/)[0];
   const src = /^Facebook/i.test(lead.source) ? "Spanish Facebook" : /^Meta Ads/i.test(lead.source) ? "Facebook" : /^Website/i.test(lead.source) ? "website" : /^Connected/i.test(lead.source) ? "Connected Investors" : "new";
   const st = (String(lead.property_address || "").match(/\b([A-Z]{2})\b(?:\s+\d{5})?(?:,\s*USA)?\s*$/) || [])[1];
-  const announce = "New " + src + " lead: " + first + (lead.loan_type ? ", " + (LOAN_WORDS[lead.loan_type] || lead.loan_type) : "") + (st && STATE_NAMES[st] ? ", " + STATE_NAMES[st] : "") + ".";
+  const lead_ = (reason === "handoff" ? "Lead passed to you, " : reason === "morning" ? "Overnight " : "New ") + src + " lead: ";
+  const announce = lead_ + first + (lead.loan_type ? ", " + (LOAN_WORDS[lead.loan_type] || lead.loan_type) : "") + (st && STATE_NAMES[st] ? ", " + STATE_NAMES[st] : "") + ".";
 
   const res = await fetch(SUPABASE_URL + "/functions/v1/make-call", {
     method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
