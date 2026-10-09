@@ -29,6 +29,10 @@ const GRAPH = "https://graph.facebook.com/v21.0";
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 const CLIENT_URL = "https://app.bplending.com/";
 const SPANISH_LO = "lo-fanis";
+// Vietnamese forms (Joe 2026-10-09): Theresa records the Vietnamese videos and owns every
+// Vietnamese lead -- pinned like Spanish, never rotated or handed off.
+const VIETNAMESE_LO = "lo-theresa";
+const isVietnamese = (locale: string, formName: string) => /^vi/i.test(locale || "") || /vietnam|tiếng việt|tieng viet/i.test(formName || "");
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -99,6 +103,8 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const form = await fetch(GRAPH + "/" + (formId || data.form_id) + "?fields=name,locale,questions&access_token=" + encodeURIComponent(token)).then((r) => r.json()).catch(() => ({}));
   const formName: string = (form && form.name) || "";
   const spanish = /^es/i.test((form && form.locale) || "") || /spanish|español|espanol/i.test(formName);
+  const vietnamese = !spanish && isVietnamese((form && form.locale) || "", formName);
+  const lang = spanish ? "es" : vietnamese ? "vi" : "en";
 
   // Multiple-choice answers come back as the option KEY (e.g. "o4"), not its text (10/9:
   // Smithie Lu's file read "credit score: o4"). Translate keys to the option text.
@@ -111,7 +117,7 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const dedicated = new Set(["full_name", "first_name", "last_name", "email", "phone_number", "phone", "nombre_completo"]);
   const answers = fields.filter((f) => !dedicated.has(f.name.toLowerCase()) && f.values && f.values.length).map((f) => f.name.replace(/_/g, " ") + ": " + f.values.join(", "));
   const today = new Date().toISOString().slice(0, 10);
-  const label = spanish ? "Facebook" : "Meta Ads — " + (loanType || "Lead Form");
+  const label = spanish ? "Facebook" : "Meta Ads — " + (vietnamese ? "Vietnamese " : "") + (loanType || "Lead Form");
 
   // Meta test leads (Lead Ads Testing Tool / POST {form}/test_leads) carry placeholder
   // answers like "<test lead: dummy data for email>". Record them so the pipe can be
@@ -121,8 +127,8 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
     await sb.from("leads").insert({
       id: "LTEST" + crypto.randomUUID().slice(0, 6).toUpperCase(), name: "TEST — Facebook form " + (formName || formId), source: label, loan_type: loanType,
       stage: "spam", status: "spam", assigned_to: "owner", created_at: today, created_at_ts: new Date().toISOString(),
-      preferred_language: spanish ? "es" : "en", automation_paused: true, entity_type: "LLC", application_token: crypto.randomUUID(),
-      activity: [{ date: today, type: "note", author: "System", text: "Meta TEST lead (leadgen " + leadgenId + ") — pipe verified; would have routed to " + (spanish ? SPANISH_LO : "the English rotation") + ". No alerts or messages sent." }],
+      preferred_language: lang, automation_paused: true, entity_type: "LLC", application_token: crypto.randomUUID(),
+      activity: [{ date: today, type: "note", author: "System", text: "Meta TEST lead (leadgen " + leadgenId + ") — pipe verified; would have routed to " + (spanish ? SPANISH_LO : vietnamese ? VIETNAMESE_LO : "the English rotation") + ". No alerts or messages sent." }],
     });
     return;
   }
@@ -137,11 +143,11 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
     return;
   }
 
-  const assignee = spanish ? SPANISH_LO : await pickEnglishAdLO();
+  const assignee = spanish ? SPANISH_LO : vietnamese ? VIETNAMESE_LO : await pickEnglishAdLO();
   const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
   const activity: Record<string, string>[] = [
     // ad_id= lets the ad optimizer score each ad on real CRM outcomes (apps, closings).
-    { date: today, type: "note", author: "System", text: "Lead captured from Facebook Instant Form \"" + (formName || formId) + "\"" + (data.campaign_name ? " · campaign " + data.campaign_name : "") + (data.ad_name ? " · ad " + data.ad_name : "") + (realAdId(data.ad_id, adId) ? " · ad_id=" + realAdId(data.ad_id, adId) : "") + " — routed to " + assignee + (spanish ? " (Spanish)" : "") },
+    { date: today, type: "note", author: "System", text: "Lead captured from Facebook Instant Form \"" + (formName || formId) + "\"" + (data.campaign_name ? " · campaign " + data.campaign_name : "") + (data.ad_name ? " · ad " + data.ad_name : "") + (realAdId(data.ad_id, adId) ? " · ad_id=" + realAdId(data.ad_id, adId) : "") + " — routed to " + assignee + (spanish ? " (Spanish)" : vietnamese ? " (Vietnamese)" : "") },
     // Our forms carry the text/call consent disclaimer; the follow-up engine keys off this note.
     // Consent only when the person actually checked a consent box (10/9: older forms had none,
     // but every lead used to be logged as consenting).
@@ -153,14 +159,14 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   const row: Record<string, unknown> = {
     id, name, email: email || null, phone: phone || null, source: label, loan_type: loanType, stage: "new", status: "active",
     assigned_to: assignee, created_at: today, created_at_ts: new Date().toISOString(),
-    preferred_language: spanish ? "es" : "en", ai_stage: "engaging", entity_type: "LLC", application_token: crypto.randomUUID(), activity,
+    preferred_language: lang, ai_stage: "engaging", entity_type: "LLC", application_token: crypto.randomUUID(), activity,
   };
   void state; // the state answer stays in the form-answers note
   const { error } = await sb.from("leads").insert(row);
   if (error) { console.error("meta-leads-webhook: insert failed", leadgenId, error.message); return; }
 
   // Hot-lead alert to the LO.
-  const alertText = "🔥 New Facebook lead" + (spanish ? " (Spanish)" : "") + ": " + name + (loanType ? " · " + loanType : "") + " — open & dial: " + CRM_URL + "?lead=" + id;
+  const alertText = "🔥 New Facebook lead" + (spanish ? " (Spanish)" : vietnamese ? " (Vietnamese)" : "") + ": " + name + (loanType ? " · " + loanType : "") + " — open & dial: " + CRM_URL + "?lead=" + id;
   await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: assignee, lead_id: id, kind: "hot-lead", text: alertText, date: today, read: false });
   const { data: lo } = await sb.from("users").select("id,name,email,phone,photo_url").eq("id", assignee).single();
   if (lo?.phone) await post("send-text", { to: lo.phone, text: alertText, fromName: "Bridgepoint CRM" });
@@ -171,7 +177,9 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
     try {
       const booking = CLIENT_URL + "?book=" + assignee + "&forLead=" + id;
       const first = name.split(/\s+/)[0];
-      const prompt = spanish
+      const prompt = vietnamese
+        ? "You are " + lo.name + ", a loan officer at Bridgepoint Lending (business-purpose real estate investor loans, not consumer mortgages). A Vietnamese-speaking investor just filled out our Vietnamese Facebook form" + (loanType ? " for a " + loanType + " loan" : "") + ". Write a short first text IN VIETNAMESE (max 3-4 sentences, warm and professional, natural Vietnamese with full diacritics, address them politely, no emojis, no promises of approval, no rates). Thank them by first name, show you read their answers, and invite them to book a quick call here: " + booking + " -- or reply with the property address. Sign as " + lo.name.split(/\s+/)[0] + ".\n\nFirst name: " + first + "\nTheir answers:\n- " + (answers.join("\n- ") || "(none)") + "\n\nReply with ONLY the message text."
+        : spanish
         ? "Eres " + lo.name + ", oficial de préstamos de Bridgepoint Lending (préstamos de negocio para inversionistas de bienes raíces, no residenciales). Un cliente acaba de llenar nuestro formulario de Facebook. Escríbele un primer mensaje corto (máximo 3-4 oraciones), cálido, en ESPAÑOL, sin emojis, sin prometer aprobación ni tasas. Agradécele por su nombre, muestra que leíste sus respuestas e invítalo a agendar una llamada rápida aquí: " + booking + " — o que responda con la dirección de la propiedad.\n\nNombre: " + first + "\nRespuestas:\n- " + (answers.join("\n- ") || "(ninguna)") + "\n\nResponde SOLO con el texto del mensaje."
         : "You are " + lo.name + ", a loan officer at Bridgepoint Lending (business-purpose real estate investor loans — not consumer mortgages). A real estate investor just filled out our Facebook form" + (loanType ? " for a " + loanType + " loan" : "") + ". Write a short first text (max 3 sentences, plain, friendly, no emojis, no promises of approval, no rates). Thank them by first name, show you read their answers, and invite them to grab a quick call here: " + booking + " — or just reply with the property address and you'll run numbers.\n\nFirst name: " + first + "\nTheir answers:\n- " + (answers.join("\n- ") || "(none)") + "\n\nReply with ONLY the message text.";
       const ai = await fetch("https://api.anthropic.com/v1/messages", {
@@ -182,7 +190,7 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
       const message: string = ai.ok ? (aj.content?.[0]?.text || "").trim() : "";
       if (message) {
         if (phone) await post("send-text", { leadId: id, to: phone, text: message, fromName: lo.name, initiatedBy: "ai" });
-        if (email) await post("send-email", { leadId: id, to: email, subject: spanish ? "Bridgepoint Lending — Su solicitud de préstamo" : "Your loan request — Bridgepoint Lending", text: message, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photo_url || null, initiatedBy: "ai" });
+        if (email) await post("send-email", { leadId: id, to: email, subject: spanish ? "Bridgepoint Lending — Su solicitud de préstamo" : vietnamese ? "Bridgepoint Lending — Yêu cầu vay vốn của bạn" : "Your loan request — Bridgepoint Lending", text: message, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photo_url || null, initiatedBy: "ai" });
       }
     } catch (e) { console.error("meta-leads-webhook: AI first contact failed", String(e)); }
   }
@@ -382,6 +390,7 @@ Deno.serve(async (req: Request) => {
       const form = await fetch(GRAPH + "/" + formId + "?fields=name,locale,questions&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch(() => ({}));
       const formName: string = (form && form.name) || "";
       const spanish = /^es/i.test((form && form.locale) || "") || /spanish|español|espanol/i.test(formName);
+      const vietnamese = !spanish && isVietnamese((form && form.locale) || "", formName);
       const { data: crm } = await sb.from("leads").select("id, phone, email");
       const phones = new Set((crm || []).map((l: any) => digits10(l.phone)).filter((d: string) => d && d.length === 10));
       const emails = new Set((crm || []).map((l: any) => String(l.email || "").toLowerCase()).filter(Boolean));
@@ -403,7 +412,7 @@ Deno.serve(async (req: Request) => {
         const email = fv(f, "email", "correo_electrónico", "correo_electronico"), phone = fv(f, "phone_number", "phone", "número_de_teléfono");
         const dedicated = new Set(["full_name", "first_name", "last_name", "email", "phone_number", "phone", "nombre_completo"]);
         const answers = f.filter((x) => !dedicated.has(x.name.toLowerCase()) && x.values && x.values.length).map((x) => x.name.replace(/_/g, " ") + ": " + x.values.join(", "));
-        const assignee = spanish ? SPANISH_LO : await pickEnglishAdLO();
+        const assignee = spanish ? SPANISH_LO : vietnamese ? VIETNAMESE_LO : await pickEnglishAdLO();
         const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
         const submitted = String(ld.created_time || "").slice(0, 10);
         const activity: Record<string, string>[] = [
@@ -414,14 +423,14 @@ Deno.serve(async (req: Request) => {
         ];
         if (answers.length) activity.push({ date: today, type: "note", author: "System", text: (spanish ? "Respuestas del formulario — " : "Form answers — ") + answers.join(" · ") });
         const { error } = await sb.from("leads").insert({
-          id, name, email: email || null, phone: phone || null, source: spanish ? "Facebook" : "Meta Ads — Lead Form", loan_type: loanTypeFrom(f, formName),
+          id, name, email: email || null, phone: phone || null, source: spanish ? "Facebook" : vietnamese ? "Meta Ads — Vietnamese Lead Form" : "Meta Ads — Lead Form", loan_type: loanTypeFrom(f, formName),
           stage: "new", status: "active", assigned_to: assignee, created_at: submitted || today, created_at_ts: ld.created_time ? new Date(ld.created_time).toISOString() : new Date().toISOString(),
-          preferred_language: spanish ? "es" : "en", automation_paused: true, entity_type: "LLC", application_token: crypto.randomUUID(), activity,
+          preferred_language: spanish ? "es" : vietnamese ? "vi" : "en", automation_paused: true, entity_type: "LLC", application_token: crypto.randomUUID(), activity,
         });
         if (!error) imported.push(id);
       }
       if (imported.length) {
-        const assignee = spanish ? SPANISH_LO : "owner";
+        const assignee = spanish ? SPANISH_LO : vietnamese ? VIETNAMESE_LO : "owner";
         await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: assignee, lead_id: imported[0], kind: "hot-lead", text: imported.length + " older Facebook leads that never reached the CRM were just added to your list (marked \"Imported from Facebook form history\") — no automatic messages were sent.", date: today, read: false });
       }
       return json({ ...summary, missingList: undefined, imported: imported.length });

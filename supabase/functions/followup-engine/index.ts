@@ -503,7 +503,7 @@ function fallbackBrief(l, plan) {
   };
 }
 async function makeBrief(l, plan, lo) {
-  const lang = l.preferred_language === "es" ? "Spanish" : "English";
+  const lang = l.preferred_language === "es" ? "Spanish" : l.preferred_language === "vi" ? "Vietnamese" : "English";
   const prompt = `You are a sales coach writing a 20-second call brief for ${lo.name}, a loan officer at Bridgepoint Lending. Bridgepoint makes BUSINESS-PURPOSE real estate investor loans only (DSCR rentals, fix & flip, bridge, ground-up construction, portfolio) — never consumer mortgages, never use consumer-mortgage terms.
 Today is ${etParts().date}. The loan officer is about to follow up with an investor. Use ONLY the facts below; never invent rates, numbers, approvals, or promises.
 
@@ -543,7 +543,7 @@ No emojis anywhere. Return ONLY the JSON.`;
 async function makeTouch(touch, l, lo, sit, anchorLabel) {
   const bookingLink = CLIENT_URL + "?book=" + l.assigned_to + "&forLead=" + l.id;
   const appLink = CLIENT_URL + "?apply=" + l.id + "&t=" + (l.application_token || "");
-  const lang = l.preferred_language === "es" ? "Spanish" : "English";
+  const lang = l.preferred_language === "es" ? "Spanish" : l.preferred_language === "vi" ? "Vietnamese" : "English";
   const exp = l.termsheet_sent_at ? addDays(dateOf(l.termsheet_sent_at), 15) : null;
   const prompt = `You are ${lo.name}, a loan officer at Bridgepoint Lending (business-purpose real estate investor loans — not consumer mortgages). Write ONE ${touch.ch === "text" ? "text message (max 2 short sentences, plain, friendly, no emojis)" : "short email (max 90 words, plain text, no markdown, sign off with just your first name)"} in ${lang} to ${first(l.name)}.
 Situation: ${SIT[sit].label}. Goal of this message: ${touch.angle}

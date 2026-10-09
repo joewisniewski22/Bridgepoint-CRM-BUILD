@@ -65,7 +65,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const first = String(lead.name || "a new lead").trim().split(/\s+/)[0];
-  const src = /^Facebook/i.test(lead.source) ? "Spanish Facebook" : /^Meta Ads/i.test(lead.source) ? "Facebook" : /^Website/i.test(lead.source) ? "website" : /^Connected/i.test(lead.source) ? "Connected Investors" : "new";
+  const src = /^Facebook/i.test(lead.source) ? "Spanish Facebook" : lead.preferred_language === "vi" ? "Vietnamese Facebook" : /^Meta Ads/i.test(lead.source) ? "Facebook" : /^Website/i.test(lead.source) ? "website" : /^Connected/i.test(lead.source) ? "Connected Investors" : "new";
   const st = (String(lead.property_address || "").match(/\b([A-Z]{2})\b(?:\s+\d{5})?(?:,\s*USA)?\s*$/) || [])[1];
   const lead_ = (reason === "handoff" ? "Lead passed to you, " : reason === "morning" ? "Overnight " : "New ") + src + " lead: ";
   const announce = lead_ + first + (lead.loan_type ? ", " + (LOAN_WORDS[lead.loan_type] || lead.loan_type) : "") + (st && STATE_NAMES[st] ? ", " + STATE_NAMES[st] : "") + ".";

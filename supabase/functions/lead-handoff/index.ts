@@ -11,7 +11,7 @@
 // - Overnight (10pm-9am ET): the lead stays with the LO it was given to -- "not fair to take a lead
 //   cause it came over in middle of night". At 9am their phone rings for it; if it still hasn't
 //   been called by noon, Joe gets a text (alert only, nothing moves).
-// - Language leads (Spanish -> Fanis) never move. If Fanis hasn't called a daytime one in 15
+// - Language leads (Spanish -> Fanis, Vietnamese -> Theresa) never move. If Fanis hasn't called a daytime one in 15
 //   minutes, Joe gets a text.
 // "Called" means a real dial to the borrower (leads.lo_dialed_at, set on press-1 / in-app call /
 // direct dial, or a call the LO logged) -- a text doesn't count.
@@ -45,7 +45,8 @@ function et(d: Date) {
 const isDay = (m: number) => m >= DAY_START && m < DAY_END;
 function poolOf(l: any): string | null {
   const src = String(l.source || "");
-  if (l.preferred_language === "es" || /^Facebook$/i.test(src)) return null; // language lead: pinned
+  // Language leads are pinned to their LO: Spanish -> Fanis, Vietnamese -> Theresa (10/9).
+  if ((l.preferred_language && l.preferred_language !== "en") || /^Facebook$/i.test(src)) return null;
   if (/^(Connected Investors|Private ?Lenders)/i.test(src)) return "ci";
   if (/^(Meta Ads|Website)/i.test(src)) return "english";
   return null;

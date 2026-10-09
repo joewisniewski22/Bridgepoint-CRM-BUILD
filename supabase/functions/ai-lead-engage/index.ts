@@ -99,7 +99,7 @@ Deno.serve(async (req: Request) => {
     const { data: lo } = await sb.from("users").select("id,name,phone,email").eq("id", lead.assigned_to).single();
     const loName = (lo && lo.name) || "your loan officer";
     const awaitingLanguage = lead.ai_stage === "awaiting_language";
-    const lang = lead.preferred_language === "es" ? "Spanish" : "English";
+    const lang = lead.preferred_language === "es" ? "Spanish" : lead.preferred_language === "vi" ? "Vietnamese" : "English";
     const transcript = buildTranscript(lead.activity as Array<Record<string, unknown>>);
     const { data: rateRows } = await sb.from("market_rates").select("key,current,previous");
     const rateNote = marketRateContext(lead.loan_type as string, rateRows || []);
@@ -133,7 +133,7 @@ Deno.serve(async (req: Request) => {
         : "Continue the conversation in " + lang + ". Use the transcript below for context -- don't repeat questions already answered.") +
       " If their latest message clearly states any of these details, extract them: " + missingFields.join(", ") + (missingFields.length ? "" : " (none outstanding)") + ". For loanType, only use one of: DSCR, Fix & Flip, Bridge, Ground Up Construction, Portfolio/Blanket, Mixed-Use. Never guess or infer a field they didn't actually state. " +
       "Output ONLY a JSON object, no markdown fences, no commentary: " +
-      '{"language": "en"|"es"|null, "reply": "next text message", "readyForApplication": true|false, "extractedFields": {"fieldName": "value", ...only fields explicitly stated, from the outstanding list above}}';
+      '{"language": "en"|"es"|"vi"|null, "reply": "next text message", "readyForApplication": true|false, "extractedFields": {"fieldName": "value", ...only fields explicitly stated, from the outstanding list above}}';
 
     const userMessage = "Conversation so far (chronological):\n" + (transcript || "(no prior messages)");
 
@@ -158,7 +158,7 @@ Deno.serve(async (req: Request) => {
     }
 
     const updates: Record<string, unknown> = {};
-    if (awaitingLanguage && (parsed.language === "es" || parsed.language === "en")) {
+    if (awaitingLanguage && (parsed.language === "es" || parsed.language === "en" || parsed.language === "vi")) {
       updates.preferred_language = parsed.language;
       updates.ai_stage = "engaging";
     }
