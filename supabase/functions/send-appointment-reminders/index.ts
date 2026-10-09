@@ -18,6 +18,12 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+// Each staff member's own time zone (set with their hours in My Schedule; default Eastern). 10/9/26.
+async function staffTz(userId: string): Promise<string> {
+  const { data } = await sb.from("availability_rules").select("timezone").eq("user_id", userId).limit(1);
+  return (data && data[0] && data[0].timezone) || "America/New_York";
+}
+
 const REMINDER_LEAD_MS = 10 * 60 * 1000; // remind ~10 min before start
 const CATCH_WINDOW_MS = 10 * 60 * 1000; // 5-min cron cadence + buffer, so nothing falls between runs
 
@@ -42,7 +48,8 @@ Deno.serve(async () => {
 
     const userId = appt.user_id as string;
     const { data: staff } = await sb.from("users").select("phone").eq("id", userId).single();
-    const startLocal = new Date(startAt).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
+    const tz = await staffTz(userId);
+    const startLocal = new Date(startAt).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit", timeZoneName: "short" });
     const link = appt.lead_id ? (CRM_URL + "?lead=" + appt.lead_id) : CRM_URL;
     const notesBit = appt.notes ? (" — " + String(appt.notes).slice(0, 160)) : "";
     const text = "📅 " + (appt.name || "A client") + " at " + startLocal + (appt.phone ? (" (" + appt.phone + ")") : "") + notesBit + " — " + link;
