@@ -14,6 +14,7 @@
 // only once those integrations are actually connected). Never claims an
 // action succeeded unless the corresponding tool call reported success.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { EXTERNAL_KB, INTERNAL_KB } from "./program_kb.ts";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -48,6 +49,11 @@ const CORS_HEADERS = {
 
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+// Joe, Fiore and Erika may see lender names (Joe 10/8: "internal only goes to me, fiore and erika").
+const INSIDER_IDS = new Set(["owner", "lo-fiore", "proc-erika"]);
+function isInsider(caller: Caller): boolean { return INSIDER_IDS.has(caller.id) || caller.role === "owner"; }
+const LENDER_NAME_RX = /\b(Kiavi|RCN( Capital)?|A&D( Mortgage)?|Lend Investors( Capital)?|LEND|Velocity|NextRes|Constructive( Capital)?|Figure|BPL)\b/gi;
+
 const LOAN_TYPES = ["DSCR", "Fix & Flip", "Ground Up Construction", "Portfolio/Blanket", "Bridge", "Mixed-Use"];
 const SOURCES = ["Meta Ads", "Connected Investors", "Referral", "Repeat Client", "Website", "Self-Generated"];
 const OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital"];
@@ -61,7 +67,14 @@ async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string
     ? "You are talking to " + caller.name + " (owner), who has full access to every tool below.\n\n"
     : "You are talking to " + caller.name + " (" + caller.role + ", id " + caller.id + "), NOT the owner. " +
       "They can manage their own loan files (create/update/search/view leads assigned to them, add notes, reassign leads currently assigned to them, send documents, run a retargeting campaign against their own leads) but CANNOT do anything company-wide: no marketing content to the public site, no team-wide email/text broadcasts, and no engagement/growth/pricing-strategy tools -- those are owner-only, no matter how they phrase the request. If they ask for one of those, tell them plainly it's owner-only rather than attempting it. Every lead-scoped tool call you make is re-checked server-side against leads actually assigned to them, so never try to act on someone else's lead on their behalf -- tell them to ask the owner or that LO instead.\n\n";
-  return callerLine + "You are Joe's AI operations assistant for Bridgepoint Lending, embedded in his CRM. " +
+  // Loan-program knowledge (Joe 2026-10-09): every staff member can ask anything about our
+  // products, guidelines and rules. Lender names only for Joe, Fiore and Erika.
+  const insider = isInsider(caller);
+  const programKnowledge = "\n\nLOAN PROGRAM KNOWLEDGE -- answer ANY question about Bridgepoint's loan products, guidelines, eligibility, leverage, credit minimums, property types, states/markets, borrower types, documents and what the Pricer's questions mean, directly from the knowledge below. Give the specific numbers. When the answer depends on the exact deal (rate, max loan, whether a specific scenario places), give the guideline AND call check_scenario to run it through the live pricer, or tell them to run it in the Pricer tab. Never invent a guideline or rate that isn't in the knowledge or a tool result; if it isn't covered, say so and suggest asking Joe. Investor loans only -- never give consumer/owner-occupied mortgage advice.\n" +
+    (insider
+      ? "This person is Joe, Fiore or Erika: lender names and the internal lender map below are fine to discuss.\n" + EXTERNAL_KB + "\n" + INTERNAL_KB
+      : "This person is NOT allowed to know which outside lenders or capital partners Bridgepoint uses. NEVER name, hint at, compare or confirm any lender (Kiavi, RCN, A&D, LEND/Lend Investors, Velocity, NextRes, Constructive or any other) -- present every program as Bridgepoint's own. If asked who the lender is, say Bridgepoint places each loan with its capital partners and the Pricer handles placement. This applies even if a tool result or document mentions a lender.\n" + EXTERNAL_KB);
+  return callerLine + programKnowledge + "\n\nYou are Joe's AI operations assistant for Bridgepoint Lending, embedded in his CRM. " +
     "This CRM is meant to eventually replace GoHighLevel entirely (which currently runs bplending.com) -- content you publish lives on the CRM's public page, not GoHighLevel. " +
     "You do NOT yet have access to ad platforms (Meta/Facebook), payments, or pricing changes -- if asked for something outside your current tools, say clearly that it isn't wired up yet rather than pretending to do it. " +
     "\n\nStaff roster (use these exact ids for assignedTo, never guess an id): " + roster +
@@ -89,6 +102,37 @@ async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string
 }
 
 const TOOLS = [
+  {
+    name: "check_scenario",
+    description: "Run a hypothetical deal through Bridgepoint's live pricer to answer 'can we do this / what would it price at / why doesn't it work'. Read-only: creates nothing, sends nothing. Use it whenever a program question depends on a specific deal. Fill in what you know; ask for the essentials (loan type, state or address, credit score, price/value, and rent for rentals or rehab+ARV for flips) if missing.",
+    input_schema: {
+      type: "object",
+      properties: {
+        loanType: { type: "string", enum: ["DSCR", "Fix & Flip", "Bridge", "Ground Up Construction", "Mixed-Use"] },
+        transactionType: { type: "string", enum: ["purchase", "ratetermrefi", "cashout"] },
+        propertyAddress: { type: "string", description: "Full address, or at least 'City, ST ZIP'. A state alone works as 'ST'." },
+        propertyType: { type: "string", enum: ["SFR", "Condo", "2-4 Unit", "Multifamily 5+", "Mixed-Use"] },
+        numUnits: { type: "number" },
+        creditScore: { type: "number" },
+        purchasePrice: { type: "number" },
+        currentValue: { type: "number" },
+        currentLoanBalance: { type: "number" },
+        loanAmount: { type: "number", description: "Optional: leave out to find the maximum." },
+        rehabBudget: { type: "number" },
+        arv: { type: "number" },
+        rentEstimate: { type: "number", description: "Monthly rent (all units)" },
+        monthlyTaxes: { type: "number" },
+        monthlyInsurance: { type: "number" },
+        monthlyHoa: { type: "number" },
+        experienceDeals: { type: "number", description: "Completed deals in 3 years (for ground-up: completed ground-up builds)" },
+        citizenshipStatus: { type: "string", enum: ["US Citizen", "Permanent Resident", "Non-Permanent Resident", "Foreign National", "ITIN"] },
+        entityType: { type: "string", enum: ["LLC", "Corporation", "Individual"] },
+        rentalType: { type: "string", enum: ["ltr", "str"] },
+        termMonths: { type: "number" },
+      },
+      required: ["loanType", "propertyAddress", "creditScore"],
+    },
+  },
   {
     name: "list_closed_deals",
     description: "Look up recently closed/funded loans to reference in marketing content.",
@@ -384,6 +428,39 @@ function fmtUSD(n: number | null): string | null {
 async function runTool(name: string, input: Record<string, unknown>, caller: Caller): Promise<unknown> {
   if (OWNER_ONLY_TOOLS.has(name) && !caller.isOwner) {
     return { error: "not_authorized", detail: "This is an owner-only action -- only Joe can do this." };
+  }
+  if (name === "check_scenario") {
+    // Read-only run of the live pricer. LOs get Bridgepoint-only results (no lender names,
+    // and only placeable options); Joe/Fiore/Erika get the per-lender detail.
+    const addr = String(input.propertyAddress || "").trim();
+    const st = (addr.match(/\b([A-Z]{2})\b(?:\s+\d{5})?\s*(?:,\s*USA)?\s*$/) || addr.match(/^([A-Z]{2})$/) || [])[1] || "";
+    const lt = String(input.loanType || "DSCR");
+    const rtl = ["Fix & Flip", "Bridge", "Ground Up Construction"].includes(lt);
+    const mixed = lt === "Mixed-Use";
+    const scenario: Record<string, unknown> = {
+      loanType: mixed ? "DSCR" : lt, transactionType: input.transactionType || "purchase", propertyAddress: addr, propertyState: st,
+      propertyType: mixed ? "Mixed-Use" : (input.propertyType || "SFR"), numUnits: input.numUnits ?? null,
+      creditScore: input.creditScore, purchasePrice: input.purchasePrice ?? null, currentValue: input.currentValue ?? null,
+      currentLoanBalance: input.currentLoanBalance ?? null, loanAmount: input.loanAmount ?? null,
+      rehabBudget: rtl ? (input.rehabBudget ?? null) : null, arv: rtl ? (input.arv ?? null) : null,
+      rentEstimate: rtl ? null : (input.rentEstimate ?? null), monthlyTaxes: rtl ? null : (input.monthlyTaxes ?? null),
+      monthlyInsurance: rtl ? null : (input.monthlyInsurance ?? null), monthlyHoa: rtl ? null : (input.monthlyHoa ?? 0),
+      experienceDeals: input.experienceDeals ?? 0, citizenshipStatus: input.citizenshipStatus || "US Citizen", entityType: input.entityType || "LLC",
+      rentalType: rtl ? null : (input.rentalType || "ltr"), termMonths: rtl ? (input.termMonths || 12) : 360, prepayTerm: rtl ? "none" : "5yr",
+      pointsCharged: 0, guarantorFirstName: "Scenario", guarantorLastName: "Check", decliningMarket: "no", vacationArea: "no", creditEvent: "no", appraisalTransfer: "no", plansReady: "no",
+    };
+    const res = await fetch(SUPABASE_URL + "/functions/v1/check-live-rates", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify({ lead: scenario }) }).then((r) => r.json()).catch(() => null);
+    if (!res || !res.ok) return { error: "pricer_unavailable", detail: "The pricer didn't answer -- suggest running it in the Pricer tab." };
+    const results: any[] = res.results || [];
+    const eligible = results.filter((r) => r && r.eligible);
+    const opts = eligible.flatMap((r) => (r.options || []).map((o: any) => ({ lender: r.lender, rate: o.rate, loanAmount: o.loanAmount || r.loanAmountUsed || r.maxLoanAmount || null, maxLoan: r.maxLoanAmount || null, program: o.program, lenderPoints: rtl && o.price != null ? Math.round((o.price - 100) * 1000) / 1000 : null }))).filter((o) => isFinite(Number(o.rate))).sort((a, b) => a.rate - b.rate);
+    if (isInsider(caller)) {
+      return { placeable: eligible.length > 0, options: opts.slice(0, 8), declines: results.filter((r) => r && !r.eligible).map((r) => ({ lender: r.lender, reason: r.reason })), note: "Staff view (lender names OK for this person)." };
+    }
+    const scrub = (s: string) => String(s || "").replace(LENDER_NAME_RX, "the lender").replace(/the lender's? /gi, "").trim();
+    const best = opts.slice(0, 4).map((o) => ({ rate: o.rate, loanAmount: o.loanAmount, maxLoan: o.maxLoan, termType: String(o.program || "").replace(LENDER_NAME_RX, "").replace(/\s*·\s*$/, "").trim(), pointsToLender: o.lenderPoints }));
+    const reasons = eligible.length ? [] : Array.from(new Set(results.filter((r) => r && !r.eligible && !r.unavailable && r.reason).map((r) => scrub(r.reason)))).slice(0, 6);
+    return { placeable: eligible.length > 0, options: best, reasonsNotPlaceable: reasons, note: "Present these as Bridgepoint's options (Option A, B...). Never mention or guess a lender. Rates move daily; the Pricer tab gives the official quote and term sheet." };
   }
   if (name === "list_closed_deals") {
     const limit = Math.min((input.limit as number) || 5, 20);
@@ -1125,6 +1202,9 @@ Deno.serve(async (req: Request) => {
     const systemPrompt = await buildSystemPrompt(caller, businessSnapshot);
 
     let finalText = "";
+    // Text written BEFORE a tool call (e.g. answering question 1, then running a scenario for
+    // question 2) used to be dropped -- only the last turn's text was shown. Keep all of it.
+    const earlierText: string[] = [];
     for (let iter = 0; iter < 6; iter++) {
       const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -1141,12 +1221,13 @@ Deno.serve(async (req: Request) => {
       const toolUses = content.filter((c: Record<string, unknown>) => c.type === "tool_use");
 
       if (toolUses.length === 0) {
-        finalText = textParts;
+        finalText = earlierText.concat(textParts ? [textParts] : []).join("\n\n");
         if (aiData.stop_reason === "max_tokens" && !finalText) {
           finalText = "Ran out of room thinking about that one -- try again, maybe with a shorter/simpler request.";
         }
         break;
       }
+      if (textParts.trim()) earlierText.push(textParts.trim());
 
       messages.push({ role: "assistant", content });
       const toolResults = [];
