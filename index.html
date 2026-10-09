@@ -9327,11 +9327,11 @@ function vuEvaluate(lead, results, built, key){
       if (key === "ad" && age != null && age > 90) add("fix", "Cross-checks", d.name + " is " + age + " days old — A&D needs the title commitment under 90 days.", "Ask title for an updated commitment.", [copy("Please send an updated title commitment (dated within the last 30 days) for " + lead.propertyAddress + ".", "Copy request for title")]);
     } else if (f.kind === "credit_report"){
       if (age != null && age > 90) add("check", "Cross-checks", d.name + " is " + age + " days old.", "Re-pull before submitting if the lender's limit is shorter (A&D: 60 days at submission).");
-      // Bridgepoint RTL trade-line rule (Joe 2026-10-09, BPL guidelines 7.2.1): 3+ trade lines (open or
+      // Constructive RTL trade-line rule (Joe 2026-10-09; their guidelines 7.2.1, "BPL Mortgage"): 3+ trade lines (open or
       // closed), 2+ active (within 60 days of the report or carrying a balance), 1+ with 24+ months.
       // Authorized-user, derogatory and collection accounts don't count. Short = not eligible for RTL,
       // unless a non-reporting mortgage can be verified to make up the shortfall.
-      if (rtl){
+      if (rtl && key === "constructive"){
         var tl = f.tradelines;
         var vomAsk = ask("12 months of payment history on any mortgage that isn't on your credit report (lender's verification of mortgage, or bank statements / cancelled checks showing the payments)", "Ask for non-reporting mortgage proof");
         if (!tl || tl.eligible == null) add("check", "Credit", "Couldn't count the trade lines on " + d.name + " automatically.", "Check by hand: 3+ trade lines, 2+ active in the last 60 days, 1 with 24+ months — authorized-user, derogatory and collection accounts don't count.", [DOCS]);
@@ -9341,9 +9341,9 @@ function vuEvaluate(lead, results, built, key){
           if (tl.active != null && tl.active < 2) short.push(tl.active + " active (needs 2)");
           if (tl.seasoned24 != null && tl.seasoned24 < 1) short.push("none with 24+ months history (needs 1)");
           var excl = [tl.authorizedUser ? tl.authorizedUser + " authorized-user" : "", tl.derogatory ? tl.derogatory + " derogatory/collection" : ""].filter(Boolean).join(" and ");
-          if (short.length) add("stop", "Credit", "Trade lines don't meet Bridgepoint's RTL minimum: " + short.join("; ") + "." + (excl ? " Not counted: " + excl + "." : ""),
-            "Not eligible for an RTL loan as is. The only fix: verify a mortgage that doesn't report to credit to make up the shortfall.", [vomAsk, DOCS]);
-          else add("ok", "Credit", "Trade lines meet Bridgepoint's RTL minimum (" + tl.eligible + " eligible, " + (tl.active != null ? tl.active : "?") + " active, " + (tl.seasoned24 != null ? tl.seasoned24 : "?") + " with 24+ months).");
+          if (short.length) add("stop", "Credit", "Trade lines don't meet Constructive's RTL minimum: " + short.join("; ") + "." + (excl ? " Not counted: " + excl + "." : ""),
+            "Not eligible for Constructive's RTL loans as is. Fix: verify a mortgage that doesn't report to credit to make up the shortfall, or re-place the file with another lender.", [vomAsk, DOCS]);
+          else add("ok", "Credit", "Trade lines meet Constructive's RTL minimum (" + tl.eligible + " eligible, " + (tl.active != null ? tl.active : "?") + " active, " + (tl.seasoned24 != null ? tl.seasoned24 : "?") + " with 24+ months).");
           if (tl.active == null || tl.seasoned24 == null) add("check", "Credit", "Couldn't tell from " + d.name + " how many trade lines are active or 24+ months old.", "Confirm by hand: 2+ active in the last 60 days and 1 with 24+ months.", [DOCS]);
         }
       }

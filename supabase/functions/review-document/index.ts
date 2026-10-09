@@ -71,7 +71,7 @@ const FACTS_INSTRUCTIONS = "ALSO read these facts off the document for cross-che
   "- payoffAmount: payoff/total due on a payoff letter or principal balance on a mortgage statement\n" +
   "- rehabTotal: total of a scope of work / rehab budget\n" +
   "- signed: true if signed by the parties where signatures are expected, false if signature lines are blank, null if not applicable\n" +
-  // Bridgepoint RTL trade-line rule (Joe 2026-10-09): 3+ trade lines, 2+ active, 1 with 24+ months;
+  // Constructive RTL trade-line rule (Joe 2026-10-09): 3+ trade lines, 2+ active, 1 with 24+ months;
   // authorized-user, derogatory and collection accounts don't count.
   "- tradelines: ONLY for a credit report, otherwise null. An object counting the borrower's trade lines (open or closed) EXCLUDING authorized-user accounts and any derogatory, collection, or charged-off account: " +
   "{\"eligible\": n (all remaining trade lines), \"active\": n (eligible ones reported/active within 60 days of the report date OR with a current balance above 0), \"seasoned24\": n (eligible ones with 24 or more months reviewed/rated), \"mortgage\": n (eligible mortgage trade lines), \"authorizedUser\": n (authorized-user accounts excluded), \"derogatory\": n (derogatory/collection/charge-off accounts excluded)}\n\n";
