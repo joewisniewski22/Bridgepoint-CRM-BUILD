@@ -23,7 +23,7 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 
 -- Weighted rotation: whoever is furthest below their share gets the lead. English Facebook /
--- website: Joe 30%, Fiore / Taeya / Theresa split 70%. Connected Investors / PrivateLenders:
+-- website: Joe 30%, Fiore 35%, Taeya 35%. Connected Investors / PrivateLenders:
 -- Joe and Fiore 50/50. Out-today LOs are skipped; if everyone is out it's Joe's.
 create or replace function public.pick_rotation_lo(p_pool text)
 returns text language plpgsql security definer set search_path = public as $$
@@ -34,7 +34,8 @@ begin
   if p_pool = 'ci' then
     ids := array['owner','lo-fiore']; weights := array[0.5,0.5];
   else
-    ids := array['owner','lo-fiore','lo-taeya','lo-theresa']; weights := array[0.30, 0.70/3, 0.70/3, 0.70/3];
+    -- Joe 10/9: English = Joe, Fiore, Taeya. Theresa does Vietnamese (rejoins English only if that doesn't work).
+    ids := array['owner','lo-fiore','lo-taeya']; weights := array[0.30, 0.35, 0.35];
   end if;
   select count(*) into total from public.rotation_picks where pool = p_pool;
   for i in 1..array_length(ids, 1) loop

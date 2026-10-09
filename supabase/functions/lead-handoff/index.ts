@@ -5,7 +5,7 @@
 //   rings (new-lead-ring). If they don't pick up and press 1, or call the lead themselves, within
 //   5 minutes, the lead moves to the next LO on the list, whose phone rings, and so on. If nobody
 //   in the pool calls it, it lands with Joe and he gets a text.
-//     English Facebook / website pool: Joe, Fiore, Taeya, Theresa (Joe 30%, the rest split 70%).
+//     English Facebook / website pool: Joe 30%, Fiore 35%, Taeya 35% (Theresa does Vietnamese).
 //     Connected Investors / PrivateLenders pool: Joe and Fiore (50/50); if both miss it, it goes
 //     to Taeya / Theresa / Fanis on a rotation, then back to Joe as the last stop.
 // - Overnight (10pm-9am ET): the lead stays with the LO it was given to -- "not fair to take a lead
@@ -28,7 +28,7 @@ const HANDOFF_START = "2026-10-09T18:30:00Z";
 const WINDOW_MS = 5 * 60000;
 const DAY_START = 9 * 60, DAY_END = 22 * 60; // ET minutes
 const POOLS: Record<string, string[]> = {
-  english: ["owner", "lo-fiore", "lo-taeya", "lo-theresa"],
+  english: ["owner", "lo-fiore", "lo-taeya"], // Theresa = Vietnamese (Joe 10/9)
   ci: ["owner", "lo-fiore"],
 };
 // Joe 10/9: "if me and fiore miss our window ... have it go out to entire team on a rotation"
