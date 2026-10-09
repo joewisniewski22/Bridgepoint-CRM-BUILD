@@ -57,7 +57,7 @@ const TP_ROLES = ["Realtor", "Title Company", "Escrow Officer", "Insurance Agent
 // file (names, entity, dates, price, value, rent, balances, insurance) and re-run the
 // lender's rules on the verified numbers. Only what is actually printed -- never guessed.
 const FACT_KINDS = ["id", "bank_statement", "purchase_contract", "appraisal", "lease", "insurance", "entity_docs", "good_standing", "ein_letter", "title", "payoff", "mortgage_statement", "credit_report", "scope_of_work", "other"];
-const FACTS_KEYS = '"kind": "...", "personNames": [], "entityNames": [], "propertyAddress": "... or null", "documentDate": "YYYY-MM-DD or null", "expirationDate": "YYYY-MM-DD or null", "purchasePrice": null, "appraisedValue": null, "arv": null, "marketRent": null, "monthlyRent": null, "endingBalance": null, "dwellingCoverage": null, "liabilityCoverage": null, "rentLossMonths": null, "deductible": null, "payoffAmount": null, "rehabTotal": null, "signed": null';
+const FACTS_KEYS = '"kind": "...", "personNames": [], "entityNames": [], "propertyAddress": "... or null", "documentDate": "YYYY-MM-DD or null", "expirationDate": "YYYY-MM-DD or null", "purchasePrice": null, "appraisedValue": null, "arv": null, "marketRent": null, "monthlyRent": null, "endingBalance": null, "dwellingCoverage": null, "liabilityCoverage": null, "rentLossMonths": null, "deductible": null, "payoffAmount": null, "rehabTotal": null, "signed": null, "tradelines": null';
 const FACTS_INSTRUCTIONS = "ALSO read these facts off the document for cross-checking (numbers as plain numbers, no $ or commas; null for anything not actually shown -- never guess):\n" +
   "- kind: exactly one of " + FACT_KINDS.join(", ") + "\n" +
   "- personNames: every individual named as a party (borrower, buyer, account holder, insured, member, tenant on a lease) -- not agents/notaries/staff\n" +
@@ -70,7 +70,11 @@ const FACTS_INSTRUCTIONS = "ALSO read these facts off the document for cross-che
   "- dwellingCoverage, liabilityCoverage (per occurrence), rentLossMonths (loss of rents in months; convert a dollar limit only if months are stated), deductible\n" +
   "- payoffAmount: payoff/total due on a payoff letter or principal balance on a mortgage statement\n" +
   "- rehabTotal: total of a scope of work / rehab budget\n" +
-  "- signed: true if signed by the parties where signatures are expected, false if signature lines are blank, null if not applicable\n\n";
+  "- signed: true if signed by the parties where signatures are expected, false if signature lines are blank, null if not applicable\n" +
+  // Bridgepoint RTL trade-line rule (Joe 2026-10-09): 3+ trade lines, 2+ active, 1 with 24+ months;
+  // authorized-user, derogatory and collection accounts don't count.
+  "- tradelines: ONLY for a credit report, otherwise null. An object counting the borrower's trade lines (open or closed) EXCLUDING authorized-user accounts and any derogatory, collection, or charged-off account: " +
+  "{\"eligible\": n (all remaining trade lines), \"active\": n (eligible ones reported/active within 60 days of the report date OR with a current balance above 0), \"seasoned24\": n (eligible ones with 24 or more months reviewed/rated), \"mortgage\": n (eligible mortgage trade lines), \"authorizedUser\": n (authorized-user accounts excluded), \"derogatory\": n (derogatory/collection/charge-off accounts excluded)}\n\n";
 
 function num(v: unknown): number | null {
   if (v === null || v === undefined || v === "") return null;
@@ -91,6 +95,10 @@ function cleanFacts(raw: any): Record<string, unknown> | null {
     dwellingCoverage: num(raw.dwellingCoverage), liabilityCoverage: num(raw.liabilityCoverage), rentLossMonths: num(raw.rentLossMonths), deductible: num(raw.deductible),
     payoffAmount: num(raw.payoffAmount), rehabTotal: num(raw.rehabTotal),
     signed: raw.signed === true ? true : raw.signed === false ? false : null,
+    tradelines: raw.kind === "credit_report" && raw.tradelines && typeof raw.tradelines === "object" ? {
+      eligible: num(raw.tradelines.eligible), active: num(raw.tradelines.active), seasoned24: num(raw.tradelines.seasoned24),
+      mortgage: num(raw.tradelines.mortgage), authorizedUser: num(raw.tradelines.authorizedUser), derogatory: num(raw.tradelines.derogatory),
+    } : null,
   };
 }
 
@@ -180,7 +188,7 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 1500,
+        max_tokens: 2000,
         system: "You are a precise loan-document review assistant. Output ONLY valid JSON matching exactly what's requested -- no markdown code fences, no commentary, no preamble.",
         messages: [{ role: "user", content: [contentBlock, { type: "text", text: promptText }] }],
       }),
