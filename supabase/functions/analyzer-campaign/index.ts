@@ -46,23 +46,25 @@ const hasConsent = (l: Row) => act(l).some((a) => typeof a.text === "string" && 
 const hasInboundText = (l: Row) => act(l).some((a) => a.type === "text" && typeof a.text === "string" && /^Received \(via/.test(a.text));
 const usedAnalyzer = (l: Row) => /Deal Analyzer/i.test(l.source || "") || act(l).some((a) => typeof a.text === "string" && /Deal Analyzer/i.test(a.text) && !/^Emailed|^Texted/.test(a.text));
 
-function url(medium: string) { return "https://bplending.com/deal-analyzer/?utm_source=crm&utm_medium=" + medium + "&utm_campaign=analyzer-crm"; }
-function emailCopy(first: string, lo: Row, unsub: string) {
+// ref=<file id>: a submission attaches to THIS file and its LO (10/9: Roscoe Davis came back through a
+// ref-less link and became a new file for a different LO).
+function url(medium: string, leadId: string) { return "https://bplending.com/deal-analyzer/?ref=" + encodeURIComponent(leadId) + "&utm_source=crm&utm_medium=" + medium + "&utm_campaign=analyzer-crm"; }
+function emailCopy(first: string, lo: Row, unsub: string, leadId: string) {
   const loFirst = String(lo.name || "your loan officer").split(/\s+/)[0];
   const phone = lo.phone ? String(lo.phone) : "";
   const subject = "Looking at a deal? Run the numbers first";
   const text = "Hi " + first + ",\n\n" +
     "It's " + loFirst + " at Bridgepoint Lending. Are you looking at a property and haven't pulled the trigger yet? Let's take the guesswork out.\n\n" +
     "We built a free Deal Analyzer for investors. Enter the address and it pulls recent closed sales nearby, estimates your rehab with real materials costs, and shows your profit and return with and without financing, plus a stress test. You can download the whole thing as a PDF.\n\n" +
-    "Run your numbers: " + url("email") + "\n\n" +
+    "Run your numbers: " + url("email", leadId) + "\n\n" +
     "If the deal works, or you just want a second set of eyes on it, reply to this email" + (phone ? " or call or text me at " + phone : "") + ". I'll help you structure it and get you real terms.\n\n" +
     loFirst + "\nBridgepoint Lending\n\n" +
     "-- \nDon't want emails like this? Unsubscribe: " + unsub + "\n" + ADDRESS;
   return { subject, text };
 }
-function textCopy(first: string, lo: Row) {
+function textCopy(first: string, lo: Row, leadId: string) {
   const loFirst = String(lo.name || "your loan officer").split(/\s+/)[0];
-  return "Hi " + first + ", it's " + loFirst + " at Bridgepoint Lending. Looking at a deal? Run it through our free Deal Analyzer and see your profit before you pull the trigger: " + url("sms") + " Questions? Just reply here, it comes straight to me. Reply STOP to opt out.";
+  return "Hi " + first + ", it's " + loFirst + " at Bridgepoint Lending. Looking at a deal? Run it through our free Deal Analyzer and see your profit before you pull the trigger: " + url("sms", leadId) + " Questions? Just reply here, it comes straight to me. Reply STOP to opt out.";
 }
 
 Deno.serve(async (req: Request) => {
@@ -106,7 +108,7 @@ Deno.serve(async (req: Request) => {
       const lo = userOf(l.assigned_to || "owner");
       const unsub = SUPABASE_URL + "/functions/v1/email-unsubscribe?l=" + encodeURIComponent(l.id) + "&t=" + (await unsubToken(l.id));
       const first = String(l.name || "").split(/\s+/)[0] || "there";
-      return { lo, ...emailCopy(first, lo, unsub) };
+      return { lo, ...emailCopy(first, lo, unsub, l.id) };
     };
 
     if (mode === "shadow") {
@@ -115,7 +117,7 @@ Deno.serve(async (req: Request) => {
       const byLo: Record<string, number> = {};
       emailPool.forEach((l: Row) => { const n = userOf(l.assigned_to || "owner").name; byLo[n] = (byLo[n] || 0) + 1; });
       return json({ ok: true, mode, ...summary, emailsByLoanOfficer: byLo, sampleEmails: sampleE,
-        sampleTexts: textPool.slice(0, 3).map((l: Row) => ({ to: l.phone, name: l.name, text: textCopy(String(l.name || "").split(/\s+/)[0] || "there", userOf(l.assigned_to || "owner")) })) });
+        sampleTexts: textPool.slice(0, 3).map((l: Row) => ({ to: l.phone, name: l.name, text: textCopy(String(l.name || "").split(/\s+/)[0] || "there", userOf(l.assigned_to || "owner"), l.id) })) });
     }
     if (mode !== "live") return json({ ok: true, skipped: "unknown mode" });
 
@@ -135,7 +137,7 @@ Deno.serve(async (req: Request) => {
     for (const l of textPool.slice(0, TEXT_BATCH)) {
       const lo = userOf(l.assigned_to || "owner");
       await sb.from("analyzer_campaign_log").upsert({ lead_id: l.id, channel: "text", sent_at: new Date().toISOString(), ok: false, detail: "sending" });
-      const r = await post("send-text", { leadId: l.id, to: l.phone, text: textCopy(String(l.name || "").split(/\s+/)[0] || "there", lo), fromName: lo.name, initiatedBy: "ai" }).catch(() => null);
+      const r = await post("send-text", { leadId: l.id, to: l.phone, text: textCopy(String(l.name || "").split(/\s+/)[0] || "there", lo, l.id), fromName: lo.name, initiatedBy: "ai" }).catch(() => null);
       const ok = !!(r && r.ok);
       await sb.from("analyzer_campaign_log").upsert({ lead_id: l.id, channel: "text", sent_at: new Date().toISOString(), ok, detail: ok ? "sent" : "send failed" });
       if (ok) sent.texts++; else sent.errors++;

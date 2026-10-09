@@ -181,10 +181,15 @@ async function handle(b: Record<string, unknown>): Promise<Response> {
     }
 
     // --- Repeat submission? Attach to the existing file, don't duplicate. ---
-    const since = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
-    const { data: recent } = await sb.from("leads").select("id,name,phone,email,activity,assigned_to,status,application_token").gte("created_at", since);
-    const existing = (recent || []).find((l: Record<string, unknown>) =>
-      (((l.phone as string) || "").replace(/\D/g, "").slice(-10) === phoneDigits) || (!!l.email && (l.email as string).toLowerCase() === email));
+    // Any age (10/9: Roscoe Davis came back months later and became a second file for another
+    // LO because this only looked back 30 days). Skips spam/duplicates; prefers a working file
+    // (active/cold) over a lost one, then the newest.
+    const { data: recent } = await sb.from("leads").select("id,name,phone,email,activity,assigned_to,status,application_token,created_at_ts,lost_reason").neq("status", "spam");
+    const matches = (recent || []).filter((l: Record<string, unknown>) => l.lost_reason !== "Duplicate" &&
+      ((phoneDigits.length === 10 && ((l.phone as string) || "").replace(/\D/g, "").slice(-10) === phoneDigits) || (!!l.email && (l.email as string).toLowerCase() === email)));
+    const rank = (l: Record<string, unknown>) => (l.status === "active" ? 2 : l.status === "cold" ? 1 : 0);
+    matches.sort((a: Record<string, unknown>, b: Record<string, unknown>) => rank(b) - rank(a) || String(b.created_at_ts || "").localeCompare(String(a.created_at_ts || "")));
+    const existing = matches[0];
     if (existing) {
       const activity = (existing.activity as unknown[]) || [];
       activity.push({ date: today, type: "note", text: "Filled out the " + loanType + " " + (isTool ? "Deal Analyzer" : channel) + " form again" + (utm ? " (" + utm + ")" : "") + " — already on file, no duplicate created", author: "System" });
