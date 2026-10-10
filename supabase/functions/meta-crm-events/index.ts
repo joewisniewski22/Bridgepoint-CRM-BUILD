@@ -39,6 +39,9 @@ Deno.serve(async (req: Request) => {
   for (let i = 0; i <= reached; i++) wanted.push(STEPS[i]);
   // A lead we mark spam/lost before it ever applied tells Meta "this kind of lead doesn't convert".
   if ((l.status === "spam" || l.status === "lost") && reached < 1) wanted.push("Disqualified");
+  // Form answers say this one can close (660+ credit, funds ready, needs it within 60 days) --
+  // sent at intake by meta-leads-webhook so Meta gets a quality signal the same minute.
+  if (body.qualified === true && l.status === "active") wanted.unshift("Qualified Lead");
   if (!wanted.length) return json({ ok: true, skipped: "nothing_to_send" });
 
   const { data: done } = await sb.from("meta_crm_events").select("event_name").eq("lead_id", leadId);

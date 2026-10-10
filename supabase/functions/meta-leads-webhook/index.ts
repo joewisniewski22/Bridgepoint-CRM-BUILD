@@ -51,6 +51,10 @@ const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { sta
 const post = (fn: string, payload: Record<string, unknown>) => fetch(SUPABASE_URL + "/functions/v1/" + fn, {
   method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify(payload),
 }).catch(() => null);
+async function adminSecret(): Promise<string> {
+  const { data } = await sb.from("ad_followup_auth").select("secret").eq("id", 1).single();
+  return (data && (data.secret as string)) || "";
+}
 
 let pageTokenCache: { pageId: string; token: string } | null = null;
 async function pageToken(pageId: string): Promise<string> {
@@ -79,6 +83,31 @@ function loanTypeFrom(fields: Field[], formName: string): string | null {
   if (/bridge|puente/i.test(ans)) return "Bridge";
   if (/flip|rehab|remodel|compra y venta/i.test(ans)) return "Fix & Flip";
   return null;
+}
+// Lead screen (Joe 2026-10-10: filter "poor credit" / "no credit score"; "we want to make sure
+// we're targeting loans that are going to close"). From the form answers:
+//  - disqualified: credit under 620, poor/no credit, or no down payment on a purchase -> filed as
+//    lost (kept for later), no LO ring/alert, no AI text, and Meta is told "Disqualified" so the
+//    ads find fewer people like them.
+//  - qualified: 660+ credit, funds ready, needs the loan within 60 days -> Meta is told
+//    "Qualified Lead" right away so delivery leans toward real closers.
+const LOW_CREDIT_RX = /under 620|below 620|less than 620|menos de 620|dưới 620|poor credit|bad credit|no credit|sin cr[eé]dito|mal cr[eé]dito|không có điểm tín dụng/i;
+function screenLead(fields: Field[]): { verdict: "disqualified" | "qualified" | "neutral"; reasons: string[] } {
+  const val = (rx: RegExp) => { const f = fields.find((x) => rx.test(x.name)); return f && f.values && f.values.length ? String(f.values[0]) : ""; };
+  const credit = val(/credit|cr[eé]dito|tin_dung|tín_dụng/i);
+  const down = val(/down_payment|enganche|tra_truoc|trả_trước/i);
+  const soon = val(/60_days|60_dias|60_ngay|60_ngày/i);
+  const txn = val(/purchase_or_refinance|compra_o_refinan|mua_hay/i);
+  const allText = fields.map((x) => (x.values || []).join(" ")).join(" ");
+  const reasons: string[] = [];
+  if (LOW_CREDIT_RX.test(credit) || LOW_CREDIT_RX.test(allText)) reasons.push("credit under 620 / no credit");
+  const noDown = /^(no|không)$/i.test(down.trim());
+  if (noDown && !/refinanc|refi|tái cấp/i.test(txn)) reasons.push("no down payment or closing funds on a purchase");
+  if (reasons.length) return { verdict: "disqualified", reasons };
+  const goodCredit = /800|7[0-9]{2}|66[0-9]|6[7-9][0-9]/.test(credit) && !/620 ?- ?659/.test(credit);
+  const yes = (s: string) => /^(yes|s[ií]|có)$/i.test(s.trim());
+  if (goodCredit && yes(down) && yes(soon)) return { verdict: "qualified", reasons: ["660+ credit, funds ready, needs it within 60 days"] };
+  return { verdict: "neutral", reasons: [] };
 }
 const digits10 = (s: string | null) => (s || "").replace(/\D/g, "").slice(-10);
 function translateAnswers(fields: Field[], questions: any[]): Field[] {
@@ -143,6 +172,24 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
     return;
   }
 
+  const screen = screenLead(fields);
+  if (screen.verdict === "disqualified") {
+    // Filed for the record (and a later nurture), but nobody is rung, alerted, or texted, and it
+    // doesn't take a turn in the rotation.
+    const did = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
+    const owner = spanish ? SPANISH_LO : vietnamese ? VIETNAMESE_LO : "owner";
+    await sb.from("leads").insert({
+      id: did, name, email: email || null, phone: phone || null, source: label, loan_type: loanType, stage: "new", status: "lost",
+      lost_reason: "Auto-filtered: " + screen.reasons.join("; "), assigned_to: owner, created_at: today, created_at_ts: new Date().toISOString(),
+      preferred_language: lang, automation_paused: true, entity_type: "LLC", application_token: crypto.randomUUID(), meta_leadgen_id: leadgenId,
+      activity: [
+        { date: today, type: "note", author: "System", text: "Facebook form lead auto-filtered (" + screen.reasons.join("; ") + ") -- not a closeable file right now. No LO alert, no texts. Form \"" + (formName || formId) + "\"" + (realAdId(data.ad_id, adId) ? " · ad_id=" + realAdId(data.ad_id, adId) : "") },
+        ...(answers.length ? [{ date: today, type: "note", author: "System", text: "Form answers — " + answers.join(" · ") }] : []),
+      ],
+    });
+    await post("meta-crm-events", { leadId: did, secret: await adminSecret() });
+    return;
+  }
   const assignee = spanish ? SPANISH_LO : vietnamese ? VIETNAMESE_LO : await pickEnglishAdLO();
   const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
   const activity: Record<string, string>[] = [
@@ -166,6 +213,7 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   void state; // the state answer stays in the form-answers note
   const { error } = await sb.from("leads").insert(row);
   if (error) { console.error("meta-leads-webhook: insert failed", leadgenId, error.message); return; }
+  if (screen.verdict === "qualified") await post("meta-crm-events", { leadId: id, secret: await adminSecret(), qualified: true });
 
   // Hot-lead alert to the LO.
   const alertText = "🔥 New Facebook lead" + (spanish ? " (Spanish)" : vietnamese ? " (Vietnamese)" : "") + ": " + name + (loanType ? " · " + loanType : "") + " — open & dial: " + CRM_URL + "?lead=" + id;
