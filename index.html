@@ -2700,11 +2700,20 @@ function isNewBusinessLead(lead){
 // call attempts only (not texts), and uses the new-business flag stamped on
 // each attempt when it was logged -- classifying the lead as it is NOW would
 // stop counting a call the moment that lead moved to a later stage.
+// Joe 10/10 ("make sure they're getting credit for the calls"): credit follows whoever made the
+// call (a.by, stamped by the phone system), so a lead handed to someone else doesn't take the
+// earlier caller's calls with it -- and an LO's own missed ring is not a call.
+function isRealCallAttempt(a){
+  return a && a.outcome !== "texted" && !a.staffMissed && !/went unanswered before reaching/i.test(String(a.notes || ""));
+}
+function callAttemptIsMine(a, lead, userId){
+  return a.by ? a.by === userId : lead.assignedTo === userId;
+}
 function callsMadeToday(userId){
   var t = todayISO(), n = 0;
-  state.leads.filter(function(l){ return l.assignedTo === userId; }).forEach(function(l){
+  state.leads.forEach(function(l){
     (l.callAttempts||[]).forEach(function(a){
-      if (a.date !== t || a.outcome === "texted") return;
+      if (a.date !== t || !isRealCallAttempt(a) || !callAttemptIsMine(a, l, userId)) return;
       if (a.newBusiness === undefined ? isNewBusinessLead(l) : a.newBusiness) n++;
     });
   });
@@ -3436,8 +3445,8 @@ function isoDateNDaysAgo(n){
 }
 function currentQuotaStreak(userId){
   var byDate = {};
-  state.leads.filter(function(l){ return l.assignedTo===userId && isNewBusinessLead(l); }).forEach(function(l){
-    (l.callAttempts||[]).forEach(function(a){ byDate[a.date] = (byDate[a.date]||0) + 1; });
+  state.leads.filter(function(l){ return isNewBusinessLead(l); }).forEach(function(l){
+    (l.callAttempts||[]).forEach(function(a){ if (isRealCallAttempt(a) && callAttemptIsMine(a, l, userId)) byDate[a.date] = (byDate[a.date]||0) + 1; });
   });
   var streak = 0, n = 0;
   var todayStr = todayISO();
@@ -6250,7 +6259,7 @@ function logCall(leadId, outcome, notes, callback){
   var d = todayISO();
   if (!lead.firstAttemptAt) lead.firstAttemptAt = nowTs();
   lead.callAttempts = lead.callAttempts || [];
-  lead.callAttempts.push({ date:d, at:nowTs(), outcome:outcome, notes:notes||"", newBusiness: isNewBusinessLead(lead) });
+  lead.callAttempts.push({ date:d, at:nowTs(), outcome:outcome, notes:notes||"", newBusiness: isNewBusinessLead(lead), by: currentUser().id });
   // A logged call completes this lead's open follow-up task; the follow-up engine schedules the next step.
   completeOpenTasksForLead(leadId, outcome);
   lead.activity = lead.activity || [];
@@ -10888,11 +10897,7 @@ function isMobileMode(){
   } catch(e){ return false; }
 }
 function myCallsToday(userId){
-  var t = todayISO(), n = 0;
-  state.leads.filter(function(l){ return l.assignedTo===userId && isNewBusinessLead(l); }).forEach(function(l){
-    n += (l.callAttempts||[]).filter(function(a){ return a.date===t; }).length;
-  });
-  return n;
+  return callsMadeToday(userId);
 }
 // Skips persist on the lead (lastSkipAt) so they survive a reload; each one
 // asks the queue for one extra slot so today's list still totals the quota.
