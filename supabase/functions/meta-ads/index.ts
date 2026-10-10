@@ -99,6 +99,16 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, insights: result.data.data }), { headers: CORS_HEADERS });
     }
 
+    // billing (10/10): how the ad account is paid for -- card/balance on file (Meta's masked
+    // display string only), prepay vs. threshold billing, balance and spend cap. Read-only.
+    if (action === "billing") {
+      const result = await graphFetch("/" + actAccount(), {
+        fields: "name,currency,funding_source_details,is_prepay_account,balance,amount_spent,spend_cap,min_daily_budget,account_status,disable_reason",
+      });
+      if (!result.ok) return new Response(JSON.stringify({ error: "meta_error", detail: result.data }), { status: 502, headers: CORS_HEADERS });
+      return new Response(JSON.stringify({ ok: true, billing: result.data }), { headers: CORS_HEADERS });
+    }
+
     if (action === "update-budget") {
       const campaignId: string = body.campaignId;
       const dailyBudgetCents: number = body.dailyBudgetCents; // Meta budgets are in cents
