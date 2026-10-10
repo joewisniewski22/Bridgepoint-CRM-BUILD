@@ -160,6 +160,8 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
     id, name, email: email || null, phone: phone || null, source: label, loan_type: loanType, stage: "new", status: "active",
     assigned_to: assignee, created_at: today, created_at_ts: new Date().toISOString(),
     preferred_language: lang, ai_stage: "engaging", entity_type: "LLC", application_token: crypto.randomUUID(), activity,
+    // Lets meta-crm-events report this lead's funnel progress back to Meta (10/9).
+    meta_leadgen_id: leadgenId,
   };
   void state; // the state answer stays in the form-answers note
   const { error } = await sb.from("leads").insert(row);
@@ -324,6 +326,40 @@ Deno.serve(async (req: Request) => {
     const made = await fetch(GRAPH + "/" + META_PAGE_ID + "/leadgen_forms", { method: "POST", body: new URLSearchParams(params) }).then((r) => r.json()).catch((e) => String(e));
     return json(made);
   }
+  // link-leadgen-ids (10/9): match every lead in every form's Meta history to its CRM file
+  // (phone/email) and store the leadgen id, so stage changes from now on are reported to Meta.
+  if (body.action === "link-leadgen-ids") {
+    if (!(await authorized(body))) return json({ error: "not_authorized" }, 403);
+    const pt = await pageToken(META_PAGE_ID);
+    const forms = await fetch(GRAPH + "/" + META_PAGE_ID + "/leadgen_forms?fields=id,name&limit=100&access_token=" + encodeURIComponent(pt)).then((r) => r.json()).catch(() => null);
+    const { data: crm } = await sb.from("leads").select("id, phone, email, meta_leadgen_id").is("meta_leadgen_id", null).or("source.eq.Facebook,source.like.Meta Ads*");
+    const byPhone = new Map<string, string>(), byEmail = new Map<string, string>();
+    for (const l of crm || []) {
+      const p = digits10(l.phone as string); if (p && p.length === 10 && !byPhone.has(p)) byPhone.set(p, l.id as string);
+      const e = String(l.email || "").toLowerCase(); if (e && !byEmail.has(e)) byEmail.set(e, l.id as string);
+    }
+    let seen = 0, linked = 0;
+    const used = new Set<string>();
+    for (const fm of (forms && forms.data) || []) {
+      let next = GRAPH + "/" + fm.id + "/leads?fields=id,field_data&limit=100&access_token=" + encodeURIComponent(pt);
+      for (let i = 0; next && i < 30; i++) {
+        const pg = await fetch(next).then((r) => r.json()).catch(() => null);
+        if (!pg || !pg.data) break;
+        for (const ld of pg.data) {
+          seen++;
+          const fd: Field[] = ld.field_data || [];
+          const p = digits10(fv(fd, "phone_number", "phone", "número_de_teléfono") || ""), e = String(fv(fd, "email", "correo_electrónico", "correo_electronico") || "").toLowerCase();
+          const crmId = (p && byPhone.get(p)) || (e && byEmail.get(e)) || null;
+          if (!crmId || used.has(crmId)) continue;
+          used.add(crmId);
+          const { error } = await sb.from("leads").update({ meta_leadgen_id: String(ld.id) }).eq("id", crmId).is("meta_leadgen_id", null);
+          if (!error) linked++;
+        }
+        next = pg.paging && pg.paging.next ? pg.paging.next : "";
+      }
+    }
+    return json({ formLeadsSeen: seen, crmFilesLinked: linked });
+  }
   // repair-answers: rewrite "Form answers / Respuestas" notes saved with option keys
   // ("option_2", "o4") into the option text, using the form's own questions.
   if (body.action === "repair-answers") {
@@ -426,6 +462,7 @@ Deno.serve(async (req: Request) => {
           id, name, email: email || null, phone: phone || null, source: spanish ? "Facebook" : vietnamese ? "Meta Ads — Vietnamese Lead Form" : "Meta Ads — Lead Form", loan_type: loanTypeFrom(f, formName),
           stage: "new", status: "active", assigned_to: assignee, created_at: submitted || today, created_at_ts: ld.created_time ? new Date(ld.created_time).toISOString() : new Date().toISOString(),
           preferred_language: spanish ? "es" : vietnamese ? "vi" : "en", automation_paused: true, entity_type: "LLC", application_token: crypto.randomUUID(), activity,
+          meta_leadgen_id: String(ld.id || "") || null,
         });
         if (!error) imported.push(id);
       }
