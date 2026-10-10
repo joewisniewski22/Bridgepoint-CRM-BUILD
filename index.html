@@ -692,9 +692,11 @@ var CITIZENSHIP_STATUSES = ["US Citizen","Permanent Resident","Non-Permanent Res
 // -- separate from lead.preferredLanguage's older en/es-only role of picking
 // which pre-built bilingual template (application, portal, documents) to use.
 // Both read the SAME lead.preferredLanguage field on purpose: selecting
-// Spanish here still gets the bilingual templates too, exactly like the old
-// toggle did, while every other language on this list only affects live
-// text translation (no bilingual templates exist for them).
+// Spanish or Vietnamese here also gets the pre-built translated templates
+// (application, borrower portal, and the invite/notification texts that
+// send their link -- see TEMPLATE_LANGS / VI_DICT below), while every other
+// language on this list only affects live text translation (no templates
+// exist for them). (Joe 2026-10-09: Vietnamese for Theresa's borrowers)
 var COMM_LANGUAGES = [
   { code:"en", name:"English" }, { code:"es", name:"Spanish" }, { code:"pt", name:"Portuguese" },
   { code:"fr", name:"French" }, { code:"ht", name:"Haitian Creole" }, { code:"zh", name:"Mandarin Chinese" },
@@ -855,7 +857,7 @@ var ES_DICT = {
   // entirely, leaving Spanish-speaking clients with a half-translated form).
   "RTL Business Purpose Loan Application":"Solicitud de Préstamo con Propósito Comercial RTL",
   "DSCR Business Purpose Loan Application":"Solicitud de Préstamo con Propósito Comercial DSCR",
-  "A few more details Constructive Capital needs beyond what you already gave us — most of your loan info above carries over automatically.":"Algunos detalles adicionales que Constructive Capital necesita, además de lo que ya nos proporcionó — la mayoría de la información de su préstamo se traslada automáticamente.",
+  "A few more details we need beyond what you already gave us — most of your loan info above carries over automatically.":"Algunos detalles adicionales que necesitamos, además de lo que ya nos proporcionó — la mayoría de la información de su préstamo se traslada automáticamente.",
   "Your Current Address":"Su Dirección Actual", "Own or Rent?":"¿Es Propietario o Renta?",
   "Own":"Propietario", "Rent":"Renta", "Years/Months at Address":"Años/Meses en la Dirección",
   "Street Address, City, State, ZIP":"Dirección, Ciudad, Estado, Código Postal",
@@ -924,9 +926,298 @@ var ES_DICT = {
   "Clear Signature":"Borrar Firma",
   "Loan Officer":"Oficial de Préstamos"
 };
+/* ---------------------------------------------------------------------
+   Vietnamese translations for client-facing content only (Joe 2026-10-09:
+   Vietnamese for Theresa's borrowers). Same rule as ES_DICT: staff views
+   always pass "en", so staff always see English. Covers every ES_DICT key
+   plus portal/application strings ES_DICT doesn't have yet. Lender names
+   never appear here (the RTL/DSCR application note below is reworded to
+   "we" instead of naming the lender).
+--------------------------------------------------------------------- */
+var VI_DICT = {
+  "Co-Borrower / Co-Guarantor (leave blank if none)": "Người đồng vay / Người đồng bảo lãnh (để trống nếu không có)",
+  "Co-Borrower / Co-Guarantor": "Người đồng vay / Người đồng bảo lãnh", "Is there a co-borrower?": "Có người đồng vay không?",
+  "Co-Borrower First Name": "Tên của người đồng vay", "Co-Borrower Date of Birth": "Ngày sinh của người đồng vay",
+  "Co-Borrower Social Security Number": "Số An sinh Xã hội (SSN) của người đồng vay", "Co-Borrower Ownership %": "% sở hữu của người đồng vay",
+  "Co-Borrower Phone": "Số điện thoại của người đồng vay", "Co-Borrower Email": "Email của người đồng vay",
+  "Co-Borrower Home Address (street, city, state, ZIP)": "Địa chỉ nhà của người đồng vay (số nhà và đường, thành phố, tiểu bang, mã ZIP)",
+  "Guarantor First Name":"Tên của người bảo lãnh", "Middle Name":"Tên đệm", "Last Name":"Họ",
+  "Guarantor Date of Birth":"Ngày sinh của người bảo lãnh", "Guarantor Ownership %":"% sở hữu của người bảo lãnh",
+  "Guarantor Social Security Number":"Số An sinh Xã hội (SSN) của người bảo lãnh",
+  "On file, ending":"Đã có trong hồ sơ, 4 số cuối",
+  "Guarantor Phone":"Số điện thoại của người bảo lãnh", "Guarantor Email":"Email của người bảo lãnh",
+  "Entity Legal Name (if closing in an entity)":"Tên pháp lý của pháp nhân (nếu vay dưới tên pháp nhân)",
+  "Entity Type":"Loại pháp nhân", "Credit Score":"Điểm tín dụng",
+  "Investing Experience (deals completed)":"Kinh nghiệm đầu tư (số thương vụ đã hoàn tất)",
+  "Liquidity / Reserves":"Tài sản thanh khoản / Dự trữ", "Property Address":"Địa chỉ bất động sản",
+  "Property Type":"Loại bất động sản", "Exit Strategy":"Chiến lược thoái vốn",
+  "Purchase Price":"Giá mua", "Monthly Rent Estimate":"Tiền thuê ước tính hàng tháng",
+  "Monthly Property Tax":"Thuế bất động sản hàng tháng", "Monthly Insurance":"Bảo hiểm hàng tháng",
+  "Monthly HOA / Dues (if any)":"Phí HOA / Hội phí hàng tháng (nếu có)",
+  "After-Repair Value (ARV)":"Giá trị sau sửa chữa (ARV)",
+  "Rehab / Construction Budget":"Ngân sách sửa chữa / Xây dựng",
+  "Rehab Budget":"Ngân sách sửa chữa", "Construction Budget":"Ngân sách xây dựng",
+  "Loan Amount Requested":"Số tiền vay đề nghị", "Term (months)":"Kỳ hạn (tháng)",
+  "Monthly Payment":"Khoản thanh toán hàng tháng", "interest only":"chỉ trả lãi",
+  "Number of Properties":"Số lượng bất động sản", "Total Purchase Price / Value":"Tổng giá mua / Giá trị",
+  "Total Monthly Rent Estimate":"Tổng tiền thuê ước tính hàng tháng",
+  "Total Monthly Tax + Insurance + HOA":"Tổng thuế + bảo hiểm + HOA hàng tháng",
+  "Track Record":"Lịch sử dự án",
+  "One row per completed project — updates automatically based on Investing Experience above.":"Mỗi dòng là một dự án đã hoàn tất — tự động cập nhật theo Kinh nghiệm đầu tư ở trên.",
+  "Enter a number above for Investing Experience to add project rows.":"Nhập một con số ở mục Kinh nghiệm đầu tư phía trên để thêm các dòng dự án.",
+  "Prior Project #":"Dự án trước #", "Purchase Date":"Ngày mua", "Exit Type":"Hình thức thoái vốn",
+  "Exit Date":"Ngày thoái vốn", "Exit Value (sale price or new loan amount)":"Giá trị thoái vốn (giá bán hoặc số tiền vay mới)",
+  "Sold":"Đã bán", "Refinanced":"Đã tái cấp vốn", "Still Own":"Vẫn đang sở hữu",
+  "Scope of Work":"Phạm vi công việc",
+  "Enter a budget for each category that applies. Leave the rest blank.":"Nhập ngân sách cho từng hạng mục áp dụng. Để trống các mục còn lại.",
+  "Scope Notes (timeline, details)":"Ghi chú phạm vi công việc (tiến độ, chi tiết)",
+  "Site Work / Excavation":"Chuẩn bị mặt bằng / Đào đất", "Foundation / Structural":"Móng / Kết cấu",
+  "Framing":"Khung nhà", "Roof":"Mái nhà",
+  "Exterior (Siding, Paint, Windows, Doors)":"Ngoại thất (Ốp tường, Sơn, Cửa sổ, Cửa ra vào)",
+  "Electrical":"Điện", "Plumbing":"Hệ thống ống nước", "HVAC":"Hệ thống sưởi và điều hòa (HVAC)",
+  "Kitchen":"Nhà bếp", "Bathrooms":"Phòng tắm", "Flooring":"Sàn nhà",
+  "Interior Paint / Drywall":"Sơn nội thất / Vách thạch cao", "Permits & Fees":"Giấy phép & Lệ phí",
+  "Contingency / Other":"Dự phòng / Khác",
+  "LLC":"LLC", "Individual":"Cá nhân", "Corporation":"Công ty cổ phần (Corporation)",
+  "SFR":"Nhà đơn lập (SFR)", "Duplex":"Nhà song lập (Duplex)", "2-4 Unit":"2-4 căn", "Multifamily 5+":"Nhà nhiều căn hộ (5+ căn)",
+  "Mixed-Use":"Đa mục đích (Mixed-Use)", "Condo":"Căn hộ chung cư (Condo)", "Land":"Đất",
+  "Sell":"Bán", "Refinance to DSCR":"Tái cấp vốn sang DSCR", "Hold/Rent":"Giữ lại/Cho thuê", "1031 Exchange":"Trao đổi 1031",
+  "DSCR":"DSCR", "Fix & Flip":"Sửa và bán lại (Fix & Flip)", "Bridge":"Vay bắc cầu (Bridge)", "Ground Up Construction":"Xây mới từ đầu (Ground Up)", "Portfolio/Blanket":"Danh mục / Gộp nhiều bất động sản",
+  "Government-Issued Photo ID":"Giấy tờ tùy thân có ảnh do chính phủ cấp",
+  "2 Months Bank Statements":"Sao kê ngân hàng 2 tháng",
+  "2 Months Personal or Business Bank Statements":"Sao kê ngân hàng cá nhân hoặc doanh nghiệp 2 tháng",
+  "Entity Formation Docs & Operating Agreement (if closing in an entity)":"Giấy tờ thành lập pháp nhân & Thỏa thuận điều hành (nếu vay dưới tên pháp nhân)",
+  "EIN Letter (if closing in an entity)":"Thư cấp số EIN (nếu vay dưới tên pháp nhân)",
+  "Credit Authorization Form":"Mẫu ủy quyền kiểm tra tín dụng",
+  "Voided Check / Wire Instructions":"Séc đã hủy (Voided Check) / Hướng dẫn chuyển khoản",
+  "Purchase Contract (purchase) or Current Mortgage Statement (refinance)":"Hợp đồng mua (nếu mua) hoặc Sao kê khoản vay thế chấp hiện tại (nếu tái cấp vốn)",
+  "Signed Lease Agreement (or Market Rent Letter if vacant)":"Hợp đồng thuê đã ký (hoặc Thư xác định tiền thuê thị trường nếu nhà đang trống)",
+  "Property Tax Bill":"Hóa đơn thuế bất động sản",
+  "Proof of Landlord / Hazard Insurance":"Bằng chứng bảo hiểm chủ nhà cho thuê / bảo hiểm rủi ro",
+  "HOA Statement (if applicable)":"Sao kê HOA (nếu có)",
+  "Purchase Contract":"Hợp đồng mua",
+  "Scope of Work / Rehab Budget":"Phạm vi công việc / Ngân sách sửa chữa",
+  "General Contractor License & Insurance (Standard/Super Rehab)":"Giấy phép & Bảo hiểm của nhà thầu chính (sửa chữa Tiêu chuẩn/Quy mô lớn)",
+  "Proof of Funds for Rehab Reserve":"Bằng chứng tài chính cho quỹ dự trữ sửa chữa",
+  "Schedule of Real Estate Owned (Track Record)":"Danh sách bất động sản đang sở hữu (Lịch sử dự án)",
+  "Builder's Risk Insurance Binder":"Giấy xác nhận bảo hiểm rủi ro trong xây dựng (Builder Risk)",
+  "Purchase Contract or Current Mortgage Statement":"Hợp đồng mua hoặc Sao kê khoản vay thế chấp hiện tại",
+  "Proof of Hazard Insurance":"Bằng chứng bảo hiểm rủi ro",
+  "Purchase Contract or Land Payoff Statement":"Hợp đồng mua hoặc Giấy xác nhận tất toán khoản vay mua đất",
+  "Scope of Work / Construction Budget":"Phạm vi công việc / Ngân sách xây dựng",
+  "Stamped & Approved Architectural Plans":"Bản vẽ kiến trúc đã đóng dấu & được phê duyệt",
+  "Permits (or Permit-Readiness Letter)":"Giấy phép xây dựng (hoặc Thư xác nhận sẵn sàng cấp phép)",
+  "General Contractor License, Insurance & Signed Contract":"Giấy phép, Bảo hiểm & Hợp đồng đã ký của nhà thầu chính",
+  "Feasibility Study (if required for experience tier)":"Nghiên cứu khả thi (nếu được yêu cầu theo cấp độ kinh nghiệm)",
+  "Welcome back":"Chào mừng bạn trở lại", "Current status:":"Trạng thái hiện tại:", "Your loan officer":"Chuyên viên cho vay của bạn",
+  "Document checklist":"Danh sách tài liệu", "No documents requested yet.":"Chưa có tài liệu nào được yêu cầu.",
+  "Received":"Đã nhận", "Needed to move forward":"Cần có để tiếp tục", "Upload":"Tải lên",
+  "New Lead":"Khách hàng mới", "Attempting Contact":"Đang liên hệ", "Contacted / Qualifying":"Đã liên hệ / Đang đánh giá",
+  "Application Sent":"Đã gửi đơn", "Application Completed":"Đã hoàn tất đơn", "Docs Collection":"Thu thập tài liệu",
+  "Processing":"Đang xử lý hồ sơ", "Underwriting":"Thẩm định", "Conditional Approval":"Phê duyệt có điều kiện",
+  "Clear to Close":"Sẵn sàng ký kết", "Closed / Funded":"Đã ký kết / Đã giải ngân", "Post-Closing":"Sau ký kết",
+  "Application Started":"Đã bắt đầu đơn", "Doc Collection":"Thu thập tài liệu",
+  "Cleared to Close":"Sẵn sàng ký kết", "Closed":"Đã ký kết",
+  "Your Loan Details":"Chi tiết khoản vay của bạn", "Preliminary — subject to change":"Sơ bộ — có thể thay đổi",
+  "Property":"Bất động sản", "Loan Amount":"Số tiền vay", "Term":"Kỳ hạn", "months":"tháng", "Rate":"Lãi suất",
+  "Welcome":"Xin chào", "Your Loan Officer":"Chuyên viên cho vay của bạn", "Email":"Email",
+  "Document Checklist":"Danh sách tài liệu",
+  "Chat with Your Loan Officer":"Trò chuyện với chuyên viên cho vay của bạn",
+  "No messages yet — ask a question below.":"Chưa có tin nhắn — hãy đặt câu hỏi bên dưới.",
+  "Type a message…":"Nhập tin nhắn…", "Send":"Gửi", "You":"Bạn",
+  "Your loan officer gets this as a text and can reply right from their phone.":"Chuyên viên cho vay của bạn sẽ nhận được tin nhắn này qua điện thoại và có thể trả lời ngay.",
+  "Underwriting Needs From You":"Bộ phận thẩm định cần bạn cung cấp",
+  "Attachment":"Tệp đính kèm",
+  "Your File Is In Processing":"Hồ sơ của bạn đang được xử lý",
+  "Your loan officer and our processing team are handling everything from here. If you need to send a document or have a question, please contact your loan officer directly.":"Chuyên viên cho vay và đội ngũ xử lý hồ sơ của chúng tôi sẽ lo mọi việc từ đây. Nếu bạn cần gửi tài liệu hoặc có câu hỏi, vui lòng liên hệ trực tiếp với chuyên viên cho vay của bạn.",
+  "Your Contacts":"Người liên hệ của bạn",
+  "Title company, insurance agent, or anyone else involved in this loan — add them here so we can coordinate directly.":"Công ty title (bảo hiểm quyền sở hữu), đại lý bảo hiểm, hoặc bất kỳ ai khác liên quan đến khoản vay này — hãy thêm họ vào đây để chúng tôi phối hợp trực tiếp.",
+  "No contacts added yet.":"Chưa thêm người liên hệ nào.",
+  "Add Contact":"Thêm người liên hệ",
+  "Name":"Họ tên", "Phone":"Điện thoại",
+  "Realtor":"Môi giới bất động sản", "Title Company":"Công ty title (bảo hiểm quyền sở hữu)", "Escrow Officer":"Nhân viên ký quỹ (Escrow)",
+  "Insurance Agent":"Đại lý bảo hiểm", "Attorney":"Luật sư", "Appraiser":"Thẩm định viên",
+  "Let's get your application started":"Hãy bắt đầu đơn xin vay của bạn",
+  "Takes about 10 minutes — fill in what you can, sign at the end.":"Mất khoảng 10 phút — điền những gì bạn có thể, ký tên ở cuối.",
+  "Submit Application":"Gửi đơn",
+  "Thanks — we've got your application! Here's where things stand.":"Cảm ơn bạn — chúng tôi đã nhận được đơn của bạn! Dưới đây là tình trạng hiện tại.",
+  "Citizenship Status":"Tình trạng quốc tịch / cư trú", "US Citizen":"Công dân Hoa Kỳ", "Permanent Resident":"Thường trú nhân",
+  "Foreign National":"Người nước ngoài (không cư trú)", "ITIN":"ITIN",
+  "Transaction Type":"Loại giao dịch", "Purchase":"Mua", "Rate/Term Refinance":"Tái cấp vốn đổi lãi suất/kỳ hạn",
+  "Cash-Out Refinance":"Tái cấp vốn rút tiền mặt", "Prepayment Penalty":"Phí phạt trả nợ trước hạn",
+  "5 Year (base)":"5 năm (cơ bản)", "3 Year":"3 năm", "2 Year":"2 năm", "1 Year":"1 năm", "No Prepay":"Không phạt trả trước hạn",
+
+  // RTL/DSCR Business Purpose Loan Application
+  "RTL Business Purpose Loan Application":"Đơn xin vay mục đích kinh doanh RTL",
+  "DSCR Business Purpose Loan Application":"Đơn xin vay mục đích kinh doanh DSCR",
+  "A few more details we need beyond what you already gave us — most of your loan info above carries over automatically.":"Thêm một vài chi tiết chúng tôi cần ngoài những thông tin bạn đã cung cấp — phần lớn thông tin khoản vay ở trên sẽ được tự động chuyển sang.",
+  "Your Current Address":"Địa chỉ hiện tại của bạn", "Own or Rent?":"Sở hữu hay thuê nhà?",
+  "Own":"Sở hữu", "Rent":"Thuê", "Years/Months at Address":"Số năm/tháng ở địa chỉ này",
+  "Street Address, City, State, ZIP":"Số nhà và đường, Thành phố, Tiểu bang, Mã ZIP",
+  "Marital Status":"Tình trạng hôn nhân", "Single":"Độc thân", "Married":"Đã kết hôn", "Separated":"Ly thân",
+  "Co-Applicant (leave blank if none)":"Người đồng đứng đơn (để trống nếu không có)",
+  "Co-Applicant (if any)":"Người đồng đứng đơn (nếu có)",
+  "First Name":"Tên",
+  "Entity Details":"Thông tin pháp nhân", "Entity Formed (date)":"Ngày thành lập pháp nhân",
+  "EIN":"EIN", "Entity Bank Name":"Tên ngân hàng của pháp nhân", "Entity Bank Balance":"Số dư ngân hàng của pháp nhân",
+  "Entity Address, City, State, ZIP":"Địa chỉ pháp nhân, Thành phố, Tiểu bang, Mã ZIP",
+  "Ownership — Schedule A":"Quyền sở hữu — Phụ lục A", "How many owners to list?":"Cần liệt kê bao nhiêu chủ sở hữu?",
+  "Enter a number above to add owner rows (leave 0 if you're the sole owner).":"Nhập một con số ở trên để thêm các dòng chủ sở hữu (để 0 nếu bạn là chủ sở hữu duy nhất).",
+  "Line of Credit":"Hạn mức tín dụng", "Existing Line of Credit in place?":"Hiện đã có hạn mức tín dụng chưa?",
+  "Requesting an Increase?":"Có đề nghị tăng hạn mức không?", "Estimated Net Worth":"Giá trị tài sản ròng ước tính",
+  "Estimated Liquidity":"Tài sản thanh khoản ước tính", "Line of Credit Requested (if applicable)":"Hạn mức tín dụng đề nghị (nếu có)",
+  "Interior Access Contact":"Người liên hệ để vào bên trong nhà", "Name or Lock Box #":"Tên hoặc mã hộp khóa (Lock Box)",
+  "Relationship":"Mối quan hệ",
+  "Current Debt on Property — refinance only, leave blank for a purchase":"Khoản nợ hiện tại trên bất động sản — chỉ dành cho tái cấp vốn, để trống nếu là giao dịch mua",
+  "Balance Owed":"Số dư còn nợ", "Current Lender":"Bên cho vay hiện tại", "Original Cost":"Chi phí ban đầu",
+  "Year Acquired":"Năm mua",
+  "Title / Insurance / Closing Agent":"Title / Bảo hiểm / Đại lý ký kết",
+  "Title Contact / Phone / Email":"Người liên hệ bên title / Điện thoại / Email",
+  "Insurance Carrier":"Công ty bảo hiểm", "Insurance Contact / Phone / Email":"Người liên hệ bảo hiểm / Điện thoại / Email",
+  "Closing Agent Company":"Công ty đại lý ký kết",
+  "Closing Agent Contact / Phone / Email":"Người liên hệ đại lý ký kết / Điện thoại / Email",
+  "Declarations":"Phần khai báo", "If yes, explain":"Nếu có, vui lòng giải thích",
+  "Certification":"Xác nhận",
+  "By signing, you certify that everything in this application is true and complete, and authorize Bridgepoint Lending / BPL Mortgage, LLC and its investors to verify this information and pull credit.":"Bằng việc ký tên, bạn xác nhận mọi thông tin trong đơn này là đúng sự thật và đầy đủ, đồng thời ủy quyền cho Bridgepoint Lending / BPL Mortgage, LLC và các nhà đầu tư của công ty xác minh thông tin này và kiểm tra tín dụng của bạn.",
+  "Sign Here to Certify":"Ký tên tại đây để xác nhận",
+  "No":"Không", "Yes":"Có",
+  "Owner #":"Chủ sở hữu #", "SSN / Tax ID":"SSN / Mã số thuế",
+  "Title":"Chức danh", "Ownership %":"% sở hữu", "Primary Address":"Địa chỉ chính",
+  "Guarantor?":"Là người bảo lãnh?", "US Citizen?":"Là công dân Hoa Kỳ?",
+  "Property #":"Bất động sản #", "Occupancy":"Tình trạng sử dụng",
+  "Purchase Price (if applicable)":"Giá mua (nếu có)", "As-Is Value":"Giá trị hiện trạng (As-Is)",
+  "Loan Term (months)":"Kỳ hạn vay (tháng)", "Transaction Purpose":"Mục đích giao dịch",
+  "Cash Out Purpose (if applicable)":"Mục đích rút tiền mặt (nếu có)",
+  "Loan Terms":"Điều khoản khoản vay", "Loan Product Needed":"Sản phẩm vay cần thiết",
+  "30 Year Fixed":"Lãi suất cố định 30 năm", "10/1 Interest Only":"10/1 Chỉ trả lãi",
+  "Multi-Pack Addendum — additional properties beyond the one above":"Phụ lục nhiều bất động sản — các bất động sản bổ sung ngoài bất động sản ở trên",
+  "How many additional properties?":"Có bao nhiêu bất động sản bổ sung?",
+  "Enter a number above if this is a Blanket/Portfolio loan covering more than one property.":"Nhập một con số ở trên nếu đây là khoản vay Danh mục/Gộp cho nhiều hơn một bất động sản.",
+  "Comments (anything else we should know)":"Ghi chú (bất cứ điều gì khác chúng tôi nên biết)",
+  "Currently or previously involved in any pending lawsuits (foreclosure, collection, or suits by lenders/creditors/subcontractors)?":"Hiện tại hoặc trước đây bạn có liên quan đến vụ kiện nào đang chờ xử lý không (tịch biên nhà, đòi nợ, hoặc bị bên cho vay/chủ nợ/nhà thầu phụ khởi kiện)?",
+  "Involved in bankruptcy or insolvency proceedings in the last 3 years?":"Bạn có liên quan đến thủ tục phá sản hoặc mất khả năng thanh toán trong 3 năm qua không?",
+  "Charged or convicted of a felony?":"Bạn có từng bị buộc tội hoặc kết án trọng tội không?",
+  "Licensed General Contractor, Real Estate Broker/Salesperson, Lender, Appraiser, or involved in other real estate activities?":"Bạn có phải là nhà thầu chính có giấy phép, môi giới/nhân viên kinh doanh bất động sản, bên cho vay, thẩm định viên, hoặc tham gia các hoạt động bất động sản khác không?",
+  "View Term Sheet":"Xem bảng điều khoản",
+  "Your Options When This Loan Comes Due":"Các lựa chọn của bạn khi khoản vay này đến hạn",
+  "Rough estimates — your loan officer can run exact numbers anytime.":"Ước tính sơ bộ — chuyên viên cho vay có thể tính con số chính xác bất cứ lúc nào.",
+  "Est. Proceeds If You Sell":"Số tiền thu về ước tính nếu bán",
+  "Est. Cash-Out If You Refinance":"Tiền mặt rút ra ước tính nếu tái cấp vốn",
+  "Refinancing into a long-term DSCR loan lets you keep the property, pull cash out, and start collecting rent — without paying selling costs or losing the upside if the area keeps appreciating. Ask your loan officer about refinancing whenever you're ready.":"Tái cấp vốn sang khoản vay DSCR dài hạn giúp bạn giữ lại bất động sản, rút tiền mặt và bắt đầu thu tiền thuê — không phải trả chi phí bán và không bỏ lỡ phần tăng giá nếu khu vực tiếp tục lên giá. Hãy hỏi chuyên viên cho vay về việc tái cấp vốn bất cứ khi nào bạn sẵn sàng.",
+  "Automatic Payment Authorization (ACH)":"Ủy quyền thanh toán tự động (ACH)",
+  "Required on every loan — authorizes your monthly payment to draft automatically. Fill it in and sign below.":"Bắt buộc với mọi khoản vay — cho phép khoản thanh toán hàng tháng của bạn được trích tự động. Vui lòng điền thông tin và ký tên bên dưới.",
+  "Account Holder Name":"Tên chủ tài khoản",
+  "Financial Institution Name":"Tên tổ chức tài chính",
+  "Bank City, State, ZIP":"Thành phố, Tiểu bang, Mã ZIP của ngân hàng",
+  "ABA / Routing Number":"Số ABA / Routing",
+  "Account Number":"Số tài khoản",
+  "Account Type":"Loại tài khoản", "Checking":"Tài khoản thanh toán (Checking)", "Savings":"Tài khoản tiết kiệm (Savings)",
+  "Preferred Draft Date":"Ngày trích tiền mong muốn",
+  "1st of the month":"Ngày 1 hàng tháng", "3rd of the month":"Ngày 3 hàng tháng", "5th of the month":"Ngày 5 hàng tháng",
+  "Additional Draft Amount (optional, applied to principal)":"Số tiền trích thêm (tùy chọn, trừ vào nợ gốc)",
+  "Sign Here to Authorize":"Ký tên tại đây để ủy quyền",
+  "Clear Signature":"Xóa chữ ký",
+  "Loan Officer":"Chuyên viên cho vay",
+
+  // Portal/application strings not (yet) in ES_DICT
+  "Your Application":"Đơn xin vay của bạn",
+  "You can still make changes below anytime before your file moves to processing.":"Bạn vẫn có thể chỉnh sửa bên dưới bất cứ lúc nào trước khi hồ sơ chuyển sang giai đoạn xử lý.",
+  "Save Changes":"Lưu thay đổi", "+ Add Another File":"+ Thêm tệp khác", "files":"tệp",
+  "Download example / form":"Tải mẫu / biểu mẫu", "On file":"Đã có trong hồ sơ", "— Select —":"— Chọn —",
+  "Unmarried":"Chưa kết hôn", "Non-Permanent Resident":"Cư dân không thường trú", "Lender Contact":"Người liên hệ bên cho vay",
+  "Country of Citizenship":"Quốc gia mang quốc tịch", "if Foreign National":"nếu là người nước ngoài", "e.g. Mexico":"ví dụ: Việt Nam",
+  "Year Built":"Năm xây dựng", "Current Lender / Mortgage Company":"Bên cho vay hiện tại / Công ty cho vay thế chấp", "if refinance":"nếu tái cấp vốn",
+  "Number of Units":"Số căn", "Residential Units":"Số căn nhà ở", "Commercial Units":"Số căn thương mại",
+  "Are all units ready for rent?":"Tất cả các căn đã sẵn sàng cho thuê chưa?",
+  "Is the property currently occupied?":"Bất động sản hiện có người ở không?",
+  "Are taxes paid current?":"Thuế bất động sản đã được đóng đầy đủ chưa?",
+  "Property Currently Leased":"Tình trạng cho thuê hiện tại",
+  "Fully Leased":"Đã cho thuê toàn bộ", "Partially Leased":"Cho thuê một phần", "Vacant":"Đang trống",
+  "Delayed Purchase?":"Mua bằng tiền mặt và vay sau (Delayed Purchase)?",
+  "New York CEMA Loan?":"Khoản vay CEMA tại New York?", "NY properties only":"chỉ áp dụng cho bất động sản tại NY",
+  "NY Closing Attorney":"Luật sư ký kết tại NY", "NY loans only":"chỉ áp dụng cho khoản vay tại NY",
+  "Current Value":"Giá trị hiện tại", "refi LTV basis":"cơ sở tính LTV khi tái cấp vốn",
+  "Cost of Improvements Since Purchase (if any)":"Chi phí cải tạo kể từ khi mua (nếu có)",
+  "Lease Detail — All Units":"Chi tiết hợp đồng thuê — Tất cả các căn",
+  "Required for Duplex, 2-4 Unit, and Multifamily 5+ properties — one row per unit, driven by Number of Units above.":"Bắt buộc với bất động sản Duplex, 2-4 căn và nhiều căn hộ (5+) — mỗi căn một dòng, theo Số căn ở trên.",
+  "Enter Number of Units above to add per-unit lease rows.":"Nhập Số căn ở trên để thêm các dòng hợp đồng thuê cho từng căn.",
+  "Unit #":"Căn #", "Actual Lease Amount":"Số tiền thuê thực tế", "Market Rent (from 1007)":"Tiền thuê thị trường (theo mẫu 1007)",
+  "Lease Start Date":"Ngày bắt đầu hợp đồng thuê", "Lease End Date":"Ngày kết thúc hợp đồng thuê", "Qualifying Rent":"Tiền thuê dùng để xét duyệt",
+  // Declarations block (LOAN_APP_DECLARATIONS) -- translated for the borrower's
+  // understanding only; the answers, not this text, are what go to the lender.
+  "Is any borrower, guarantor, or key principal currently involved, or previously been involved in, any pending lawsuits, including foreclosure, collection or suits by past or current lenders, creditors, or subcontractors/suppliers?":"Có người vay, người bảo lãnh hoặc thành viên chủ chốt nào hiện đang hoặc đã từng liên quan đến vụ kiện đang chờ xử lý không, bao gồm tịch biên nhà, đòi nợ, hoặc bị bên cho vay, chủ nợ hay nhà thầu phụ/nhà cung cấp trước đây hoặc hiện tại khởi kiện?",
+  "If yes, list the lenders, creditors, or subcontractors/suppliers involved in the action":"Nếu có, liệt kê các bên cho vay, chủ nợ hoặc nhà thầu phụ/nhà cung cấp liên quan đến vụ kiện",
+  "If yes, attach explanation":"Nếu có, đính kèm giải trình",
+  "Have any borrowers, guarantors, or key principals filed for bankruptcy or been involved in foreclosure proceedings in the last 2-4 years?":"Có người vay, người bảo lãnh hoặc thành viên chủ chốt nào đã nộp đơn phá sản hoặc liên quan đến thủ tục tịch biên nhà trong 2-4 năm qua không?",
+  "If yes, Bankruptcy Discharge or Foreclosure Settlement Date":"Nếu có, ngày được xóa nợ phá sản hoặc ngày giải quyết tịch biên",
+  "Has any borrower, guarantor, or key principal been charged or convicted of a felony?":"Có người vay, người bảo lãnh hoặc thành viên chủ chốt nào từng bị buộc tội hoặc kết án trọng tội không?",
+  "Is any borrower, guarantor, or key principal a licensed General Contractor, Real Estate Broker/Sales Person, Lender, Appraiser or involved in any other real estate related activities?":"Có người vay, người bảo lãnh hoặc thành viên chủ chốt nào là nhà thầu chính có giấy phép, môi giới/nhân viên kinh doanh bất động sản, bên cho vay, thẩm định viên, hoặc tham gia các hoạt động khác liên quan đến bất động sản không?",
+  "Has the property been inspected or tested for environmental hazards (lead-based paint, asbestos, underground storage tanks, etc.)?":"Bất động sản đã được kiểm tra hoặc xét nghiệm các mối nguy về môi trường (sơn chứa chì, amiăng, bồn chứa ngầm, v.v.) chưa?",
+  "If yes, please attach report":"Nếu có, vui lòng đính kèm báo cáo",
+  // Borrower-visible checklist items (UNIVERSAL_DOCS / REQUIRED_DOCS_BY_TYPE /
+  // FOREIGN_NATIONAL_DOCS / non-staff lender-pack items) not covered above.
+  "Certificate of Good Standing (if closing in an entity)":"Giấy chứng nhận pháp nhân hoạt động hợp lệ (Good Standing) (nếu vay dưới tên pháp nhân)",
+  "Title Commitment":"Cam kết bảo hiểm quyền sở hữu (Title Commitment)",
+  "Closing Protection Letter (CPL)":"Thư bảo vệ giao dịch ký kết (CPL)",
+  "Letter of Explanation for Recent Credit Inquiries (if applicable — any pull in the last 120 days)":"Thư giải trình về các lần kiểm tra tín dụng gần đây (nếu có — bất kỳ lần kiểm tra nào trong 120 ngày qua)",
+  "Letter of Explanation for Cash-Out Proceeds (if applicable)":"Thư giải trình về mục đích sử dụng tiền mặt rút ra (nếu có)",
+  "HOA / COA / PUD Questionnaire & Package (if applicable)":"Bảng câu hỏi & hồ sơ HOA / COA / PUD (nếu có)",
+  "Paid Appraisal Invoice":"Hóa đơn thẩm định giá đã thanh toán",
+  "Appraisal Report":"Báo cáo thẩm định giá",
+  "Flood Insurance (if applicable)":"Bảo hiểm lũ lụt (nếu có)",
+  "Payoff Statement (refinance only)":"Giấy xác nhận số tiền tất toán (chỉ khi tái cấp vốn)",
+  "Subject Property Acquisition HUD-1 (if borrower owned under 12 months)":"HUD-1 khi mua bất động sản này (nếu sở hữu dưới 12 tháng)",
+  "Fully Executed Assignment of Contract (if applicable)":"Hợp đồng chuyển nhượng hợp đồng mua đã ký đầy đủ (nếu có)",
+  "Detailed Rent Roll (5-20 unit properties only)":"Bảng kê tiền thuê chi tiết (chỉ với bất động sản 5-20 căn)",
+  "Commercial General Liability Insurance $1MM+ (5-20 unit properties only)":"Bảo hiểm trách nhiệm chung thương mại từ $1 triệu (chỉ với bất động sản 5-20 căn)",
+  "Schedule of Properties (addresses for every property in the portfolio)":"Danh sách bất động sản (địa chỉ của từng bất động sản trong danh mục)",
+  "Foreign National Passport":"Hộ chiếu (người nước ngoài)",
+  "Foreign National Visa / USCIS Approval":"Thị thực / Giấy chấp thuận của USCIS (người nước ngoài)",
+  "Foreign National Liquidity Verification":"Xác minh tài sản thanh khoản (người nước ngoài)",
+  "Registered Agent Confirmation":"Xác nhận đại diện đăng ký (Registered Agent)",
+  "Entity Ownership Schedule (Foreign National)":"Bảng cơ cấu sở hữu pháp nhân (người nước ngoài)",
+  "Certificate of Foreign Qualification (if the entity was formed outside the property's state)":"Giấy chứng nhận đăng ký hoạt động ngoài tiểu bang (nếu pháp nhân được thành lập ở tiểu bang khác với bất động sản)",
+  "Track Record Worksheet support — HUDs / leases for each listed project":"Hồ sơ chứng minh lịch sử dự án — HUD / hợp đồng thuê cho từng dự án đã liệt kê",
+  "Plans & Specifications (heavy rehab)":"Bản vẽ & Thông số kỹ thuật (sửa chữa quy mô lớn)",
+  "Building Permits (heavy rehab)":"Giấy phép xây dựng (sửa chữa quy mô lớn)",
+  "$1,000,000 Commercial General Liability (heavy rehab)":"Bảo hiểm trách nhiệm chung thương mại $1.000.000 (sửa chữa quy mô lớn)",
+  "GMI Addendum (not closing in an entity)":"Phụ lục GMI (nếu không vay dưới tên pháp nhân)",
+  "Scope of Work (if owned under 12 months and improved)":"Phạm vi công việc (nếu sở hữu dưới 12 tháng và đã cải tạo)",
+  "Signed loan application with authorization to run credit":"Đơn xin vay đã ký kèm ủy quyền kiểm tra tín dụng",
+  "Bank statement showing the liquidity needed for this deal":"Sao kê ngân hàng thể hiện đủ tài sản thanh khoản cho thương vụ này",
+  "Pro-forma statement — projected rents, taxes and insurance":"Bảng dự toán — tiền thuê, thuế và bảo hiểm dự kiến",
+  "Leases for occupied units (no tenant purchase option)":"Hợp đồng thuê của các căn đang có người ở (không có quyền mua của người thuê)",
+  "Property Management Questionnaire (if a property manager is used)":"Bảng câu hỏi về quản lý bất động sản (nếu có thuê công ty quản lý)",
+  "Rent Roll":"Bảng kê tiền thuê",
+  "Signed Borrowing Authorization form":"Mẫu ủy quyền vay đã ký",
+  "Executed purchase contract with all addenda":"Hợp đồng mua đã ký kèm tất cả phụ lục",
+  "Fully executed purchase contract with all addenda":"Hợp đồng mua đã ký đầy đủ kèm tất cả phụ lục",
+  "Payoff statement / letter (refinance)":"Giấy xác nhận số tiền tất toán (tái cấp vốn)",
+  "Voided check for monthly ACH auto-debit":"Séc đã hủy để trích tiền tự động ACH hàng tháng",
+  "Detailed line-by-line Scope of Work":"Phạm vi công việc chi tiết theo từng hạng mục",
+  "Initial Disclosures signed by all parties (needed before underwriting)":"Tài liệu công bố ban đầu có chữ ký của tất cả các bên (cần có trước khi thẩm định)",
+  "Proof of residential real estate ownership (current or within 36 months)":"Bằng chứng sở hữu bất động sản nhà ở (hiện tại hoặc trong vòng 36 tháng)",
+  "Reserves: 3 months (6 over $1M, 12 over $2M)":"Dự trữ: 3 tháng (6 tháng nếu trên $1 triệu, 12 tháng nếu trên $2 triệu)",
+  "Certificate of Good Standing dated within 60 days of closing":"Giấy chứng nhận hoạt động hợp lệ (Good Standing) cấp trong vòng 60 ngày trước khi ký kết",
+  "Member list showing every member / manager and ownership %":"Danh sách thành viên thể hiện mọi thành viên / người quản lý và % sở hữu"
+};
+// Languages that get the pre-built translated borrower templates
+// (application, portal, invite/notification texts). Every other code in
+// COMM_LANGUAGES only gets live text translation and sees English templates.
+// (Joe 2026-10-09: Vietnamese for Theresa's borrowers)
+var TEMPLATE_LANGS = ["es","vi"];
+function templateLang(code){
+  return TEMPLATE_LANGS.indexOf(code) !== -1 ? code : "en";
+}
+// Three-way pick for hard-coded borrower-facing strings. A missing
+// Vietnamese string falls back to English, never Spanish.
+function langPick(lang, en, es, vi){
+  return lang === "es" ? es : lang === "vi" ? (vi || en) : en;
+}
 function tr(text, lang){
-  if (lang !== "es") return text;
-  return ES_DICT[text] || text;
+  if (lang === "es") return ES_DICT[text] || text;
+  if (lang === "vi") return VI_DICT[text] || text;
+  return text;
 }
 var TP_ROLES = ["Realtor","Title Company","Escrow Officer","Insurance Agent","Attorney","Appraiser","Lender Contact"];
 
@@ -3842,13 +4133,15 @@ function reallySendBorrowerPortalInvite(leadId, channels){
   if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
   channels = channels || ["email","text"];
   var link = applicationLink(lead);
-  var lang = lead.preferredLanguage || "en";
+  // Spanish or Vietnamese clients get this in their language (Joe 2026-10-09: Vietnamese for Theresa's borrowers).
+  var lang = templateLang(lead.preferredLanguage);
   var lo = docLoanOfficer(lead);
   var firstName = (lead.name||"").split(" ")[0];
-  var text = lang === "es"
-    ? ("Hola " + firstName + ", puede revisar el estado de su préstamo, subir documentos y enviar mensajes a " + (lo.name||"su oficial de préstamos") + " en cualquier momento aquí: " + link)
-    : ("Hi " + firstName + ", you can check your loan status, upload documents, and message " + (lo.name||"your loan officer") + " anytime here: " + link);
-  var subject = lang === "es" ? "Bridgepoint Lending — Su Portal de Cliente" : "Bridgepoint Lending — Your Borrower Portal";
+  var text = langPick(lang,
+    ("Hi " + firstName + ", you can check your loan status, upload documents, and message " + (lo.name||"your loan officer") + " anytime here: " + link),
+    ("Hola " + firstName + ", puede revisar el estado de su préstamo, subir documentos y enviar mensajes a " + (lo.name||"su oficial de préstamos") + " en cualquier momento aquí: " + link),
+    ("Chào " + firstName + ", bạn có thể xem tình trạng khoản vay, tải lên tài liệu và nhắn tin cho " + (lo.name||"chuyên viên cho vay của bạn") + " bất cứ lúc nào tại đây: " + link));
+  var subject = langPick(lang, "Bridgepoint Lending — Your Borrower Portal", "Bridgepoint Lending — Su Portal de Cliente", "Bridgepoint Lending — Cổng thông tin khách hàng của bạn");
   if (!sb){ showToast("Send service unavailable"); return; }
   var calls = [];
   if (channels.indexOf("email") !== -1 && lead.email){
@@ -4999,12 +5292,13 @@ function sendStoredTermSheetOption(leadId, idx){
   render();
   showToast("Sending term sheet…");
   var lo = docLoanOfficer(lead);
-  var isEs = (lead.preferredLanguage||"en") === "es";
+  var smsLang = templateLang(lead.preferredLanguage); // heads-up text only; the term sheet itself is unchanged (Joe 2026-10-09: Vietnamese for Theresa's borrowers)
   var firstName = (lead.name||"").split(" ")[0];
   var subject = "Bridgepoint Lending — Your Term Sheet";
-  var smsMsg = isEs
-    ? ("Hola " + firstName + ", es " + (lo.name||"") + " de Bridgepoint Lending — le acabo de enviar por correo electrónico su hoja de términos con todos los detalles. Revise su bandeja de entrada (" + (lead.email||"su correo") + ") y avíseme si tiene preguntas.")
-    : ("Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your term sheet with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!");
+  var smsMsg = langPick(smsLang,
+    ("Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your term sheet with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!"),
+    ("Hola " + firstName + ", es " + (lo.name||"") + " de Bridgepoint Lending — le acabo de enviar por correo electrónico su hoja de términos con todos los detalles. Revise su bandeja de entrada (" + (lead.email||"su correo") + ") y avíseme si tiene preguntas."),
+    ("Chào " + firstName + ", tôi là " + (lo.name||"") + " từ Bridgepoint Lending — tôi vừa gửi email bảng điều khoản với đầy đủ chi tiết cho bạn. Vui lòng kiểm tra hộp thư (" + (lead.email||"email của bạn") + ") và cho tôi biết nếu bạn có câu hỏi."));
   function finishSend(pdfBase64, filename, emailBodyText){
     var calls = [];
     if (lead.email){
@@ -5526,13 +5820,14 @@ function sendBorrowerPortalFollowUp(lead){
   // submitted), just reframed now that there's something to check on.
   if (!sb || (!lead.email && !lead.phone)) return;
   var link = applicationLink(lead);
-  var isEs = (lead.preferredLanguage||"en") === "es";
+  var lang = templateLang(lead.preferredLanguage); // es / vi / en (Joe 2026-10-09: Vietnamese for Theresa's borrowers)
   var lo = docLoanOfficer(lead);
   var firstName = (lead.name||"").split(" ")[0];
-  var text = isEs
-    ? ("¡Gracias, " + firstName + "! Recibimos su solicitud. Use este mismo enlace en cualquier momento para ver el estado de su préstamo, subir documentos, o enviarle un mensaje a " + (lo.name||"su oficial de préstamos") + ": " + link)
-    : ("Thanks, " + firstName + "! We've got your application. Use this same link anytime to check your loan status, upload documents, or message " + (lo.name||"your loan officer") + ": " + link);
-  var subject = isEs ? "Bridgepoint Lending — Su Portal de Cliente" : "Bridgepoint Lending — Your Borrower Portal";
+  var text = langPick(lang,
+    ("Thanks, " + firstName + "! We've got your application. Use this same link anytime to check your loan status, upload documents, or message " + (lo.name||"your loan officer") + ": " + link),
+    ("¡Gracias, " + firstName + "! Recibimos su solicitud. Use este mismo enlace en cualquier momento para ver el estado de su préstamo, subir documentos, o enviarle un mensaje a " + (lo.name||"su oficial de préstamos") + ": " + link),
+    ("Cảm ơn " + firstName + "! Chúng tôi đã nhận được đơn của bạn. Bạn có thể dùng lại đường link này bất cứ lúc nào để xem tình trạng khoản vay, tải lên tài liệu hoặc nhắn tin cho " + (lo.name||"chuyên viên cho vay của bạn") + ": " + link));
+  var subject = langPick(lang, "Bridgepoint Lending — Your Borrower Portal", "Bridgepoint Lending — Su Portal de Cliente", "Bridgepoint Lending — Cổng thông tin khách hàng của bạn");
   if (lead.email){
     sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lead.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null } }).catch(function(){});
   }
@@ -6125,16 +6420,32 @@ function sendApplicationAction(leadId, channel){
   showToast("Application marked as sent");
   persist();
 }
+// The standard "complete your application" invite. Staff always see and
+// edit the English version in the Send Application modal; if they leave it
+// untouched, a Spanish or Vietnamese client gets the same message in their
+// own language (Joe 2026-10-09: Vietnamese for Theresa's borrowers). An
+// edited message goes out exactly as typed.
+function applicationInviteMessage(lead, lang){
+  var first = (lead.name||"").split(" ")[0];
+  var link = applicationLink(lead);
+  return langPick(lang,
+    ("Hi " + first + ", please complete your Bridgepoint Lending application here: " + link + " — takes about 5 minutes."),
+    ("Hola " + first + ", por favor complete su solicitud de Bridgepoint Lending aquí: " + link + " — toma unos 5 minutos."),
+    ("Chào " + first + ", vui lòng hoàn tất đơn xin vay Bridgepoint Lending của bạn tại đây: " + link + " — chỉ mất khoảng 5 phút."));
+}
 function reallySendApplication(leadId, channels){
   var lead = leadById(leadId);
   if (!lead || !sb) return;
   var msgBox = document.getElementById("app-message-box");
-  var msg = (msgBox && msgBox.value) ? msgBox.value : ("Hi " + (lead.name||"").split(" ")[0] + ", please complete your Bridgepoint Lending application here: " + applicationLink(lead) + " — takes about 5 minutes.");
+  var appLang = templateLang(lead.preferredLanguage);
+  var typedMsg = (msgBox && msgBox.value) ? msgBox.value : "";
+  var msg = (!typedMsg || typedMsg.trim() === applicationInviteMessage(lead, "en").trim()) ? applicationInviteMessage(lead, appLang) : typedMsg;
+  var appSubject = langPick(appLang, "Bridgepoint Lending — Complete Your Application", "Bridgepoint Lending — Complete su Solicitud", "Bridgepoint Lending — Hoàn tất đơn xin vay của bạn");
   var lo = docLoanOfficer(lead);
   var calls = [];
   if (channels.indexOf("email") !== -1 && lead.email){
     calls.push(sb.functions.invoke("send-email", {
-      body: { leadId: lead.id, to: lead.email, subject: "Bridgepoint Lending — Complete Your Application", text: msg, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
+      body: { leadId: lead.id, to: lead.email, subject: appSubject, text: msg, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null }
     }).then(function(res){ return { channel:"email", ok: !(res.error || !res.data || !res.data.ok) }; }).catch(function(){ return { channel:"email", ok:false }; }));
   }
   if (channels.indexOf("text") !== -1 && lead.phone){
@@ -6225,11 +6536,12 @@ function reallySendDocumentBoth(leadId, kind){
   var lo = docLoanOfficer(lead);
   var subject = "Bridgepoint Lending — Your " + label;
   var filename = docPdfFilename(lead, label);
-  var isEs = (lead.preferredLanguage||"en") === "es";
+  var smsLang = templateLang(lead.preferredLanguage); // heads-up text only; the document itself stays English/Spanish (Joe 2026-10-09: Vietnamese for Theresa's borrowers)
   var firstName = (lead.name||"").split(" ")[0];
-  var smsMsg = isEs
-    ? ("Hola " + firstName + ", es " + (lo.name||"") + " de Bridgepoint Lending — le acabo de enviar por correo electrónico su " + (isTerm ? "hoja de términos" : "carta de preaprobación") + " con todos los detalles. Revise su bandeja de entrada (" + (lead.email||"su correo") + ") y avíseme si tiene preguntas.")
-    : ("Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your " + label.toLowerCase() + " with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!");
+  var smsMsg = langPick(smsLang,
+    ("Hi " + firstName + ", it's " + (lo.name||"") + " with Bridgepoint Lending — I just emailed your " + label.toLowerCase() + " with all the details. Check your inbox (" + (lead.email||"your email") + ") and let me know if you have questions!"),
+    ("Hola " + firstName + ", es " + (lo.name||"") + " de Bridgepoint Lending — le acabo de enviar por correo electrónico su " + (isTerm ? "hoja de términos" : "carta de preaprobación") + " con todos los detalles. Revise su bandeja de entrada (" + (lead.email||"su correo") + ") y avíseme si tiene preguntas."),
+    ("Chào " + firstName + ", tôi là " + (lo.name||"") + " từ Bridgepoint Lending — tôi vừa gửi email " + (isTerm ? "bảng điều khoản" : "thư phê duyệt sơ bộ") + " với đầy đủ chi tiết cho bạn. Vui lòng kiểm tra hộp thư (" + (lead.email||"email của bạn") + ") và cho tôi biết nếu bạn có câu hỏi."));
   showToast("Sending " + label + "…");
   sb.functions.invoke("generate-doc-pdf", { body: { text: body, label: label } }).then(function(pdfRes){
     var pdfBase64 = (pdfRes && pdfRes.data && pdfRes.data.ok) ? pdfRes.data.pdfBase64 : null;
@@ -7788,10 +8100,11 @@ function setCommLanguage(leadId, code){
     date: todayISO(), type:"system",
     text: code === "en"
       ? "Switched client language back to English"
-      : "Set client language to " + commLanguageName(code) + " — texts you send are now translated into " + commLanguageName(code) + ", and their replies are translated to English for you" + (code === "es" ? " (application, portal, and documents also go out in Spanish)" : ""),
+      : "Set client language to " + commLanguageName(code) + " — texts you send are now translated into " + commLanguageName(code) + ", and their replies are translated to English for you" + (code === "es" ? " (application, portal, and documents also go out in Spanish)" : code === "vi" ? " (application, borrower portal, and their invite/notification texts also go out in Vietnamese; term sheets and letters stay in English)" : ""),
     author: currentUser().name
   });
-  showToast(code === "en" ? "Client language set to English" : "Texts will now be translated to/from " + commLanguageName(code));
+  // (Joe 2026-10-09: Vietnamese for Theresa's borrowers)
+  showToast(code === "en" ? "Client language set to English" : "Texts will now be translated to/from " + commLanguageName(code) + (code === "vi" ? " — application and portal also go out in Vietnamese" : ""));
   persist();
 }
 
@@ -8296,12 +8609,18 @@ function notifyBorrowerOfDocs(lead, names, isReminder){
   var lo = docLoanOfficer(lead);
   var first = (lead.name||"").split(" ")[0];
   var link = applicationLink(lead);
-  var list = names.map(function(n){ return "• " + n; }).join("\n");
-  var es = lead.preferredLanguage === "es";
-  var text = es
-    ? ((isReminder ? "Hola " + first + ", un recordatorio: todavía necesitamos " : "Hola " + first + ", para avanzar con su préstamo necesitamos ") + "lo siguiente:\n" + list + "\n\nPuede subirlos aquí: " + link + "\n\n— " + (lo.name||"Bridgepoint Lending"))
-    : ((isReminder ? "Hi " + first + ", quick reminder — we still need " : "Hi " + first + ", to keep your loan moving we need ") + "the following:\n" + list + "\n\nUpload them here: " + link + "\n\nA photo from your phone works fine. — " + (lo.name||"Bridgepoint Lending"));
-  var subject = es ? (isReminder ? "Recordatorio: documentos pendientes" : "Documentos para su préstamo") : (isReminder ? "Reminder: documents still needed" : "Documents needed for your loan");
+  // es / vi clients get the request (and the document names) in their own
+  // language (Joe 2026-10-09: Vietnamese for Theresa's borrowers).
+  var lang = templateLang(lead.preferredLanguage);
+  var list = names.map(function(n){ return "• " + tr(n, lang); }).join("\n");
+  var text = langPick(lang,
+    ((isReminder ? "Hi " + first + ", quick reminder — we still need " : "Hi " + first + ", to keep your loan moving we need ") + "the following:\n" + list + "\n\nUpload them here: " + link + "\n\nA photo from your phone works fine. — " + (lo.name||"Bridgepoint Lending")),
+    ((isReminder ? "Hola " + first + ", un recordatorio: todavía necesitamos " : "Hola " + first + ", para avanzar con su préstamo necesitamos ") + "lo siguiente:\n" + list + "\n\nPuede subirlos aquí: " + link + "\n\n— " + (lo.name||"Bridgepoint Lending")),
+    ((isReminder ? "Chào " + first + ", xin nhắc lại: chúng tôi vẫn cần " : "Chào " + first + ", để tiếp tục xử lý khoản vay của bạn, chúng tôi cần ") + "các tài liệu sau:\n" + list + "\n\nBạn có thể tải lên tại đây: " + link + "\n\nChụp ảnh bằng điện thoại cũng được. — " + (lo.name||"Bridgepoint Lending")));
+  var subject = langPick(lang,
+    (isReminder ? "Reminder: documents still needed" : "Documents needed for your loan"),
+    (isReminder ? "Recordatorio: documentos pendientes" : "Documentos para su préstamo"),
+    (isReminder ? "Nhắc nhở: tài liệu còn thiếu" : "Tài liệu cần cho khoản vay của bạn"));
   var calls = [];
   if (lead.phone) calls.push(sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name } })
     .then(function(r){ return { ch:"text", ok: !(r.error || !r.data || !r.data.ok) }; }).catch(function(){ return { ch:"text", ok:false }; }));
@@ -8480,9 +8799,17 @@ function addUnderwritingCondition(leadId, description, file){
   if (lead.assignedTo) notifyUser(lead.assignedTo, lead.id, "uw-condition", "New underwriting condition on " + lead.name + "'s loan: " + description.slice(0,120));
   var lo = docLoanOfficer(lead);
   var portalLink = applicationLink(lead);
-  var msgText = "Hi " + (lead.name||"").split(" ")[0] + ", underwriting needs the following to keep your loan moving: " + description + "\n\nView details and respond here: " + portalLink;
+  // Wrapper text follows the client's template language (Joe 2026-10-09:
+  // Vietnamese for Theresa's borrowers); the condition itself is sent as staff typed it.
+  var condLang = templateLang(lead.preferredLanguage);
+  var condFirst = (lead.name||"").split(" ")[0];
+  var msgText = langPick(condLang,
+    ("Hi " + condFirst + ", underwriting needs the following to keep your loan moving: " + description + "\n\nView details and respond here: " + portalLink),
+    ("Hola " + condFirst + ", el departamento de suscripción necesita lo siguiente para avanzar con su préstamo: " + description + "\n\nVea los detalles y responda aquí: " + portalLink),
+    ("Chào " + condFirst + ", bộ phận thẩm định cần thông tin sau để tiếp tục xử lý khoản vay của bạn: " + description + "\n\nXem chi tiết và phản hồi tại đây: " + portalLink));
+  var condSubject = langPick(condLang, "Action needed on your loan — underwriting condition", "Acción requerida en su préstamo — condición de suscripción", "Cần bạn xử lý cho khoản vay — điều kiện thẩm định");
   if (sb && lead.phone) sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: msgText, fromName: lo.name } }).catch(function(){});
-  if (sb && lead.email) sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lead.email, subject: "Action needed on your loan — underwriting condition", text: msgText, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null } }).catch(function(){});
+  if (sb && lead.email) sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lead.email, subject: condSubject, text: msgText, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null } }).catch(function(){});
   showToast("Condition added — borrower and loan officer notified");
   persist();
   if (file) uploadUnderwritingConditionFile(leadId, cond.id, file, currentUser().name, false);
@@ -10050,9 +10377,53 @@ function renderPublicApply(){
    and for the life of the loan after. Same markup powers the real public
    link (renderPublicApply) and the staff-facing preview (renderPortal).
 --------------------------------------------------------------------- */
+// Which language the portal/application renders in: the borrower's own pick
+// from the picker this session, else the lead's language (es/vi get the
+// translated templates, everything else English). Staff preview can switch
+// its display without touching the lead. (Joe 2026-10-09: Vietnamese for
+// Theresa's borrowers)
+var PORTAL_LANG_OPTIONS = [{ code:"en", label:"English" }, { code:"es", label:"Español" }, { code:"vi", label:"Tiếng Việt" }];
+function portalDisplayLang(lead){
+  if (ui.publicApply && ui.publicApply.lang) return ui.publicApply.lang;
+  if (!ui.publicApply && ui.portalPreviewLang && ui.portalPreviewLang.leadId === lead.id) return ui.portalPreviewLang.lang;
+  return templateLang(lead.preferredLanguage);
+}
+function portalLangPickerHTML(lead, lang){
+  return '<div class="portal-lang-picker" style="font-size:.85rem;margin:10px 0 0">' + PORTAL_LANG_OPTIONS.map(function(o){
+    return o.code === lang
+      ? '<b lang="' + o.code + '">' + esc(o.label) + '</b>'
+      : '<button type="button" class="link-btn" lang="' + o.code + '" data-action="portal-set-lang" data-lead="' + lead.id + '" data-lang="' + o.code + '">' + esc(o.label) + '</button>';
+  }).join(' · ') + '</div>';
+}
+// Borrower picks a language on the public page: re-render in it and save it
+// to the lead (so invites/notifications and live text translation follow).
+// The staff preview only switches what's displayed.
+function setPortalLanguage(leadId, code){
+  if (!PORTAL_LANG_OPTIONS.some(function(o){ return o.code === code; })) return;
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (!ui.publicApply){
+    ui.portalPreviewLang = { leadId: leadId, lang: code };
+    render();
+    return;
+  }
+  // Keep whatever's already typed into the application before the re-render.
+  var appForm = document.querySelector('form[data-form="public-application"]');
+  if (appForm){
+    if (applicationAutoSaveTimer){ clearTimeout(applicationAutoSaveTimer); applicationAutoSaveTimer = null; }
+    autoSaveApplicationDraft(appForm);
+  }
+  ui.publicApply.lang = code;
+  if (templateLang(lead.preferredLanguage) === code){ render(); return; }
+  lead.preferredLanguage = code;
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"system", text: "Borrower switched their portal language to " + commLanguageName(code) + " — client language is now " + commLanguageName(code), author: lead.name });
+  persist();
+  render();
+}
 function buildBorrowerPortalHTML(lead, opts){
   opts = opts || {};
-  var lang = lead.preferredLanguage || "en";
+  var lang = portalDisplayLang(lead);
   var L = function(s){ return esc(tr(s, lang)); };
   var hasCompletedIntake = !!lead.applicationTakenAt;
   var idx = borrowerStageGroupIndex(lead.stage);
@@ -10074,6 +10445,7 @@ function buildBorrowerPortalHTML(lead, opts){
       '<div class="portal-hero"><img src="' + LOGO_URL + '" alt="Bridgepoint Lending"></div>' +
       '<div style="text-align:right">' + (opts.selectorHTML || '') + propertyImageHTML + '</div>' +
     '</div>' +
+    portalLangPickerHTML(lead, lang) +
     '<h2 class="font-display" style="margin:16px 0 2px">' + L("Welcome") + ', ' + esc((lead.name||"").split(" ")[0]) + '</h2>' +
     '<div class="view-sub">' + L(lead.loanType) + (lead.propertyAddress ? (' · ' + esc(lead.propertyAddress)) : '') + '</div>' +
     '<div class="portal-status-badge">' + esc(tr(borrowerStageLabel(lead.stage), lang)) + '</div>' +
@@ -10569,7 +10941,7 @@ function renderMobileCard(item, opts){
   var lastTouch = (lead.activity||[]).filter(function(a){ return a.type === "call" || a.type === "text" || a.type === "email"; }).slice(-1)[0];
   var touchTxt = lastTouch ? ((lastTouch.type === "text" ? (/^Received/.test(lastTouch.text||"") ? "They texted" : "Texted") : lastTouch.type === "email" ? "Emailed" : "Called") + " · " + (lastTouch.at && typeof textStamp === "function" ? textStamp(lastTouch, true) : fmtDate(lastTouch.date))) : "No contact yet";
   var detail = open ? ('<div class="m-detail">' +
-    '<div><b>Stage:</b> ' + esc(stageLabel(lead.stage)) + (lead.preferredLanguage === "es" ? ' · <span class="m-badge" style="display:inline-block;margin:0">Español</span>' : '') + '</div>' +
+    '<div><b>Stage:</b> ' + esc(stageLabel(lead.stage)) + (lead.preferredLanguage === "es" ? ' · <span class="m-badge" style="display:inline-block;margin:0">Español</span>' : lead.preferredLanguage === "vi" ? ' · <span class="m-badge" style="display:inline-block;margin:0">Tiếng Việt</span>' : '') + '</div>' +
     '<div><b>Last touch:</b> ' + esc(touchTxt) + '</div>' +
     '<div><b>Phone:</b> ' + esc(lead.phone||"—") + '</div>' +
     (lead.email ? ('<div><b>Email:</b> ' + esc(lead.email) + '</div>') : '') +
@@ -17066,6 +17438,10 @@ function modalSendPreview(leadId, kind){
   var lead = leadById(leadId);
   if (!lead) return "";
   var willSendEs = (lead.preferredLanguage||"en") === "es";
+  // Vietnamese clients (Joe 2026-10-09: Theresa's borrowers) get the portal
+  // invite and the document heads-up text in Vietnamese; the scheduling /
+  // Deal Analyzer messages and the documents themselves still go in English.
+  var willSendVi = (lead.preferredLanguage||"en") === "vi" && kind !== "scheduling" && kind !== "analyzer";
   var firstName = (lead.name||"").split(" ")[0];
   var lo = docLoanOfficer(lead);
   var title, subject, emailBody, smsMsg, showPdfBtn;
@@ -17111,6 +17487,7 @@ function modalSendPreview(leadId, kind){
       '<div class="modal-body">' +
         '<div class="footnote" style="padding:0 0 8px">Going out via ' + (channels.length ? channels.join(" and ") : "no channel — add an email or phone first") + '. Review below before it sends for real.' +
           (willSendEs ? ' Shown in English for you — this client is tagged Spanish, so what actually sends will be in Spanish.' : '') +
+          (willSendVi ? (kind === "portal" ? ' Shown in English for you — this client is tagged Vietnamese, so the message actually sends in Vietnamese.' : ' Shown in English for you — this client is tagged Vietnamese, so the text heads-up sends in Vietnamese (the document itself stays in English).') : '') +
         '</div>' +
         '<div class="form-row"><label>Email subject</label><div class="val">' + esc(subject) + '</div></div>' +
         '<div class="form-row"><label>Email body' + (showPdfBtn ? " (also attached as a PDF)" : "") + '</label><textarea class="textarea" rows="10" readonly>' + esc(emailBody) + '</textarea></div>' +
@@ -17512,7 +17889,9 @@ function modalSendApplication(leadId){
   var lead = leadById(leadId);
   if (!lead) return "";
   var link = applicationLink(lead);
-  var msg = "Hi " + (lead.name||"").split(" ")[0] + ", please complete your Bridgepoint Lending application here: " + link + " — takes about 5 minutes.";
+  var msg = applicationInviteMessage(lead, "en");
+  var appLang = templateLang(lead.preferredLanguage);
+  var langNote = appLang === "en" ? "" : (' This client is tagged ' + commLanguageName(appLang) + ' — if you leave the message as-is, it goes out in ' + commLanguageName(appLang) + ' and the application opens in ' + commLanguageName(appLang) + '. An edited message sends exactly as typed.');
   var digits = (lead.phone||"").replace(/[^0-9+]/g,"");
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
     '<div class="modal" data-stop="1">' +
@@ -17520,7 +17899,7 @@ function modalSendApplication(leadId){
       '<div class="modal-body">' +
         '<div class="form-row"><label>Application link</label><input class="input mono" id="app-link-box" readonly value="' + esc(link) + '"></div>' +
         '<div class="form-row"><label>Message</label><textarea class="textarea" id="app-message-box" rows="3">' + esc(msg) + '</textarea></div>' +
-        '<div class="footnote" style="padding:0">Opens as a plain web page — no login required. When they submit it, it lands directly in this lead\'s file and notifies you here in the CRM.</div>' +
+        '<div class="footnote" style="padding:0">Opens as a plain web page — no login required. When they submit it, it lands directly in this lead\'s file and notifies you here in the CRM.' + esc(langNote) + '</div>' +
       '</div>' +
       '<div class="modal-foot" style="flex-wrap:wrap">' +
         '<button class="btn" type="button" data-action="copy-app-link">Copy Link</button>' +
@@ -18584,7 +18963,7 @@ function buildRtlApplicationFieldsHTML(lead, lang){
     '</div>';
   }).join("");
   return '<div class="section-head" style="margin-top:24px"><h2>' + L("RTL Business Purpose Loan Application") + '</h2></div>' +
-    '<div class="footnote" style="padding:0 0 10px">' + L("A few more details Constructive Capital needs beyond what you already gave us — most of your loan info above carries over automatically.") + '</div>' +
+    '<div class="footnote" style="padding:0 0 10px">' + L("A few more details we need beyond what you already gave us — most of your loan info above carries over automatically.") + '</div>' +
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Your Current Address") + '</b></div>' +
     '<div class="form-two">' +
@@ -18834,7 +19213,7 @@ function buildDscrApplicationFieldsHTML(lead, lang){
     '</div>';
   }).join("");
   return '<div class="section-head" style="margin-top:24px"><h2>' + L("DSCR Business Purpose Loan Application") + '</h2></div>' +
-    '<div class="footnote" style="padding:0 0 10px">' + L("A few more details Constructive Capital needs beyond what you already gave us — most of your loan info above carries over automatically.") + '</div>' +
+    '<div class="footnote" style="padding:0 0 10px">' + L("A few more details we need beyond what you already gave us — most of your loan info above carries over automatically.") + '</div>' +
 
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Your Current Address") + '</b></div>' +
     '<div class="form-two">' +
@@ -19713,6 +20092,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "view-term-sheet"){
     viewTermSheet(t.dataset.lead);
   }
+  else if (action === "portal-set-lang"){ setPortalLanguage(t.dataset.lead, t.dataset.lang); }
   else if (action === "view-lender-summary"){
     viewLenderSummary(t.dataset.lead);
   }
