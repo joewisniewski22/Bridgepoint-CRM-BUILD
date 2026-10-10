@@ -5520,6 +5520,7 @@ function leadToRow(l){
     commitment_fee_refundable: !!l.commitmentFeeRefundable,
     guideline_override_approved: !!l.guidelineOverrideApproved, guideline_override_note: l.guidelineOverrideNote || null,
     pending_decision: l.pendingDecision || null,
+    funded_date: l.fundedDate || null, payoff_date: l.payoffDate || null, capital_source: l.capitalSource || null, servicer: l.servicer || null, maturity_date: l.maturityDate || null, note_date: l.noteDate || null,
     call_attempts: l.callAttempts||[], activity: l.activity||[], documents: l.documents||[], third_parties: l.thirdParties||[]
   };
 }
@@ -5578,7 +5579,8 @@ function rowToLead(r){
     commitmentFeeOverride: r.commitment_fee_override!=null ? r.commitment_fee_override : null,
     commitmentFeeRefundable: !!r.commitment_fee_refundable,
     guidelineOverrideApproved: !!r.guideline_override_approved, guidelineOverrideNote: r.guideline_override_note || null,
-    pendingDecision: r.pending_decision || null
+    pendingDecision: r.pending_decision || null,
+    fundedDate: r.funded_date || null, payoffDate: r.payoff_date || null, capitalSource: r.capital_source || null, servicer: r.servicer || null, maturityDate: r.maturity_date || null, noteDate: r.note_date || null
   };
 }
 function notifToRow(n){
@@ -6741,6 +6743,7 @@ function exportAllDocuments(leadId){
   if (typeof JSZip === "undefined"){ showToast("Export tool didn't load — try refreshing the page"); return; }
   showToast("Zipping " + docs.length + " document(s)…");
   var zip = new JSZip();
+  zip.file("00_FILE_INDEX.txt", fileIndexText(lead));
   var usedNames = {};
   var safeName = function(s){ return (s||"document").replace(/[\\/:*?"<>|]/g,"_"); };
   Promise.all(docs.map(function(d){
@@ -10925,6 +10928,7 @@ function renderShell(){
         (isOwner() ? navItem("followups","📋","Follow-Up Center", (fuLoStats().reduce(function(s,r){ return s + r.over24; }, 0)) || null) : "") +
         (isOwner() ? navItem("webposts","🌐","Website Posts", wpPendingCount() || null) : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
+        (isOwner() ? navItem("capital","\uD83C\uDFE6","Capital Readiness") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
         (isOwner() ? navItem("settings","⚙","Settings") : "") +
         navItem("ai-assistant","🤖","AI Assistant") +
@@ -10961,6 +10965,7 @@ function renderShell(){
   else if (ui.view === "detail") body = renderLeadDetail();
   else if (ui.view === "followups") body = renderFollowUps();
   else if (ui.view === "webposts") body = renderWebsitePosts();
+  else if (ui.view === "capital") body = isOwner() ? renderCapitalReadiness() : renderToday();
   else if (ui.view === "team") body = renderTeam();
   else if (ui.view === "payroll") body = renderPayroll();
   else if (ui.view === "ai-assistant") body = renderAiAssistant();
@@ -13061,6 +13066,271 @@ function leadSearchHaystack(l){
     l.guarantorFirstName, l.guarantorLastName, l.guarantorPhone, l.guarantorEmail, l.id
   ].filter(Boolean).join(" ").toLowerCase();
 }
+/* ===== Borrower history, reusable documents, document freshness, saved lead views, Capital Readiness ===== */
+var CAPITAL_REQUIRED = [["loanAmount","Loan amount"],["rate","Rate"],["termMonths","Term"],["closeDate","Closing date"],["propertyAddress","Property address"],["purchasePrice","Purchase price"],["creditScore","Credit score"],["fundedDate","Funded date"],["capitalSource","Capital source"]];
+function samePerson(a, b){
+  var ea = (a.email||"").trim().toLowerCase(), eb = (b.email||"").trim().toLowerCase();
+  if (ea && ea === eb) return true;
+  var pa = (a.phone||"").replace(/\D/g,"").slice(-10), pb = (b.phone||"").replace(/\D/g,"").slice(-10);
+  return !!pa && pa === pb;
+}
+function otherFilesFor(lead){
+  return state.leads.filter(function(o){ return o.id !== lead.id && o.status !== "spam" && samePerson(lead, o); });
+}
+function borrowerHistoryHTML(lead){
+  var others = otherFilesFor(lead);
+  if (!others.length) return "";
+  var all = others.concat([lead]);
+  var closed = all.filter(function(l){ return l.status === "closed"; });
+  var vol = closed.reduce(function(s,l){ return s + (l.loanAmount||0); }, 0);
+  var rows = others.map(function(o){
+    return '<tr data-action="select-lead" data-lead="' + o.id + '" style="cursor:pointer"><td><b>' + esc(o.id) + '</b></td><td>' + esc(o.loanType||"—") + '</td><td>' + esc(o.propertyAddress||"—") + '</td><td>' + badgeForStage(o) + '</td><td class="num">' + fmtUSD(o.loanAmount) + '</td><td>' + fmtDate(o.createdAt) + '</td></tr>';
+  }).join("");
+  return '<div class="section-head" style="margin-top:20px"><h2>Borrower history</h2><span class="hint">' + others.length + ' other file' + (others.length===1?"":"s") + ' for this borrower · ' + closed.length + ' closed · ' + fmtUSD(vol) + ' funded in total</span></div>' +
+    '<div class="table-wrap"><table><thead><tr><th>File</th><th>Loan type</th><th>Property</th><th>Stage</th><th>Amount</th><th>Created</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+}
+
+// Documents that go stale: lenders want recent bank statements, credit, appraisal, title and insurance.
+var DOC_FRESHNESS = [[/bank statement/i, 60], [/credit (report|authorization)/i, 90], [/appraisal/i, 180], [/title|commitment|preliminary/i, 90], [/insurance|hazard|flood|binder/i, 365]];
+function docExpiryInfo(d){
+  if (!d || d.status !== "received") return null;
+  var base = d.receivedAt || ((d.files && d.files[0]) ? d.files[0].uploadedAt : null);
+  if (!base) return null;
+  var limit = null, i;
+  for (i = 0; i < DOC_FRESHNESS.length; i++){ if (DOC_FRESHNESS[i][0].test(d.name||"")){ limit = DOC_FRESHNESS[i][1]; break; } }
+  if (!limit) return null;
+  var exp = new Date(base + "T00:00:00"); if (isNaN(exp.getTime())) return null;
+  exp.setDate(exp.getDate() + limit);
+  return { left: Math.round((exp.getTime() - startOfToday().getTime()) / 86400000), limit: limit };
+}
+function docExpiryBadge(d){
+  var x = docExpiryInfo(d);
+  if (!x) return "";
+  if (x.left < 0) return '<span class="badge badge-rust" title="Lenders usually want this within ' + x.limit + ' days of today. Ask for a fresh copy.">Stale ' + (-x.left) + 'd</span>';
+  if (x.left <= 14) return '<span class="badge badge-gold" title="Lenders usually want this within ' + x.limit + ' days of today.">Fresh for ' + x.left + 'd</span>';
+  return "";
+}
+
+// Documents the borrower already gave us on another file: reuse them instead of asking again.
+var PROFILE_DOC_RE = /government id|photo id|driver|passport|ssn|social security|itin|articles of|operating agreement|certificate of (good standing|formation|organization|trust)|\bein\b|w-?9|bylaws|membership|track record|schedule of real estate/i;
+function reusableProfileDocs(lead){
+  var have = {};
+  (lead.documents||[]).forEach(function(d){ if (d.status === "received") have[(d.name||"").toLowerCase()] = true; });
+  var out = [];
+  otherFilesFor(lead).forEach(function(o){
+    (o.documents||[]).forEach(function(d, i){
+      var nm = (d.name||"").toLowerCase();
+      if (d.status === "received" && !d.staffOnly && (d.storagePath || (d.files && d.files.length)) && PROFILE_DOC_RE.test(d.name||"") && !have[nm]){
+        out.push({ from:o.id, fromName:o.name, idx:i, name:d.name });
+        have[nm] = true;
+      }
+    });
+  });
+  return out;
+}
+function reuseDocsPanel(lead){
+  if (!canManageDocs(lead)) return "";
+  var list = reusableProfileDocs(lead);
+  if (!list.length) return "";
+  var items = list.map(function(x){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px"><div><b>' + esc(x.name) + '</b> <span class="hint">already on file from ' + esc(x.fromName) + ' (' + esc(x.from) + ')</span></div>' +
+      '<button class="btn btn-sm" type="button" data-action="reuse-profile-doc" data-lead="' + lead.id + '" data-from="' + esc(x.from) + '" data-didx="' + x.idx + '">Use here</button></div>';
+  }).join("");
+  return '<div class="panel panel-pad" style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:700">Don\'t ask again: ' + list.length + ' document' + (list.length===1?"":"s") + ' this borrower already gave us</div>' +
+    '<button class="btn btn-sm btn-primary" type="button" data-action="reuse-all-profile-docs" data-lead="' + lead.id + '">Use all ' + list.length + '</button></div>' + items + '</div>';
+}
+function reuseProfileDoc(leadId, fromId, idx){
+  var lead = leadById(leadId), src = leadById(fromId);
+  if (!lead || !src || !sb || !canManageDocs(lead)) return Promise.resolve(false);
+  var d = (src.documents||[])[idx];
+  if (!d || d.status !== "received") return Promise.resolve(false);
+  var pairs = [];
+  if (d.storagePath) pairs.push({ fileName:d.fileName, storagePath:d.storagePath, top:true });
+  (d.files||[]).forEach(function(f){ pairs.push({ fileName:f.fileName, storagePath:f.storagePath, uploadedAt:f.uploadedAt, uploadedBy:f.uploadedBy }); });
+  var seen = {}; pairs = pairs.filter(function(p){ if (!p.storagePath || seen[p.storagePath]) return false; seen[p.storagePath] = true; return true; });
+  var stamp = Date.now();
+  return Promise.all(pairs.map(function(p, n){
+    var safe = String(p.fileName || "document").replace(/[^A-Za-z0-9._-]/g, "_");
+    var dest = lead.id + "/" + stamp + "-" + n + "-" + safe;
+    return sb.storage.from("lead-documents").copy(p.storagePath, dest).then(function(res){ if (res.error) return null; return { fileName:p.fileName, storagePath:dest, uploadedAt:p.uploadedAt || todayISO(), uploadedBy:p.uploadedBy || "Reused" }; }).catch(function(){ return null; });
+  })).then(function(copies){
+    copies = copies.filter(Boolean);
+    if (!copies.length) return false;
+    var entry = { name:d.name, status:"received", receivedAt:d.receivedAt || todayISO(), fileName:copies[0].fileName, storagePath:copies[0].storagePath, files:copies, note:"Reused from file " + src.id + " (" + src.name + ")" };
+    lead.documents = lead.documents || [];
+    var open = lead.documents.filter(function(x){ return (x.name||"").toLowerCase() === (d.name||"").toLowerCase() && x.status !== "received"; })[0];
+    if (open){ Object.keys(entry).forEach(function(k){ open[k] = entry[k]; }); } else lead.documents.push(entry);
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date:todayISO(), type:"system", text:"Reused " + d.name + " already on file from " + src.id + " (" + src.name + ")", author:currentUser().name });
+    return true;
+  });
+}
+function reuseProfileDocAction(leadId, fromId, idx){
+  showToast("Copying…");
+  reuseProfileDoc(leadId, fromId, idx).then(function(ok){ if (ok){ persist(); showToast("Document added to this file"); render(); } else showToast("Couldn't copy that document — try again"); });
+}
+function reuseAllProfileDocs(leadId){
+  var lead = leadById(leadId); if (!lead) return;
+  var list = reusableProfileDocs(lead);
+  if (!list.length) return;
+  showToast("Copying " + list.length + " document(s)…");
+  var chain = Promise.resolve(0);
+  list.forEach(function(x){ chain = chain.then(function(n){ return reuseProfileDoc(leadId, x.from, x.idx).then(function(ok){ return n + (ok ? 1 : 0); }); }); });
+  chain.then(function(n){ if (n){ persist(); } showToast(n ? ("Added " + n + " document(s) to this file") : "Couldn't copy the documents — try again"); render(); });
+}
+function fileIndexText(lead){
+  var L = [];
+  L.push("FILE INDEX - " + lead.name + " (" + lead.id + ")");
+  L.push("Exported " + todayISO() + " by " + currentUser().name);
+  L.push("");
+  L.push("Program: " + (lead.loanType||"") + " | Stage: " + stageLabel(lead.stage) + " | Status: " + lead.status);
+  L.push("Property: " + (lead.propertyAddress||"") + " | Loan amount: " + (lead.loanAmount||"") + " | Rate: " + (lead.rate||"") + " | Term (months): " + (lead.termMonths||""));
+  L.push("Loan officer: " + userName(lead.assignedTo) + " | Processor: " + (lead.assignedProcessor ? userName(lead.assignedProcessor) : ""));
+  L.push("");
+  L.push("DOCUMENTS");
+  (lead.documents||[]).forEach(function(d){
+    if (d.isTermSheetOption) return;
+    var x = docExpiryInfo(d);
+    var files = (d.files && d.files.length) ? d.files.map(function(f){ return f.fileName; }).join("; ") : (d.fileName||"");
+    L.push("- " + (d.name||"") + " [" + (d.status||"") + "]" + (d.receivedAt ? (" received " + d.receivedAt) : "") + (files ? (" | " + files) : "") + (x ? (x.left < 0 ? (" | STALE by " + (-x.left) + " days") : (" | fresh for " + x.left + " more days")) : ""));
+  });
+  return L.join("\r\n");
+}
+
+// Saved lead views and the "no activity in X days" filter
+function daysSinceTouch(l){
+  var best = l.lastContactAt || null;
+  (l.activity||[]).forEach(function(a){ if (a.date && a.author !== "System" && a.type !== "system" && (!best || a.date > best)) best = a.date; });
+  if (!best) best = l.createdAt;
+  if (!best) return 9999;
+  var t = new Date(best + "T00:00:00"); if (isNaN(t.getTime())) return 9999;
+  return Math.floor((startOfToday().getTime() - t.getTime()) / 86400000);
+}
+function savedViewsKey(){ return "bp_saved_views_" + currentUser().id; }
+function getSavedViews(){ try { return JSON.parse(localStorage.getItem(savedViewsKey()) || "[]"); } catch(e){ return []; } }
+function setSavedViews(v){ try { localStorage.setItem(savedViewsKey(), JSON.stringify(v)); } catch(e){} }
+function saveCurrentView(){
+  var name = window.prompt("Name this view (for example: Stale fix & flip leads)");
+  if (!name) return;
+  name = name.trim().slice(0, 40); if (!name) return;
+  var views = getSavedViews().filter(function(v){ return v.name !== name; });
+  views.push({ name:name, f:JSON.parse(JSON.stringify(ui.leadFilter)) });
+  setSavedViews(views); showToast("View saved: " + name); render();
+}
+function applySavedView(name){
+  if (!name) return;
+  var v = getSavedViews().filter(function(x){ return x.name === name; })[0];
+  if (!v) return;
+  ui.leadFilter = JSON.parse(JSON.stringify(v.f)); ui.activeSavedView = name; render();
+}
+function deleteSavedView(name){
+  if (!name) return;
+  setSavedViews(getSavedViews().filter(function(v){ return v.name !== name; }));
+  ui.activeSavedView = ""; showToast("View deleted"); render();
+}
+function leadStaleAndViewsHTML(f){
+  var stale = [["","Any activity"],["3","No contact in 3+ days"],["7","No contact in 7+ days"],["14","No contact in 14+ days"],["30","No contact in 30+ days"],["60","No contact in 60+ days"]];
+  var staleSel = '<select class="select" data-action="filter" data-key="stale">' + stale.map(function(s){ return '<option value="' + s[0] + '"' + ((f.stale||"")===s[0] ? " selected" : "") + '>' + s[1] + '</option>'; }).join("") + '</select>';
+  var views = getSavedViews();
+  var viewSel = '<select class="select" data-action="apply-saved-view" title="Your saved views"><option value="">Saved views' + (views.length ? " (" + views.length + ")" : "") + '</option>' + views.map(function(v){ return '<option value="' + esc(v.name) + '"' + (ui.activeSavedView === v.name ? " selected" : "") + '>' + esc(v.name) + '</option>'; }).join("") + '</select>';
+  return staleSel + viewSel + '<button class="btn btn-ghost btn-sm" type="button" data-action="save-view">Save this view</button>' +
+    (ui.activeSavedView && views.some(function(v){ return v.name === ui.activeSavedView; }) ? '<button class="btn btn-ghost btn-sm" type="button" data-action="delete-view" data-name="' + esc(ui.activeSavedView) + '">Delete view</button>' : "");
+}
+
+// Capital Readiness: the data a warehouse lender or private investor will ask for, kept complete from day one
+function csvCell(v){ if (v === null || v === undefined) return ""; var s = String(v); return /[",\r\n]/.test(s) ? ('"' + s.replace(/"/g, '""') + '"') : s; }
+function loanTapeRows(){
+  return state.leads.filter(function(l){ return l.status !== "spam"; }).map(function(l){
+    var arv = l.arv, loan = l.loanAmount, pp = l.purchasePrice, rb = l.rehabBudget;
+    var ltarv = (arv > 0 && loan) ? Math.round(loan / arv * 1000) / 10 : "";
+    var ltc = (loan && ((pp||0) + (rb||0)) > 0) ? Math.round(loan / ((pp||0) + (rb||0)) * 1000) / 10 : "";
+    return [l.id, l.name, l.entityLegalName||"", l.loanType||"", l.transactionType||"", stageLabel(l.stage), l.status, l.createdAt||"", l.closeDate||"", l.fundedDate||"", l.maturityDate||"", l.payoffDate||"",
+      l.propertyAddress||"", l.propertyType||"", pp||"", l.currentValue||"", arv||"", rb||"", loan||"", l.rate||"", l.pointsCharged||"", l.termMonths||"", ltarv, ltc,
+      l.creditScore||"", l.experienceDeals===0||l.experienceDeals ? l.experienceDeals : "", l.liquidity||"", userName(l.assignedTo), l.assignedProcessor ? userName(l.assignedProcessor) : "",
+      l.outsideLender||"", l.capitalSource||"", l.servicer||"", l.source||"", (l.documents||[]).filter(function(d){ return d.status === "received"; }).length];
+  });
+}
+function downloadLoanTape(){
+  if (!isOwner()) return;
+  var head = ["Loan ID","Borrower","Entity","Program","Transaction","Stage","Status","Application date","Closing date","Funded date","Maturity date","Payoff date","Property address","Property type","Purchase price","As-is value","ARV","Rehab budget","Loan amount","Rate","Points","Term (months)","LTARV %","LTC %","Credit score","Experience (deals)","Liquidity","Loan officer","Processor","Outside lender","Capital source","Servicer","Lead source","Documents received"];
+  var csv = [head].concat(loanTapeRows()).map(function(r){ return r.map(csvCell).join(","); }).join("\r\n");
+  var blob = new Blob([csv], { type:"text/csv" });
+  var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "Bridgepoint loan tape " + todayISO() + ".csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 30000);
+  showToast("Loan tape downloaded");
+}
+function capMissing(l){
+  var miss = [];
+  CAPITAL_REQUIRED.forEach(function(p){ var v = l[p[0]]; if (v === null || v === undefined || v === "" || v === 0) miss.push(p[1]); });
+  return miss;
+}
+function ensureCapStats(){
+  if (!sb || ui.capStats) return;
+  ui.capStats = { loading:true };
+  var cnt = function(t, c){ return sb.from(t).select(c, { count:"exact", head:true }).then(function(r){ return r.error ? null : r.count; }).catch(function(){ return null; }); };
+  Promise.all([cnt("lead_change_log","id"), cnt("loan_book_snapshots","loan_id"), cnt("deleted_leads_archive","id")]).then(function(r){ ui.capStats = { log:r[0], snaps:r[1], archived:r[2] }; if (ui.view === "capital") render(); });
+}
+function saveCapitalFields(leadId, fd){
+  var lead = leadById(leadId); if (!lead || !isOwner()) return;
+  lead.fundedDate = fd.get("fundedDate") || null;
+  lead.capitalSource = (fd.get("capitalSource") || "").trim() || null;
+  lead.servicer = (fd.get("servicer") || "").trim() || null;
+  lead.payoffDate = fd.get("payoffDate") || null;
+  var base = lead.fundedDate || lead.closeDate;
+  if (base && lead.termMonths && !lead.maturityDate){ var m = new Date(base + "T00:00:00"); if (!isNaN(m.getTime())){ m.setMonth(m.getMonth() + Number(lead.termMonths)); lead.maturityDate = m.getFullYear() + "-" + ("0" + (m.getMonth()+1)).slice(-2) + "-" + ("0" + m.getDate()).slice(-2); } }
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date:todayISO(), type:"system", text:"Capital details updated (funded " + (lead.fundedDate||"—") + ", source " + (lead.capitalSource||"—") + ")", author:currentUser().name });
+  persist(); showToast("Saved"); render();
+}
+function renderCapitalReadiness(){
+  ensureCapStats();
+  var all = state.leads.filter(function(l){ return l.status !== "spam"; });
+  var closed = all.filter(function(l){ return l.status === "closed"; });
+  var pctBox = "";
+  var totalSlots = closed.length * CAPITAL_REQUIRED.length, filled = 0;
+  closed.forEach(function(l){ filled += CAPITAL_REQUIRED.length - capMissing(l).length; });
+  var pct = totalSlots ? Math.round(filled / totalSlots * 100) : 0;
+  var st = ui.capStats || {};
+  var cards = '<div class="grid-3" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px">' +
+    '<div class="panel panel-pad"><div class="hint">Closed loans in the tape</div><div style="font-size:26px;font-weight:800">' + closed.length + '</div></div>' +
+    '<div class="panel panel-pad"><div class="hint">Closed-loan data completeness</div><div style="font-size:26px;font-weight:800">' + pct + '%</div></div>' +
+    '<div class="panel panel-pad"><div class="hint">Changes logged</div><div style="font-size:26px;font-weight:800">' + (st.log != null ? st.log : "…") + '</div></div>' +
+    '<div class="panel panel-pad"><div class="hint">Daily loan-book snapshots</div><div style="font-size:26px;font-weight:800">' + (st.snaps != null ? st.snaps : "…") + '</div></div>' +
+    '<div class="panel panel-pad"><div class="hint">Deleted files archived</div><div style="font-size:26px;font-weight:800">' + (st.archived != null ? st.archived : "…") + '</div></div></div>';
+  var rows = closed.slice().sort(function(a,b){ return (b.closeDate||"").localeCompare(a.closeDate||""); }).map(function(l){
+    var miss = capMissing(l);
+    return '<tr><td data-action="select-lead" data-lead="' + l.id + '" style="cursor:pointer"><div class="cell-name">' + esc(l.name) + '</div><div class="cell-sub">' + esc(l.propertyAddress||l.id) + '</div></td>' +
+      '<td class="num">' + fmtUSD(l.loanAmount) + '</td><td>' + fmtDate(l.closeDate) + '</td>' +
+      '<td>' + (miss.length ? ('<span class="badge badge-rust">' + miss.length + ' missing</span> <span class="hint">' + esc(miss.join(", ")) + '</span>') : '<span class="badge badge-forest">Complete</span>') + '</td>' +
+      '<td><form data-form="save-capital-fields" data-lead="' + l.id + '" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+        '<input class="input" type="date" name="fundedDate" value="' + esc(l.fundedDate||"") + '" title="Funded date" style="width:140px">' +
+        '<input class="input" name="capitalSource" value="' + esc(l.capitalSource||l.outsideLender||"") + '" placeholder="Capital source" style="width:150px">' +
+        '<input class="input" name="servicer" value="' + esc(l.servicer||"") + '" placeholder="Servicer" style="width:120px">' +
+        '<input class="input" type="date" name="payoffDate" value="' + esc(l.payoffDate||"") + '" title="Payoff date (when paid off)" style="width:140px">' +
+        '<button class="btn btn-sm" type="submit">Save</button></form></td></tr>';
+  }).join("");
+  var closedTable = closed.length ? ('<div class="table-wrap"><table><thead><tr><th>Loan</th><th>Amount</th><th>Closed</th><th>Tape data</th><th>Funded · source · servicer · payoff</th></tr></thead><tbody>' + rows + '</tbody></table></div>') : '<div class="empty">No closed loans yet.</div>';
+  var APPS = ["app_completed","qualifying","docs","processing","underwriting","approved","ctc","closed"];
+  var byLo = {}, bySrc = {};
+  all.forEach(function(l){
+    var lo = userName(l.assignedTo), src = l.source || "Unknown";
+    [[byLo, lo], [bySrc, src]].forEach(function(p){
+      var o = p[0][p[1]] = p[0][p[1]] || { n:0, apps:0, funded:0, vol:0 };
+      o.n++; if (APPS.indexOf(l.stage) !== -1) o.apps++; if (l.status === "closed"){ o.funded++; o.vol += (l.loanAmount||0); }
+    });
+  });
+  var perfRows = function(map){ return Object.keys(map).sort(function(a,b){ return map[b].vol - map[a].vol || map[b].n - map[a].n; }).map(function(k){ var o = map[k]; return '<tr><td><b>' + esc(k) + '</b></td><td class="num">' + o.n + '</td><td class="num">' + o.apps + '</td><td class="num">' + (o.n ? Math.round(o.apps/o.n*100) : 0) + '%</td><td class="num">' + o.funded + '</td><td class="num">' + fmtUSD(o.vol) + '</td></tr>'; }).join(""); };
+  var perfHead = '<thead><tr><th></th><th>Files</th><th>Reached application</th><th>App rate</th><th>Funded</th><th>Funded volume</th></tr></thead>';
+  return topbar("Capital Readiness", "Everything a warehouse lender or private investor will ask for, kept complete", '<button class="btn btn-primary" data-action="download-loan-tape">⬇ Download loan tape (CSV)</button>') +
+    '<div class="content">' + cards +
+    '<div class="section"><div class="section-head"><h2>What we keep, automatically</h2></div><div class="footnote" style="padding:0 0 8px">Every change to every loan is logged with who made it and when. Deleted files are archived in full. A snapshot of the whole loan book is saved every night. SSNs are never included in any of it.</div></div>' +
+    '<div class="section"><div class="section-head"><h2>Closed loans: is the data complete?</h2><span class="hint">Fill funded date, capital source, servicer and payoff date as loans fund and pay off</span></div>' + closedTable + '</div>' +
+    '<div class="section"><div class="section-head"><h2>By loan officer</h2></div><div class="table-wrap"><table>' + perfHead + '<tbody>' + perfRows(byLo) + '</tbody></table></div></div>' +
+    '<div class="section"><div class="section-head"><h2>By lead source</h2><span class="hint">Where funded loans really come from</span></div><div class="table-wrap"><table>' + perfHead + '<tbody>' + perfRows(bySrc) + '</tbody></table></div></div>' +
+    '</div>';
+}
+
 function renderLeadsTable(){
   var f = ui.leadFilter;
   var allScoped = scopedLeads();
@@ -13070,6 +13340,7 @@ function renderLeadsTable(){
     if (f.loanType && l.loanType!==f.loanType) return false;
     if (f.assignedTo && l.assignedTo!==f.assignedTo) return false;
     if (f.source && l.source!==f.source) return false;
+    if (f.stale && !(daysSinceTouch(l) >= Number(f.stale))) return false;
     if (f.dateFrom && (!l.createdAt || l.createdAt < f.dateFrom)) return false;
     if (f.dateTo && (!l.createdAt || l.createdAt > f.dateTo)) return false;
     if (f.amountMin && !(l.loanAmount >= Number(f.amountMin))) return false;
@@ -13097,7 +13368,7 @@ function renderLeadsTable(){
   allScoped.forEach(function(l){ if (l.source) sourceSet[l.source] = true; });
   var sourceOptions = Object.keys(sourceSet).sort().map(function(s){ return '<option value="' + esc(s) + '"' + (f.source===s?" selected":"") + '>' + esc(s) + '</option>'; }).join("");
 
-  var hasActiveFilters = f.q || f.stage || f.loanType || f.assignedTo || f.source || f.dateFrom || f.dateTo || f.amountMin || f.amountMax || (f.status !== "active");
+  var hasActiveFilters = f.q || f.stage || f.loanType || f.assignedTo || f.source || f.dateFrom || f.dateTo || f.amountMin || f.amountMax || f.stale || (f.status !== "active");
 
   var filters = '<div class="filters">' +
     '<input class="input" placeholder="Search name, address, phone, email, entity, guarantor…" value="' + esc(f.q) + '" data-action="filter" data-key="q" style="min-width:280px">' +
@@ -13117,6 +13388,7 @@ function renderLeadsTable(){
   '<div class="filters" style="margin-top:8px">' +
     '<label class="footnote" style="display:flex;align-items:center;gap:6px">Created<input class="input" type="date" value="' + esc(f.dateFrom) + '" data-action="filter" data-key="dateFrom" style="width:150px"><span>to</span><input class="input" type="date" value="' + esc(f.dateTo) + '" data-action="filter" data-key="dateTo" style="width:150px"></label>' +
     '<label class="footnote" style="display:flex;align-items:center;gap:6px">Loan amount<input class="input" type="number" placeholder="Min" value="' + esc(f.amountMin) + '" data-action="filter" data-key="amountMin" style="width:110px"><span>to</span><input class="input" type="number" placeholder="Max" value="' + esc(f.amountMax) + '" data-action="filter" data-key="amountMax" style="width:110px"></label>' +
+    leadStaleAndViewsHTML(f) +
     '<select class="select" data-action="filter" data-key="sort">' +
       '<option value="newest"' + (f.sort==="newest"?" selected":"") + '>Newest first</option>' +
       '<option value="oldest"' + (f.sort==="oldest"?" selected":"") + '>Oldest first</option>' +
@@ -13525,6 +13797,7 @@ function renderTabOverview(lead){
     field("Liquidity / Reserves", fmtUSD(lead.liquidity), true) +
     field("Created", fmtDate(lead.createdAt)) +
   '</div>' +
+  borrowerHistoryHTML(lead) +
   '<div class="section-head" style="margin-top:20px"><h2>Guarantor & Entity</h2>' +
     '<span class="hint">Quick-fix a gap here — this doesn\'t re-send the application, it just corrects the file</span></div>' +
   '<form data-form="quick-edit-guarantor" data-lead="' + lead.id + '" class="field-grid">' +
@@ -15181,7 +15454,7 @@ function renderTabDocuments(lead){
       extraFiles +
       aiNote +
       '</div>' +
-      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + autoBtn + refBtn + viewBtn + aiRecheckBtn + requestBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">' + statusBadge + staffOnlyBadge + aiBadge + docExpiryBadge(d) + autoBtn + refBtn + viewBtn + aiRecheckBtn + requestBtn + uploadBtn + markBtn + naBtn + undoNaBtn + deleteBtn + '</div></div>';
   }).join("");
   var uwRows = (lead.uwConditions||[]).map(function(c){
     var statusBadge = c.status==="received" ? '<span class="badge badge-forest">Response Received</span>' : '<span class="badge badge-slate">Open</span>';
@@ -15205,7 +15478,7 @@ function renderTabDocuments(lead){
         '<button class="btn btn-sm btn-primary" type="submit" style="margin-top:8px">Send Condition</button>' +
       '</form>'
     ) : '');
-  return exportBar + scanBar + issuesPanel + requestAllBar + (rows || '<div class="empty">No documents on the checklist yet.</div>') +
+  return exportBar + reuseDocsPanel(lead) + scanBar + issuesPanel + requestAllBar + (rows || '<div class="empty">No documents on the checklist yet.</div>') +
     '<form data-form="request-doc" data-lead="' + lead.id + '" data-dropzone="request-doc-file" style="margin-top:14px;padding:10px;border:1px dashed var(--border);border-radius:8px">' +
       '<div style="display:flex;gap:8px">' +
         '<input class="input" name="name" placeholder="Document name (e.g. Bank Statements)" style="flex:1">' +
@@ -20154,6 +20427,11 @@ appEl.addEventListener("click", function(e){
     var textBox = document.getElementById("text-message-box");
     sendTextMessage(t.dataset.lead, textBox ? textBox.value : "");
   }
+  else if (action === "reuse-profile-doc"){ reuseProfileDocAction(t.dataset.lead, t.dataset.from, Number(t.dataset.didx)); }
+  else if (action === "reuse-all-profile-docs"){ reuseAllProfileDocs(t.dataset.lead); }
+  else if (action === "save-view"){ saveCurrentView(); }
+  else if (action === "delete-view"){ deleteSavedView(t.dataset.name); }
+  else if (action === "download-loan-tape"){ downloadLoanTape(); }
   else if (action === "resend-borrower"){ resendBorrower(t.dataset.lead, t.dataset.bid); }
   else if (action === "copy-borrower-link"){ copyBorrowerLink(t.dataset.lead, t.dataset.bid); }
   else if (action === "remove-borrower"){ removeBorrower(t.dataset.lead, t.dataset.bid); }
@@ -20402,6 +20680,8 @@ appEl.addEventListener("change", function(e){
   }
   if (action === "filter"){
     ui.leadFilter[t.dataset.key] = t.value; render();
+  } else if (action === "apply-saved-view"){
+    applySavedView(t.value);
   } else if (action === "filter-comm"){
     ui.commFilter = t.value; render();
   } else if (action === "move-stage" && t.tagName==="SELECT"){
@@ -21045,6 +21325,8 @@ appEl.addEventListener("submit", function(e){
     saveCompanySettings(fd);
   } else if (type === "bulk-set-availability"){
     bulkSetAvailability(fd);
+  } else if (type === "save-capital-fields"){
+    saveCapitalFields(form.dataset.lead, fd);
   } else if (type === "add-borrower"){
     addAdditionalBorrower(form.dataset.lead, fd);
   } else if (type === "submit-borrower-app"){
