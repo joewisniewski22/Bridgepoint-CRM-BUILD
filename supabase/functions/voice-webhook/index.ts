@@ -233,12 +233,14 @@ async function notifyVoicemail(opts: { vmTarget: CallState["vmTarget"]; leadId?:
   }
 }
 
-async function logCallOutcome(opts: { leadId: string; staffId?: string | null; sessionId: string; outcome: string; note: string }) {
+async function logCallOutcome(opts: { leadId: string; staffId?: string | null; sessionId: string; outcome: string; note: string; staffMissed?: boolean }) {
   const { data: lead } = await sb.from("leads").select("call_attempts, activity").eq("id", opts.leadId).single();
   if (!lead) return;
   const attempts = (Array.isArray(lead.call_attempts) ? lead.call_attempts : []) as Array<Record<string, unknown>>;
   const activity = (Array.isArray(lead.activity) ? lead.activity : []) as Array<Record<string, unknown>>;
-  const d = new Date().toISOString().slice(0, 10);
+  // Eastern date, like the CRM's todayISO() -- a UTC date put evening calls on tomorrow and
+  // they never counted toward the LO's calls today (Joe 10/10: "make sure they're getting credit").
+  const d = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
   let staffName = "System";
   if (opts.staffId) {
@@ -246,7 +248,11 @@ async function logCallOutcome(opts: { leadId: string; staffId?: string | null; s
     if (staff?.name) staffName = staff.name as string;
   }
 
-  const entry = { date: d, outcome: opts.outcome, notes: opts.note, telnyxSessionId: opts.sessionId };
+  // by = who made the call (credit follows the caller, not whoever owns the lead later);
+  // staffMissed = the LO's own phone wasn't answered, so no call reached the borrower (not credited).
+  const entry: Record<string, unknown> = { date: d, at: new Date().toISOString(), outcome: opts.outcome, notes: opts.note, telnyxSessionId: opts.sessionId };
+  if (opts.staffId) entry.by = opts.staffId;
+  if (opts.staffMissed) entry.staffMissed = true;
   const existingIdx = attempts.findIndex((a) => a.telnyxSessionId === opts.sessionId);
   if (existingIdx !== -1) attempts[existingIdx] = entry;
   else attempts.push(entry);
@@ -462,7 +468,12 @@ Deno.serve(async (req: Request) => {
           // 45s so voicemail (often ~30s) picks up before we give up.
           await telnyxAction(callControlId, "transfer", { to: state.leadPhone, from: TELNYX_FROM_NUMBER, timeout_secs: 45, early_media: true, client_state: encodeState(nextState) });
           // The LO is dialing the borrower right now -- stops the 5-minute lead handoff (lead-handoff).
-          if (state.leadId) await sb.from("leads").update({ lo_dialed_at: new Date().toISOString() }).eq("id", state.leadId);
+          if (state.leadId){
+            const nowIso = new Date().toISOString();
+            await sb.from("leads").update({ lo_dialed_at: nowIso }).eq("id", state.leadId);
+            // First call on the file counts for speed-to-lead reports too.
+            await sb.from("leads").update({ first_attempt_at: nowIso }).eq("id", state.leadId).is("first_attempt_at", null);
+          }
         } else {
           // No key press: a voicemail or pocket answer -- don't dial the client.
           await telnyxAction(callControlId, "hangup", {});
@@ -614,7 +625,7 @@ Deno.serve(async (req: Request) => {
       } else if (state.stage === "ringing_staff") {
         if (state.leadId) {
           await logCallOutcome({
-            leadId: state.leadId, staffId: state.userId, sessionId, outcome: "no-answer",
+            leadId: state.leadId, staffId: state.userId, sessionId, outcome: "no-answer", staffMissed: true,
             note: "Dialer call to " + (state.staffName || "staff") + " went unanswered before reaching " + (state.leadName || "the lead"),
           });
         }

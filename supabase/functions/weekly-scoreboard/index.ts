@@ -43,9 +43,11 @@ Deno.serve(async (req: Request) => {
 
   const since7 = new Date(Date.now() - 7 * 86400000).toISOString();
   const since30 = new Date(Date.now() - 30 * 86400000).toISOString();
-  const { data: leads } = await sb.from("leads").select("id,name,source,assigned_to,stage,status,created_at_ts,first_attempt_at,call_attempts").gte("created_at_ts", since30).neq("status", "spam");
+  const { data: leads } = await sb.from("leads").select("id,name,source,assigned_to,stage,status,created_at_ts,first_attempt_at,lo_dialed_at,call_attempts").gte("created_at_ts", since30).neq("status", "spam");
   const inbound = (leads || []).filter((l: any) => INBOUND.test(String(l.source || "")) && !/^TEST/i.test(String(l.name || "")));
   const week = inbound.filter((l: any) => l.created_at_ts >= since7);
+  // First real dial: the CRM call log or the phone system (press-1 / in-app), whichever is earlier.
+  for (const l of inbound as any[]) { const ts = [l.first_attempt_at, l.lo_dialed_at].filter(Boolean).map((x: string) => Date.parse(x)); l.first_attempt_at = ts.length ? new Date(Math.min(...ts)).toISOString() : null; }
   const reached = (l: any) => (l.call_attempts || []).some((a: any) => a.outcome === "connected" || a.outcome === "callback");
   const fast = (l: any) => l.first_attempt_at && new Date(l.first_attempt_at).getTime() - new Date(l.created_at_ts).getTime() <= 5 * 60000;
   const isApp = (l: any) => APP_STAGES.includes(l.stage);

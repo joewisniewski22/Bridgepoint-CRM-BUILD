@@ -95,6 +95,13 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "Your personal cell isn't on file yet — ask an admin to add it before using the dialer." }), { status: 400, headers: CORS_HEADERS });
     }
 
+    // One dial at a time per person (10/10): a double tap used to ring the LO's cell 2-3 times at
+    // once, and switching to an extra call-waiting leg left the borrower on hold hearing nothing.
+    const { data: claimed } = await sb.rpc("claim_dial", { p_user: userId });
+    if (claimed === false) {
+      return new Response(JSON.stringify({ ok: true, duplicate: true, note: "Already calling your cell -- answer that one." }), { headers: CORS_HEADERS });
+    }
+
     const destE164 = toE164(destPhone);
     const staffE164 = toE164(staff.phone as string);
     if (!destE164) {
@@ -141,7 +148,11 @@ Deno.serve(async (req: Request) => {
         id: pairId, staff_call_control_id: staffCallControlId, destination_call_control_id: destCallControlId,
       });
       // The borrower's phone is ringing now -- stops the 5-minute lead handoff (lead-handoff).
-      if (matchedLeadId) await sb.from("leads").update({ lo_dialed_at: new Date().toISOString() }).eq("id", matchedLeadId);
+      if (matchedLeadId){
+        const nowIso = new Date().toISOString();
+        await sb.from("leads").update({ lo_dialed_at: nowIso }).eq("id", matchedLeadId);
+        await sb.from("leads").update({ first_attempt_at: nowIso }).eq("id", matchedLeadId).is("first_attempt_at", null);
+      }
 
       return new Response(JSON.stringify({ ok: true, destCallControlId, staffCallControlId, matchedLeadId }), { headers: CORS_HEADERS });
     }
