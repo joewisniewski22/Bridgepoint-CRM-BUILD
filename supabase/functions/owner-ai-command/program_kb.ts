@@ -19,7 +19,7 @@ AT A GLANCE
 | DSCR Rental (1–4 units) | 80% purchase, 80% rate/term, 75% cash-out | 620 | $75k–$3M (a few programs go as low as $50k when the property is worth $75k+; most start at $75k–$100k) | 30-yr fixed, 40-yr, 5/1 & 7/1 ARM, interest-only |
 | Short-Term Rental | up to 80% purchase | 620 | $75k–$2M | 30-yr fixed |
 | 5+ Unit Multifamily | up to 75% | 700 | from $250k | 30-yr fixed |
-| Mixed-Use (rental only) | up to 75% | 680 | higher than other rentals — minimum varies by program (Joe 10/11: NOT $75k); run the Pricer, don't quote a number | 30-yr fixed, interest-only |
+| Mixed-Use (rental only) | up to 75% | 680 | from $100k (verified in the live pricer 10/11: $75k and $90k declined, $100k+ prices) | 30-yr fixed, interest-only |
 | Commercial (rental only) | up to 70% | per scenario | per scenario | 30-yr fixed, interest-only |
 | Portfolio / Blanket | 80% purchase, 75% cash-out | 680 | 2+ properties | 30-yr fixed |
 
@@ -48,7 +48,7 @@ SHORT-TERM RENTALS (Airbnb/VRBO): 700+: 80% purchase / 75% cash-out; 680–699: 
 
 5+ MULTIFAMILY, MIXED-USE, COMMERCIAL (rental/hold loans):
 - 5+ unit apartments: 75% purchase, 70% cash-out, 700 min, from $250k; 1.25 DSCR on 5–9 unit buildings.
-- Mixed-use (residential + commercial units): 75%, 680 — rental loans only. The minimum loan is higher than the $75k on 1–4 unit rentals and varies by program; never say $75k for mixed-use — tell the user to run the Pricer for the exact minimum.
+- Mixed-use (residential + commercial units): 75%, 680 — rental loans only. Minimum loan is $100k (not the $75k of 1–4 unit rentals); anything under $100k can't be placed. No fix & flip, bridge or ground-up on mixed-use.
 - Office, retail, warehouse, self-storage, automotive, mobile home parks, commercial condos, day care: up to 70%, priced individually; no rehab financing.
 - 30-yr fixed with interest-only up to 10 years; low-leverage streamlined options. Foreign investors with no US credit: up to 65%.
 
@@ -92,7 +92,7 @@ FIX & FLIP / BRIDGE:
 
 GROUND-UP: LEND 660 (700 top), up to 95% LTC by tier, needs 1+ completed build. RCN 650, US citizens only, ARV $175k+, $100k–$2M, takes first-time builders at ~+0.50% rate. Constructive 700, 3+ builds, 85/90% LTC, 70% ARV, land advance 50% (65–70% with permit-ready plans), FL/TX -5%, SFR/2–4/PUD. NextRes: no mixed-use ground-up.
 
-RENTALS: A&D (DSCR only) 620 (700 visa), FN/ITIN/NP/STR priced, DSCR<1 layered limits, sub-700 cash-out limits, no Philadelphia County/Baltimore City. Kiavi rental 660, 80% for 700+ SFR purchase at 1.10 DSCR, $100k–$1.5M, cash-out max $500k, entity only, no 5+/rural. RCN 650: STR 80% of STR rent, 75% max; 5–9 units 700+, 1.25 DSCR, 70%; portfolio; ITIN declines. Velocity 30-yr/Fast50: no floor in engine (we don't market sub-620), 75% (FN 65%), $75k–$5M, asset-based, IO up to 10 yrs, 5-yr step-down prepay. Constructive DSCR 680, no mixed-use/land, no FN STR, not in AZ CA MN UT (ID for DSCR), 5–8 units not priced. NextRes 5–50 units, no MD DSCR.
+RENTALS: A&D (DSCR only) 620 (700 visa), FN/ITIN/NP/STR priced, DSCR<1 layered limits, sub-700 cash-out limits, no Philadelphia County/Baltimore City. Kiavi rental 660, 80% for 700+ SFR purchase at 1.10 DSCR, $100k–$1.5M, cash-out max $500k, entity only, no 5+/rural. RCN 650: STR 80% of STR rent, 75% max; 5–9 units 700+, 1.25 DSCR, 70%; portfolio; ITIN declines. Velocity 30-yr/Fast50: no floor in engine (we don't market sub-620), 75% (FN 65%), $75k–$5M ($100k minimum on mixed-use, multifamily and commercial; Velocity declines mixed-use on its fix & flip program), asset-based, IO up to 10 yrs, 5-yr step-down prepay. Constructive DSCR 680, no mixed-use/land, no FN STR, not in AZ CA MN UT (ID for DSCR), 5–8 units not priced. NextRes 5–50 units, no MD DSCR.
 
 COMP & FEES: Only Joe and Fiore use YSP; never with A&D. A&D: lender-paid 2.75% or borrower-paid; $1,595 UW. Kiavi: our pts max 3, ours + Kiavi max 5%; YSP up to 2 pts F&F, 1 pt rentals. RCN: points only, no YSP; $1,995 closing fee. LEND: max 5 pts total; lender fee greater of $2,500 or 1% + add-ons; $1,295 processing + $500 closing. Velocity: YSP up to 2%. Borrower-facing documents say "origination" and never name a lender.
 
