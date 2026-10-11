@@ -16,10 +16,10 @@ AT A GLANCE
 | Fix & Flip / Rehab | up to 95% of total cost (90% of purchase), 100% of rehab, max 75% of ARV | 650 | $75k–$3M | 9–24 mo interest-only |
 | Bridge (no rehab) | up to 75% of as-is value | 680 | $100k–$3M | 12–24 mo interest-only |
 | Ground-Up Construction | up to 95% of total cost, max 75% of completed value | 660 | $100k–$2M | 12–24 mo interest-only |
-| DSCR Rental (1–4 units) | 80% purchase, 80% rate/term, 75% cash-out | 620 | $75k–$3M | 30-yr fixed, 40-yr, 5/1 & 7/1 ARM, interest-only |
+| DSCR Rental (1–4 units) | 80% purchase, 80% rate/term, 75% cash-out | 620 | $75k–$3M (a few programs go as low as $50k when the property is worth $75k+; most start at $75k–$100k) | 30-yr fixed, 40-yr, 5/1 & 7/1 ARM, interest-only |
 | Short-Term Rental | up to 80% purchase | 620 | $75k–$2M | 30-yr fixed |
 | 5+ Unit Multifamily | up to 75% | 700 | from $250k | 30-yr fixed |
-| Mixed-Use (rental only) | up to 75% | 680 | from $75k | 30-yr fixed, interest-only |
+| Mixed-Use (rental only) | up to 75% | 680 | higher than other rentals — minimum varies by program (Joe 10/11: NOT $75k); run the Pricer, don't quote a number | 30-yr fixed, interest-only |
 | Commercial (rental only) | up to 70% | per scenario | per scenario | 30-yr fixed, interest-only |
 | Portfolio / Blanket | 80% purchase, 75% cash-out | 680 | 2+ properties | 30-yr fixed |
 
@@ -48,7 +48,7 @@ SHORT-TERM RENTALS (Airbnb/VRBO): 700+: 80% purchase / 75% cash-out; 680–699: 
 
 5+ MULTIFAMILY, MIXED-USE, COMMERCIAL (rental/hold loans):
 - 5+ unit apartments: 75% purchase, 70% cash-out, 700 min, from $250k; 1.25 DSCR on 5–9 unit buildings.
-- Mixed-use (residential + commercial units): 75%, 680, from $75k — rental loans only.
+- Mixed-use (residential + commercial units): 75%, 680 — rental loans only. The minimum loan is higher than the $75k on 1–4 unit rentals and varies by program; never say $75k for mixed-use — tell the user to run the Pricer for the exact minimum.
 - Office, retail, warehouse, self-storage, automotive, mobile home parks, commercial condos, day care: up to 70%, priced individually; no rehab financing.
 - 30-yr fixed with interest-only up to 10 years; low-leverage streamlined options. Foreign investors with no US credit: up to 65%.
 

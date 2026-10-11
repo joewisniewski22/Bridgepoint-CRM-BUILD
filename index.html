@@ -15928,7 +15928,7 @@ function payrollRowHTML(r, showMarkPaid){
     '<td class="num"><b>' + fmtUSD(r.amount) + '</b></td>' +
     '<td>' + (showMarkPaid
       ? ('<button class="btn btn-sm" type="button" data-action="mark-payroll-paid" data-entry-id="' + (r.id||"") + '" data-lead-id="' + (r.leadId||"") + '" data-person-id="' + esc(r.personId) + '" data-role="' + r.role + '" data-amount="' + r.amount + '" data-file-label="' + esc(r.fileLabel||"") + '" data-person-name="' + esc(r.personName||"") + '">Mark Paid</button>')
-      : ('<span class="badge badge-forest">Paid</span>' + (r.transactionId ? ('<div class="cell-sub">Txn: ' + esc(r.transactionId) + '</div>') : '') + (r.paidAt ? ('<div class="cell-sub">' + fmtDate(String(r.paidAt).slice(0,10)) + '</div>') : ''))) + '</td>' +
+      : ('<span class="badge badge-forest">Paid</span>' + (r.transactionId ? ('<div class="cell-sub">Txn: ' + esc(r.transactionId) + '</div>') : '') + (r.paidAt ? ('<div class="cell-sub">' + fmtDate(String(r.paidAt).slice(0,10)) + '</div>') : ''))) + ' ' + payrollEditBtn(r) + '</td>' +
   '</tr>';
 }
 function renderPayroll(){
@@ -16042,13 +16042,14 @@ function confirmMarkPayrollPaid(fd){
   var transactionId = (fd.get("transactionId")||"").trim() || null;
   var paidDate = fd.get("paidDate") || todayISO();
   var paidAtIso = new Date(paidDate + "T12:00:00").toISOString();
+  var amt = Number(fd.get("amount")); if (fd.get("amount") === null || fd.get("amount") === "" || !(amt >= 0)) amt = Number(m.amount);
   if (m.entryId){
     sb.from("payroll_entries").update({
-      status:"paid", transaction_id: transactionId, paid_at: paidAtIso, paid_by: currentUser().id
+      amount: amt, status:"paid", transaction_id: transactionId, paid_at: paidAtIso, paid_by: currentUser().id
     }).eq("id", m.entryId).then(function(res){
       if (res.error){ showToast("Couldn't update — try again"); return; }
       var e = (state.payrollEntries||[]).filter(function(x){ return x.id===m.entryId; })[0];
-      if (e){ e.status = "paid"; e.transactionId = transactionId; e.paidAt = paidAtIso; }
+      if (e){ e.amount = amt; e.status = "paid"; e.transactionId = transactionId; e.paidAt = paidAtIso; }
       showToast("Marked paid");
       ui.modal = null;
       render();
@@ -16057,7 +16058,7 @@ function confirmMarkPayrollPaid(fd){
     var id = "pe-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
     var row = {
       id:id, lead_id: m.leadId||null, person_id: m.personId, role: m.role,
-      file_label: m.leadId ? null : m.fileLabel, amount: Number(m.amount), status:"paid",
+      file_label: m.leadId ? null : m.fileLabel, amount: amt, status:"paid",
       note: null, entry_date: todayISO(), created_by: currentUser().id,
       transaction_id: transactionId, paid_at: paidAtIso, paid_by: currentUser().id
     };
@@ -16071,6 +16072,93 @@ function confirmMarkPayrollPaid(fd){
     });
   }
 }
+// Payroll amounts are editable (Joe, 10/11/26): the calculated number is only a starting point --
+// what was actually paid can differ (negotiated fee, adjusted split, etc.). Editing a calculated row
+// saves a linked entry with the real amount, which then replaces the calculated one.
+function payrollEditBtn(r){
+  return '<button class="btn btn-sm btn-ghost" type="button" data-action="edit-payroll-entry" data-entry-id="' + (r.id||"") + '" data-lead-id="' + (r.leadId||"") + '" data-person-id="' + esc(r.personId) + '" data-role="' + r.role + '" data-amount="' + r.amount + '" data-status="' + r.status + '" data-file-label="' + esc(r.fileLabel||"") + '" data-person-name="' + esc(r.personName||"") + '" data-entry-date="' + esc(r.entryDate||"") + '" data-note="' + esc(r.note||"") + '" data-transaction-id="' + esc(r.transactionId||"") + '" data-paid-at="' + esc(r.paidAt ? String(r.paidAt).slice(0,10) : "") + '">Edit</button>';
+}
+function editPayrollEntry(btn){
+  var d = btn.dataset;
+  ui.modal = {
+    type: "editPayrollEntry", entryId: d.entryId||null, leadId: d.leadId||null, personId: d.personId, role: d.role,
+    amount: Number(d.amount), status: d.status, fileLabel: d.fileLabel||"", personName: d.personName||"",
+    entryDate: d.entryDate||todayISO(), note: d.note||"", transactionId: d.transactionId||"", paidDate: d.paidAt||""
+  };
+  render();
+}
+function modalEditPayroll(){
+  var m = ui.modal;
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
+    '<div class="modal" data-stop="1">' +
+      '<div class="modal-head"><h3>Edit Payroll — ' + esc(m.fileLabel||"") + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+      '<form data-form="save-payroll-edit">' +
+      '<div class="modal-body">' +
+        '<div class="footnote" style="padding:0 0 10px">' + esc(m.personName||"") + ' (' + (m.role==="lo"?"Loan Officer":"Processor") + '). Change the amount to what was actually owed or paid.' + (m.entryId ? '' : ' This was a calculated amount; saving records your number in its place.') + '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Amount</label><input class="input" type="number" step="0.01" min="0" name="amount" value="' + m.amount + '" required></div>' +
+          '<div class="form-row"><label>Status</label><select class="select" name="status"><option value="outstanding"' + (m.status!=="paid"?" selected":"") + '>Outstanding</option><option value="paid"' + (m.status==="paid"?" selected":"") + '>Paid</option></select></div>' +
+        '</div>' +
+        '<div class="form-two">' +
+          '<div class="form-row"><label>Date paid (if paid)</label><input class="input" type="date" name="paidDate" value="' + esc(m.paidDate||todayISO()) + '"></div>' +
+          '<div class="form-row"><label>Transaction ID (optional)</label><input class="input" name="transactionId" value="' + esc(m.transactionId||"") + '"></div>' +
+        '</div>' +
+        (m.leadId ? '' : '<div class="form-row"><label>File / Borrower Name</label><input class="input" name="fileLabel" value="' + esc(m.fileLabel||"") + '"></div>') +
+        '<div class="form-row"><label>Note (optional)</label><input class="input" name="note" value="' + esc(m.note||"") + '" placeholder="e.g. Fee reduced, adjusted split"></div>' +
+      '</div>' +
+      '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="submit">Save</button></div>' +
+      '</form>' +
+    '</div></div>';
+}
+function savePayrollEdit(fd){
+  var m = ui.modal;
+  if (!sb || !m) return;
+  var raw = fd.get("amount");
+  var amount = Number(raw);
+  if (raw === null || raw === "" || !(amount >= 0)){ showToast("Enter a valid amount"); return; }
+  var status = fd.get("status") === "paid" ? "paid" : "outstanding";
+  var txn = (fd.get("transactionId")||"").trim() || null;
+  var note = (fd.get("note")||"").trim() || null;
+  var paidAtIso = null;
+  if (status === "paid"){ paidAtIso = new Date((fd.get("paidDate") || todayISO()) + "T12:00:00").toISOString(); }
+  var upd = {
+    amount: amount, status: status, note: note,
+    transaction_id: status === "paid" ? txn : null,
+    paid_at: paidAtIso, paid_by: status === "paid" ? currentUser().id : null
+  };
+  if (m.entryId){
+    var fl = (fd.get("fileLabel")||"").trim();
+    if (!m.leadId && fl) upd.file_label = fl;
+    sb.from("payroll_entries").update(upd).eq("id", m.entryId).then(function(res){
+      if (res.error){ showToast("Couldn't save — try again"); return; }
+      var e = (state.payrollEntries||[]).filter(function(x){ return x.id===m.entryId; })[0];
+      if (e){
+        e.amount = amount; e.status = status; e.note = note || ""; e.transactionId = upd.transaction_id; e.paidAt = paidAtIso; e.paidBy = upd.paid_by;
+        if (upd.file_label) e.fileLabel = upd.file_label;
+      }
+      showToast("Saved");
+      ui.modal = null;
+      render();
+    });
+  } else {
+    var id = "pe-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
+    var row = {
+      id: id, lead_id: m.leadId||null, person_id: m.personId, role: m.role,
+      file_label: m.leadId ? null : m.fileLabel, amount: amount, status: status,
+      note: note, entry_date: m.entryDate || todayISO(), created_by: currentUser().id,
+      transaction_id: upd.transaction_id, paid_at: paidAtIso, paid_by: upd.paid_by
+    };
+    sb.from("payroll_entries").insert(row).then(function(res){
+      if (res.error){ showToast("Couldn't save — try again"); return; }
+      state.payrollEntries = state.payrollEntries || [];
+      state.payrollEntries.push(rowToPayrollEntry(row));
+      showToast("Saved");
+      ui.modal = null;
+      render();
+    });
+  }
+}
+
 function addManualPayrollEntry(fd){
   if (!sb) return;
   var id = "pe-" + (crypto.randomUUID ? crypto.randomUUID() : (Date.now()+"-"+Math.random()));
@@ -17800,6 +17888,7 @@ function renderModal(){
   if (ui.modal.type === "addInternalDocument") return modalAddInternalDocument(ui.modal.leadId);
   if (ui.modal.type === "myAch") return modalMyAch();
   if (ui.modal.type === "confirmMarkPayrollPaid") return modalMarkPayrollPaid();
+  if (ui.modal.type === "editPayrollEntry") return modalEditPayroll();
   if (ui.modal.type === "sendPreview") return modalSendPreview(ui.modal.leadId, ui.modal.kind);
   if (ui.modal.type === "composeEmail") return modalComposeEmail(ui.modal);
   if (ui.modal.type === "sendTeamMessage") return modalSendTeamMessage(ui.modal);
@@ -17940,6 +18029,7 @@ function modalMarkPayrollPaid(){
       '<form data-form="confirm-mark-payroll-paid">' +
       '<div class="modal-body">' +
         '<div class="footnote" style="padding:0 0 10px">' + esc(m.personName||"") + ' — ' + fmtUSD(m.amount) + '. Record the transaction ID from your bank once you\'ve sent it, so this is traceable later.</div>' +
+        '<div class="form-row"><label>Amount paid</label><input class="input" type="number" step="0.01" min="0" name="amount" value="' + m.amount + '" required></div>' +
         '<div class="form-row"><label>Transaction ID (optional)</label><input class="input" name="transactionId" placeholder="e.g. Capital One confirmation number"></div>' +
         '<div class="form-row"><label>Date paid</label><input class="input" type="date" name="paidDate" value="' + todayISO() + '"></div>' +
       '</div>' +
@@ -20514,6 +20604,9 @@ appEl.addEventListener("click", function(e){
     ui.modal = null;
     render();
   }
+  else if (action === "edit-payroll-entry"){
+    editPayrollEntry(t);
+  }
   else if (action === "mark-payroll-paid"){
     markPayrollEntryPaid(t);
   }
@@ -21311,6 +21404,8 @@ appEl.addEventListener("submit", function(e){
     addInternalDocumentFile(form.dataset.lead, (fd.get("name")||"").trim(), intDocFile);
     ui.modal = null;
     render();
+  } else if (type === "save-payroll-edit"){
+    savePayrollEdit(fd);
   } else if (type === "confirm-mark-payroll-paid"){
     confirmMarkPayrollPaid(fd);
   } else if (type === "save-my-ach"){
