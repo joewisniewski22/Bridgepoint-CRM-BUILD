@@ -3218,7 +3218,7 @@ function attemptLogin(username, pin){
   sb.functions.invoke("staff-login", { body: { username: username||"", pin: pin||"" } }).then(function(res){
     ui.loginBusy = false;
     if (res.error || !res.data || !res.data.ok){
-      ui.loginError = "Incorrect username or PIN.";
+      ui.loginError = (res.error && res.error.context && res.error.context.status === 429) ? "Too many tries. Wait 15 minutes and try again." : "Incorrect username or PIN.";
       render();
       return;
     }

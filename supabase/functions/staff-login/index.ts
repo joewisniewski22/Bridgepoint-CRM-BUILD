@@ -37,10 +37,25 @@ Deno.serve(async (req: Request) => {
 
     const sbService = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+    // Brute-force limit (2026-10-12): PINs are only 4-6 digits, so cap wrong guesses --
+    // 10 per IP and 40 per username in any 15 minutes.
+    const ip = (req.headers.get("x-forwarded-for") || "unknown").split(",")[0].trim();
+    const uname = String(username).toLowerCase();
+    const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const [byIp, byUser] = await Promise.all([
+      sbService.from("login_attempts").select("id", { count: "exact", head: true }).eq("ip", ip).gte("created_at", since),
+      sbService.from("login_attempts").select("id", { count: "exact", head: true }).eq("username", uname).gte("created_at", since),
+    ]);
+    if ((byIp.count || 0) >= 10 || (byUser.count || 0) >= 40) {
+      return new Response(JSON.stringify({ error: "too_many_attempts" }), { status: 429, headers: CORS_HEADERS });
+    }
+
     // Same validation the app has always used -- SECURITY DEFINER function,
     // compares against public.users.pin, returns null on no match.
     const { data: userRow, error: loginErr } = await sbService.rpc("login", { p_username: username, p_pin: pin });
     if (loginErr || !userRow) {
+      await sbService.from("login_attempts").insert({ ip, username: uname });
+      await sbService.from("login_attempts").delete().lt("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
       return new Response(JSON.stringify({ error: "invalid_credentials" }), { status: 401, headers: CORS_HEADERS });
     }
 
