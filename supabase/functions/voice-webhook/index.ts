@@ -686,6 +686,12 @@ Deno.serve(async (req: Request) => {
           // The timed-out transfer's hangup event may carry the dead staff
           // leg's id rather than the caller's -- voicemail has to run on the
           // caller's own leg.
+          // Joe 10/12: keep a record of every callback the assigned loan officer missed -- the Bounced Leads report reads this.
+          // staffMissed keeps it from counting as one of their calls.
+          if (state.leadId) await logCallOutcome({
+            leadId: state.leadId, staffId: state.staffId, sessionId, outcome: "no-answer", staffMissed: true,
+            note: "Inbound call from " + (state.callerNumber || "the lead") + " was not answered by " + (state.staffName || "the assigned loan officer") + " — went to voicemail",
+          });
           await startVoicemail(state.originalCallControlId || callControlId,
             "You've reached " + (state.staffName || "your loan officer") + " at Bridgepoint Lending. Please leave your name, number, and a brief message after the tone.",
             "en", { kind: "staff", staffId: state.staffId || null, label: state.staffName || "Loan officer" }, state.leadId, state.callerNumber);

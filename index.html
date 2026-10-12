@@ -11016,6 +11016,7 @@ function renderShell(){
         '<button class="nav-item" type="button" data-action="open-quick-dial"><span class="ic">📞</span><span>Dialer</span></button>' +
         navItem("today", isProcessor() ? "📋" : "☎", "Today", isProcessor() ? null : (callsDue||null)) +
         (!isProcessor() ? navItem("calllog","📒","Call Log") : "") +
+        (!isProcessor() ? navItem("bounced","📵","Bounced Leads") : "") +
         (isOwner() ? navItem("processing","📋","Processing") : "") +
         ((isOwner() || !isProcessor()) && navVisible("pricer") ? navItem("pricer","🧮","Pricer") : "") +
         (navVisible("pipeline") ? navItem("pipeline","▤","Pipeline") : "") +
@@ -11067,6 +11068,7 @@ function renderShell(){
   var body = "";
   if (ui.view === "today") body = renderToday();
   else if (ui.view === "calllog") body = isProcessor() ? renderToday() : renderCallLog();
+  else if (ui.view === "bounced") body = isProcessor() ? renderToday() : renderBouncedLeads();
   else if (ui.view === "pricer") body = renderStandalonePricer();
   else if (ui.view === "processing") body = topbar("Processing", "Erika's desk — every in-process file, what's in, and the one thing that moves it.") + '<div class="content">' + renderProcessingBoard() + '</div>';
   else if (ui.view === "pipeline") body = renderPipeline();
@@ -13414,6 +13416,101 @@ function callLogData(userId, day){
   });
   rows.sort(function(a, b){ return (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0); });
   return rows;
+}
+/* ---- Bounced Leads report (Joe 2026-10-12: "show the LOs what leads they lost because they didn't answer the phone") ----
+   Built from what the phone system records:
+   - "passed": the 5-minute rule moved the lead to the next person (activity line "Not called within 5 minutes by X -- automatically passed to Y")
+   - "ring": the new-lead ring to the loan officer's phone went unanswered ("Dialer call to X went unanswered before reaching ...")
+   - "callback": the lead called back and the assigned loan officer didn't pick up (logged by voice-webhook from 10/12 on)
+   Plus a live list of leads nobody has called yet. */
+function bounceUserIdByName(name){
+  var n = String(name || "").trim().toLowerCase(), hit = null;
+  state.users.forEach(function(u){ if (String(u.name || "").trim().toLowerCase() === n) hit = u.id; });
+  return hit;
+}
+function bouncedLeadRows(sinceISO){
+  var rows = [];
+  state.leads.forEach(function(l){
+    if (l.status === "spam") return;
+    var mine = [];
+    (l.activity || []).forEach(function(x){
+      var m = /Not called within 5 minutes by (.+?) -- automatically passed to (.+?)\./.exec(x.text || "");
+      if (m) mine.push({ type:"passed", lead:l, whoId:bounceUserIdByName(m[1]), whoName:m[1], toName:m[2], at:x.at || x.date, detail:"Not called within 5 minutes, passed to " + m[2] });
+    });
+    (l.callAttempts || []).forEach(function(a){
+      var m2 = /^Dialer call to (.+?) went unanswered before reaching/.exec(a.notes || "");
+      if (m2) mine.push({ type:"ring", lead:l, whoId:bounceUserIdByName(m2[1]), whoName:m2[1], at:a.at || a.date, detail:"The call rang " + m2[1] + "'s phone and nobody picked up" });
+      var m3 = /^Inbound call from (.+?) was not answered by (.+?) —/.exec(a.notes || "");
+      if (m3) mine.push({ type:"callback", lead:l, whoId:a.by || bounceUserIdByName(m3[2]), whoName:m3[2], at:a.at || a.date, detail:"The lead called back and " + m3[2] + " didn't answer" });
+    });
+    // a ring miss that was then passed on is one event, not two
+    mine = mine.filter(function(r){
+      if (r.type !== "ring") return true;
+      return !mine.some(function(p){ return p.type === "passed" && p.whoName === r.whoName && Math.abs((Date.parse(p.at) || 0) - (Date.parse(r.at) || 0)) < 20 * 60000; });
+    });
+    mine.forEach(function(r){ if (!sinceISO || String(r.at).slice(0, 10) >= sinceISO) rows.push(r); });
+  });
+  rows.sort(function(a, b){ return (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0); });
+  return rows;
+}
+function untouchedLeadsFor(userId){
+  var cutoff = Date.now() - 24 * 3600000;
+  return state.leads.filter(function(l){
+    if (l.status !== "active" || (l.stage !== "new" && l.stage !== "attempting")) return false;
+    if (userId && l.assignedTo !== userId) return false;
+    if (!l.phone || /^(LendingWise|Self-Generated)/i.test(l.source || "")) return false;
+    if (Date.parse(l.createdAtTs || l.createdAt) > cutoff) return false;
+    return !(l.callAttempts || []).some(isRealCallAttempt);
+  });
+}
+function renderBouncedLeads(){
+  var me = currentUser(), owner = isOwner();
+  var range = ui.bounceRange || "30";
+  var who = owner ? (ui.bounceWho || "all") : me.id;
+  var since = range === "all" ? null : (function(){ var d = new Date(Date.now() - parseInt(range, 10) * 86400000); return localDateStr(d); })();
+  var rows = bouncedLeadRows(since).filter(function(r){ return who === "all" || r.whoId === who; });
+  var untouched = untouchedLeadsFor(who === "all" ? null : who);
+  var LABEL = { passed:"Passed on (5-min rule)", ring:"Phone rang, no answer", callback:"Callback missed" };
+  var CLS = { passed:"badge-rust", ring:"badge-gold", callback:"badge-rust" };
+  var statusNow = function(l){
+    var s = stageLabel(l.stage) + (l.status === "closed" ? " (closed)" : l.status === "lost" ? " (lost)" : l.status === "cold" ? " (cold)" : "");
+    var past = ["app_sent","app_completed","docs","processing","underwriting","approved","ctc","closed"].indexOf(l.stage) !== -1 || l.status === "closed";
+    return '<span class="badge ' + (past ? 'badge-forest' : 'badge-neutral') + '">' + esc(s) + '</span>';
+  };
+  var est = function(l){ return l.loanAmount ? Math.round(l.loanAmount * 0.025) : null; };
+  var total = rows.reduce(function(s, r){ return s + (est(r.lead) || 0); }, 0);
+  var converted = rows.filter(function(r){ return ["app_sent","app_completed","docs","processing","underwriting","approved","ctc","closed"].indexOf(r.lead.stage) !== -1 || r.lead.status === "closed"; }).length;
+  var byLo = {};
+  rows.forEach(function(r){ var k = r.whoName || "Unknown"; byLo[k] = (byLo[k] || 0) + 1; });
+  var loBoard = Object.keys(byLo).sort(function(a, b){ return byLo[b] - byLo[a]; }).map(function(k){ return '<div class="panel panel-pad"><div class="stat">' + byLo[k] + '</div><div class="footnote">' + esc(k) + '</div></div>'; }).join("");
+  var whoSel = owner ? ('<select class="select" data-action="bounce-who" style="max-width:220px"><option value="all"' + (who === "all" ? " selected" : "") + '>Everyone</option>' +
+    state.users.filter(function(u){ return u.role !== "processor"; }).map(function(u){ return '<option value="' + esc(u.id) + '"' + (who === u.id ? " selected" : "") + '>' + esc(u.name) + '</option>'; }).join("") + '</select>') : "";
+  var rangeSel = '<select class="select" data-action="bounce-range" style="max-width:160px">' + [["7","Last 7 days"],["30","Last 30 days"],["90","Last 90 days"],["all","All time"]].map(function(o){ return '<option value="' + o[0] + '"' + (range === o[0] ? " selected" : "") + '>' + o[1] + '</option>'; }).join("") + '</select>';
+  var table = rows.length ? ('<div class="table-wrap"><table><thead><tr><th>When</th><th>Lead</th><th>What happened</th>' + (who === "all" ? '<th>Missed by</th>' : '') + '<th>Where it stands now</th><th class="num">Est. value</th></tr></thead><tbody>' +
+    rows.map(function(r){
+      var l = r.lead, v = est(l);
+      var wh = Date.parse(r.at) ? new Date(r.at).toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }) : fmtDate(String(r.at).slice(0, 10));
+      return '<tr data-action="select-lead" data-lead="' + l.id + '" style="cursor:pointer"><td>' + esc(wh) + '</td>' +
+        '<td><div class="cell-name">' + esc(l.name) + '</div><div class="cell-sub">' + esc([l.source, l.loanType].filter(Boolean).join(" · ")) + '</div></td>' +
+        '<td><span class="badge ' + CLS[r.type] + '">' + esc(LABEL[r.type]) + '</span><div class="cell-sub">' + esc(r.detail) + '</div></td>' +
+        (who === "all" ? '<td>' + esc(r.whoName) + '</td>' : '') +
+        '<td>' + statusNow(l) + '<div class="cell-sub">With ' + esc(userName(l.assignedTo)) + '</div></td>' +
+        '<td class="num">' + (v ? fmtUSD(v) : "—") + '</td></tr>';
+    }).join("") + '</tbody></table></div>') : '<div class="empty">No bounced leads in this period. Nothing has been recorded as missed.</div>';
+  var untouchedHTML = untouched.length ? ('<div class="section-head" style="margin-top:24px"><h2>Still untouched: nobody has called these yet</h2><div class="hint">' + untouched.length + ' lead(s) older than a day with zero calls. Each day they wait, the odds drop.</div></div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Lead</th><th>Source</th><th>Came in</th><th>Assigned to</th></tr></thead><tbody>' +
+    untouched.slice(0, 40).map(function(l){ return '<tr data-action="select-lead" data-lead="' + l.id + '" style="cursor:pointer"><td><div class="cell-name">' + esc(l.name) + '</div></td><td>' + esc(l.source || "") + '</td><td>' + esc(fmtDate(String(l.createdAt || "").slice(0, 10))) + '</td><td>' + esc(userName(l.assignedTo)) + '</td></tr>'; }).join("") +
+    '</tbody></table></div>' + (untouched.length > 40 ? '<div class="footnote">Showing 40 of ' + untouched.length + '.</div>' : '')) : '';
+  return topbar("Bounced Leads", "Leads that slipped away because a call wasn't answered.", '<div style="display:flex;gap:8px;flex-wrap:wrap">' + whoSel + rangeSel + '</div>') +
+    '<div class="content">' +
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">' +
+        '<div class="panel panel-pad"><div class="stat">' + rows.length + '</div><div class="footnote">bounced leads</div></div>' +
+        '<div class="panel panel-pad"><div class="stat">' + converted + '</div><div class="footnote">moved forward after someone else took them</div></div>' +
+        '<div class="panel panel-pad"><div class="stat">' + fmtUSD(total) + '</div><div class="footnote">estimated origination at stake (2.5% of loan amount, where known)</div></div>' +
+        loBoard +
+      '</div>' + table + untouchedHTML +
+      '<div class="footnote" style="padding-top:10px">Passed-on and unanswered-ring events are recorded from 10/9. Missed callbacks are recorded from 10/12.</div>' +
+    '</div>';
 }
 // A short "calls so far today" list for the Today screen, so you can see who you called without leaving it.
 function todayCallsCardHTML(userId){
@@ -20985,6 +21082,10 @@ appEl.addEventListener("change", function(e){
     ui.callLogDate = t.value || null; render();
   } else if (action === "call-log-who"){
     ui.callLogWho = t.value; render();
+  } else if (action === "bounce-who"){
+    ui.bounceWho = t.value; render();
+  } else if (action === "bounce-range"){
+    ui.bounceRange = t.value; render();
   } else if (action === "apply-saved-view"){
     applySavedView(t.value);
   } else if (action === "filter-comm"){
