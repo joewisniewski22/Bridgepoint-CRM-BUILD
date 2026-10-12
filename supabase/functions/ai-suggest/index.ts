@@ -1,3 +1,4 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 // Generates short, specific text (win-back messages, birthday messages,
 // plain-English guideline explanations, social post ideas) using Claude.
 // Called from the CRM frontend with the Supabase publishable (anon) key.
@@ -80,6 +81,14 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), { status: 405, headers: CORS_HEADERS });
   }
 
+  // Staff only (10/12/2026): this endpoint spends AI credits, so it no longer answers anonymous callers.
+  {
+    const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    const svc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { data: au } = token ? await svc.auth.getUser(token) : { data: { user: null } } as any;
+    const { data: staffRow } = au && au.user ? await svc.from("users").select("id").eq("auth_id", au.user.id).maybeSingle() : { data: null } as any;
+    if (!staffRow) return new Response(JSON.stringify({ error: "not_authorized" }), { status: 401, headers: CORS_HEADERS });
+  }
   try {
     const body = await req.json();
     const kind: string = body.kind;

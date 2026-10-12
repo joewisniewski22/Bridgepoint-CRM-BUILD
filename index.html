@@ -6418,7 +6418,8 @@ function logCall(leadId, outcome, notes, callback){
   var d = todayISO();
   if (!lead.firstAttemptAt) lead.firstAttemptAt = nowTs();
   lead.callAttempts = lead.callAttempts || [];
-  lead.callAttempts.push({ date:d, at:nowTs(), outcome:outcome, notes:notes||"", newBusiness: isNewBusinessLead(lead), by: currentUser().id });
+  var loggedAttempt = { date:d, at:nowTs(), outcome:outcome, notes:notes||"", newBusiness: isNewBusinessLead(lead), by: currentUser().id };
+  lead.callAttempts.push(loggedAttempt);
   // A logged call completes this lead's open follow-up task; the follow-up engine schedules the next step.
   completeOpenTasksForLead(leadId, outcome);
   lead.activity = lead.activity || [];
@@ -6497,6 +6498,24 @@ function logCall(leadId, outcome, notes, callback){
   // skips it if they opted out, are a closed client, or were already sent one
   // in the last 12 hours (which also covers the automatic missed-call text).
   if (sb && lead.phone && (outcome === "no-answer" || outcome === "left-voicemail")) sendMissedCallFollowUp(lead);
+  // Joe 10/12: AI recap built from the loan officer's own notes (nothing hears or records the call).
+  if (sb && notes && notes.trim().length >= 25) requestCallRecap(lead, loggedAttempt, outcome, notes);
+}
+function requestCallRecap(lead, attempt, outcome, notes){
+  sb.functions.invoke("summarize-call", { body: { leadId: lead.id, outcome: outcome, notes: notes } }).then(function(res){
+    var r = res && res.data && res.data.ok && res.data.recap;
+    if (!r) return;
+    attempt.recap = r;
+    lead.activity = lead.activity || [];
+    var bits = ["AI recap: " + r.summary];
+    if (r.keyPoints && r.keyPoints.length) bits.push("Key points: " + r.keyPoints.join("; ") + ".");
+    if (r.nextStep) bits.push("Next step: " + r.nextStep);
+    if (r.followUpDate) bits.push("Suggested follow-up: " + fmtDate(r.followUpDate) + ".");
+    if (r.temperature) bits.push("Temperature: " + r.temperature + ".");
+    lead.activity.push({ date: todayISO(), type:"recap", text: bits.join(" "), author: "AI recap (from " + (currentUser() ? currentUser().name : "the loan officer") + "'s notes)" });
+    persist();
+    showToast("AI recap added to " + lead.name + "'s file");
+  }).catch(function(){});
 }
 function sendMissedCallFollowUp(lead){
   sb.functions.invoke("send-missed-call-text", { body: { leadId: lead.id, staffId: currentUser().id } }).then(function(res){
