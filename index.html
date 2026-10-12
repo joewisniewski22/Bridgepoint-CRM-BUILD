@@ -13045,6 +13045,7 @@ function renderToday(){
     '</div>';
   }
 
+  if (scopeIsMine && !isProcessor()) quotaBanner += todayCallsCardHTML(ui.viewAs);
   var kpis = '<div class="kpi-row">' +
     '<div class="kpi"><div class="kpi-label">Calls due today</div><div class="kpi-value num">' + k.callsDue + '</div><div class="kpi-sub">' + (!isOwner() ? "Across your desk" : (scopeIsMine ? "Your queue — switch to Whole Team below to see everyone's" : "Across all loan officers")) + '</div></div>' +
     '<div class="kpi"><div class="kpi-label">Active pipeline</div><div class="kpi-value num">' + k.activeCount + '</div><div class="kpi-sub">' + fmtUSD(k.pipelineValue) + ' in requested volume</div></div>' +
@@ -13413,6 +13414,21 @@ function callLogData(userId, day){
   });
   rows.sort(function(a, b){ return (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0); });
   return rows;
+}
+// A short "calls so far today" list for the Today screen, so you can see who you called without leaving it.
+function todayCallsCardHTML(userId){
+  var rows = callLogData(userId, localDateStr(new Date()));
+  var logged = rows.filter(function(r){ return r.logged; }).length;
+  var label = function(k){ var o = CALL_OUTCOMES.filter(function(x){ return x.key === k; })[0]; return o ? o.label : (k || ""); };
+  var list = rows.length ? rows.slice(0, 8).map(function(r){
+    var tm = r.at ? new Date(r.at).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "";
+    var ok = r.outcome === "connected" || r.outcome === "callback" || r.outcome === "sent-terms";
+    return '<div data-action="select-lead" data-lead="' + r.lead.id + '" style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--border-soft);cursor:pointer">' +
+      '<span class="footnote" style="width:62px;padding:0">' + esc(tm) + '</span><b style="flex:1">' + esc(r.lead.name) + '</b>' +
+      (r.logged ? '<span class="badge ' + (ok ? 'badge-forest' : 'badge-neutral') + '">' + esc(label(r.outcome)) + '</span>' : '<span class="badge badge-gold" title="Dialed through the phone system, but no outcome was saved">Dialed, not logged</span>') + '</div>';
+  }).join("") + (rows.length > 8 ? '<div class="footnote" style="padding:6px 0 0">+ ' + (rows.length - 8) + ' more</div>' : '') : '<div class="footnote" style="padding:4px 0 0">No calls yet today.</div>';
+  return '<div class="section" style="padding:16px 20px"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:4px"><b>📒 Calls so far today (' + logged + ')</b>' +
+    '<button class="btn btn-sm btn-ghost" type="button" data-action="nav" data-view="calllog">Full call log →</button></div>' + list + '</div>';
 }
 function renderCallLog(){
   var me = currentUser(), day = ui.callLogDate || localDateStr(new Date());
