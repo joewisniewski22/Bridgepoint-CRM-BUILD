@@ -11207,7 +11207,7 @@ function renderMobileCard(item, opts){
   var id = 'data-lead="' + lead.id + '"';
   var canSendDocs = !isProcessor() && lead.rate && lead.loanAmount;
   var lastNote = null;
-  (lead.callAttempts||[]).slice().reverse().some(function(a){ if (a.notes){ lastNote = a; return true; } return false; });
+  (lead.callAttempts||[]).slice().reverse().some(function(a){ if (a.notes && isRealCallAttempt(a)){ lastNote = a; return true; } return false; });
   // Last real touch (call, text, email) so the rep knows where things stand before dialing.
   var lastTouch = (lead.activity||[]).filter(function(a){ return a.type === "call" || a.type === "text" || a.type === "email"; }).slice(-1)[0];
   var touchTxt = lastTouch ? ((lastTouch.type === "text" ? (/^Received/.test(lastTouch.text||"") ? "They texted" : "Texted") : lastTouch.type === "email" ? "Emailed" : "Called") + " · " + (lastTouch.at && typeof textStamp === "function" ? textStamp(lastTouch, true) : fmtDate(lastTouch.date))) : "No contact yet";
@@ -18596,7 +18596,7 @@ function renderLiveCallPanel(){
     if (ctxLead){
       var ctxItem = ui.dialer && ui.dialer.itemsByLead && ui.dialer.itemsByLead[ctxLead.id];
       var ctxLastNote = null;
-      (ctxLead.callAttempts||[]).slice().reverse().some(function(a){ if (a.notes){ ctxLastNote = a; return true; } return false; });
+      (ctxLead.callAttempts||[]).slice().reverse().some(function(a){ if (a.notes && isRealCallAttempt(a)){ ctxLastNote = a; return true; } return false; });
       ctxHTML = '<div class="panel panel-pad" style="background:var(--surface-2);font-size:.9rem;display:flex;flex-direction:column;gap:3px">' +
         (ctxItem ? ('<div style="font-weight:600">' + esc(ctxItem.label) + '</div><div class="footnote" style="padding:0 0 4px">' + esc(ctxItem.reason) + '</div>') : '') +
         '<div><b>Loan:</b> ' + esc(ctxLead.loanType || "—") + ' · <b>Stage:</b> ' + esc(stageLabel(ctxLead.stage)) + '</div>' +
@@ -18718,7 +18718,7 @@ function modalDialer(){
   var outOptions = CALL_OUTCOMES.map(function(o){ return '<option value="' + o.key + '">' + o.label + '</option>'; }).join("");
   var qItem = ui.dialer.itemsByLead && ui.dialer.itemsByLead[lead.id];
   var lastNote = null;
-  (lead.callAttempts||[]).slice().reverse().some(function(a){ if (a.notes){ lastNote = a; return true; } return false; });
+  (lead.callAttempts||[]).slice().reverse().some(function(a){ if (a.notes && isRealCallAttempt(a)){ lastNote = a; return true; } return false; });
   var synopsis = '<div class="panel panel-pad" style="margin:8px 0;background:var(--surface-2)">' +
     (qItem ? ('<div style="font-weight:600">' + esc(qItem.label) + '</div><div class="footnote" style="padding-top:2px">' + esc(qItem.reason) + '</div>') : '') +
     '<div class="field-grid" style="margin-top:8px">' +
