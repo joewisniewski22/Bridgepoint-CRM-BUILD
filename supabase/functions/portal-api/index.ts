@@ -18,7 +18,10 @@ const CORS = {
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: CORS });
 
 // Never sent to the browser.
-const HIDE = ["guarantor_ssn_encrypted", "co_ssn_encrypted", "ai_quote", "call_attempts"];
+const HIDE = [
+  "guarantor_ssn_encrypted", "co_ssn_encrypted", "ai_quote", "call_attempts", "activity", "ai_stage", "pricing_review_note",
+  "pricing_review_requested_by", "lost_reason_note", "guideline_override_note", "capital_source", "servicer", "lo_dialed_at",
+];
 
 // The only columns a borrower's page may change.
 const WRITABLE = new Set([
@@ -53,7 +56,14 @@ Deno.serve(async (req: Request) => {
   const lead = await loadLead(leadId, token);
   if (!lead) return json({ ok: false, error: "invalid" }, 404);
 
-  if (action === "get") return json({ ok: true, lead: strip(lead) });
+  if (action === "get") {
+    // Contact details for this file's own loan officer / processor only (the staff directory is not public).
+    const ids = [lead.assigned_to, lead.assigned_processor].filter(Boolean);
+    const { data: staffRows } = ids.length ? await sb.from("users").select("id,name,role,title,phone,email,nmls_number,photo_url,speaks_spanish").in("id", ids) : { data: [] };
+    const staff = (staffRows || []).map((u: any) => ({ id: u.id, name: u.name, role: u.role, title: u.title, phone: u.phone, email: u.email,
+      nmls: u.nmls_number, photoUrl: u.photo_url, speaksSpanish: !!u.speaks_spanish, fullAccess: false, portalPrefs: {} }));
+    return json({ ok: true, lead: strip(lead), staff });
+  }
 
   if (action === "upload-url") {
     if (!safePath(leadId, body.path)) return json({ ok: false, error: "bad_path" }, 400);
@@ -90,6 +100,7 @@ Deno.serve(async (req: Request) => {
       const add = (Array.isArray(incoming) ? incoming : []).filter((x) => x && typeof x === "object" && !seen.has(JSON.stringify(x)) && (!onlyBorrower || x.from === "borrower")).slice(-50);
       return add.length ? ex.concat(add) : null;
     };
+    // the page never receives the file's internal activity log, so everything it sends is new
     const act = appendOnly(lead.activity, row.activity, false);
     if (act) upd.activity = act;
     const chat = appendOnly(lead.portal_chat, row.portal_chat, true);

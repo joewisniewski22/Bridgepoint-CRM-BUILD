@@ -5622,6 +5622,11 @@ function loadPublicApplication(leadId, token){
     state.leads = [rowToLead(res.data.lead)];
     sb.rpc("list_users").then(function(res2){
       if (res2.data) state.users = res2.data;
+      // the public staff list has no contact details; this file's own loan officer / processor come with the file
+      (res.data.staff || []).forEach(function(s){
+        var i = state.users.findIndex(function(x){ return x.id === s.id; });
+        if (i === -1) state.users.push(s); else state.users[i] = Object.assign({}, state.users[i], s);
+      });
       ui.publicApply.status = "ready";
       render();
       startPortalPolling(leadId, token);
