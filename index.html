@@ -5588,6 +5588,7 @@ function rowToLead(r){
     guidelineOverrideApproved: !!r.guideline_override_approved, guidelineOverrideNote: r.guideline_override_note || null,
     pendingDecision: r.pending_decision || null,
     loDialedAt: r.lo_dialed_at || null, // read-only here (set by the dialer); never written back from the app
+    aiQuote: r.ai_quote || null, // read-only here (written by ai-price-lead; the quote card updates it directly)
     fundedDate: r.funded_date || null, payoffDate: r.payoff_date || null, capitalSource: r.capital_source || null, servicer: r.servicer || null, maturityDate: r.maturity_date || null, noteDate: r.note_date || null
   };
 }
@@ -13712,6 +13713,65 @@ function tabBtn(key, label){
   return '<button class="tab' + (ui.activeTab===key?" active":"") + '" data-action="set-tab" data-tab="' + key + '">' + label + '</button>';
 }
 
+/* ---- AI-priced quote card (Joe 2026-10-12) ----
+   When the text-message AI has gathered the whole deal, ai-price-lead prices it privately and saves a lender-free draft
+   on the lead. The loan officer reviews it, edits if needed, and sends it with one tap. The borrower never sees a
+   number the loan officer hasn't approved. */
+function aiQuoteDraftFor(lead){
+  var d = ui.aiQuoteDrafts && ui.aiQuoteDrafts[lead.id];
+  return d != null ? d : ((lead.aiQuote && lead.aiQuote.draft) || "");
+}
+function saveAiQuote(lead, patch){
+  var q = Object.assign({}, lead.aiQuote || {}, patch);
+  lead.aiQuote = q;
+  if (sb) sb.from("leads").update({ ai_quote: q }).eq("id", lead.id).then(function(){}, function(){});
+}
+function renderAiQuoteCard(lead){
+  var q = lead.aiQuote;
+  if (!q || !q.status || q.status === "dismissed") return "";
+  var staff = canManageOutsideLender();
+  var wrap = function(inner){ return '<div class="panel panel-pad" style="margin-bottom:16px;border:2px solid var(--c-gold)"><div class="hint" style="margin-bottom:4px">💬 FROM THE TEXT CONVERSATION</div>' + inner + '</div>'; };
+  var btns = function(list){ return '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' + list.join("") + '</div>'; };
+  var reprice = '<button class="btn btn-sm btn-ghost" type="button" data-action="ai-quote-reprice" data-lead="' + lead.id + '">Re-price</button>';
+  var dismiss = '<button class="btn btn-sm btn-ghost" type="button" data-action="ai-quote-dismiss" data-lead="' + lead.id + '">Dismiss</button>';
+  var sc = q.scenario || {};
+  var head = '<div style="font-size:1.15rem;font-weight:800">AI collected the deal and priced it</div>' +
+    '<div class="footnote" style="padding:2px 0 8px">' + esc(sc.loanType || lead.loanType || "") + ' · ' + esc(sc.summary || "") + (sc.state ? ' · ' + esc(sc.state) : '') + (sc.credit ? ' · credit ' + esc(sc.credit) : '') + '</div>';
+  var assumed = (q.assumed && q.assumed.length) ? '<div class="footnote" style="padding:0 0 6px">Assumed: ' + esc(q.assumed.join("; ")) + '. Confirm on the call.</div>' : '';
+  if (q.status === "sent"){
+    return wrap(head + '<div class="badge badge-forest">Quote texted ' + esc(q.sentAt ? fmtDate(String(q.sentAt).slice(0, 10)) : "") + (q.sentBy ? ' by ' + esc(q.sentBy) : '') + '</div>' + btns([reprice, dismiss]));
+  }
+  if (q.status === "no_match"){
+    return wrap(head + '<div style="padding:4px 0;color:var(--c-rust)"><b>Nothing placed.</b> ' + esc((q.reasons || [])[0] || "No lender matched this scenario.") + '</div>' +
+      ((q.reasons || []).length > 1 ? '<ul class="footnote" style="margin:4px 0 0 18px">' + q.reasons.slice(1).map(function(r){ return '<li>' + esc(r) + '</li>'; }).join("") + '</ul>' : '') + btns([reprice, dismiss]));
+  }
+  var opts = (q.options || []).map(function(o, i){
+    return '<tr><td><b>Option ' + "AB".charAt(i) + '</b></td><td class="num">' + esc(o.rate) + '%</td><td class="num">' + (o.loanAmount ? fmtUSD(o.loanAmount) : "—") + '</td>' +
+      (staff ? '<td>' + esc(o.lender) + (o.estimate ? ' <span class="badge badge-neutral" title="Bridgepoint\'s researched copy of this lender\'s pricing, not a live quote">Estimate</span>' : '') + '</td>' : '') + '</tr>';
+  }).join("");
+  var table = '<div class="table-wrap"><table><thead><tr><th></th><th class="num">Rate</th><th class="num">Up to</th>' + (staff ? '<th>Lender (staff only)</th>' : '') + '</tr></thead><tbody>' + opts + '</tbody></table></div>';
+  var draft = '<div class="form-row" style="margin-top:10px"><label>Text to send (edit it if you like)</label>' +
+    '<textarea class="textarea" rows="8" data-action="ai-quote-edit" data-lead="' + lead.id + '">' + esc(aiQuoteDraftFor(lead)) + '</textarea></div>';
+  return wrap(head + assumed + table + draft + btns(['<button class="btn btn-sm btn-primary" type="button" data-action="ai-quote-send" data-lead="' + lead.id + '">Send quote by text</button>', reprice, dismiss]) +
+    '<div class="footnote" style="padding-top:6px">The borrower has not seen any numbers. Nothing goes out until you tap Send.</div>');
+}
+function aiQuoteSend(leadId){
+  var lead = leadById(leadId); if (!lead || !lead.aiQuote) return;
+  var text = (aiQuoteDraftFor(lead) || "").trim();
+  if (!text){ showToast("Nothing to send"); return; }
+  if (!lead.phone){ showToast("No phone number on this lead"); return; }
+  sendTextMessage(leadId, text);
+  saveAiQuote(lead, { status:"sent", sentAt:new Date().toISOString(), sentBy:currentUser().name, sentText:text });
+  if (ui.aiQuoteDrafts) delete ui.aiQuoteDrafts[leadId];
+  render();
+}
+function aiQuoteReprice(leadId){
+  if (!sb) return;
+  showToast("Re-pricing… check back in about a minute");
+  sb.functions.invoke("ai-price-lead", { body:{ leadId:leadId, force:true } }).then(function(res){
+    if (res.error) showToast("Couldn't start re-pricing");
+  }).catch(function(){ showToast("Couldn't start re-pricing"); });
+}
 function renderLeadDetail(){
   var lead = leadById(ui.selectedLeadId);
   if (!lead){
@@ -13745,7 +13805,7 @@ function renderLeadDetail(){
     '<button class="btn btn-ghost" data-action="nav" data-view="leads">← Back</button>';
 
   return topbar(esc(lead.name), esc(lead.loanType) + " · " + esc(lead.propertyAddress||""), actions) +
-    '<div class="content">' + renderDuplicateFileBanner(lead) + '<div class="detail-grid">' + main + rail + '</div></div>';
+    '<div class="content">' + renderDuplicateFileBanner(lead) + renderAiQuoteCard(lead) + '<div class="detail-grid">' + main + rail + '</div></div>';
 }
 // Joe's explicit ask (2026-09-09): he, Fiore, and Erika need loan
 // placement visible in big blue letters right in the header, on every
@@ -20721,6 +20781,12 @@ appEl.addEventListener("click", function(e){
   else if (action === "wp-rec-dismiss"){ wpRecAct(t.dataset.id, "dismissed"); }
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
+  else if (action === "ai-quote-send"){ aiQuoteSend(t.dataset.lead); }
+  else if (action === "ai-quote-reprice"){ aiQuoteReprice(t.dataset.lead); }
+  else if (action === "ai-quote-dismiss"){
+    var aqLead = leadById(t.dataset.lead);
+    if (aqLead){ saveAiQuote(aqLead, { status:"dismissed" }); render(); }
+  }
   else if (action === "call-log-shift"){
     var clBase = new Date((ui.callLogDate || localDateStr(new Date())) + "T12:00:00"), clN = parseInt(t.dataset.n, 10);
     if (clN === 0) ui.callLogDate = null; else { clBase.setDate(clBase.getDate() + clN); ui.callLogDate = localDateStr(clBase); }
@@ -21327,6 +21393,11 @@ appEl.addEventListener("input", function(e){
   }
   if (t.dataset.action === "call-live-notes"){
     ui.callNotes = t.value;
+    return;
+  }
+  if (t.dataset.action === "ai-quote-edit"){
+    ui.aiQuoteDrafts = ui.aiQuoteDrafts || {};
+    ui.aiQuoteDrafts[t.dataset.lead] = t.value;
     return;
   }
   if (t.dataset.action === "brief-field"){

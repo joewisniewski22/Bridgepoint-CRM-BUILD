@@ -6,7 +6,7 @@
 // overwriting a field that's already set. Sends the reply itself via
 // send-text. Stops entirely once automation_paused is set (the LO's own
 // "Stop Automation" button) -- checked by the caller before invoking this.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -36,6 +36,16 @@ const FIELD_MAP: Record<string, string> = {
   creditScore: "credit_score",
   propertyType: "property_type",
   exitStrategy: "exit_strategy",
+  // Pricing inputs (Joe 2026-10-12): collected over text so the deal can be priced privately for the loan officer.
+  rehabBudget: "rehab_budget",
+  arv: "arv",
+  experienceDeals: "experience_deals",
+  rentEstimate: "rent_estimate",
+  monthlyTaxes: "monthly_taxes",
+  monthlyInsurance: "monthly_insurance",
+  currentValue: "current_value",
+  transactionType: "transaction_type",
+  citizenshipStatus: "citizenship_status",
 };
 
 const RATE_KEY_BY_LOAN_TYPE: Record<string, string> = {
@@ -71,6 +81,39 @@ function marketRateContext(loanType: string, rates: Array<Record<string, unknown
   return "Current market note: " + loanType + " rates are at " + current + "% right now.";
 }
 
+// What it takes to price each loan type, in the order the AI should ask (one at a time, only when it fits the conversation).
+const NEED_BY_TYPE: Record<string, string[]> = {
+  "Fix & Flip": ["propertyAddress", "purchasePrice", "rehabBudget", "arv", "creditScore", "experienceDeals"],
+  "Bridge": ["propertyAddress", "purchasePrice", "creditScore", "experienceDeals"],
+  "Ground Up Construction": ["propertyAddress", "purchasePrice", "rehabBudget", "arv", "creditScore", "experienceDeals"],
+  "DSCR": ["propertyAddress", "purchasePrice", "rentEstimate", "creditScore"],
+  "Mixed-Use": ["propertyAddress", "purchasePrice", "rentEstimate", "creditScore"],
+};
+const ASK_FOR: Record<string, string> = {
+  propertyAddress: "the property address (street, city and state)",
+  purchasePrice: "the purchase price (or what it's worth today if they already own it)",
+  rehabBudget: "roughly how much the rehab or construction will cost",
+  arv: "what they expect it to be worth after the work is done (the after-repair value)",
+  creditScore: "their approximate credit score",
+  experienceDeals: "how many flips, builds or rentals they've completed in the last 3 years (zero is fine)",
+  rentEstimate: "the monthly rent it brings in or should bring in",
+};
+const NUMERIC_FIELDS = ["purchasePrice", "loanAmount", "creditScore", "rehabBudget", "arv", "rentEstimate", "monthlyTaxes", "monthlyInsurance", "currentValue"];
+function normalizeTxn(text: string): string | null {
+  const t = text.toLowerCase();
+  if (/cash.?out/.test(t)) return "cashout";
+  if (/refi|refinanc|rate.?(and|\/|&)?.?term/.test(t)) return "ratetermrefi";
+  if (/purchas|buy|acquir|under contract/.test(t)) return "purchase";
+  return null;
+}
+function normalizeCitizenship(text: string): string | null {
+  const t = text.toLowerCase();
+  if (/foreign/.test(t)) return "Foreign National";
+  if (/green.?card|permanent|resident/.test(t)) return "Permanent Resident";
+  if (/visa|non.?perm/.test(t)) return "Non-Permanent Resident";
+  if (/citizen|u\.?s\.?a?\b|american/.test(t)) return "US Citizen";
+  return null;
+}
 function buildTranscript(activity: Array<Record<string, unknown>>): string {
   return (activity || [])
     .filter((a) => a.type === "text")
@@ -106,6 +149,17 @@ Deno.serve(async (req: Request) => {
 
     const knownFields = Object.keys(FIELD_MAP).filter((k) => lead[FIELD_MAP[k]] != null && lead[FIELD_MAP[k]] !== "");
     const missingFields = Object.keys(FIELD_MAP).filter((k) => !knownFields.includes(k));
+    const needKeys = NEED_BY_TYPE[(lead.loan_type as string) || ""] || [];
+    const stillNeeded = needKeys.filter((k) => !knownFields.includes(k));
+    const nextAsk = stillNeeded.length ? ASK_FOR[stillNeeded[0]] : null;
+    const pricingGuidance =
+      "Also, your loan officer needs the deal details to price this loan, so while chatting, gather them naturally, one question at a time, never as a checklist. " +
+      (needKeys.length
+        ? (stillNeeded.length
+            ? ("Still needed to price it: " + stillNeeded.map((k) => ASK_FOR[k]).join("; ") + ". When the conversation allows it, the next thing to ask about is " + nextAsk + " -- but if they asked you something, answer that first, and if they're ready for the application or a call, do that instead of interrogating them. ")
+            : "You already have everything needed to price this loan; the loan officer is pulling their numbers together -- you can tell them that, and move toward the application or a call. ")
+        : "") +
+      "NEVER state, estimate or hint at a specific interest rate, points, fees, loan terms or approval odds for THEIR deal (general commentary like rates just dropped is fine, but no numbers for them). If they ask what the rate or price will be, say you are pulling their exact numbers together and " + loName + " will text them real numbers shortly. ";
 
     // Live-tunable guidance -- the AI Assistant's analyze_and_adjust_engagement
     // tool updates this based on real conversion data, no code deploy needed.
@@ -126,6 +180,7 @@ Deno.serve(async (req: Request) => {
             ? "Their loan type is already known: " + lead.loan_type + ". If they clearly agree to fill out an application (or ask for one), set readyForApplication true in your response and tell them in your reply that you're sending it now."
             : "Their loan type is NOT yet known. Before offering or sending an application, find out what type of financing they need (fix & flip, DSCR/rental, ground-up construction, etc.) -- never set readyForApplication true and never offer to send the application until you know this, since sending the wrong application type would confuse them.")) +
       " Once they seem ready to talk (or if the conversation has gone back and forth a couple times with no clear next step), send them this exact booking link so they can grab a real time slot themselves instead of a vague \"let's hop on a call\": " + bookingLink + " -- don't send it on literally the first message unless they ask to schedule directly. " +
+      pricingGuidance +
       messagingGuidance +
       (rateNote ? (rateNote + " ") : "") +
       (awaitingLanguage
@@ -173,7 +228,13 @@ Deno.serve(async (req: Request) => {
         const normalized = normalizeLoanType(String(val));
         if (!normalized || !KNOWN_LOAN_TYPES.includes(normalized)) continue; // never store an unrecognized loan type
         updates[col] = normalized;
-      } else if (key === "purchasePrice" || key === "loanAmount" || key === "creditScore") {
+      } else if (key === "transactionType") {
+        const tt = normalizeTxn(String(val)); if (!tt) continue; updates[col] = tt;
+      } else if (key === "citizenshipStatus") {
+        const cs = normalizeCitizenship(String(val)); if (!cs) continue; updates[col] = cs;
+      } else if (key === "experienceDeals") {
+        const ed = Math.round(Number(String(val).replace(/[^0-9.]/g, ""))); if (!Number.isFinite(ed) || ed < 0 || ed > 500) continue; updates[col] = ed;
+      } else if (NUMERIC_FIELDS.includes(key)) {
         const num = Number(String(val).replace(/[^0-9.]/g, ""));
         if (!Number.isFinite(num) || num <= 0) continue;
         updates[col] = num;
@@ -238,6 +299,18 @@ Deno.serve(async (req: Request) => {
       });
       sendResult = await sendRes.json();
     }
+
+    // Joe 2026-10-12: once the deal details are complete, price it privately and brief the loan officer (ai-price-lead).
+    try {
+      const merged: Record<string, unknown> = Object.assign({}, lead, updates);
+      const need = NEED_BY_TYPE[(merged.loan_type as string) || ""] || [];
+      if (need.length && need.every((k) => merged[FIELD_MAP[k]] != null && merged[FIELD_MAP[k]] !== "")) {
+        const kick = fetch(SUPABASE_URL + "/functions/v1/ai-price-lead", {
+          method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify({ leadId }),
+        }).catch(() => null);
+        try { (globalThis as any).EdgeRuntime.waitUntil(kick); } catch (_e) { await kick; }
+      }
+    } catch (_e) { /* pricing is best-effort and never blocks the reply */ }
 
     return new Response(JSON.stringify({ ok: true, reply: replyText, extracted: filledNotes, sendResult }), { headers: CORS_HEADERS });
   } catch (err) {
