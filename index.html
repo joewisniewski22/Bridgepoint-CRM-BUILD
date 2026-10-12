@@ -1473,7 +1473,20 @@ var LENDER_DOC_PACKS = {
     if (st && ["AK","AR","KS","MI","MN","NM","RI"].indexOf(st) !== -1) items.push({ name:"No prepay allowed in " + st + " — buydown required (price it with no prepay)", staffOnly:true });
     return items;
   },
-  nextres: function(lead){ return []; },
+  // NextRes: from the Wholesale Lender Agreement draft dated 10/12/2026 (sections 1-7; Schedule A and the
+  // Exhibit A fee agreement were not in the copy Joe sent). NextRes's own submission checklist is still
+  // not loaded (see LENDER_PACK_PENDING), so these are the agreement's closing/compliance steps only.
+  nextres: function(lead){
+    return [
+      { name:"Loan was originated by Bridgepoint — not a third-party / outside-broker loan (not eligible for NextRes)", staffOnly:true },
+      { name:"NextRes guidelines / rate sheet re-checked at submission (they can change any time)", staffOnly:true },
+      { name:"NextRes written approval received before any approval, rate or terms are promised to the borrower", staffOnly:true, note:"NextRes decides in its sole discretion; only its written approval counts." },
+      { name:"Term Sheet sent to the borrower in writing with every fee, before closing", staffOnly:true },
+      { name:"Any third-party charge pre-approved by NextRes", staffOnly:true },
+      { name:"Fees on the settlement statement match the Term Sheet and what the law and NextRes allow", staffOnly:true },
+      { name:"Closing set up in Bridgepoint's name, with the assignment to NextRes ready (no liens)", staffOnly:true, note:"Table funding: the loan closes in our name and is assigned to NextRes; the application is assigned at submission." }
+    ];
+  },
   // Velocity: public forms (velocitymortgage.com/resources, read 2026-10-08) -- LLC/Entity
   // Document Checklist + Evidence of Insurance Request (1-4). No written guidelines exist;
   // eligibility comes from Velocity's own pricing engine.
