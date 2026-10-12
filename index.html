@@ -8115,7 +8115,8 @@ function setBirthday(leadId, birthday){
 // ships to the browser at all on a normal lead read (only the last-4 does).
 function saveGuarantorSsn(leadId, ssn){
   if (!sb) return;
-  sb.rpc("set_guarantor_ssn", { p_lead_id: leadId, p_ssn: ssn }).then(function(res){
+  var ssnLead = leadById(leadId);
+  sb.rpc("set_guarantor_ssn", { p_lead_id: leadId, p_ssn: ssn, p_token: (ssnLead && ssnLead.applicationToken) || null }).then(function(res){
     if (res.error){ showToast("Couldn't save SSN — try again"); return; }
     var lead = leadById(leadId);
     if (lead){
