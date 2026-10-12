@@ -5613,13 +5613,13 @@ function rowToNotif(r){
 }
 function loadPublicApplication(leadId, token){
   if (!sb){ ui.publicApply.status = "invalid"; render(); return; }
-  sb.from("leads").select("*").eq("id", leadId).eq("application_token", token).then(function(res){
-    if (res.error || !res.data || !res.data.length){
+  sb.functions.invoke("portal-api", { body: { action: "get", leadId: leadId, token: token } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok || !res.data.lead){
       ui.publicApply.status = "invalid";
       render();
       return;
     }
-    state.leads = [rowToLead(res.data[0])];
+    state.leads = [rowToLead(res.data.lead)];
     sb.rpc("list_users").then(function(res2){
       if (res2.data) state.users = res2.data;
       ui.publicApply.status = "ready";
@@ -5690,9 +5690,10 @@ function startPortalPolling(leadId, token){
   ui.publicApply._pollStarted = true;
   setInterval(function(){
     if (!sb || !ui.publicApply) return;
-    sb.from("leads").select("*").eq("id", leadId).eq("application_token", token).then(function(res){
-      if (res.error || !res.data || !res.data.length) return;
-      var fresh = rowToLead(res.data[0]);
+    if (syncTimer || syncInFlight) return; // a local edit is still being saved -- don't overwrite it with an older copy
+    sb.functions.invoke("portal-api", { body: { action: "get", leadId: leadId, token: token } }).then(function(res){
+      if (res.error || !res.data || !res.data.ok || !res.data.lead) return;
+      var fresh = rowToLead(res.data.lead);
       var old = state.leads[0];
       if (!old) return;
       var changed = JSON.stringify(old.portalChat||[]) !== JSON.stringify(fresh.portalChat||[]) || old.stage !== fresh.stage || old.rate !== fresh.rate;
@@ -6291,10 +6292,38 @@ function isBirthdayToday(lead){
 // server copy. The poll now refuses to overwrite anything while a sync
 // is queued or in flight, closing that window instead of racing it.
 var syncInFlight = false;
+// Document storage. Staff talk to storage directly (signed-in session). The public borrower page has no
+// storage access of its own: portal-api checks the file's token and hands back a one-time upload slot or
+// a short-lived link, only inside that file's own folder.
+function bpStorageUpload(path, file, opts){
+  var pa = ui.publicApply;
+  if (!pa) return sb.storage.from("lead-documents").upload(path, file, opts);
+  return sb.functions.invoke("portal-api", { body: { action: "upload-url", leadId: pa.leadId, token: pa.token, path: path } }).then(function(r){
+    if (r.error || !r.data || !r.data.ok) return { data: null, error: { message: "upload_unavailable" } };
+    return sb.storage.from("lead-documents").uploadToSignedUrl(r.data.path, r.data.token, file, opts);
+  });
+}
+function bpSignedUrl(path, secs){
+  var pa = ui.publicApply;
+  if (!pa) return sb.storage.from("lead-documents").createSignedUrl(path, secs);
+  return sb.functions.invoke("portal-api", { body: { action: "signed-url", leadId: pa.leadId, token: pa.token, path: path } }).then(function(r){
+    if (r.error || !r.data || !r.data.ok) return { data: null, error: { message: "not_available" } };
+    return { data: { signedUrl: r.data.url }, error: null };
+  });
+}
 function syncToSupabase(){
   if (!sb) return;
   syncInFlight = true;
   var pending = [];
+  if (ui.publicApply && ui.publicApply.leadId && state.leads && state.leads.length){
+    // Borrower page: the server checks the file's token and saves only the fields a borrower may change.
+    var pl = state.leads[0];
+    pending.push(sb.functions.invoke("portal-api", { body: { action: "save", leadId: ui.publicApply.leadId, token: ui.publicApply.token,
+      row: leadToRow(pl), notifications: (state.notifications || []).slice(0, 10).map(notifToRow) } })
+      .then(function(res){ if (res.error || !res.data || !res.data.ok) console.error("portal save error", res.error || res.data); }));
+    Promise.all(pending).then(function(){ syncInFlight = false; }).catch(function(){ syncInFlight = false; });
+    return;
+  }
   if (state.leads && state.leads.length){
     pending.push(sb.from("leads").upsert(state.leads.map(leadToRow)).then(function(res){ if (res.error) console.error("lead sync error", res.error); }));
   }
@@ -8734,7 +8763,7 @@ function uploadDocRequestReferenceFile(leadId, idx, file, actorLabel){
   var doc = lead.documents[idx];
   var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   var path = leadId + "/docreq-" + Date.now() + "-" + safeName;
-  sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+  bpStorageUpload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
     if (res.error){ showToast("Reference file upload failed — try again"); return; }
     doc.referenceFileUrl = path;
     doc.referenceFileName = file.name;
@@ -8748,7 +8777,7 @@ function viewDocRequestReferenceFile(leadId, idx){
   var lead = leadById(leadId);
   var doc = lead && lead.documents[idx];
   if (!doc || !doc.referenceFileUrl || !sb) return;
-  sb.storage.from("lead-documents").createSignedUrl(doc.referenceFileUrl, 3600).then(function(res){
+  bpSignedUrl(doc.referenceFileUrl, 3600).then(function(res){
     if (res.error || !res.data){ showToast("Couldn't open the file — try again"); return; }
     window.open(res.data.signedUrl, "_blank");
   });
@@ -8762,7 +8791,7 @@ function uploadDeclarationFile(leadId, appKey, declKey, file){
   if (!lead || !file || !sb) return;
   var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   var path = leadId + "/decl-" + declKey + "-" + Date.now() + "-" + safeName;
-  sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+  bpStorageUpload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
     if (res.error){ showToast("Attachment upload failed — try again"); return; }
     lead[appKey] = lead[appKey] || {};
     lead[appKey].declarations = lead[appKey].declarations || {};
@@ -8776,7 +8805,7 @@ function viewDeclarationFile(leadId, appKey, declKey){
   var lead = leadById(leadId);
   var decl = lead && lead[appKey] && lead[appKey].declarations && lead[appKey].declarations[declKey];
   if (!decl || !decl.fileUrl || !sb) return;
-  sb.storage.from("lead-documents").createSignedUrl(decl.fileUrl, 3600).then(function(res){
+  bpSignedUrl(decl.fileUrl, 3600).then(function(res){
     if (res.error || !res.data){ showToast("Couldn't open the file — try again"); return; }
     window.open(res.data.signedUrl, "_blank");
   });
@@ -8920,7 +8949,7 @@ function viewLeadDocument(leadId, idx){
   var lead = leadById(leadId);
   var doc = lead && lead.documents[idx];
   if (!doc || !doc.storagePath || !sb) return;
-  sb.storage.from("lead-documents").createSignedUrl(doc.storagePath, 3600).then(function(res){
+  bpSignedUrl(doc.storagePath, 3600).then(function(res){
     if (res.error || !res.data){ showToast("Couldn't open the file — try again"); return; }
     window.open(res.data.signedUrl, "_blank");
   });
@@ -8930,7 +8959,7 @@ function viewUnderwritingConditionFile(leadId, condId, isBorrowerFile){
   var cond = lead && (lead.uwConditions||[]).filter(function(c){ return c.id===condId; })[0];
   var path = cond && (isBorrowerFile ? cond.borrowerFileUrl : cond.fileUrl);
   if (!path || !sb) return;
-  sb.storage.from("lead-documents").createSignedUrl(path, 3600).then(function(res){
+  bpSignedUrl(path, 3600).then(function(res){
     if (res.error || !res.data){ showToast("Couldn't open the file — try again"); return; }
     window.open(res.data.signedUrl, "_blank");
   });
@@ -8985,7 +9014,7 @@ function uploadLeadDocument(leadId, idx, file, actorLabel){
   var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   var path = leadId + "/" + Date.now() + "-" + safeName;
   showToast("Uploading " + file.name + "…");
-  sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+  bpStorageUpload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
     if (res.error){ showToast("Upload failed — try again"); return; }
     doc.status = "received";
     doc.receivedAt = todayISO();
@@ -9008,7 +9037,7 @@ function viewExtraDocumentFile(leadId, idx, fileIdx){
   var doc = lead && lead.documents[idx];
   var f = doc && doc.files && doc.files[fileIdx];
   if (!f || !sb) return;
-  sb.storage.from("lead-documents").createSignedUrl(f.storagePath, 3600).then(function(res){
+  bpSignedUrl(f.storagePath, 3600).then(function(res){
     if (res.error || !res.data){ showToast("Couldn't open the file — try again"); return; }
     window.open(res.data.signedUrl, "_blank");
   });
@@ -9056,7 +9085,7 @@ function uploadUnderwritingConditionFile(leadId, condId, file, actorLabel, isBor
   if (!cond) return;
   var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   var path = leadId + "/uwcond-" + Date.now() + "-" + safeName;
-  sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+  bpStorageUpload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
     if (res.error){ showToast("Upload failed — try again"); return; }
     lead.activity = lead.activity || [];
     if (isBorrowerResponse){
@@ -9575,7 +9604,7 @@ function uploadGeneratedPdfDocument(leadId, docName, blob, opts){
   if (!doc){ doc = { name: docName, status:"requested" }; lead.documents.push(doc); }
   var fileName = docName.replace(/[^a-zA-Z0-9._-]/g, "_") + ".pdf";
   var path = leadId + "/" + Date.now() + "-" + fileName;
-  sb.storage.from("lead-documents").upload(path, blob, { contentType:"application/pdf" }).then(function(res){
+  bpStorageUpload(path, blob, { contentType:"application/pdf" }).then(function(res){
     if (res.error) return;
     doc.status = "received";
     doc.receivedAt = todayISO();
@@ -9607,7 +9636,7 @@ function addInternalDocumentFile(leadId, name, file){
   if (!doc){ doc = { name: name, status:"requested", staffOnly:true }; lead.documents.push(doc); }
   var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   var path = leadId + "/" + Date.now() + "-" + safeName;
-  sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+  bpStorageUpload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
     if (res.error){ showToast("Upload failed — try again"); return; }
     doc.status = "received";
     doc.receivedAt = todayISO();
@@ -14074,7 +14103,7 @@ function addTermSheetOption(leadId, fd, file){
     var idx = lead.documents.indexOf(entry);
     var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
     var path = leadId + "/" + Date.now() + "-" + safeName;
-    sb.storage.from("lead-documents").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+    bpStorageUpload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
       if (res.error){ showToast("Option saved, but the file upload failed — try attaching it again"); return; }
       entry.storagePath = path;
       entry.fileName = file.name;
@@ -16907,12 +16936,10 @@ function loadPublicBooking(userId){
     var u = (res.data||[]).filter(function(x){ return x.id===userId; })[0];
     if (!u){ ui.publicBooking.status = "invalid"; render(); return; }
     ui.publicBooking.host = u;
-    Promise.all([
-      sb.from("availability_rules").select("*").eq("user_id", userId),
-      sb.from("appointments").select("*").eq("user_id", userId).neq("status","canceled")
-    ]).then(function(results){
-      state.availabilityRules = (results[0].data||[]).map(rowToAvailabilityRule);
-      state.appointments = (results[1].data||[]).map(rowToAppointment);
+    sb.functions.invoke("booking-api", { body: { action: "slots", userId: userId } }).then(function(r){
+      if (r.error || !r.data || !r.data.ok){ ui.publicBooking.status = "invalid"; render(); return; }
+      state.availabilityRules = (r.data.rules||[]).map(rowToAvailabilityRule);
+      state.appointments = (r.data.appointments||[]).map(rowToAppointment);
       ui.publicBooking.status = "ready";
       render();
     });
@@ -16927,14 +16954,15 @@ function submitBooking(fd){
     name: fd.get("name"), phone: fd.get("phone")||"", email: fd.get("email")||"", notes: fd.get("notes")||"",
     startAt: pb.selectedSlot.start, endAt: pb.selectedSlot.end, status:"scheduled"
   };
-  sb.from("appointments").insert(appointmentToRow(appt)).then(function(res){
-    if (res.error){
+  sb.functions.invoke("booking-api", { body: { action: "book", userId: pb.userId, appt: appt } }).then(function(res){
+    var slotTaken = !!(res.data && res.data.error === "slot_taken") || !!(res.error && res.error.context && res.error.context.status === 409);
+    if (res.error || !res.data || !res.data.ok){
       // 23505 = unique_violation -- someone else grabbed this exact slot
       // in the gap between the prospect loading the page and clicking
       // Confirm (or a double-click submitted twice). No DB-level guard
       // against this existed before -- found 2026-09-24. Send them back
       // to pick a different time instead of silently double-booking the LO.
-      if (res.error.code === "23505"){
+      if (slotTaken){
         pb.selectedSlot = null;
         showToast("That time was just booked by someone else — please pick another");
       } else {
@@ -16945,17 +16973,7 @@ function submitBooking(fd){
     }
     state.appointments = state.appointments || [];
     state.appointments.push(appt);
-    var when = new Date(appt.startAt).toLocaleString([], {weekday:"long", month:"long", day:"numeric", hour:"numeric", minute:"2-digit"});
-    var alertText = appt.name + " booked a time with you: " + when + (appt.phone ? (" — " + appt.phone) : "");
-    pushStaffAlert(pb.userId, alertText);
-    sb.from("notifications").insert({
-      id: "N" + Date.now().toString(36) + Math.floor(Math.random()*1000),
-      to_user_id: pb.userId, lead_id: null, kind: "appointment", text: alertText,
-      date: todayISO(), read:false
-    }).then(function(nres){ if (nres.error) console.error("appointment notification error", nres.error); });
-    if (pb.host && pb.host.email){
-      sb.functions.invoke("send-email", { body: { to: pb.host.email, subject: "New booking: " + appt.name, text: alertText, fromName: "Bridgepoint CRM" } }).catch(function(){});
-    }
+    // the booking-api function already saved the alert, texted and emailed the host
     pb.status = "confirmed";
     pb.confirmedAppointment = appt;
     render();
