@@ -62,6 +62,14 @@ Deno.serve(async (req: Request) => {
   try {
     const payload = await req.json();
     const originalRecipient: string = payload.OriginalRecipient || payload.To || "";
+    // Declan's separate 62 app (Joe 2026-10-12): mail sent to <this inbound address>+62@... belongs to that app, not to a lead.
+    // It is handed straight to the app's own inbound function and is NOT filed in the lending CRM.
+    if ((extractPlusTag(originalRecipient) || "").toLowerCase() === "62") {
+      const target = Deno.env.get("APP62_INBOUND_URL");
+      if (!target) return new Response("62 forwarding not configured", { status: 200 });
+      const fr = await fetch(target, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => null);
+      return new Response(fr && fr.ok ? "forwarded" : "forward failed", { status: fr && fr.ok ? 200 : 502 });
+    }
     const leadId = extractPlusTag(originalRecipient);
     const fromAddress: string = payload.From || (payload.FromFull && payload.FromFull.Email) || "";
     const subject: string = payload.Subject || "(no subject)";
