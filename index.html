@@ -13440,7 +13440,7 @@ function bouncedLeadRows(sinceISO){
     (l.callAttempts || []).forEach(function(a){
       var m2 = /^Dialer call to (.+?) went unanswered before reaching/.exec(a.notes || "");
       if (m2) mine.push({ type:"ring", lead:l, whoId:bounceUserIdByName(m2[1]), whoName:m2[1], at:a.at || a.date, detail:"The call rang " + m2[1] + "'s phone and nobody picked up" });
-      var m3 = /^Inbound call from (.+?) was not answered by (.+?) —/.exec(a.notes || "");
+      var m3 = /^Inbound call from (.+?) was not answered by (.+?) \(went to voicemail\)/.exec(a.notes || "");
       if (m3) mine.push({ type:"callback", lead:l, whoId:a.by || bounceUserIdByName(m3[2]), whoName:m3[2], at:a.at || a.date, detail:"The lead called back and " + m3[2] + " didn't answer" });
     });
     // a ring miss that was then passed on is one event, not two

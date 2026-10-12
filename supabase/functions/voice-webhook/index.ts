@@ -43,7 +43,7 @@
 // webhook event knows what stage the call is in. call_session_id stays
 // constant across a transfer (Telnyx docs: it correlates all legs of one
 // call flow), so it's what call outcomes get logged against.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -690,7 +690,7 @@ Deno.serve(async (req: Request) => {
           // staffMissed keeps it from counting as one of their calls.
           if (state.leadId) await logCallOutcome({
             leadId: state.leadId, staffId: state.staffId, sessionId, outcome: "no-answer", staffMissed: true,
-            note: "Inbound call from " + (state.callerNumber || "the lead") + " was not answered by " + (state.staffName || "the assigned loan officer") + " — went to voicemail",
+            note: "Inbound call from " + (state.callerNumber || "the lead") + " was not answered by " + (state.staffName || "the assigned loan officer") + " (went to voicemail)",
           });
           await startVoicemail(state.originalCallControlId || callControlId,
             "You've reached " + (state.staffName || "your loan officer") + " at Bridgepoint Lending. Please leave your name, number, and a brief message after the tone.",
