@@ -85,7 +85,6 @@ Deno.serve(async () => {
   const callsByUser: Record<string, number> = {};
   (leads || []).forEach((l) => {
     const assignedTo = l.assigned_to as string | null;
-    if (!assignedTo) return;
     const attempts = Array.isArray(l.call_attempts) ? (l.call_attempts as Array<Record<string, unknown>>) : [];
     // Matches index.html's own callsMadeToday(): excludes quick-text
     // "attempts" (outcome:"texted" isn't a real call), and uses the
@@ -94,11 +93,15 @@ Deno.serve(async () => {
     // morning stops counting the moment the lead advances past cadence
     // stages later the same day, silently diverging from what the LO sees
     // in their own dashboard. Found 2026-09-24.
-    const todays = attempts.filter((a) => {
-      if (a.date !== todayUtc || a.outcome === "texted") return false;
-      return a.newBusiness === undefined ? isNewBusinessLead(l) : !!a.newBusiness;
-    }).length;
-    if (todays) callsByUser[assignedTo] = (callsByUser[assignedTo] || 0) + todays;
+    // Joe 10/10: credit follows whoever made the call (a.by, stamped by the phone system), exactly like the
+    // dashboard's callsMadeToday(); older calls with no "by" fall back to the lead's assigned LO. An LO's own
+    // missed ring is not a call.
+    attempts.forEach((a) => {
+      if (a.date !== todayUtc || a.outcome === "texted" || a.staffMissed || /went unanswered before reaching/i.test(String(a.notes || ""))) return;
+      const counts = a.newBusiness === undefined ? isNewBusinessLead(l) : !!a.newBusiness;
+      const who = (a.by as string | undefined) || assignedTo;
+      if (counts && who) callsByUser[who] = (callsByUser[who] || 0) + 1;
+    });
   });
 
   const sent: Array<Record<string, unknown>> = [];
