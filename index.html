@@ -5587,6 +5587,7 @@ function rowToLead(r){
     commitmentFeeRefundable: !!r.commitment_fee_refundable,
     guidelineOverrideApproved: !!r.guideline_override_approved, guidelineOverrideNote: r.guideline_override_note || null,
     pendingDecision: r.pending_decision || null,
+    loDialedAt: r.lo_dialed_at || null, // read-only here (set by the dialer); never written back from the app
     fundedDate: r.funded_date || null, payoffDate: r.payoff_date || null, capitalSource: r.capital_source || null, servicer: r.servicer || null, maturityDate: r.maturity_date || null, noteDate: r.note_date || null
   };
 }
@@ -11014,6 +11015,7 @@ function renderShell(){
       '<nav class="nav">' +
         '<button class="nav-item" type="button" data-action="open-quick-dial"><span class="ic">📞</span><span>Dialer</span></button>' +
         navItem("today", isProcessor() ? "📋" : "☎", "Today", isProcessor() ? null : (callsDue||null)) +
+        (!isProcessor() ? navItem("calllog","📒","Call Log") : "") +
         (isOwner() ? navItem("processing","📋","Processing") : "") +
         ((isOwner() || !isProcessor()) && navVisible("pricer") ? navItem("pricer","🧮","Pricer") : "") +
         (navVisible("pipeline") ? navItem("pipeline","▤","Pipeline") : "") +
@@ -11064,6 +11066,7 @@ function renderShell(){
 
   var body = "";
   if (ui.view === "today") body = renderToday();
+  else if (ui.view === "calllog") body = isProcessor() ? renderToday() : renderCallLog();
   else if (ui.view === "pricer") body = renderStandalonePricer();
   else if (ui.view === "processing") body = topbar("Processing", "Erika's desk — every in-process file, what's in, and the one thing that moves it.") + '<div class="content">' + renderProcessingBoard() + '</div>';
   else if (ui.view === "pipeline") body = renderPipeline();
@@ -13388,6 +13391,69 @@ function saveCapitalFields(leadId, fd){
   lead.activity = lead.activity || [];
   lead.activity.push({ date:todayISO(), type:"system", text:"Capital details updated (funded " + (lead.fundedDate||"—") + ", source " + (lead.capitalSource||"—") + ")", author:currentUser().name });
   persist(); showToast("Saved"); render();
+}
+/* ---- Call Log (Joe 2026-10-12: "I need a call log so I can see who I called that day") ----
+   Every call placed that day, newest first: who, outcome, notes. A call dialed through the phone system whose outcome
+   was never saved (the log form was skipped) still shows up, flagged, with a button to log it. */
+function localDateStr(d){ var p = function(n){ return (n < 10 ? "0" : "") + n; }; return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()); }
+function attemptDay(a){ return a.at ? localDateStr(new Date(a.at)) : a.date; }
+function callLogData(userId, day){
+  var rows = [];
+  state.leads.forEach(function(l){
+    (l.callAttempts || []).forEach(function(a){
+      if (!isRealCallAttempt(a) || attemptDay(a) !== day) return;
+      if (userId && !callAttemptIsMine(a, l, userId)) return;
+      rows.push({ lead:l, at:a.at || null, outcome:a.outcome, notes:a.notes || "", who:a.by || l.assignedTo, logged:true });
+    });
+    if (l.loDialedAt && localDateStr(new Date(l.loDialedAt)) === day){
+      var t = Date.parse(l.loDialedAt);
+      var covered = (l.callAttempts || []).some(function(a){ var ta = a.at ? Date.parse(a.at) : NaN; return !isNaN(ta) && ta >= t - 120000 && ta <= t + 5400000 && isRealCallAttempt(a); });
+      if (!covered && (!userId || l.assignedTo === userId)) rows.push({ lead:l, at:l.loDialedAt, outcome:null, notes:"", who:l.assignedTo, logged:false });
+    }
+  });
+  rows.sort(function(a, b){ return (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0); });
+  return rows;
+}
+function renderCallLog(){
+  var me = currentUser(), day = ui.callLogDate || localDateStr(new Date());
+  var who = isOwner() ? (ui.callLogWho || me.id) : me.id;
+  var rows = callLogData(who === "all" ? null : who, day);
+  var logged = rows.filter(function(r){ return r.logged; });
+  var connected = logged.filter(function(r){ return r.outcome === "connected" || r.outcome === "callback" || r.outcome === "sent-terms"; }).length;
+  var vms = logged.filter(function(r){ return r.outcome === "left-voicemail"; }).length;
+  var unlogged = rows.length - logged.length;
+  var label = function(k){ var o = CALL_OUTCOMES.filter(function(x){ return x.key === k; })[0]; return o ? o.label : (k || ""); };
+  var badge = function(r){
+    if (!r.logged) return '<span class="badge badge-gold" title="This call went through the phone system but no outcome was saved">Dialed, no outcome saved</span>';
+    var cls = (r.outcome === "connected" || r.outcome === "callback" || r.outcome === "sent-terms") ? "badge-forest" : (r.outcome === "wrong-number" || r.outcome === "not-interested") ? "badge-rust" : "badge-neutral";
+    return '<span class="badge ' + cls + '">' + esc(label(r.outcome)) + '</span>';
+  };
+  var whoSel = isOwner() ? ('<select class="select" data-action="call-log-who" style="max-width:220px"><option value="all"' + (who === "all" ? " selected" : "") + '>Everyone</option>' +
+    state.users.filter(function(u){ return u.role !== "processor"; }).map(function(u){ return '<option value="' + esc(u.id) + '"' + (who === u.id ? " selected" : "") + '>' + esc(u.name) + '</option>'; }).join("") + '</select>') : "";
+  var controls = '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + whoSel +
+    '<button class="btn btn-sm" type="button" data-action="call-log-shift" data-n="-1">‹</button>' +
+    '<input class="input" type="date" data-action="call-log-date" value="' + esc(day) + '" style="max-width:160px">' +
+    '<button class="btn btn-sm" type="button" data-action="call-log-shift" data-n="1">›</button>' +
+    '<button class="btn btn-sm btn-ghost" type="button" data-action="call-log-shift" data-n="0">Today</button></div>';
+  var table = rows.length ? ('<div class="table-wrap"><table><thead><tr><th>Time</th><th>Who you called</th><th>Outcome</th><th>Notes</th>' + (who === "all" ? '<th>Caller</th>' : '') + '<th></th></tr></thead><tbody>' +
+    rows.map(function(r){
+      var tm = r.at ? new Date(r.at).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "—";
+      var l = r.lead;
+      return '<tr data-action="select-lead" data-lead="' + l.id + '" style="cursor:pointer"><td class="num">' + esc(tm) + '</td>' +
+        '<td><div class="cell-name">' + esc(l.name) + '</div><div class="cell-sub">' + esc([l.phone, l.loanType].filter(Boolean).join(" · ")) + '</div></td>' +
+        '<td>' + badge(r) + '</td><td>' + esc(r.notes || "") + '</td>' +
+        (who === "all" ? '<td>' + esc((userById(r.who) || {}).name || r.who || "") + '</td>' : '') +
+        '<td>' + (!r.logged ? '<button class="btn btn-sm" type="button" data-action="open-modal" data-modal="logCall" data-lead="' + l.id + '">Log it</button>' : '') + '</td></tr>';
+    }).join("") + '</tbody></table></div>') : '<div class="empty">No calls on ' + esc(fmtDate(day)) + '.</div>';
+  return topbar("Call Log", "Every call placed through the system, by day.", controls) +
+    '<div class="content">' +
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">' +
+        '<div class="panel panel-pad"><div class="stat">' + logged.length + '</div><div class="footnote">calls logged</div></div>' +
+        '<div class="panel panel-pad"><div class="stat">' + connected + '</div><div class="footnote">spoke with them</div></div>' +
+        '<div class="panel panel-pad"><div class="stat">' + vms + '</div><div class="footnote">voicemails left</div></div>' +
+        (unlogged ? '<div class="panel panel-pad"><div class="stat">' + unlogged + '</div><div class="footnote">dialed, outcome not saved</div></div>' : '') +
+      '</div>' + table +
+    '</div>';
 }
 function renderCapitalReadiness(){
   ensureCapStats();
@@ -20542,6 +20608,11 @@ appEl.addEventListener("click", function(e){
   else if (action === "wp-rec-dismiss"){ wpRecAct(t.dataset.id, "dismissed"); }
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
+  else if (action === "call-log-shift"){
+    var clBase = new Date((ui.callLogDate || localDateStr(new Date())) + "T12:00:00"), clN = parseInt(t.dataset.n, 10);
+    if (clN === 0) ui.callLogDate = null; else { clBase.setDate(clBase.getDate() + clN); ui.callLogDate = localDateStr(clBase); }
+    render();
+  }
   else if (action === "softphone-mute"){ toggleSoftphoneMute(); }
   else if (action === "softphone-drop-vm"){ dropVoicemail(); }
   else if (action === "toggle-call-script"){ toggleCallScript(); }
@@ -20894,6 +20965,10 @@ appEl.addEventListener("change", function(e){
   }
   if (action === "filter"){
     ui.leadFilter[t.dataset.key] = t.value; render();
+  } else if (action === "call-log-date"){
+    ui.callLogDate = t.value || null; render();
+  } else if (action === "call-log-who"){
+    ui.callLogWho = t.value; render();
   } else if (action === "apply-saved-view"){
     applySavedView(t.value);
   } else if (action === "filter-comm"){
