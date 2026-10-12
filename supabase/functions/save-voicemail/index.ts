@@ -24,6 +24,11 @@ async function whoFor(uid: string, t: string) {
   const { data } = await sb.from("users").select("id,name,role").eq("id", uid).maybeSingle();
   return data && data.role !== "processor" ? data : null;
 }
+const kindOf = (k: unknown) => (k === "greeting" ? "greeting" : "drop");
+const fileFor = (id: string, kind: string) => "voicemails/" + id + (kind === "greeting" ? "-greeting" : "") + ".wav";
+function greetingFor(fullName: string): string {
+  return "Hi, you've reached " + fullName + " with Bridgepoint Lending. I'm not able to take your call right now. Please leave your name, your number, and a short message after the tone, and I'll call you back as soon as I can. Thank you.";
+}
 function scriptFor(fullName: string): string {
   return "Hi, this is " + fullName + " with Bridgepoint Lending. I'm following up on the loan inquiry you sent us, and I'd love to hear about the property you're working on. " +
     "You can call or text me back any time at " + COMPANY_PHONE_SPOKEN + ". " +
@@ -37,8 +42,10 @@ Deno.serve(async (req: Request) => {
     if (req.method === "GET") {
       const who = await whoFor(url.searchParams.get("u") || "", url.searchParams.get("t") || "");
       if (!who) return json({ error: "This link isn't valid. Ask Joe for a new one." }, 403);
-      const { data: files } = await sb.storage.from("public-assets").list("voicemails", { search: who.id + ".wav" });
-      return json({ ok: true, name: who.name, script: scriptFor(who.name), hasRecording: !!(files && files.length) });
+      const kind = kindOf(url.searchParams.get("kind"));
+      const { data: files } = await sb.storage.from("public-assets").list("voicemails", { search: fileFor(who.id, kind).replace("voicemails/", "") });
+      const exact = (files || []).some((f: { name: string }) => f.name === fileFor(who.id, kind).replace("voicemails/", ""));
+      return json({ ok: true, name: who.name, kind, script: kind === "greeting" ? greetingFor(who.name) : scriptFor(who.name), hasRecording: exact });
     }
     if (req.method === "POST") {
       const body = await req.json();
@@ -49,7 +56,7 @@ Deno.serve(async (req: Request) => {
       if (raw.length < 4000 || raw.length > 3_000_000) return json({ error: "That recording is too short or too long (aim for 20-40 seconds)." }, 400);
       const head = new TextDecoder().decode(raw.slice(0, 4)), wave = new TextDecoder().decode(raw.slice(8, 12));
       if (head !== "RIFF" || wave !== "WAVE") return json({ error: "Unexpected audio format." }, 400);
-      const { error } = await sb.storage.from("public-assets").upload("voicemails/" + who.id + ".wav", raw, { contentType: "audio/wav", upsert: true, cacheControl: "0" });
+      const { error } = await sb.storage.from("public-assets").upload(fileFor(who.id, kindOf(body.kind)), raw, { contentType: "audio/wav", upsert: true, cacheControl: "0" });
       if (error) return json({ error: "Couldn't save the recording: " + error.message }, 500);
       return json({ ok: true });
     }

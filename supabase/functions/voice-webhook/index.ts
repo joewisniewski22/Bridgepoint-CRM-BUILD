@@ -75,7 +75,7 @@ type Stage =
   | "answering_inbound" | "connecting_staff"                  // inbound, matched lead
   | "ivr_lang_menu" | "ivr_main_menu" | "ivr_directory_menu"   // inbound, unmatched caller
   | "ivr_single_connect" | "ivr_ring_all_leg"
-  | "voicemail_recording";
+  | "voicemail_greeting" | "voicemail_recording";
 
 interface CallState {
   v: 1;
@@ -171,7 +171,25 @@ function gather(callControlId: string, text: string, validDigits: string, state:
 // on the CALLER's own leg (still ours to control since every dial-out
 // used timeout_secs rather than letting Telnyx just kill the call) and
 // starts recording. call.recording.saved (below) does the notifying.
+// Joe 2026-10-12: each person can record their own greeting (/vm/?kind=greeting link, saved as voicemails/<id>-greeting.wav).
+// When one exists, the caller hears it in that person's own voice instead of the spoken (text-to-speech) greeting; recording
+// starts when it finishes playing (call.playback.ended below). No recording yet = the spoken greeting exactly as before.
+async function customGreetingUrl(vmTarget: CallState["vmTarget"], lang: "en" | "es"): Promise<string | null> {
+  if (lang !== "en" || !vmTarget) return null;
+  const who = vmTarget.kind === "staff" ? vmTarget.staffId : vmTarget.kind === "owner" ? "owner" : null;
+  if (!who) return null;
+  const url = SUPABASE_URL + "/storage/v1/object/public/public-assets/voicemails/" + who + "-greeting.wav";
+  const head = await fetch(url, { method: "HEAD" }).catch(() => null);
+  return head && head.ok ? url : null;
+}
 async function startVoicemail(callControlId: string, greeting: string, lang: "en" | "es", vmTarget: CallState["vmTarget"], leadId: string | null | undefined, callerNumber: string | undefined) {
+  const custom = await customGreetingUrl(vmTarget, lang);
+  if (custom) {
+    const gState: CallState = { v: 1, stage: "voicemail_greeting", leadId: leadId || null, callerNumber, vmTarget };
+    const r = await telnyxAction(callControlId, "playback_start", { audio_url: custom, client_state: encodeState(gState) });
+    if (r && (r as any).ok !== false) return;
+    console.error("voice-webhook: custom greeting playback failed, using the spoken greeting");
+  }
   await speak(callControlId, greeting, lang);
   const state: CallState = {
     v: 1, stage: "voicemail_recording", leadId: leadId || null, callerNumber, vmTarget,
@@ -561,6 +579,16 @@ Deno.serve(async (req: Request) => {
           }
         }
         await startVoicemail(callControlId, "Please leave your name, number, and a brief message after the tone.", "en", { kind: "owner", label: "Company directory (invalid selection)" }, null, state.callerNumber);
+      }
+      return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+    }
+
+    if (eventType === "call.playback.ended" || eventType === "call.playback.failed") {
+      const pState = decodeState(payload);
+      if (pState && pState.stage === "voicemail_greeting") {
+        const ccid = payload.call_control_id as string;
+        const rState: CallState = { v: 1, stage: "voicemail_recording", leadId: pState.leadId || null, callerNumber: pState.callerNumber, vmTarget: pState.vmTarget };
+        await telnyxAction(ccid, "record_start", { format: "mp3", channels: "single", play_beep: true, timeout_secs: 120, transcription: true, client_state: encodeState(rState) });
       }
       return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
     }

@@ -1605,18 +1605,20 @@ function absorbCookies(jar: Record<string, string>, res: Response) {
 async function rcnFetch(jar: Record<string, string>, url: string, init: RequestInit = {}, hops = 8): Promise<{ res: Response; body: string; url: string }> {
   let cur = url;
   let opts: RequestInit = init;
+  const chain: string[] = [];
   for (let i = 0; i < hops; i++) {
     const res = await fetch(cur, { ...opts, redirect: "manual", headers: { "User-Agent": RCN_UA, "Accept": "text/html,application/json,*/*", ...(opts.headers || {}), "Cookie": cookieHeader(jar) } });
     absorbCookies(jar, res);
     const loc = res.headers.get("location");
     if (res.status >= 300 && res.status < 400 && loc) {
+      chain.push(res.status + " " + new URL(cur).pathname + " -> " + (() => { try { const u = new URL(loc, cur); return u.host.split(".")[0] + u.pathname; } catch (_) { return loc; } })());
       cur = new URL(loc, cur).toString();
       opts = { method: "GET" };
       continue;
     }
     return { res, body: await res.text(), url: cur };
   }
-  throw new Error("RCN redirect loop");
+  throw new Error("RCN redirect loop [" + chain.join(" | ") + "]");
 }
 async function rcnLoadStoredSession(): Promise<RcnSession | null> {
   if (!SUPABASE_URL_RCN || !SERVICE_KEY_RCN) return null;
@@ -1624,6 +1626,10 @@ async function rcnLoadStoredSession(): Promise<RcnSession | null> {
   if (!r || !r.ok) return null;
   const rows = await r.json().catch(() => []);
   return rows && rows[0] && rows[0].session ? rows[0].session as RcnSession : null;
+}
+async function rcnClearStoredSession() {
+  if (!SUPABASE_URL_RCN || !SERVICE_KEY_RCN) return;
+  await fetch(SUPABASE_URL_RCN + "/rest/v1/lender_sessions?lender=eq.rcn", { method: "DELETE", headers: { apikey: SERVICE_KEY_RCN, Authorization: "Bearer " + SERVICE_KEY_RCN } }).catch(() => null);
 }
 async function rcnStoreSession(sess: RcnSession) {
   if (!SUPABASE_URL_RCN || !SERVICE_KEY_RCN) return;
@@ -1688,15 +1694,28 @@ function formEncode(obj: Record<string, unknown>, prefix = "", out = new URLSear
 async function rcnCalculate(data: Record<string, unknown>): Promise<any> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const sess = await rcnSession(attempt > 0);
-    const r = await rcnFetch(sess.cookies, RCN_BROKER + "/pricing-tool/loan-calculator/calculate-loan?_=" + Math.random(), {
+    // Joe 10/12: a dead (logged-out) session makes RCN bounce us to /members/login/logout and then the home page. That used to
+    // throw "redirect loop" out of here and skip the re-login below, so pricing stayed on the estimate forever. Treat it as an
+    // expired session instead: drop the saved one, log in fresh, and try again.
+    let r: { res: Response; body: string; url: string };
+    try { r = await rcnFetch(sess.cookies, RCN_BROKER + "/pricing-tool/loan-calculator/calculate-loan?_=" + Math.random(), {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "X-Requested-With": "XMLHttpRequest", "X-CSRF-Token": sess.csrf, "Accept": "application/json", "Referer": RCN_BROKER + "/pricing-tool/loan-calculator" },
       body: formEncode(data).toString(),
-    }, 2);
+    }, 2); }
+    catch (e) {
+      if (/redirect loop/i.test(String((e as Error).message || e))) {
+        rcnSessionMemo = null; await rcnClearStoredSession();
+        if (attempt > 0) throw new Error("session rejected right after a fresh login: " + (e as Error).message + " (csrf length " + (sess.csrf || "").length + ", cookies " + Object.keys(sess.cookies).join("/") + ")");
+        continue;
+      }
+      throw e;
+    }
     let j: any = null;
     try { j = JSON.parse(r.body); } catch (_) { j = null; }
     if (j && j.status) return j;
-    rcnSessionMemo = null; // got a login page instead of JSON: session expired, log in again
+    if (attempt > 0) throw new Error("RCN answered the pricing request with HTTP " + r.res.status + " at " + new URL(r.url).pathname + ": " + r.body.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 220) + " (csrf length " + (sess.csrf || "").length + ")");
+    rcnSessionMemo = null; await rcnClearStoredSession(); // got a login page instead of JSON: session expired, log in again
   }
   throw new Error("session_expired");
 }

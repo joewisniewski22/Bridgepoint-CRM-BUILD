@@ -58,17 +58,19 @@ audio{width:100%}
 (function(){
 "use strict";
 var API = "https://idzkigmvovehjpapatxv.supabase.co/functions/v1/save-voicemail";
-var q = new URLSearchParams(location.search), U = q.get("u") || "", T = q.get("t") || "";
+var q = new URLSearchParams(location.search), U = q.get("u") || "", T = q.get("t") || "", KIND = q.get("kind") === "greeting" ? "greeting" : "drop";
 var $ = function(id){ return document.getElementById(id); };
 var rec = null, chunks = [], stream = null, tick = null, t0 = 0, wavBlob = null;
 
 function say(html, cls){ $("msg").innerHTML = '<div class="' + (cls || "") + '">' + html + '</div>'; }
 function fmt(s){ return Math.floor(s/60) + ":" + (s%60 < 10 ? "0" : "") + (s%60); }
 
-fetch(API + "?u=" + encodeURIComponent(U) + "&t=" + encodeURIComponent(T)).then(function(r){ return r.json(); }).then(function(d){
+fetch(API + "?u=" + encodeURIComponent(U) + "&t=" + encodeURIComponent(T) + "&kind=" + KIND).then(function(r){ return r.json(); }).then(function(d){
   if (!d.ok){ $("sub").textContent = ""; say(d.error || "This link isn't valid.", "err"); return; }
-  $("title").textContent = "Hi " + d.name.split(" ")[0] + ", record your voicemail";
-  $("sub").textContent = d.hasRecording ? "You already have a voicemail saved. Recording again replaces it." : "Takes about a minute. Once it's saved, you'll get a Drop Voicemail button on your CRM call screen.";
+  $("title").textContent = "Hi " + d.name.split(" ")[0] + (KIND === "greeting" ? ", record your greeting" : ", record your voicemail");
+  $("sub").textContent = KIND === "greeting"
+    ? (d.hasRecording ? "You already have a greeting saved. Recording again replaces it." : "This is what a lead hears when they call you back and you can't pick up. Takes about a minute.")
+    : (d.hasRecording ? "You already have a voicemail saved. Recording again replaces it." : "Takes about a minute. Once it's saved, you'll get a Drop Voicemail button on your CRM call screen.");
   $("script").textContent = d.script;
   ["scriptCard","tips","recCard"].forEach(function(id){ $(id).hidden = false; });
 }).catch(function(){ $("sub").textContent = ""; say("Couldn't load. Check your connection and refresh.", "err"); });
@@ -106,10 +108,10 @@ $("saveBtn").addEventListener("click", function(){
   $("saveBtn").disabled = true; $("saveBtn").textContent = "Saving…";
   var fr = new FileReader();
   fr.onload = function(){
-    fetch(API, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ u:U, t:T, wav:String(fr.result).split(",")[1] }) })
+    fetch(API, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ u:U, t:T, kind:KIND, wav:String(fr.result).split(",")[1] }) })
       .then(function(r){ return r.json(); }).then(function(d){
-        if (d.ok){ $("reviewCard").hidden = true; say("Saved. Your voicemail is ready. Open the CRM and you'll see Drop Voicemail on your call screen.", "ok"); }
-        else { $("saveBtn").disabled = false; $("saveBtn").textContent = "Save as my voicemail"; say(d.error || "Couldn't save. Try again.", "err"); }
+        if (d.ok){ $("reviewCard").hidden = true; say(KIND === "greeting" ? "Saved. Leads who call you back and reach voicemail will now hear you." : "Saved. Your voicemail is ready. Open the CRM and you'll see Drop Voicemail on your call screen.", "ok"); }
+        else { $("saveBtn").disabled = false; $("saveBtn").textContent = "Save"; say(d.error || "Couldn't save. Try again.", "err"); }
       }).catch(function(){ $("saveBtn").disabled = false; $("saveBtn").textContent = "Save as my voicemail"; say("Couldn't save. Check your connection and try again.", "err"); });
   };
   fr.readAsDataURL(wavBlob);
