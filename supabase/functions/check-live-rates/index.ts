@@ -1912,7 +1912,10 @@ function rcnRtlModel(s: Scenario, assumptions: string[]): LenderResult {
   total = Math.floor(total / 500) * 500;
   const pts = Math.max(0.5, 1500 / total * 100);
   rate = Math.round(rate * 100) / 100;
-  assumptions.push("RCN live connection isn't set up yet — this is Bridgepoint's estimate of RCN's rehab pricing (" + "measured 2026-10-06" + "), 12-month term.");
+  const liveFailed = assumptions.some((a) => a.startsWith("RCN live pricing failed"));
+  assumptions.push(liveFailed
+    ? "RCN's live pricing tool is returning an error right now (RCN's own calculator fails too, 10/12), so this is Bridgepoint's ESTIMATE of RCN's rehab pricing (measured 2026-10-06), 12-month term. Confirm with RCN before quoting."
+    : "RCN live connection isn't set up yet — this is Bridgepoint's estimate of RCN's rehab pricing (" + "measured 2026-10-06" + "), 12-month term.");
   return { lender: L, eligible: true, source: "model", options: [{ program: "RCN " + pts.toFixed(2) + " pts (est.)", rate, price: 100 + pts }, { program: "RCN 1.00 pt (est.)", rate: Math.round((rate - (et === 0 ? 0.5 : 0.75)) * 100) / 100, price: 101 }], loanAmountUsed: total, maxLoanAmount: total, assumptions, fees: { lenderFee: 1995 } };
 }
 
