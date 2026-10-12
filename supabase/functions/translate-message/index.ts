@@ -1,3 +1,4 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 // Translates a single message for the live text-conversation language
 // feature: an LO writes in English and it's sent to the client in their
 // selected language (see index.html sendTextViaQuo), or an inbound reply
@@ -22,6 +23,18 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), { status: 405, headers: CORS_HEADERS });
   }
 
+  // Staff or server jobs only (10/12/2026): this spends AI credits, so anonymous callers are refused.
+  {
+    const token = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+    const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    let ok = token === SERVICE_KEY;
+    if (!ok && token) {
+      const svc = createClient(Deno.env.get("SUPABASE_URL")!, SERVICE_KEY);
+      const { data: au } = await svc.auth.getUser(token).catch(() => ({ data: null })) as any;
+      if (au && au.user) { const { data: s } = await svc.from("users").select("id").eq("auth_id", au.user.id).maybeSingle(); ok = !!s; }
+    }
+    if (!ok) return new Response(JSON.stringify({ error: "not_authorized" }), { status: 401, headers: CORS_HEADERS });
+  }
   try {
     const body = await req.json();
     const text: string = (body.text || "").trim();

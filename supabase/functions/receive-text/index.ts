@@ -2,7 +2,7 @@
 // (message.received = a client/staff text arriving; message.finalized = the
 // carrier's final verdict on something we sent). Replaced the Quo webhook
 // 2026-09-21. A failed delivery is logged onto the lead so it isn't silent.
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -71,6 +71,96 @@ async function forwardToOwner(sb: ReturnType<typeof createClient>, from: string,
   } catch (e) {
     console.error("receive-text: forward to owner failed", String(e));
   }
+}
+
+// Reply-by-text (Joe 2026-10-12): an LO answers a client by replying to the alert text. Safety rails, because on
+// 2026-09-21 a stray staff text landed in a client's chat: only a reply within 2 hours of a client-text alert counts;
+// it goes to that alert's client; if two different clients texted within 10 minutes of each other nothing is sent
+// unless the reply starts with the client's first name ("Maria: ..."); every send is confirmed back to the LO.
+const REPLY_WINDOW_MS = 2 * 60 * 60 * 1000;
+const AMBIGUOUS_MS = 10 * 60 * 1000;
+const LANG_NAMES: Record<string, string> = { es: "Spanish", vi: "Vietnamese" };
+const firstNameOf = (n: string) => String(n || "").trim().split(/\s+/)[0] || "";
+
+async function textStaff(phone: string | null | undefined, text: string) {
+  if (!phone) return;
+  await fetch(SUPABASE_URL + "/functions/v1/send-text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+    body: JSON.stringify({ to: phone, text, fromName: "Bridgepoint CRM" }),
+  }).catch(() => {});
+}
+
+async function routeStaffReplyToClient(sb: ReturnType<typeof createClient>, staff: { id: string; name: string; phone: string }, rawText: string): Promise<boolean> {
+  const text = (rawText || "").trim();
+  if (!text || text.length > 600) return false;
+  if (/^(stop|stopall|unsubscribe|cancel|end|quit|start|unstop|help)$/i.test(text)) return false;
+  const since = new Date(Date.now() - REPLY_WINDOW_MS).toISOString();
+  const { data: ctx } = await sb.from("staff_reply_context").select("lead_id,lead_name,created_at")
+    .eq("staff_id", staff.id).gte("created_at", since).order("created_at", { ascending: false }).limit(20);
+  if (!ctx || !ctx.length) return false;
+
+  const distinct: Array<{ lead_id: string; lead_name: string; created_at: string }> = [];
+  for (const r of ctx as Array<{ lead_id: string; lead_name: string; created_at: string }>) {
+    if (!distinct.some((d) => d.lead_id === r.lead_id)) distinct.push(r);
+  }
+  let target = null as null | { lead_id: string; lead_name: string; created_at: string };
+  let body = text;
+  const pm = text.match(/^([^\s:,\-]{2,20})\s*[:,\-]\s*([\s\S]+)$/);
+  if (pm) {
+    const hit = distinct.find((d) => firstNameOf(d.lead_name).toLowerCase() === pm[1].toLowerCase());
+    if (hit) { target = hit; body = pm[2].trim(); }
+  }
+  if (!target) {
+    if (distinct.length > 1 && new Date(distinct[0].created_at).getTime() - new Date(distinct[1].created_at).getTime() < AMBIGUOUS_MS) {
+      const names = distinct.slice(0, 3).map((d) => firstNameOf(d.lead_name)).join(", ");
+      await textStaff(staff.phone, "Two clients texted you close together (" + names + "). Nothing was sent. Start your reply with the client's first name, like \"" +
+        firstNameOf(distinct[0].lead_name) + ": your message\", or reply from the CRM.");
+      return true;
+    }
+    target = distinct[0];
+  }
+  if (!body) return false;
+
+  const { data: lead } = await sb.from("leads").select("id,name,phone,assigned_to,sms_opt_out,preferred_language").eq("id", target.lead_id).maybeSingle();
+  if (!lead || !lead.phone) { await textStaff(staff.phone, "Couldn't send: no phone number on file for " + target.lead_name + "."); return true; }
+  if (lead.sms_opt_out) { await textStaff(staff.phone, "Not sent: " + lead.name + " opted out of texts."); return true; }
+  if (lead.assigned_to !== staff.id && staff.id !== "owner") { await textStaff(staff.phone, "Not sent: " + lead.name + " is now assigned to someone else."); return true; }
+
+  let outText = body;
+  let note = "";
+  const langName = lead.preferred_language && lead.preferred_language !== "en" ? LANG_NAMES[lead.preferred_language as string] : null;
+  if (langName) {
+    const tr = await fetch(SUPABASE_URL + "/functions/v1/translate-message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+      body: JSON.stringify({ text: body, targetLanguage: langName }),
+    }).then((r) => r.json()).catch(() => null);
+    if (tr && tr.ok && tr.translated) { outText = tr.translated; note = " (translated to " + langName + ")"; }
+    else note = " (sent in English, translation was unavailable)";
+  }
+
+  const send = await fetch(SUPABASE_URL + "/functions/v1/send-text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+    body: JSON.stringify({ leadId: lead.id, to: lead.phone, text: outText, fromName: staff.name }),
+  }).then((r) => r.json()).catch(() => null);
+  if (!send || !send.ok) { await textStaff(staff.phone, "Couldn't send your reply to " + lead.name + ". Open the CRM and send it there."); return true; }
+
+  // same bookkeeping as a text sent from the CRM; a human taking over also stands the AI down
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: fresh } = await sb.from("leads").select("call_attempts,activity,ai_stage,automation_paused").eq("id", lead.id).single();
+  const attempts = ((fresh && fresh.call_attempts) as unknown[]) || [];
+  attempts.push({ date: today, at: new Date().toISOString(), outcome: "texted", notes: body, by: staff.id });
+  const upd: Record<string, unknown> = { call_attempts: attempts, last_contact_at: today };
+  if (fresh && fresh.ai_stage && !fresh.automation_paused) {
+    const act = ((fresh.activity as unknown[]) || []).concat([{ date: today, type: "system", text: "AI automation paused - " + staff.name + " replied by text", author: "System" }]);
+    upd.automation_paused = true;
+    upd.activity = act;
+  }
+  await sb.from("leads").update(upd).eq("id", lead.id);
+  await textStaff(staff.phone, "Sent to " + lead.name + note + ": \"" + body.slice(0, 70) + (body.length > 70 ? "..." : "") + "\"");
+  return true;
 }
 
 Deno.serve(async (req: Request) => {
@@ -192,7 +282,9 @@ Deno.serve(async (req: Request) => {
           const link = CRM_URL + "?lead=" + match.id;
           const isHotAiEngagement = !!match.ai_stage;
           const alertText = (isHotAiEngagement ? "🚨 URGENT HOT LEAD — " : "") +
-            (match.name as string) + " replied: \"" + msg.text.slice(0, 100) + "\" — " + link;
+            (match.name as string) + " replied: \"" + msg.text.slice(0, 100) + "\" - reply to this text to answer them, or open: " + link;
+          // remember which client this alert was about, so the LO's text reply can go to them (see routeStaffReplyToClient)
+          if (lo.phone) await sb.from("staff_reply_context").insert({ staff_id: match.assigned_to, lead_id: match.id, lead_name: match.name });
           if (lo.phone) {
             fetch(SUPABASE_URL + "/functions/v1/send-text", {
               method: "POST",
@@ -305,7 +397,11 @@ Deno.serve(async (req: Request) => {
           }).catch(() => {});
         }
       } else {
-        // A text from a staff member's own phone. It is NOT posted into any
+        // Reply-by-text first (2026-10-12): if this is an answer to a client-text alert sent within the last 2 hours, it goes to that client.
+        if (await routeStaffReplyToClient(sb, staffMatch as { id: string; name: string; phone: string }, msg.text)) {
+          return new Response(JSON.stringify({ ok: true, routedToClient: true }), { headers: CORS_HEADERS });
+        }
+        // A text from a staff member's own phone. Otherwise it is NOT posted into any
         // borrower's portal chat anymore: staff texts now arrive on the same
         // company number as team announcements, so any reply ("sounds good",
         // "got it") could be mistaken for a message to a client -- a simulated
