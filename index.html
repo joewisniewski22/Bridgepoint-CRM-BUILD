@@ -2722,6 +2722,7 @@ var CALL_OUTCOMES = [
   { key:"no-answer", label:"No answer" },
   { key:"left-voicemail", label:"Left voicemail" },
   { key:"connected", label:"Connected" },
+  { key:"sent-terms", label:"Sent terms" },
   { key:"callback", label:"Requested call back" },
   { key:"not-interested", label:"Not interested" },
   { key:"wrong-number", label:"Wrong number" }
@@ -3828,7 +3829,7 @@ function computeQueueForLeads(leads, userId, today){
   leads.forEach(function(lead){
     if (lead.status==="active" && CADENCE_STAGES.indexOf(lead.stage) !== -1){
       var attempts = lead.callAttempts || [];
-      var connected = attempts.some(function(a){ return a.outcome==="connected" || a.outcome==="callback"; });
+      var connected = attempts.some(function(a){ return a.outcome==="connected" || a.outcome==="callback" || a.outcome==="sent-terms"; });
       // A client who asked to be called back later isn't chased in the
       // meantime -- whether that's a future date (Belinda on deployment
       // until November) or later THIS SAME day (Mike Bodhaine asked for
@@ -6371,7 +6372,12 @@ function logCall(leadId, outcome, notes, callback){
   lead.lastContactAt = d;
   // "Requested call back" means a real person answered and asked to be called
   // again, so it counts as contact everywhere "connected" does.
-  if (outcome === "connected" || outcome === "callback"){
+  if (outcome === "sent-terms"){
+    // Joe 10/12: "Sent terms" is a call outcome that also marks the lead as terms-sent, same as the Send Term Sheet button.
+    lead.termsheetSentAt = d;
+    lead.activity.push({ date:d, type:"system", text:"Terms sent (logged from a call)", author: currentUser().name });
+  }
+  if (outcome === "connected" || outcome === "callback" || outcome === "sent-terms"){
     if (lead.status==="cold" || lead.status==="lost"){
       lead.status = "active";
       lead.stage = "qualifying";
@@ -6388,7 +6394,7 @@ function logCall(leadId, outcome, notes, callback){
       notifyUser(currentUser().id, leadId, "note", "Automation paused for " + lead.name + " since you just connected — make sure to follow up yourself as planned.", { skipText:true });
     }
   } else {
-    var unanswered = lead.callAttempts.filter(function(a){ return a.outcome!=="connected" && a.outcome!=="callback"; }).length;
+    var unanswered = lead.callAttempts.filter(function(a){ return a.outcome!=="connected" && a.outcome!=="callback" && a.outcome!=="sent-terms"; }).length;
     var callbackPending = !!(lead.nextFollowUp && lead.nextFollowUp > d);
     if (unanswered >= CADENCE_MAX && lead.status==="active" && !callbackPending){
       lead.status = "cold";
@@ -6407,7 +6413,7 @@ function logCall(leadId, outcome, notes, callback){
     lead.nextFollowUpAt = new Date(callback.date + "T" + (callback.time || "09:00") + ":00").toISOString();
     lead.nextFollowUpNote = "Call back requested" + (notes ? (": " + notes.slice(0, 140)) : "");
     lead.activity.push({ date:d, type:"system", text:"Call back scheduled for " + fmtDate(callback.date) + " at " + fmtClock(callback.time || "09:00"), author: currentUser().name });
-  } else if (lead.nextFollowUp && lead.nextFollowUp <= d && ["connected","not-interested","wrong-number"].indexOf(outcome) !== -1){
+  } else if (lead.nextFollowUp && lead.nextFollowUp <= d && ["connected","sent-terms","not-interested","wrong-number"].indexOf(outcome) !== -1){
     lead.nextFollowUp = null;
     lead.nextFollowUpAt = null;
     lead.nextFollowUpNote = null;
@@ -6425,7 +6431,7 @@ function logCall(leadId, outcome, notes, callback){
     lead.nextFollowUp = addDaysISO(d, RELATIONSHIP_CALL_CADENCE_DAYS);
     lead.nextFollowUpAt = null;
     lead.nextFollowUpNote = "Relationship / referral check-in call";
-  } else if ((lead.status === "cold" || lead.status === "lost") && outcome !== "connected" && outcome !== "callback"){
+  } else if ((lead.status === "cold" || lead.status === "lost") && outcome !== "connected" && outcome !== "callback" && outcome !== "sent-terms"){
     lead.nextFollowUp = addDaysISO(d, WINBACK_POOL_RETRY_DAYS);
     lead.nextFollowUpNote = "Win-back re-attempt";
   }
@@ -7454,7 +7460,7 @@ function placeSoftphoneCall(leadId, displayName, e164){
   // hangup and logging, the dialer moves to the next lead by itself.
   var fromDialer = !!(ui.dialer && ui.modal && ui.modal.type === "dialer");
   ui.softphoneCall = { leadId: leadId||null, leadName: displayName, phone: e164, state: "new", muted:false, fromDialer: fromDialer };
-  ui.callNotes = "";
+  ui.callNotes = ""; ui.pendingOutcome = null; loadMyVoicemail();
   primeRingback(); // must be created inside this click gesture or the browser blocks audio
   ui.modal ={ type:"callDisposition", leadId: leadId||null, leadName: displayName, phone: e164, fromDialer: fromDialer };
   render();
@@ -7507,6 +7513,100 @@ function toggleSoftphoneMute(){
   if (ui.softphoneCall.muted){ telnyxActiveCall.unmuteAudio(); ui.softphoneCall.muted = false; }
   else { telnyxActiveCall.muteAudio(); ui.softphoneCall.muted = true; }
   render();
+}
+/* ---- Call script on the call screen + one-click voicemail drop (Joe 2026-10-12) ----
+   The script follows the lead (name, loan type) and the person calling. It starts open for Theresa (new to calling)
+   and closed for everyone else; each person’s choice is remembered. "Drop voicemail" plays that person’s own
+   recorded voicemail (recorded from the link they were texted, saved by the save-voicemail function) straight into
+   the live softphone call by swapping the microphone for the recording, then hangs up and offers to log
+   "Left voicemail". */
+var COMPANY_PHONE_DISPLAY = "(850) 279-8588";
+function callScriptOpen(){
+  var me = currentUser(), v = null;
+  try { v = localStorage.getItem("bp_call_script_open_" + me.id); } catch(e){}
+  if (v === "1") return true;
+  if (v === "0") return false;
+  return me.id === "lo-theresa";
+}
+function toggleCallScript(){
+  var me = currentUser();
+  try { localStorage.setItem("bp_call_script_open_" + me.id, callScriptOpen() ? "0" : "1"); } catch(e){}
+  render();
+}
+function callScriptHTML(lead){
+  var me = currentUser(), meFirst = String(me.name || "").split(" ")[0] || "your loan officer";
+  var first = lead ? String(lead.name || "").split(" ")[0] : "";
+  if (!first || /^unknown$/i.test(first)) first = "there";
+  var lt = lead && lead.loanType ? lead.loanType : "loan";
+  var open = callScriptOpen();
+  var head = '<div style="display:flex;justify-content:space-between;align-items:center"><label class="footnote" style="font-weight:600">Call script</label>' +
+    '<button class="btn btn-sm btn-ghost" type="button" data-action="toggle-call-script">' + (open ? "Hide" : "Show script") + '</button></div>';
+  if (!open) return head;
+  function say(t){ return '<div style="background:var(--surface-2);border-left:3px solid var(--c-forest, #2d6a4f);padding:6px 10px;border-radius:6px;margin:4px 0;font-style:italic">“' + t + '”</div>'; }
+  function sec(title, body, openIt){ return '<details' + (openIt ? ' open' : '') + ' style="margin:4px 0"><summary style="cursor:pointer;font-weight:700">' + title + '</summary><div style="padding:4px 2px 6px;font-size:.88rem;line-height:1.45">' + body + '</div></details>'; }
+  var s = '';
+  s += sec("1. Open (say this first)",
+    say("Hi " + esc(first) + ", it’s " + esc(meFirst) + " with Bridgepoint Lending. You reached out about a " + esc(lt) + " loan. Did I catch you at an okay time?") +
+    '<div>• <b>Yes</b> → go to the questions.</div><div>• <b>Busy</b> → ' + 'say: “No problem. What’s a better time today or tomorrow?” Then log <i>Requested call back</i> with the time.</div>' +
+    '<div class="footnote" style="padding:4px 0 0">Smile. Slow down. They asked us to call.</div>', true);
+  s += sec("2. Questions (get the deal in two minutes)",
+    '<div>1. What’s the property and where is it?</div>' +
+    '<div>2. Buying it or refinancing?</div>' +
+    '<div>3. Purchase price, or what’s it worth today?</div>' +
+    '<div>4. Fixing it up? How much of a rehab? <i>(rental: is it leased, and for how much?)</i></div>' +
+    '<div>5. When do you need to close?</div>' +
+    '<div>6. How many deals have you done in the last three years?</div>' +
+    '<div>7. Roughly where’s your credit? Over 680?</div>' +
+    '<div>8. Will it close in an LLC?</div>' +
+    '<div class="footnote" style="padding:4px 0 0">Investment property only. Not a home they live in. <b>Don’t quote a rate on the call.</b> Say: “Give me the address and I’ll price the exact deal and send it today.”</div>', false);
+  s += sec("3. Close (always leave with a next step)",
+    say("Let me send you a quick application so I can run exact numbers. It takes about five minutes. Can I text it to this number?") +
+    '<div>→ Click <b>Send Application</b> on the lead. Or book a time: ' + say("How’s tomorrow at ___ for me to walk you through your options?") + '</div>', false);
+  s += sec("4. If they say…",
+    '<div><b>“I’m just looking.”</b> ' + say("Totally fine. I can have real numbers in your inbox within the hour so you know what’s possible.") + '</div>' +
+    '<div><b>“I already have a lender.”</b> ' + say("Great. Are they quick and flexible? We close fast. Let me send a quote so you can compare. No obligation.") + '</div>' +
+    '<div><b>“What’s the rate?”</b> ' + say("It depends on the property, your credit and the leverage. Give me the address and I’ll price it exactly.") + '</div>' +
+    '<div><b>“Send me info.”</b> ' + say("Happy to. I’ll text you our application and a deal analyzer link right now. What else would help?") + '</div>' +
+    '<div><b>“Not interested.”</b> ' + say("No problem. If plans change I’m at " + COMPANY_PHONE_DISPLAY + ". Thanks for your time.") + '</div>', false);
+  s += sec("5. Voicemail",
+    '<div>Click <b>📨 Drop voicemail</b> when the greeting starts. Your own recorded message plays and the call ends. Then log the outcome.</div>' +
+    '<div class="footnote" style="padding:2px 0 0">No recording yet? Use the link Joe texted you, or ask him to resend it.</div>', false);
+  return head + '<div class="panel panel-pad" style="max-height:300px;overflow:auto;padding:6px 10px">' + s + '</div>';
+}
+var vmCache = null;
+function vmUrl(uid){ return SUPABASE_URL + "/storage/v1/object/public/public-assets/voicemails/" + uid + ".wav"; }
+function loadMyVoicemail(force){
+  var me = currentUser();
+  if (!me || !me.id) return Promise.resolve(null);
+  if (vmCache && vmCache.uid === me.id && !force) return Promise.resolve(vmCache);
+  return fetch(vmUrl(me.id) + "?t=" + Date.now(), { cache:"no-store" }).then(function(r){ if (!r.ok) throw new Error("none"); return r.arrayBuffer(); })
+    .then(function(buf){
+      var AC = window.AudioContext || window.webkitAudioContext, ctx = new AC();
+      return new Promise(function(res, rej){ ctx.decodeAudioData(buf, res, rej); }).then(function(decoded){ vmCache = { uid:me.id, ctx:ctx, buf:decoded }; return vmCache; });
+    }).catch(function(){ return null; });
+}
+function dropVoicemail(){
+  var sp = ui.softphoneCall;
+  if (!sp || !telnyxActiveCall){ return; }
+  if (sp.dropping) return;
+  if (sp.state !== "active"){ showToast("Wait until the call connects (when the voicemail greeting starts), then click again."); return; }
+  loadMyVoicemail().then(function(vm){
+    if (!vm){ showToast("You haven’t recorded your voicemail yet. Use the link Joe texted you."); return; }
+    var pc = telnyxActiveCall && telnyxActiveCall.peer && telnyxActiveCall.peer.instance;
+    var sender = pc && pc.getSenders && pc.getSenders().filter(function(s){ return s.track && s.track.kind === "audio"; })[0];
+    if (!sender){ showToast("Couldn’t reach the call audio. The call is still live."); return; }
+    try {
+      if (vm.ctx.state === "suspended") vm.ctx.resume();
+      var dest = vm.ctx.createMediaStreamDestination(), src = vm.ctx.createBufferSource();
+      src.buffer = vm.buf; src.connect(dest);
+      sender.replaceTrack(dest.stream.getAudioTracks()[0]).then(function(){
+        sp.dropping = true; ui.pendingOutcome = "left-voicemail";
+        render();
+        src.start();
+        src.onended = function(){ setTimeout(function(){ if (ui.softphoneCall === sp) hangupSoftphoneCall(); }, 800); };
+      }).catch(function(){ showToast("Couldn’t play the voicemail. The call is still live."); });
+    } catch(e){ showToast("Couldn’t play the voicemail. The call is still live."); }
+  });
 }
 function startDialerCall(leadId, forceApp){
   // On a phone, every Call button rings the rep's own cell and bridges (Joe 2026-10-07: the
@@ -11696,7 +11796,7 @@ function briefTimeline(lead){
 function briefLastNotes(lead){
   return (lead.callAttempts||[]).filter(function(a){ return a.notes; }).slice(-2).reverse();
 }
-var BRIEF_OUTCOME_ICONS = { "connected":"✅", "left-voicemail":"📨", "no-answer":"📵", "callback":"🕒", "not-interested":"🚫", "wrong-number":"❌" };
+var BRIEF_OUTCOME_ICONS = { "connected":"✅", "sent-terms":"📑", "left-voicemail":"📨", "no-answer":"📵", "callback":"🕒", "not-interested":"🚫", "wrong-number":"❌" };
 function renderBriefScreen(){
   var t = taskById(ui.briefTaskId);
   var lead = t ? leadById(t.leadId) : null;
@@ -18213,12 +18313,13 @@ function renderLiveCallPanel(){
     }
     return '<div class="call-float" id="call-float-host" style="' + posStyle + (ctxLead ? ';width:440px' : '') + '">' +
       '<div class="call-float-head" data-drag-handle="1"><h3>📞 ' + esc(sp.leadName || sp.phone || "Call") + '</h3><span class="footnote">' + esc(stateLabel) + ' · drag to move</span></div>' +
-      '<div class="modal-body" style="padding:14px 16px;gap:8px">' + ctxHTML +
+      '<div class="modal-body" style="padding:14px 16px;gap:8px">' + ctxHTML + callScriptHTML(ctxLead) +
         '<label class="footnote" for="call-live-notes" style="font-weight:600">Live notes</label>' +
         '<textarea class="textarea" id="call-live-notes" data-action="call-live-notes" rows="7" placeholder="Type notes while you talk…">' + esc(ui.callNotes || "") + '</textarea>' +
         '<div class="footnote">Saved automatically — they\'ll be waiting in the log form when the call ends.</div>' +
       '</div>' +
       '<div class="modal-foot" style="justify-content:center;gap:10px">' +
+        (sp.dropping ? '<span class="footnote" style="align-self:center">📨 Leaving your voicemail…</span>' : ('<button class="btn" type="button" data-action="softphone-drop-vm" title="Plays your recorded voicemail into the call, then hangs up">📨 Drop voicemail</button>')) +
         '<button class="btn" type="button" data-action="softphone-mute">' + (sp.muted ? "Unmute" : "Mute") + '</button>' +
         '<button class="btn btn-primary" type="button" data-action="softphone-hangup" style="background:var(--c-rust)">Hang Up</button>' +
       '</div>' +
@@ -18242,7 +18343,7 @@ function modalCallDisposition(modalInfo){
         '<div class="modal-foot"><button class="btn btn-primary" type="button" data-action="close-modal">Close</button></div>' +
       '</div></div>';
   }
-  var outOptions = CALL_OUTCOMES.map(function(o){ return '<option value="' + o.key + '">' + o.label + '</option>'; }).join("");
+  var outOptions = CALL_OUTCOMES.map(function(o){ return '<option value="' + o.key + '"' + (ui.pendingOutcome === o.key ? ' selected' : '') + '>' + o.label + '</option>'; }).join("");
   return '<div class="modal-backdrop" id="modal-host" data-action="backdrop">' +
     '<div class="modal" data-stop="1">' +
       '<div class="modal-head"><h3>Log Call — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
@@ -20424,6 +20525,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "open-quick-dial"){ ui.modal = { type:"quickDial" }; render(); }
   else if (action === "softphone-hangup"){ hangupSoftphoneCall(); }
   else if (action === "softphone-mute"){ toggleSoftphoneMute(); }
+  else if (action === "softphone-drop-vm"){ dropVoicemail(); }
+  else if (action === "toggle-call-script"){ toggleCallScript(); }
   else if (action === "m-tab"){ ui.mobileTab = t.dataset.tab; ui.mobileOpen = (t.dataset.tab === "new" ? undefined : null); render(); }
   else if (action === "m-messages-open"){ ui.textNewOpen = false; ui.mobileMessagesLeadId = t.dataset.lead; markTextThreadRead(t.dataset.lead); render(); }
   else if (action === "m-messages-back"){ ui.textNewOpen = false; ui.mobileMessagesLeadId = null; render(); }
