@@ -3406,6 +3406,12 @@ function dscrLockedRateInfo(lead){
   if (delta < -0.0001) return { parRate: par.rate, delta: delta, priceRow: null, belowPar: true };
   return { parRate: par.rate, delta: delta, priceRow: dscrPriceForDelta(delta), belowPar: false };
 }
+// A&D dual compensation (10/12/26): the points we charge plus the yield spread A&D pays can't exceed 5% of the loan.
+function capDualCompYsp(lead, terms, ysp){
+  if (!terms || !/A&D/i.test(String(terms.lender || "")) || !lead.loanAmount) return ysp;
+  var room = lead.loanAmount * 0.05 - pointsRevenue(lead);
+  return Math.max(0, Math.min(ysp, Math.round(room * 100) / 100));
+}
 function yspRevenue(lead){
   if (lead.loanType !== "DSCR" && lead.loanType !== "Portfolio/Blanket") return 0;
   if (!lead.loanAmount) return 0;
@@ -3413,7 +3419,7 @@ function yspRevenue(lead){
   if (noYsp) return 0;
   var appliedTerms = pricerTermsFor(lead);
   if (appliedTerms && appliedTerms.price != null){
-    return Math.max(0, Math.round((appliedTerms.price - 100) / 100 * lead.loanAmount * 100) / 100);
+    return capDualCompYsp(lead, appliedTerms, Math.max(0, Math.round((appliedTerms.price - 100) / 100 * lead.loanAmount * 100) / 100));
   }
   if (lead.rate != null){
     // A rate is already locked in -- price it off that exact rate relative
@@ -3444,7 +3450,7 @@ function yspBreakdown(lead){
   // pricer -- more exact than re-deriving them from the in-house rate sheet.
   var appliedTerms = pricerTermsFor(lead);
   if (appliedTerms && appliedTerms.price != null){
-    return { amount: Math.max(0, Math.round((appliedTerms.price - 100) / 100 * lead.loanAmount * 100) / 100), reason: null };
+    return { amount: capDualCompYsp(lead, appliedTerms, Math.max(0, Math.round((appliedTerms.price - 100) / 100 * lead.loanAmount * 100) / 100)), reason: null };
   }
   var info = dscrLockedRateInfo(lead);
   if (!info) return { amount: null, reason: "can't compute this borrower's par rate yet — missing credit score, purchase price, or loan amount" };
@@ -14812,7 +14818,11 @@ function lpRenderResults(key){
     var best = -1;
     // "Best for us" = most revenue: lender comp where fixed (A&D Lender Paid),
     // otherwise yield spread -- but never a credit that goes to the borrower.
-    var ourPts = function(o){ return o.revenuePts != null ? o.revenuePts : (o.creditToBorrower ? 0 : (o.price - 100)) + points; };
+    var ourPts = function(o){
+      if (o.revenuePts != null) return o.revenuePts;
+      if (o.dualComp) return Math.min(points + Math.max(o.price - 100, 0), o.maxCombinedCompPts || 5); // A&D dual comp: BPC + YSP capped at 5%
+      return (o.creditToBorrower ? 0 : (o.price - 100)) + points;
+    };
     if (r.eligible && !rtl) (r.options || []).forEach(function(o, oi){ if (best === -1 || ourPts(o) > ourPts(r.options[best])) best = oi; });
     var head = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div class="rail-title" style="margin:0">' + esc(label) + '</div>' +
       (r.eligible ? '<span class="badge badge-forest">Eligible</span>' : (r.unavailable ? '<span class="badge badge-neutral">Unavailable</span>' : '<span class="badge badge-rust">Not eligible</span>')) + '</div>';
@@ -14855,10 +14865,12 @@ function lpRenderResults(key){
         var yspCell = o.creditToBorrower
           ? '<span title="Lender credit toward the borrower\'s closing costs — not paid to Bridgepoint">' + ysp.toFixed(3) + ' credit to borrower (' + fmtUSD(yspDollar) + ')</span>'
           : ((ysp > 0 ? "+" : "") + ysp.toFixed(3) + ' (' + fmtUSD(yspDollar) + ')');
+        // A&D dual compensation (10/12/26): BPC + YSP can't exceed 5% of the loan, so a big origination fee gets trimmed.
+        var bpcPts = o.dualComp ? Math.min(points, Math.max(0, (o.maxCombinedCompPts || 5) - Math.max(ysp, 0))) : points;
         var revenue = o.revenuePts != null ? Math.round(oAmt * o.revenuePts / 100)
-          : (Math.round(oAmt * points / 100) + (o.creditToBorrower ? 0 : yspDollar));
+          : (Math.round(oAmt * bpcPts / 100) + (o.creditToBorrower ? 0 : yspDollar));
         cells += '<td class="num">' + o.price.toFixed(3) + '</td><td class="num" style="color:' + (ysp < 0 ? 'var(--c-rust)' : 'inherit') + '">' + yspCell + '</td>' +
-          '<td class="num">' + (o.dscr != null ? o.dscr.toFixed(2) + "x" : "—") + '</td><td class="num">' + fmtUSD(revenue) + (o.revenuePts != null ? '<span class="footnote"> (' + o.revenuePts + '% from lender)</span>' : '') + '</td>';
+          '<td class="num">' + (o.dscr != null ? o.dscr.toFixed(2) + "x" : "—") + '</td><td class="num">' + fmtUSD(revenue) + (o.revenuePts != null ? '<span class="footnote"> (' + o.revenuePts + '% from lender)</span>' : (o.dualComp ? '<span class="footnote" title="A&D pays yield spread on top of your points when the price is 100.00 or better. Points plus yield spread are capped at 5% of the loan, initial lock only."> (points + YSP' + (bpcPts < points ? ", points trimmed to " + (Math.round(bpcPts * 1000) / 1000) + " for the 5% cap" : "") + ')</span>' : '')) + '</td>';
       }
       var pickBtn = (lpIsStandalone(key) || canEditApplication(leadOrNull(key)))
         ? '<button class="btn btn-sm' + (applied ? '' : ' btn-primary') + '" type="button" data-action="lp-select" data-lp="' + esc(key) + '" data-r="' + ri + '" data-o="' + oi + '">' + (applied ? "Applied ✓" : (lpIsStandalone(key) ? "Use this" : "Apply to file")) + '</button>' : '';
@@ -15094,7 +15106,8 @@ function lpCapOver(r, points, rtl){
 function lpCompetitiveSpread(results, sc){
   var rtl = LP_RTL.indexOf(sc.loanType) !== -1;
   var points = sc.pointsCharged || 0;
-  var ourPts = function(o){ return o.revenuePts != null ? o.revenuePts : (o.creditToBorrower ? 0 : (o.price - 100)); };
+  // (points excluded on purpose: they're the same whichever option is picked). A&D dual comp: YSP only counts up to the 5% cap minus the points.
+  var ourPts = function(o){ return o.revenuePts != null ? o.revenuePts : (o.creditToBorrower ? 0 : (o.dualComp ? Math.min(o.price - 100, Math.max(0, (o.maxCombinedCompPts || 5) - points)) : (o.price - 100))); };
   var amtOf = function(r, o){ return o.loanAmount || r.loanAmountUsed || 0; };
   // The rate the borrower actually sees (RTL: plus any YSP forced by a point cap).
   var shown = function(r, o){ return o.rate + (rtl ? lpCapOver(r, points, rtl) * ((r.compCaps || {}).yspRatePerPoint != null ? r.compCaps.yspRatePerPoint : 1) : 0); };
@@ -15116,14 +15129,14 @@ function lpCompetitiveSpread(results, sc){
   var top = null;
   results.forEach(function(r, ri){
     if (!r.eligible) return;
-    // Joe 2026-10-06: no yield spread with A&D -- their price credit goes to the
-    // borrower and Lender Paid comp is fixed, so a higher rate earns us nothing.
-    // A&D still counts as a competitor.
-    if ((r.options || []).some(function(o){ return o.creditToBorrower || o.revenuePts != null; })) return;
+    // Joe 2026-10-12: A&D now pays yield spread on its Borrower Paid options (dual compensation), so it joins the spread
+    // search -- but only on those options. Its Lender Paid options are a different plan (fixed 2.75%, no points) and
+    // can't be compared option-for-option, so they're skipped below.
+    if ((r.options || []).some(function(o){ return o.creditToBorrower; })) return;
     var c = r.compCaps || {};
     if (rtl && c.yspRatePerPoint == null) return; // lender doesn't pay yield spread on RTL
     (r.options || []).forEach(function(base, oi){
-      if (!quotable(base)) return;
+      if (!quotable(base) || base.revenuePts != null) return;
       var amt = amtOf(r, base), rate = shown(r, base);
       // Nobody else lends this much: compare to their best rate at ANY size
       // (smaller loans price lower, so this is the cautious benchmark).
@@ -15135,7 +15148,7 @@ function lpCompetitiveSpread(results, sc){
       if (!rtl){
         var cap = Math.min(ceiling, rate + LP_SPREAD_MAX_DSCR_RATE), pick = null;
         r.options.forEach(function(o, j){
-          if (o.rate > cap + 0.0005 || amtOf(r, o) !== amt) return;
+          if (o.rate > cap + 0.0005 || amtOf(r, o) !== amt || o.revenuePts != null) return;
           if (pick == null || ourPts(o) > ourPts(r.options[pick])) pick = j;
         });
         if (pick == null || ourPts(r.options[pick]) <= ourPts(base) + 0.0005) return;
@@ -15199,6 +15212,11 @@ function lpSelectOption(key, ri, oi, spreadPts){
   if (capYsp > 0) lead.pointsCharged = selCaps.maxBrokerPoints;
   // A&D Lender Paid: A&D pays us through the rate; no origination may be charged to the borrower.
   if (o.revenuePts != null) lead.pointsCharged = 0;
+  // A&D dual compensation: points + yield spread can't exceed 5% of the loan, so trim the origination to fit.
+  if (o.dualComp){
+    var dcYsp = Math.max(o.price - 100, 0), dcCap = o.maxCombinedCompPts || 5;
+    if ((lead.pointsCharged || 0) + dcYsp > dcCap) lead.pointsCharged = Math.max(0, Math.round((dcCap - dcYsp) * 1000) / 1000);
+  }
   lead.termMonths = sc.termMonths;
   lead.prepayTerm = sc.prepayTerm;
   var basis = lpBasis(sc);

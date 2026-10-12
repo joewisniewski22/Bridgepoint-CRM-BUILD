@@ -81,7 +81,7 @@ type LenderResult = {
   // creditToBorrower: a price above 100 is a lender credit to the borrower
   // (A&D Borrower Paid), not yield spread to us. revenuePts: our fixed comp
   // on that option (A&D Lender Paid 2.75%), replacing points + YSP.
-  options?: Array<{ program: string; rate: number; price: number; dscr?: number | null; loanAmount?: number; note?: string; creditToBorrower?: boolean; revenuePts?: number }>;
+  options?: Array<{ program: string; rate: number; price: number; dscr?: number | null; loanAmount?: number; note?: string; creditToBorrower?: boolean; revenuePts?: number; dualComp?: boolean; maxCombinedCompPts?: number }>;
   // Lender's own cap on what the broker can earn, so the UI can steer extra
   // compensation into yield spread when points alone hit the cap.
   compCaps?: { maxBrokerPoints?: number; maxYsp?: number; yspRatePerPoint?: number };
@@ -1293,6 +1293,7 @@ function kiaviRental(s, out, unit, st) {
 // ---------------------------------------------------------------------
 const AD_SNAPSHOT = "A&D rate sheet 10/06/26 09:04 AM ET";
 const AD_LPC = 2.75;
+const AD_DUAL_COMP_CAP = 5; // BPC + YSP can't exceed 5% of the loan amount (A&D, 10/12/26)
 const AD_MAX_CREDIT = 2.5;
 const AD_FIT = {"fico":{"620":{"50":-3.5,"55":-3.5,"60":-4,"65":-4.25,"70":null,"75":null,"80":null},"640":{"50":-2.25,"55":-2.25,"60":-2.375,"65":-2.75,"70":-3.75,"75":null,"80":null},"660":{"50":-0.625,"55":-0.625,"60":-1.125,"65":-1.5,"70":-2.5,"75":-3.375,"80":null},"680":{"50":0,"55":0,"60":-0.125,"65":-0.875,"70":-1.5,"75":-2.5,"80":-4.5},"700":{"50":0.375,"55":0.375,"60":0.25,"65":0,"70":-0.5,"75":-1.125,"80":-2.875},"720":{"50":0.625,"55":0.625,"60":0.5,"65":0.25,"70":-0.125,"75":-0.5,"80":-1.625},"740":{"50":0.75,"55":0.75,"60":0.625,"65":0.5,"70":0.125,"75":-0.375,"80":-1.125},"760":{"50":0.875,"55":0.875,"60":0.75,"65":0.625,"70":0.375,"75":-0.125,"80":-0.875},"780":{"50":1,"55":1,"60":0.875,"65":0.75,"70":0.5,"75":0,"80":-0.625}},"B":{"6.75":1.75,"6.875":1,"6.99":0.375,"7.125":-0.375,"7.25":-1.125,"7.375":-1.75,"7.49":-2.375,"7.625":-2.75,"7.75":-3,"7.875":-3.25,"7.99":-3.5,"8.125":-3.625,"8.25":-3.75,"8.375":-3.875,"8.49":-4,"8.625":-4.125,"8.75":-4.25,"8.875":-4.375,"8.99":-4.5,"9.125":-4.625,"9.25":-4.75,"9.375":-4.875,"9.49":-5,"9.625":-5.125,"9.75":-5.25,"9.875":-5.375,"9.99":-5.5,"10.125":-5.625,"10.25":-5.75,"10.375":-5.875,"10.49":-6,"10.625":-6.125,"10.75":-6.25,"10.875":-6.375,"10.99":-6.5,"11.125":-6.625,"11.25":-6.75,"11.375":-6.875}};
 // Eligibility (null = A&D doesn't offer that combination), measured in single-factor sweeps.
@@ -1466,6 +1467,7 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
   if (!pt) return { lender: L, eligible: false, source: "model", reason: "A&D's DSCR program doesn't take " + s.propertyType + " properties." };
   const cit = s.citizenshipStatus === "Foreign National" ? "fn" : s.citizenshipStatus === "ITIN" ? "itin" : s.citizenshipStatus === "Non-Permanent Resident" ? "np" : "us";
   if (!s.creditScore || s.creditScore < 620) return { lender: L, eligible: false, source: "model", reason: "A&D needs at least a 620 credit score." };
+  if (s.transactionType === "cashout" && s.creditScore < 660) return { lender: L, eligible: false, source: "model", reason: "A&D cash-out refinances need at least a 660 credit score (620 on purchase and rate/term)." };
   // Foreign national / ITIN: priced from their own measured grids (AD_CIT_TABLES, 2026-10-07).
   if (cit === "fn" && !s.creditScore) return { lender: L, eligible: false, source: "model", reason: "A&D foreign nationals need a U.S. credit score on this program." };
   const refi = s.transactionType !== "purchase";
@@ -1537,11 +1539,15 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
     const bp = around(adLadder(adj, false, ladB).filter((x) => x[1] <= 2.0 && x[1] >= -AD_MAX_CREDIT), 3, 7);
     const lp = around(adLadder(adj, true, ladB).filter((x) => x[1] <= 2.0), 2, 5);
     const pmtD = (rate: number) => Math.round((s.rentEstimate || 0) / (adMonthlyPI(loan, rate) + escrow) * 100) / 100;
-    const options = bp.map(([rate, d]) => ({ program: "30-yr fixed · Borrower Paid", rate, price: 100 - d, dscr: pmtD(rate), creditToBorrower: d < 0 }))
+    // Joe 2026-10-12 (A&D announcement): Borrower Paid + yield spread = "dual compensation". Any Borrower Paid option priced
+    // at 100.00 or better pays Bridgepoint (price - 100) points of YSP on top of the points we charge, as long as BPC + YSP
+    // stays at or under 5% of the loan. Initial lock only, wholesale, non-QM first-lien DSCR. Discounted prices (under 100)
+    // earn no YSP. Before this the price over par was a credit to the borrower.
+    const options = bp.map(([rate, d]) => ({ program: "30-yr fixed · Borrower Paid", rate, price: 100 - d, dscr: pmtD(rate), ...(d <= 0.0005 ? { dualComp: true, maxCombinedCompPts: AD_DUAL_COMP_CAP } : {}) }))
       .concat(lp.map(([rate, d]) => ({ program: "30-yr fixed · Lender Paid (A&D pays " + AD_LPC + "%)", rate, price: 100 - d, dscr: pmtD(rate), revenuePts: AD_LPC })));
     const assumptions = [
       "A&D model, rate sheet " + (snap.asOf || AD_SNAPSHOT) + (ageDays != null ? " (refreshed " + (ageDays < 1 ? "today" : Math.floor(ageDays) + " day(s) ago") + ")" : " (built-in snapshot)") + ". Long-term rental, no interest-only, 30-yr fixed (40-yr and 5/6 or 7/6 ARMs also available).",
-      "Borrower Paid: your origination is on top, and any negative price is a lender credit to the BORROWER, not yield spread to us. Lender Paid: A&D pays Bridgepoint " + AD_LPC + "% through the rate; no origination points can be added.",
+      "Borrower Paid (dual compensation): your origination points plus yield spread. Any option priced at 100.00 or better pays Bridgepoint (price - 100) points of YSP on top of your points; BPC + YSP can't exceed " + AD_DUAL_COMP_CAP + "% of the loan. Needs the initial lock only (the file can't already be locked) and the Borrower Paid comp plan. Discounted prices (under 100) earn no YSP. Lender Paid: A&D pays Bridgepoint " + AD_LPC + "% through the rate; no origination points can be added.",
     ];
     if (ppp !== pppAsked) assumptions.unshift(ppp === "none" ? "A&D doesn't allow a prepay penalty here (" + st + (st === "OH" || st === "PA" || st === "MD" || st === "VA" ? " at this loan size" : "") + ") — priced with no prepay (buydown required)." : "A&D caps the prepay at " + ppp.replace("yr", " years") + " in " + st + " — priced that way.");
     // A&D "Fees Information" (wholesale, effective 12/26): Non-QM underwriting fee $1,595; plus
