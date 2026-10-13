@@ -718,9 +718,34 @@ async function callNextresPriceLoan(body: Record<string, unknown>, assumptions: 
     }
   }
   if (!options.length) {
-    return { lender: "NextRes", eligible: false, reason: "No eligible NextRes programs for this scenario.", assumptions };
+    return { lender: "NextRes", eligible: false, reason: nextresDeclineReason(data && data.data) || "No eligible NextRes programs for this scenario.", assumptions };
   }
   return { lender: "NextRes", eligible: true, options, assumptions };
+}
+
+// NextRes's pricing response carries a pass/fail line for every criterion of every program
+// (ProgramLoanDetails, found 2026-10-13), so a decline can name the real guideline instead of
+// "no eligible programs". Lines that only say an adjustment is N/A are noise, not declines.
+function nextresDeclineReason(d: any): string {
+  const pld = d && d.ProgramLoanDetails;
+  if (!pld) return "";
+  const progs: { name: string; fails: string[] }[] = [];
+  for (const mp of Object.keys(pld)) {
+    for (const pg of Object.keys(pld[mp] || {})) {
+      const fails: string[] = [];
+      for (const k of Object.keys(pld[mp][pg] || {})) {
+        const c = pld[mp][pg][k];
+        if (!c || c.isPassed !== false) continue;
+        const t = String(c.ineligibleText || "").replace(/^\s*(Leverage Limit|Min\/Max Loan Amount):\s*/i, "").trim();
+        if (/adjustment is N\/A/i.test(t)) continue;
+        fails.push(/no matched rate/i.test(t) ? "doesn't price this property/credit combination" : (t || k));
+      }
+      progs.push({ name: pg, fails });
+    }
+  }
+  const declined = progs.filter((p) => p.fails.length).sort((a, b) => a.fails.length - b.fails.length);
+  if (!declined.length) return "";
+  return "NextRes declined: " + declined.slice(0, 3).map((p) => p.name + " (" + p.fails.slice(0, 2).join("; ") + ")").join(" | ");
 }
 
 // RTL (Fix & Flip / Bridge / Ground Up Construction) -- confirmed live
