@@ -149,6 +149,7 @@ function el(tag, attrs, kids){
 }
 var CHECK = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 function icon(inner){ var s = el("span"); s.innerHTML = inner; return s.firstChild; }
+function t12(hhmm){ var p = String(hhmm || "").split(":"), h = parseInt(p[0], 10); if (isNaN(h)) return hhmm; return ((h % 12) || 12) + ":" + (p[1] || "00") + (h >= 12 ? " PM" : " AM"); }
 function pad(n){ return (n < 10 ? "0" : "") + n; }
 function dstr(d){ d = d || new Date(); return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()); }
 function today(){ return dstr(); }
@@ -223,7 +224,7 @@ function viewToday(){
       el("div", { class:"box" + (on ? " on" : "") }, [icon(CHECK)]),
       el("div", { class:"grow" }, [
         el("div", { text:h.name, style: on ? "text-decoration:line-through;opacity:.6" : "" }),
-        el("div", { class:"small " + (late ? "due" : "muted"), text: late ? "Due since " + h.time : h.time + (st > 1 ? "  ·  " + st + " day streak" : "") })
+        el("div", { class:"small " + (late ? "due" : "muted"), text: late ? "Due since " + t12(h.time) : t12(h.time) + (st > 1 ? "  ·  " + st + " day streak" : "") })
       ])
     ]));
   });
@@ -667,7 +668,7 @@ function shoulderCard(){
   var dots = [];
   for (var i = 6; i >= 0; i--){ var d = new Date(); d.setDate(d.getDate() - i); var k = dstr(d), on = !!((S.rehabLog || {})[k] && S.rehabLog[k].done); dots.push(el("span", { class:"pill", style:"margin-right:4px;" + (on ? "" : "opacity:.35"), text:["S","M","T","W","T","F","S"][d.getDay()] })); }
   var c = el("div", { class:"card", style: late ? "border-color:#c0392b" : "" }, [
-    el("div", { class:"row between" }, [el("h2", { text:"Shoulder routine" }), el("span", { class:"pill", text: done ? "Done today" : (late ? "Due now" : "Due " + p.time) })]),
+    el("div", { class:"row between" }, [el("h2", { text:"Shoulder routine" }), el("span", { class:"pill", text: done ? "Done today" : (late ? "Due now" : "Due " + t12(p.time)) })]),
     el("div", { class:"small " + (late ? "due" : "muted"), text: done ? "Nice work. " + (st > 1 ? st + " days in a row." : "") : "7 exercises, 3 sets each. Do it exactly like your doctor's sheet says. Takes about 15 minutes." }),
     el("div", { style:"margin:10px 0" }, dots),
     el("button", { class:"btn primary block", type:"button", text: done ? "Do it again" : "Start my shoulder routine", onclick:function(){ openRehabRun({}); } })
