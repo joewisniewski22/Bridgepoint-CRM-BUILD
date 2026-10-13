@@ -2982,13 +2982,13 @@ try {
     ui.publicSign = { id: qp.get("sign"), signer: qp.get("s"), token: applyToken, status: "loading" };
     loadPublicSign();
   } else if (qp.get("borrower") && qp.get("b") && applyToken){
-    ui.publicBorrower = { leadId: qp.get("borrower"), bid: qp.get("b"), token: applyToken, status: "loading" };
+    ui.publicBorrower = { leadId: qp.get("borrower"), bid: qp.get("b"), token: applyToken, status: "loading", lang: (["en","es","vi"].indexOf(qp.get("lang")) !== -1 ? qp.get("lang") : null) };
     loadPublicBorrower();
   } else if (applyId && applyToken){
     ui.publicApply = { leadId:applyId, token:applyToken, status:"loading" };
     loadPublicApplication(applyId, applyToken);
   } else if (bookUserId){
-    ui.publicBooking = { userId:bookUserId, leadId: bookForLead||null, status:"loading" };
+    ui.publicBooking = { userId:bookUserId, leadId: bookForLead||null, status:"loading", lang: (["en","es","vi"].indexOf(qp.get("lang")) !== -1 ? qp.get("lang") : null) };
     loadPublicBooking(bookUserId);
   } else if (sessionWasRestored){
     if (isDemoAccountId(ui.viewAs)){
@@ -4405,6 +4405,7 @@ function dealAnalyzerMessage(lead, lang){
   var first = (lead.name||"").split(" ")[0];
   var lo = docLoanOfficer(lead);
   var link = dealAnalyzerLink(lead);
+  if (lang === "vi") return "Chào " + first + ", tôi là " + (lo.name||"chuyên viên cho vay của anh/chị") + " ở Bridgepoint Lending. Đây là Công Cụ Phân Tích Thương Vụ miễn phí của chúng tôi — nhập các con số của bất động sản và chỉ khoảng một phút anh/chị sẽ thấy lợi nhuận, số tiền mặt cần có và tỷ suất sinh lời: " + link + " Gửi kết quả cho tôi, tôi sẽ cùng xem với anh/chị.";
   return lang === "es"
     ? ("Hola " + first + ", soy " + (lo.name||"su oficial de préstamos") + " de Bridgepoint Lending. Aquí está nuestro Analizador de Inversiones gratis — ponga los números de su propiedad y en un minuto verá su ganancia, el efectivo que necesita y su retorno: " + link + " Mándeme los resultados y lo revisamos juntos.")
     : ("Hi " + first + ", it's " + (lo.name||"your loan officer") + " with Bridgepoint Lending. Here's our free Deal Analyzer — plug in your property's numbers and in about a minute you'll see your profit, cash needed, and return: " + link + " Send me the results and I'll walk through them with you.");
@@ -4423,9 +4424,9 @@ function reallySendDealAnalyzer(leadId, channels){
   if (!sb){ showToast("Send service unavailable"); return; }
   channels = channels || ["email", "text"];
   var lo = docLoanOfficer(lead);
-  var lang = (lead.preferredLanguage||"en") === "es" ? "es" : "en";
+  var lang = templateLang(lead.preferredLanguage); // en / es / vi
   var text = dealAnalyzerMessage(lead, lang);
-  var subject = lang === "es" ? "Bridgepoint Lending — Analice su inversión gratis" : "Bridgepoint Lending — Run the numbers on your deal (free)";
+  var subject = lang === "es" ? "Bridgepoint Lending — Analice su inversión gratis" : lang === "vi" ? "Bridgepoint Lending — Phân tích thương vụ của anh/chị (miễn phí)" : "Bridgepoint Lending — Run the numbers on your deal (free)";
   var calls = [];
   if (channels.indexOf("email") !== -1 && lead.email){
     calls.push(sb.functions.invoke("send-email", {
@@ -17141,11 +17142,28 @@ function submitBooking(fd){
 }
 function renderPublicBooking(){
   var pb = ui.publicBooking;
-  var wrap = function(inner){ return '<div class="login-screen"><div class="login-card" style="max-width:520px">' + inner + '</div></div>'; };
+  // Language: the visitor can pick English / Español / Tiếng Việt (or the link carries &lang=); Vietnamese added 2026-10-13 for Theresa's borrowers.
+  var bkLang = pb.lang || null;
+  var langBar = '<div style="font-size:.85rem;margin:0 0 10px">' + [["en", "English"], ["es", "Español"], ["vi", "Tiếng Việt"]].map(function(o){
+    var on = (bkLang || (pb.host && pb.host.speaksSpanish ? "es" : "en")) === o[0];
+    return on ? '<b>' + o[1] + '</b>' : '<button type="button" class="link-btn" data-action="booking-set-lang" data-lang="' + o[0] + '">' + o[1] + '</button>';
+  }).join(' · ') + '</div>';
+  var wrap = function(inner){ return '<div class="login-screen"><div class="login-card" style="max-width:520px">' + langBar + inner + '</div></div>'; };
   if (pb.status === "loading") return wrap('<div class="empty">Loading availability…</div>');
   if (pb.status === "invalid") return wrap('<div class="empty">This scheduling link isn\'t valid or is no longer active.</div>');
-  var bilingual = !!(pb.host && pb.host.speaksSpanish);
-  var two = function(en, es){ return bilingual ? (en + ' <span style="opacity:.7">/ ' + es + '</span>') : en; };
+  var bilingual = bkLang ? bkLang !== "en" : !!(pb.host && pb.host.speaksSpanish);
+  var VI_BOOK = { "Your Name":"Họ tên", "Phone":"Số điện thoại", "Email":"Email", "Confirm Booking":"Xác nhận lịch hẹn", "Confirm your time":"Xác nhận giờ hẹn", "Pick a time":"Chọn giờ", "with":"với", "for":"cho",
+    "your time":"giờ của anh/chị", "times shown in your time zone":"giờ hiển thị theo múi giờ của anh/chị", "← Back":"← Quay lại", "← Choose a different day":"← Chọn ngày khác", "You're booked ✓":"Đã đặt lịch ✓",
+    "What would you like to discuss? (optional)":"Anh/chị muốn trao đổi điều gì? (không bắt buộc)", "No open times in the next few weeks — please call or text directly.":"Mấy tuần tới chưa còn giờ trống — vui lòng gọi hoặc nhắn tin trực tiếp." };
+  var viBook = function(en){
+    if (VI_BOOK[en]) return VI_BOOK[en];
+    var m;
+    if ((m = /^Book a time with (.*)$/.exec(en))) return "Đặt lịch hẹn với " + m[1];
+    if ((m = /^your time with (.*) is confirmed for:$/.exec(en))) return "lịch hẹn của anh/chị với " + m[1] + " đã được xác nhận vào:";
+    if ((m = /^A confirmation has been sent to (.*)\. They'll reach out if anything changes\.$/.exec(en))) return "Đã gửi xác nhận tới " + m[1] + ". Họ sẽ liên hệ nếu có thay đổi.";
+    return en;
+  };
+  var two = function(en, es){ return bilingual ? (en + ' <span style="opacity:.7">/ ' + (bkLang === "vi" ? viBook(en) : es) + '</span>') : en; };
   if (pb.status === "confirmed"){
     var a = pb.confirmedAppointment;
     return wrap(
@@ -19566,7 +19584,7 @@ function ensureBorrowersLoaded(leadId, force){
   }).catch(function(){ BORROWERS[leadId] = { loaded: true, rows: [] }; });
 }
 function borrowerLink(lead, row){
-  return CRM_URL.replace(/\/$/, "") + "/?borrower=" + encodeURIComponent(lead.id) + "&b=" + encodeURIComponent(row.id) + "&t=" + encodeURIComponent(row.invite_token);
+  return CRM_URL.replace(/\/$/, "") + "/?borrower=" + encodeURIComponent(lead.id) + "&b=" + encodeURIComponent(row.id) + "&t=" + encodeURIComponent(row.invite_token) + (templateLang(lead.preferredLanguage) !== "en" ? "&lang=" + templateLang(lead.preferredLanguage) : "");
 }
 function borrowerDisplayName(row){ return [row.first_name, row.middle_name, row.last_name].filter(Boolean).join(" ") || row.email || "Borrower"; }
 function additionalBorrowersHTML(lead){
@@ -19738,7 +19756,10 @@ function loadPublicBorrower(){
 }
 function renderPublicBorrower(){
   var pb = ui.publicBorrower;
-  var wrap = function(inner){ return '<div class="login-screen"><div class="login-card" style="max-width:640px;text-align:left">' + inner + '</div></div>'; };
+  var bl = pb.lang || null;
+  var B = function(en, vi, es){ return bl === "vi" ? (en + ' / ' + vi) : bl === "es" ? (en + ' / ' + es) : en; };
+  var langBar = '<div style="font-size:.85rem;margin:0 0 10px">' + [["en", "English"], ["es", "Español"], ["vi", "Tiếng Việt"]].map(function(o){ return (bl || "en") === o[0] ? '<b>' + o[1] + '</b>' : '<button type="button" class="link-btn" data-action="borrower-set-lang" data-lang="' + o[0] + '">' + o[1] + '</button>'; }).join(' · ') + '</div>';
+  var wrap = function(inner){ return '<div class="login-screen"><div class="login-card" style="max-width:640px;text-align:left">' + langBar + inner + '</div></div>'; };
   if (pb.status === "loading") return wrap('<div class="empty">Loading…</div>');
   if (pb.status === "invalid") return wrap('<div class="empty">This link isn\'t valid anymore. Please contact your loan officer at Bridgepoint Lending for a new one.</div>');
   var info = pb.info || {}, pre = info.prefill || {};
@@ -19751,32 +19772,32 @@ function renderPublicBorrower(){
   var cit = ['<option value="">— Select —</option>'].concat(CITIZENSHIP_STATUSES.map(function(t){ return '<option value="' + t + '"' + (pre.citizenshipStatus === t ? " selected" : "") + '>' + t + '</option>'; })).join("");
   var mar = ['<option value="">— Select —</option>'].concat(["Married", "Unmarried"].map(function(t){ return '<option value="' + t + '"' + (pre.maritalStatus === t ? " selected" : "") + '>' + t + '</option>'; })).join("");
   return wrap(
-    '<div class="rail-title" style="margin-bottom:4px">Complete your part of the application</div>' +
+    '<div class="rail-title" style="margin-bottom:4px">' + B("Complete your part of the application","Hoàn tất phần của anh/chị trong hồ sơ vay","Complete su parte de la solicitud") + '</div>' +
     '<div class="footnote" style="padding:0 0 12px">' + esc(info.primaryName || "Your partner") + ' is applying for a loan with Bridgepoint Lending' + (info.property ? ' for <b>' + esc(info.property) + '</b>' : '') + ', and you\'ve been added as a borrower. Your answers go into that same application. This takes about 5 minutes.' + (info.status === "submitted" ? ' <b>You already submitted this once; sending it again will update your information.</b>' : '') + '</div>' +
     '<form data-form="submit-borrower-app">' +
       '<div class="form-row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">' +
-        '<div><label>First name</label><input class="input" name="firstName" required value="' + esc(v(info.firstName)) + '"></div>' +
-        '<div><label>Middle name</label><input class="input" name="middleName" value="' + esc(v(pre.middleName)) + '"></div>' +
-        '<div><label>Last name</label><input class="input" name="lastName" required value="' + esc(v(info.lastName)) + '"></div></div>' +
+        '<div><label>' + B("First name","Tên","Nombre") + '</label><input class="input" name="firstName" required value="' + esc(v(info.firstName)) + '"></div>' +
+        '<div><label>' + B("Middle name","Tên đệm","Segundo nombre") + '</label><input class="input" name="middleName" value="' + esc(v(pre.middleName)) + '"></div>' +
+        '<div><label>' + B("Last name","Họ","Apellido") + '</label><input class="input" name="lastName" required value="' + esc(v(info.lastName)) + '"></div></div>' +
       '<div class="form-two">' +
-        '<div class="form-row"><label>Date of birth</label><input class="input" type="date" name="birthday" required value="' + esc(v(pre.birthday)) + '"></div>' +
-        '<div class="form-row"><label>Social Security number</label><input class="input" type="password" autocomplete="off" name="ssn" inputmode="numeric" placeholder="' + (pre.ssnLast4 ? ("On file, ending " + esc(pre.ssnLast4)) : "XXX-XX-XXXX") + '"></div></div>' +
+        '<div class="form-row"><label>' + B("Date of birth","Ngày sinh","Fecha de nacimiento") + '</label><input class="input" type="date" name="birthday" required value="' + esc(v(pre.birthday)) + '"></div>' +
+        '<div class="form-row"><label>' + B("Social Security number","Số An Sinh Xã Hội (SSN)","Número de Seguro Social") + '</label><input class="input" type="password" autocomplete="off" name="ssn" inputmode="numeric" placeholder="' + (pre.ssnLast4 ? ("On file, ending " + esc(pre.ssnLast4)) : "XXX-XX-XXXX") + '"></div></div>' +
       '<div class="form-two">' +
-        '<div class="form-row"><label>Phone</label><input class="input" type="tel" name="phone" required value="' + esc(v(pre.phone)) + '"></div>' +
-        '<div class="form-row"><label>Email</label><input class="input" type="email" name="email" required value="' + esc(v(info.email)) + '"></div></div>' +
-      '<div class="form-row"><label>Home address (street, city, state, ZIP)</label><input class="input" name="address" required value="' + esc(v(pre.address)) + '"></div>' +
+        '<div class="form-row"><label>' + B("Phone","Số điện thoại","Teléfono") + '</label><input class="input" type="tel" name="phone" required value="' + esc(v(pre.phone)) + '"></div>' +
+        '<div class="form-row"><label>' + B("Email","Email","Correo electrónico") + '</label><input class="input" type="email" name="email" required value="' + esc(v(info.email)) + '"></div></div>' +
+      '<div class="form-row"><label>' + B("Home address (street, city, state, ZIP)","Địa chỉ nhà (đường, thành phố, tiểu bang, ZIP)","Dirección (calle, ciudad, estado, ZIP)") + '</label><input class="input" name="address" required value="' + esc(v(pre.address)) + '"></div>' +
       '<div class="form-two">' +
-        '<div class="form-row"><label>Citizenship status</label><select class="select" name="citizenshipStatus">' + cit + '</select></div>' +
+        '<div class="form-row"><label>' + B("Citizenship status","Tình trạng quốc tịch","Estatus de ciudadanía") + '</label><select class="select" name="citizenshipStatus">' + cit + '</select></div>' +
         '<div class="form-row"><label>Country of citizenship <span class="hint">(if Foreign National)</span></label><input class="input" name="countryOfDomicile" value="' + esc(v(pre.countryOfDomicile)) + '"></div></div>' +
       '<div class="form-two">' +
-        '<div class="form-row"><label>Ownership % in the deal</label><input class="input" type="number" min="0" max="100" name="ownershipPct" value="' + esc(v(pre.ownershipPct)) + '"></div>' +
-        '<div class="form-row"><label>Credit score (estimate is fine)</label><input class="input" type="number" min="300" max="850" name="creditScore" value="' + esc(v(pre.creditScore)) + '"></div></div>' +
+        '<div class="form-row"><label>' + B("Ownership % in the deal","% sở hữu trong thương vụ","% de propiedad en el trato") + '</label><input class="input" type="number" min="0" max="100" name="ownershipPct" value="' + esc(v(pre.ownershipPct)) + '"></div>' +
+        '<div class="form-row"><label>' + B("Credit score (estimate is fine)","Điểm tín dụng (ước chừng cũng được)","Puntaje de crédito (un estimado está bien)") + '</label><input class="input" type="number" min="300" max="850" name="creditScore" value="' + esc(v(pre.creditScore)) + '"></div></div>' +
       '<div class="form-two">' +
-        '<div class="form-row"><label>Investing experience (deals completed)</label><input class="input" type="number" min="0" name="experienceDeals" value="' + esc(v(pre.experienceDeals)) + '"></div>' +
-        '<div class="form-row"><label>Liquidity / reserves</label><input class="input" type="number" min="0" name="liquidity" value="' + esc(v(pre.liquidity)) + '"></div></div>' +
-      '<div class="form-row"><label>Marital status</label><select class="select" name="maritalStatus">' + mar + '</select></div>' +
+        '<div class="form-row"><label>' + B("Investing experience (deals completed)","Kinh nghiệm đầu tư (số thương vụ đã hoàn thành)","Experiencia invirtiendo (tratos completados)") + '</label><input class="input" type="number" min="0" name="experienceDeals" value="' + esc(v(pre.experienceDeals)) + '"></div>' +
+        '<div class="form-row"><label>' + B("Liquidity / reserves","Tiền mặt / dự trữ","Liquidez / reservas") + '</label><input class="input" type="number" min="0" name="liquidity" value="' + esc(v(pre.liquidity)) + '"></div></div>' +
+      '<div class="form-row"><label>' + B("Marital status","Tình trạng hôn nhân","Estado civil") + '</label><select class="select" name="maritalStatus">' + mar + '</select></div>' +
       '<label style="display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-size:13px"><input type="checkbox" name="certify" style="margin-top:3px"><span>I confirm this information is true and complete, and I authorize Bridgepoint Lending to verify it, including obtaining my credit report, in connection with this loan request.</span></label>' +
-      '<button class="btn btn-primary" type="submit">Submit my information</button>' +
+      '<button class="btn btn-primary" type="submit">' + B("Submit my information","Gửi thông tin của tôi","Enviar mi información") + '</button>' +
       '<div class="footnote" style="padding:10px 0 0">Your information is encrypted. Questions? Contact ' + contact + '.</div>' +
     '</form>');
 }
@@ -19814,39 +19835,47 @@ function loadPublicSign(){
     render();
   }).catch(function(){ ps.status = "invalid"; render(); });
 }
+// The signing page always shows English, plus a second language: Vietnamese when the client's language is Vietnamese
+// (Joe 2026-10-13: Theresa's borrowers), otherwise Spanish as before. The English text is what the signer agrees to.
+function signSecond(info, es, vi){ return info && info.lang === "vi" ? vi : es; }
 function renderPublicSign(){
   var ps = ui.publicSign;
   var wrap = function(inner){ return '<div class="login-screen"><div class="login-card" style="max-width:640px;text-align:left">' + inner + '</div></div>'; };
-  if (ps.status === "loading") return wrap('<div class="empty">Loading… / Cargando…</div>');
-  if (ps.status === "invalid") return wrap('<div class="empty">This link isn\'t valid anymore. Please contact your loan officer at Bridgepoint Lending for a new one.<br><br>Este enlace ya no es válido. Comuníquese con su oficial de préstamos en Bridgepoint Lending.</div>');
   var info = ps.info || {};
+  var S = function(es, vi){ return signSecond(info, es, vi); };
+  if (ps.status === "loading") return wrap('<div class="empty">Loading… / ' + S("Cargando…", "Đang tải…") + '</div>');
+  if (ps.status === "invalid") return wrap('<div class="empty">This link isn\'t valid anymore. Please contact your loan officer at Bridgepoint Lending for a new one.<br><br>' +
+    S("Este enlace ya no es válido. Comuníquese con su oficial de préstamos en Bridgepoint Lending.", "Liên kết này không còn hiệu lực. Vui lòng liên hệ chuyên viên cho vay của anh/chị tại Bridgepoint Lending.") + '</div>');
   var contact = info.loName ? (esc(info.loName) + (info.loPhone ? " · " + esc(info.loPhone) : "")) : "your loan officer";
   if (ps.status === "done"){
-    return wrap('<div class="rail-title" style="margin-bottom:8px">Thank you, ' + esc((info.name || "").split(" ")[0]) + ' ✓ &nbsp;¡Gracias!</div>' +
-      '<div class="footnote" style="padding:0 0 10px">Your signature is on the application' + (info.property ? ' for ' + esc(info.property) : '') + '. Your loan officer has been notified.<br>Su firma quedó registrada en la solicitud. Su oficial de préstamos ya fue notificado.</div>' +
-      (info.pdfUrl ? '<a class="btn btn-sm" href="' + esc(info.pdfUrl) + '" target="_blank" rel="noopener">View the application / Ver la solicitud</a>' : '') +
+    return wrap('<div class="rail-title" style="margin-bottom:8px">Thank you, ' + esc((info.name || "").split(" ")[0]) + ' ✓ &nbsp;' + S("¡Gracias!", "Cảm ơn anh/chị!") + '</div>' +
+      '<div class="footnote" style="padding:0 0 10px">Your signature is on the application' + (info.property ? ' for ' + esc(info.property) : '') + '. Your loan officer has been notified.<br>' +
+        S("Su firma quedó registrada en la solicitud. Su oficial de préstamos ya fue notificado.", "Chữ ký của anh/chị đã được ghi vào hồ sơ vay. Chuyên viên cho vay của anh/chị đã được thông báo.") + '</div>' +
+      (info.pdfUrl ? '<a class="btn btn-sm" href="' + esc(info.pdfUrl) + '" target="_blank" rel="noopener">View the application / ' + S("Ver la solicitud", "Xem hồ sơ vay") + '</a>' : '') +
       '<div class="footnote" style="padding:12px 0 0">Questions? ' + contact + '</div>');
   }
   return wrap(
     '<div class="rail-title" style="margin-bottom:4px">Review &amp; sign your loan application</div>' +
     '<div class="footnote" style="padding:0 0 4px"><b>' + esc(info.name || "") + '</b> · ' + esc(info.role || "") + (info.property ? ' · ' + esc(info.property) : '') + '</div>' +
-    '<div class="footnote" style="padding:0 0 12px">Revise y firme su solicitud de préstamo. Ya está llenada con la información de su expediente.</div>' +
+    '<div class="footnote" style="padding:0 0 12px">' + S("Revise y firme su solicitud de préstamo. Ya está llenada con la información de su expediente.", "Vui lòng xem lại và ký hồ sơ vay của anh/chị. Hồ sơ đã được điền sẵn từ thông tin trong hồ sơ của anh/chị.") + '</div>' +
     '<div class="panel panel-pad" style="margin:0 0 14px">' +
-      '<div style="margin-bottom:6px"><b>1.</b> Review the application (already filled in from your file) · <i>Revise la solicitud</i></div>' +
-      (info.pdfUrl ? '<a class="btn btn-sm btn-primary" href="' + esc(info.pdfUrl) + '" target="_blank" rel="noopener">Open the application (PDF) / Abrir la solicitud</a>' : '') +
-      '<div class="footnote" style="padding:6px 0 0">If anything is wrong, don\'t sign. Call or text ' + contact + ' and we\'ll fix it first. / Si algo está incorrecto, no firme y comuníquese con nosotros.</div>' +
+      '<div style="margin-bottom:6px"><b>1.</b> Review the application (already filled in from your file) · <i>' + S("Revise la solicitud", "Xem lại hồ sơ vay") + '</i></div>' +
+      (info.pdfUrl ? '<a class="btn btn-sm btn-primary" href="' + esc(info.pdfUrl) + '" target="_blank" rel="noopener">Open the application (PDF) / ' + S("Abrir la solicitud", "Mở hồ sơ vay (PDF)") + '</a>' : '') +
+      '<div class="footnote" style="padding:6px 0 0">If anything is wrong, don\'t sign. Call or text ' + contact + ' and we\'ll fix it first. / ' +
+        S("Si algo está incorrecto, no firme y comuníquese con nosotros.", "Nếu có gì không đúng, xin đừng ký. Hãy gọi hoặc nhắn tin cho chúng tôi để sửa trước.") + '</div>' +
     '</div>' +
     '<form data-form="submit-esign">' +
-      '<div style="margin-bottom:6px"><b>2.</b> Your information · <i>Su información</i></div>' +
+      '<div style="margin-bottom:6px"><b>2.</b> Your information · <i>' + S("Su información", "Thông tin của anh/chị") + '</i></div>' +
       '<div class="form-two">' +
-        '<div class="form-row"><label>Social Security number / Número de Seguro Social</label><input class="input" type="password" autocomplete="off" name="ssn" inputmode="numeric" placeholder="XXX-XX-XXXX" required></div>' +
-        (info.needsEin ? '<div class="form-row"><label>Business EIN / EIN de la empresa <span class="hint">(XX-XXXXXXX)</span></label><input class="input" autocomplete="off" name="ein" inputmode="numeric" placeholder="XX-XXXXXXX"></div>' : '') +
+        '<div class="form-row"><label>Social Security number / ' + S("Número de Seguro Social", "Số An Sinh Xã Hội (SSN)") + '</label><input class="input" type="password" autocomplete="off" name="ssn" inputmode="numeric" placeholder="XXX-XX-XXXX" required></div>' +
+        (info.needsEin ? '<div class="form-row"><label>Business EIN / ' + S("EIN de la empresa", "Mã số EIN của công ty") + ' <span class="hint">(XX-XXXXXXX)</span></label><input class="input" autocomplete="off" name="ein" inputmode="numeric" placeholder="XX-XXXXXXX"></div>' : '') +
       '</div>' +
-      '<div class="form-row"><label>Type your full legal name / Escriba su nombre legal completo</label><input class="input" name="typedName" required autocomplete="off" value=""></div>' +
-      '<div style="margin:10px 0 6px"><b>3.</b> Sign · <i>Firme</i></div>' +
-      sigPadHTML("esign-pad", "Draw your signature / Dibuje su firma", "en") +
-      '<label style="display:flex;gap:10px;align-items:flex-start;margin:12px 0;font-size:13px"><input type="checkbox" name="consent" style="margin-top:3px"><span>I reviewed the application and agree to sign it electronically. I certify the information is true and complete, and I authorize the lender and Bridgepoint Lending to obtain my credit report as described in the Credit Authorization. <i>Revisé la solicitud y acepto firmarla electrónicamente. Certifico que la información es verdadera y autorizo que se obtenga mi reporte de crédito.</i></span></label>' +
-      '<button class="btn btn-primary" type="submit">Sign the application / Firmar</button>' +
+      '<div class="form-row"><label>Type your full legal name / ' + S("Escriba su nombre legal completo", "Nhập họ tên đầy đủ theo giấy tờ pháp lý") + '</label><input class="input" name="typedName" required autocomplete="off" value=""></div>' +
+      '<div style="margin:10px 0 6px"><b>3.</b> Sign · <i>' + S("Firme", "Ký tên") + '</i></div>' +
+      sigPadHTML("esign-pad", "Draw your signature / " + S("Dibuje su firma", "Vẽ chữ ký của anh/chị"), "en") +
+      '<label style="display:flex;gap:10px;align-items:flex-start;margin:12px 0;font-size:13px"><input type="checkbox" name="consent" style="margin-top:3px"><span>I reviewed the application and agree to sign it electronically. I certify the information is true and complete, and I authorize the lender and Bridgepoint Lending to obtain my credit report as described in the Credit Authorization. <i>' +
+        S("Revisé la solicitud y acepto firmarla electrónicamente. Certifico que la información es verdadera y autorizo que se obtenga mi reporte de crédito.", "Tôi đã xem lại hồ sơ vay và đồng ý ký điện tử. Tôi xác nhận thông tin là đúng và đầy đủ, và cho phép bên cho vay cùng Bridgepoint Lending lấy báo cáo tín dụng của tôi theo Giấy Ủy Quyền Tín Dụng. (Bản tiếng Anh ở trên là văn bản có giá trị pháp lý.)") + '</i></span></label>' +
+      '<button class="btn btn-primary" type="submit">Sign the application / ' + S("Firmar", "Ký hồ sơ") + '</button>' +
       '<div class="footnote" style="padding:10px 0 0">Your Social Security number is sent securely and only placed on your application. Questions? ' + contact + '</div>' +
     '</form>');
 }
@@ -19855,23 +19884,23 @@ function submitPublicSign(form){
   if (!ps || !sb) return;
   var fd = new FormData(form);
   var ssn = String(fd.get("ssn") || "").replace(/\D/g, "");
-  if (ssn.length !== 9){ showToast("Enter your 9-digit Social Security number / Ingrese su número de Seguro Social", true); return; }
+  if (ssn.length !== 9){ showToast("Enter your 9-digit Social Security number / " + signSecond(ps.info, "Ingrese su número de Seguro Social", "Nhập số An Sinh Xã Hội gồm 9 chữ số"), true); return; }
   var ein = String(fd.get("ein") || "").replace(/\D/g, "");
   if (ein && ein.length !== 9){ showToast("The EIN should be 9 digits", true); return; }
   var typedName = String(fd.get("typedName") || "").trim();
-  if (typedName.length < 3){ showToast("Type your full legal name / Escriba su nombre", true); return; }
+  if (typedName.length < 3){ showToast("Type your full legal name / " + signSecond(ps.info, "Escriba su nombre", "Nhập họ tên của anh/chị"), true); return; }
   var sig = signaturePadDataUrl("esign-pad");
-  if (!sig){ showToast("Please draw your signature / Por favor firme", true); return; }
-  if (!fd.get("consent")){ showToast("Please check the box to agree / Marque la casilla", true); return; }
-  var btn = form.querySelector('button[type="submit"]'); if (btn){ btn.disabled = true; btn.textContent = "Signing… / Firmando…"; }
+  if (!sig){ showToast("Please draw your signature / " + signSecond(ps.info, "Por favor firme", "Vui lòng ký tên"), true); return; }
+  if (!fd.get("consent")){ showToast("Please check the box to agree / " + signSecond(ps.info, "Marque la casilla", "Vui lòng đánh dấu ô đồng ý"), true); return; }
+  var btn = form.querySelector('button[type="submit"]'); if (btn){ btn.disabled = true; btn.textContent = "Signing… / " + signSecond(ps.info, "Firmando…", "Đang ký…"); }
   sb.functions.invoke("esign", { body: { action: "sign", id: ps.id, signer: ps.signer, token: ps.token, ssn: ssn, ein: ein || null, typedName: typedName, signature: sig, consent: true } }).then(function(res){
     if (res.error || !res.data || !res.data.ok){
-      if (btn){ btn.disabled = false; btn.textContent = "Sign the application / Firmar"; }
+      if (btn){ btn.disabled = false; btn.textContent = "Sign the application / " + signSecond(ps.info, "Firmar", "Ký hồ sơ"); }
       showToast("Something went wrong — please try again or contact your loan officer", true);
       return;
     }
     ps.status = "loading"; render(); loadPublicSign();
-  }).catch(function(){ if (btn){ btn.disabled = false; btn.textContent = "Sign the application / Firmar"; } showToast("Something went wrong — please try again", true); });
+  }).catch(function(){ if (btn){ btn.disabled = false; btn.textContent = "Sign the application / " + signSecond(ps.info, "Firmar", "Ký hồ sơ"); } showToast("Something went wrong — please try again", true); });
 }
 
 function coPdfSection(w, lead, heading){
@@ -21605,6 +21634,8 @@ appEl.addEventListener("click", function(e){
     } else { fallback(); }
   }
   else if (action === "select-booking-day"){ ui.publicBooking.selectedDate = t.dataset.date; render(); }
+  else if (action === "borrower-set-lang"){ if (ui.publicBorrower){ ui.publicBorrower.lang = t.dataset.lang; render(); } }
+  else if (action === "booking-set-lang"){ if (ui.publicBooking){ ui.publicBooking.lang = t.dataset.lang; render(); } }
   else if (action === "booking-back-to-days"){ ui.publicBooking.selectedDate = null; render(); }
   else if (action === "select-booking-slot"){ ui.publicBooking.selectedSlot = { start:t.dataset.start, end:t.dataset.end }; render(); }
   else if (action === "booking-back-to-slots"){ ui.publicBooking.selectedSlot = null; render(); }
@@ -21724,7 +21755,7 @@ appEl.addEventListener("click", function(e){
       reason: wbInfo ? wbInfo.reasons.join("; ") : "",
       marketContext: marketContext,
       loName: userName(draftLead.assignedTo),
-      language: draftLead.preferredLanguage === "es" ? "Spanish" : "English"
+      language: commLanguageName(draftLead.preferredLanguage)
     }, function(suggestion){
       if (draftBox) draftBox.value = suggestion || defaultOutreachMessage(draftLead);
     });

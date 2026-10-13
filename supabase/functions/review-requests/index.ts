@@ -38,7 +38,7 @@ Deno.serve(async (req: Request) => {
     if (!/^https:\/\//.test(link)) return json({ ok: true, skipped: "no review link set" });
 
     const from = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10), to = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
-    const { data: leads } = await sb.from("leads").select("id,name,phone,assigned_to,source,sms_opt_out,close_date,property_address,stage,status")
+    const { data: leads } = await sb.from("leads").select("id,name,phone,assigned_to,source,sms_opt_out,close_date,property_address,stage,status,preferred_language")
       .eq("status", "closed").neq("stage", "lost").gte("close_date", from).lte("close_date", to).limit(200);
     const { data: logged } = await sb.from("review_request_log").select("lead_id");
     const done = new Set((logged || []).map((r: { lead_id: string }) => r.lead_id));
@@ -49,7 +49,12 @@ Deno.serve(async (req: Request) => {
     const plan = todo.map((l: Record<string, unknown>) => {
       const first = String(l.name || "").split(/\s+/)[0] || "there";
       const lo = nameOf(String(l.assigned_to || "owner")).split(/\s+/)[0];
-      const text = "Hi " + first + ", it's " + lo + " at Bridgepoint Lending. Thank you again for trusting us with your loan. If we earned it, would you take a minute to leave a quick Google review? It helps other investors find us: " + link + "  (Reply STOP to opt out.)";
+      const lang = String(l.preferred_language || "en");
+      const text = lang === "vi"
+        ? "Chào " + first + ", tôi là " + lo + " ở Bridgepoint Lending. Cảm ơn anh/chị một lần nữa đã tin tưởng chúng tôi với khoản vay. Nếu chúng tôi xứng đáng, anh/chị vui lòng dành một phút để đánh giá trên Google nhé? Điều này giúp các nhà đầu tư khác tìm thấy chúng tôi: " + link + "  (Nhắn STOP để hủy nhận tin.)"
+        : lang === "es"
+        ? "Hola " + first + ", soy " + lo + " de Bridgepoint Lending. Gracias nuevamente por confiar en nosotros con su préstamo. Si nos lo ganamos, ¿podría tomar un minuto para dejar una reseña en Google? Ayuda a otros inversionistas a encontrarnos: " + link + "  (Responda STOP para cancelar.)"
+        : "Hi " + first + ", it's " + lo + " at Bridgepoint Lending. Thank you again for trusting us with your loan. If we earned it, would you take a minute to leave a quick Google review? It helps other investors find us: " + link + "  (Reply STOP to opt out.)";
       return { leadId: l.id, name: l.name, to: l.phone, text };
     });
     if (mode === "shadow") return json({ ok: true, mode, wouldSend: plan });

@@ -62,7 +62,7 @@ Deno.serve(async (req: Request) => {
     if (!leadId || !staffId) return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400, headers: CORS_HEADERS });
 
     const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-    const { data: lead } = await sb.from("leads").select("id, name, phone, loan_type, status, activity").eq("id", leadId).single();
+    const { data: lead } = await sb.from("leads").select("id, name, phone, loan_type, status, activity, preferred_language").eq("id", leadId).single();
     if (!lead || !lead.phone) return new Response(JSON.stringify({ ok: true, sent: false, reason: "no_phone" }), { headers: CORS_HEADERS });
     if (lead.status === "closed" || lead.status === "spam") return new Response(JSON.stringify({ ok: true, sent: false, reason: "status_" + lead.status }), { headers: CORS_HEADERS });
 
@@ -81,13 +81,19 @@ Deno.serve(async (req: Request) => {
     const first = ((lead.name as string) || "").trim().split(" ")[0] || "there";
     const loName = ((staff.name as string) || "your loan officer").trim();
     const loanType = lead.loan_type ? (lead.loan_type as string) + " loan" : "loan";
-    const book = CLIENT_URL + "?book=" + staffId + "&forLead=" + leadId;
+    const book = CLIENT_URL + "?book=" + staffId + "&forLead=" + leadId + (lead.preferred_language === "vi" ? "&lang=vi" : lead.preferred_language === "es" ? "&lang=es" : "");
 
     let message =
       "Hey " + first + ", it's " + loName + " with Bridgepoint Lending following up on your " + loanType + " inquiry — sorry I missed you! " +
       "Call or text me back anytime at " + COMPANY_PHONE_DISPLAY + ", or grab a time that works for you: " + book + " (Reply STOP to opt out)";
     // Bilingual loan officers send both, same as the first-contact AI text.
-    if (staff.speaks_spanish) {
+    // Vietnamese clients (Joe 2026-10-13: Theresa's borrowers) get the text in Vietnamese, then English below it.
+    if (lead.preferred_language === "vi") {
+      message =
+        "Chào " + first + ", tôi là " + loName + " của Bridgepoint Lending, theo dõi yêu cầu vay của anh/chị — xin lỗi vì tôi đã lỡ cuộc gọi! " +
+        "Anh/chị gọi hoặc nhắn tin cho tôi bất cứ lúc nào theo số " + COMPANY_PHONE_DISPLAY + ", hoặc chọn một giờ thuận tiện tại đây: " + book + " (Nhắn STOP để hủy nhận tin)\n\n" + message;
+    }
+    if (staff.speaks_spanish || lead.preferred_language === "es") {
       message += "\n\nHola " + first + ", soy " + loName + " de Bridgepoint Lending, dándole seguimiento a su consulta de préstamo — ¡disculpe que no pude atenderle! " +
         "Llámeme o envíeme un mensaje al " + COMPANY_PHONE_DISPLAY + ", o elija un horario aquí: " + book + " (Responda STOP para cancelar)";
     }

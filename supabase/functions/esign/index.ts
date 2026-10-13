@@ -328,7 +328,7 @@ Deno.serve(async (req) => {
     const me = signers.find((s) => s.key === body.signer && s.token === body.token);
     if (!me) return json({ ok: false, error: "invalid" });
     const tpl = TEMPLATES[reqRow.template];
-    const { data: lead } = await sb.from("leads").select("id,property_address,assigned_to").eq("id", reqRow.lead_id).maybeSingle();
+    const { data: lead } = await sb.from("leads").select("id,property_address,assigned_to,preferred_language").eq("id", reqRow.lead_id).maybeSingle();
     const { data: lo } = lead?.assigned_to ? await sb.from("users").select("name,phone").eq("id", lead.assigned_to).maybeSingle() : { data: null };
 
     if (action === "view") {
@@ -336,7 +336,7 @@ Deno.serve(async (req) => {
       const { data: su } = await sb.storage.from(BUCKET).createSignedUrl(path, 3600);
       return json({ ok: true, title: reqRow.title, name: me.name, role: me.role, signedAt: me.signedAt || null, complete: reqRow.status === "complete",
         property: clean(lead?.property_address).replace(/,?\s*USA$/i, ""), pdfUrl: su?.signedUrl || null, needsEin: !!(tpl.sigs[me.key] && tpl.sigs[me.key].einField),
-        loName: lo?.name || null, loPhone: lo?.phone || null });
+        loName: lo?.name || null, loPhone: lo?.phone || null, lang: lead?.preferred_language || "en" });
     }
 
     if (action === "sign") {
