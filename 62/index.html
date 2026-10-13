@@ -1,0 +1,1664 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>62</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="62">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0D0D0D">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Barlow:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#EEF0F2; --panel:#FFFFFF; --panel2:#E3E6EA; --ink:#15171A; --muted:#5B636D; --line:#CDD2D8;
+  --plate:#FF6600; --plate-ink:#0D0D0D; --good:#1E9E5A; --bad:#C23B2E; --accent-soft:#FFE0CC;
+  --display:"Barlow Condensed","Arial Narrow",Impact,sans-serif; --body:"Barlow",system-ui,-apple-system,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0D0D0D; --panel:#1A1A1A; --panel2:#262626; --ink:#F1F2F3; --muted:#9AA2AC; --line:#33383F;
+    --accent-soft:#3D1D08; --good:#3DD07F; --bad:#FF6B5A;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0D0D0D; --panel:#1A1A1A; --panel2:#262626; --ink:#F1F2F3; --muted:#9AA2AC; --line:#33383F;
+  --accent-soft:#3D1D08; --good:#3DD07F; --bad:#FF6B5A;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.35}
+body{padding-top:env(safe-area-inset-top);padding-bottom:calc(76px + env(safe-area-inset-bottom));min-height:100vh}
+h1,h2,h3{font-family:var(--display);font-weight:800;letter-spacing:.01em;margin:0;text-transform:uppercase;text-wrap:balance}
+h1{font-size:34px;line-height:1} h2{font-size:24px} h3{font-size:19px}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+.wrap{max-width:560px;margin:0 auto;padding:14px 16px 24px;display:flex;flex-direction:column;gap:14px}
+.top{display:flex;align-items:center;gap:12px}
+.plate{background:var(--plate);color:var(--plate-ink);font-family:var(--display);font-weight:800;font-size:30px;line-height:1;padding:6px 12px 4px;border-radius:9px;letter-spacing:.02em}
+.top .sub{color:var(--muted);font-size:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+.card.flat{background:transparent;border-style:dashed}
+.row{display:flex;gap:10px;align-items:center}
+.between{justify-content:space-between}
+.grow{flex:1;min-width:0}
+.muted{color:var(--muted)} .small{font-size:14px}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 16px;font-weight:600;min-height:48px}
+.btn.primary{background:var(--plate);color:var(--plate-ink);border-color:transparent;font-family:var(--display);font-size:21px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
+.btn.sm{min-height:38px;padding:7px 12px;font-size:15px;border-radius:10px}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--bad)}
+.btn.block{width:100%}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+input[type=text],input[type=number],input[type=email],input[type=time],input[type=date],textarea,select{
+  background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:11px 12px;width:100%;min-height:46px}
+textarea{min-height:140px;resize:vertical}
+input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid var(--plate);outline-offset:1px}
+.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);display:flex;padding-bottom:env(safe-area-inset-bottom);z-index:20}
+.tabs button{flex:1;background:none;border:0;padding:10px 0 8px;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--muted);font-family:var(--display);font-weight:700;font-size:15px;text-transform:uppercase;letter-spacing:.05em}
+.tabs button svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tabs button[aria-current=page]{color:var(--ink)}
+.tabs button[aria-current=page] svg{stroke:var(--ink)}
+.tabs button[aria-current=page]::before{content:"";width:34px;height:4px;border-radius:2px;background:var(--plate);position:absolute;margin-top:-10px}
+.check{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--line);min-height:56px}
+.check:last-child{border-bottom:0}
+.box{width:32px;height:32px;border-radius:9px;border:2px solid var(--line);display:grid;place-items:center;flex:none;background:var(--bg)}
+.box.on{background:var(--plate);border-color:var(--plate)}
+.box svg{width:20px;height:20px;stroke:var(--plate-ink);stroke-width:3;fill:none;opacity:0}
+.box.on svg{opacity:1}
+.due{color:var(--bad);font-weight:600}
+.pill{display:inline-block;padding:2px 9px;border-radius:99px;background:var(--accent-soft);font-size:13px;font-weight:600}
+.sets{display:grid;grid-template-columns:34px 1fr 1fr 52px;gap:8px;align-items:center}
+.sets .hd{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.sets input{text-align:center;font-family:var(--display);font-size:24px;font-weight:700;padding:6px}
+.setn{font-family:var(--display);font-size:22px;font-weight:700;color:var(--muted);text-align:center}
+.done{height:46px;border-radius:11px;border:2px solid var(--line);background:var(--bg);display:grid;place-items:center}
+.done.on{background:var(--good);border-color:var(--good)}
+.done svg{width:22px;height:22px;stroke:#fff;stroke-width:3;fill:none;opacity:0}
+.done.on svg{opacity:1}
+.restbar{position:fixed;left:10px;right:10px;bottom:calc(76px + env(safe-area-inset-bottom));background:var(--plate);color:var(--plate-ink);border-radius:16px;padding:10px 14px;display:flex;align-items:center;gap:12px;z-index:30;box-shadow:0 6px 24px rgba(0,0,0,.35)}
+.restbar .t{font-family:var(--display);font-weight:800;font-size:44px;line-height:1;min-width:92px;font-variant-numeric:tabular-nums}
+.restbar .l{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.07em}
+.restbar button{background:rgba(0,0,0,.14);border:0;border-radius:10px;padding:10px 12px;font-weight:700;color:var(--plate-ink);min-height:44px}
+.restbar.over{background:var(--good);color:#fff}
+.restbar.over button{color:#fff;background:rgba(0,0,0,.2)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--bg);width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:20px 20px 0 0;padding:18px 16px calc(22px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:12px}
+.toast{position:fixed;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;z-index:60;font-weight:600}
+.stat{font-family:var(--display);font-weight:800;font-size:40px;line-height:1}
+.chart{width:100%;height:120px}
+.hr{height:1px;background:var(--line);border:0;margin:4px 0}
+.thumb{width:64px;height:64px;border-radius:10px;object-fit:cover;background:var(--panel2);flex:none}
+.macro{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center}
+.macro b{font-family:var(--display);font-size:24px;display:block}
+.macro span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+@media (prefers-reduced-motion:no-preference){.btn,.box,.done{transition:transform .08s ease}.btn:active,.box:active,.done:active{transform:scale(.96)}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------- config ----------
+   api/key stay empty until the 62 backend exists. Everything except the AI features
+   (reading a coach's PDF/Word file, analyzing a plate photo) works without it. */
+var CFG = { api: "https://rdbzxpmwqyeddkwhoqie.supabase.co", key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJkYnp4cG13cXllZGRrd2hvcWllIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3Mzc1MTcsImV4cCI6MjEwNzMxMzUxN30._bR-bLe6nVn9Qbs7Ysxxc2wgQW542qBmgtTjESxWUFY" };
+var cloud = { client:null, session:null, needLogin:false, recovery:false, inbox:[], status:"", pushTimer:null };
+
+var KEY = "app62.v1";
+var DEFAULT_HABITS = [
+  { id:"teeth-am", name:"Brush teeth (morning)", time:"07:15" },
+  { id:"water-am", name:"Big glass of water", time:"07:20" },
+  { id:"breakfast", name:"Breakfast with protein", time:"07:45" },
+  { id:"mobility", name:"10 min stretch / mobility", time:"17:30" },
+  { id:"teeth-pm", name:"Brush teeth (night)", time:"20:45" },
+  { id:"bed", name:"Phone away, lights out", time:"21:30" }
+];
+function defaults(){
+  return { programs:[], sessions:[], active:null, habits:DEFAULT_HABITS, habitLog:{}, weights:[], hr:[], meals:[],
+           settings:{ name:"Declan", trainerEmail:"robb@coachrobb.com", trainerName:"Coach Robb", heightIn:null, momName:"Mom", momEmail:"nicbodt@gmail.com", allergies:"", dislikes:"", rideDays:3, maxHr:200 }, lastExport:null, plan:null, injury:{ active:true, area:"shoulder", note:"Surgery is planned. Doctor: strengthening the rotator cuff and the muscles around it before surgery is fine, and riding can restart once shoulder strength is back.", since:null, rideClear:false }, rehab:[], wellness:{}, rides:[], rehabLog:{} };
+}
+var S = load();
+function load(){
+  try{ var s = JSON.parse(localStorage.getItem(KEY)); if (s){ var d = defaults(); for (var k in d) if (!(k in s)) s[k] = d[k]; s.settings = s.settings || d.settings; if (!s.settings.trainerEmail) s.settings.trainerEmail = d.settings.trainerEmail; if (!s.settings.momEmail) s.settings.momEmail = d.settings.momEmail; return s; } }catch(e){}
+  return defaults();
+}
+function save(){ S._updatedAt = new Date().toISOString(); try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast("Storage is full — export your logs"); } queuePush(); }
+
+/* ---------- helpers ---------- */
+function el(tag, attrs, kids){
+  var n = document.createElement(tag);
+  if (attrs) for (var k in attrs){
+    var v = attrs[k];
+    if (k === "class") n.className = v;
+    else if (k === "text") n.textContent = v;
+    else if (k.indexOf("on") === 0) n.addEventListener(k.slice(2), v);
+    else if (v === true) n.setAttribute(k, "");
+    else if (v !== false && v != null) n.setAttribute(k, v);
+  }
+  (kids || []).forEach(function(c){ if (c == null) return; n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+  return n;
+}
+var CHECK = '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+function icon(inner){ var s = el("span"); s.innerHTML = inner; return s.firstChild; }
+function pad(n){ return (n < 10 ? "0" : "") + n; }
+function dstr(d){ d = d || new Date(); return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate()); }
+function today(){ return dstr(); }
+function fmtDay(s){ var d = new Date(s + "T12:00:00"); return d.toLocaleDateString(undefined, { weekday:"short", month:"short", day:"numeric" }); }
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"]/g, function(c){ return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]; }); }
+function toast(msg){ var t = el("div", { class:"toast", text:msg }); document.body.appendChild(t); setTimeout(function(){ t.remove(); }, 2400); }
+function num(v){ var n = parseFloat(v); return isNaN(n) ? null : n; }
+function mmss(sec){ sec = Math.max(0, Math.round(sec)); return Math.floor(sec/60) + ":" + pad(sec%60); }
+
+/* ---------- navigation ---------- */
+var tab = "today";
+var TABS = [
+  ["today","Today",'<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="3"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>'],
+  ["train","Train",'<svg viewBox="0 0 24 24"><path d="M3 9v6M6 7v10M18 7v10M21 9v6M6 12h12"/></svg>'],
+  ["food","Fuel",'<svg viewBox="0 0 24 24"><path d="M5 11h14a7 7 0 0 1-7 7 7 7 0 0 1-7-7zM9 7c0-2 2-2 2-4M14 7c0-2 2-2 2-4"/></svg>'],
+  ["ride","Ride",'<svg viewBox="0 0 24 24"><circle cx="6" cy="16" r="3.5"/><circle cx="18" cy="16" r="3.5"/><path d="M6 16l4-7h5l3 7M10 9L8.5 6.5"/></svg>'],
+  ["body","Body",'<svg viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12 2.5-6h5"/></svg>']
+];
+function go(t){ tab = t; render(); window.scrollTo(0, 0); }
+
+function render(){
+  var root = document.getElementById("app");
+  root.textContent = "";
+  if (cloud.recovery){ root.appendChild(viewReset()); return; }
+  if (cloud.needLogin){ root.appendChild(viewLogin()); return; }
+  var view = tab === "train" ? viewTrain() : tab === "food" ? viewFood() : tab === "ride" ? viewRide() : tab === "body" ? viewBody() : viewToday();
+  root.appendChild(view);
+  var bar = el("nav", { class:"tabs", "aria-label":"Main" }, TABS.map(function(t){
+    var b = el("button", { type:"button", "aria-current": tab === t[0] ? "page" : null, onclick:function(){ go(t[0]); } }, [icon(t[2]), t[1]]);
+    return b;
+  }));
+  root.appendChild(bar);
+  if (rest.end) root.appendChild(restBarEl());
+}
+function header(title, sub){
+  return el("div", { class:"top" }, [
+    el("div", { class:"plate", text:"62" }),
+    el("div", { class:"grow" }, [el("h1", { text:title }), sub ? el("div", { class:"sub", text:sub }) : null]),
+    el("button", { class:"btn sm ghost", type:"button", "aria-label":"Settings", onclick:openSettings, text:"⚙" })
+  ]);
+}
+
+/* ---------- TODAY ---------- */
+function dueNow(h){ var n = new Date(); return (pad(n.getHours()) + ":" + pad(n.getMinutes())) >= h.time; }
+function streakFor(h){
+  var n = 0, d = new Date();
+  var t = dstr(d);
+  if (!(S.habitLog[t] && S.habitLog[t][h.id])) d.setDate(d.getDate() - 1);
+  for (var i = 0; i < 400; i++){ var k = dstr(d); if (S.habitLog[k] && S.habitLog[k][h.id]){ n++; d.setDate(d.getDate() - 1); } else break; }
+  return n;
+}
+function viewToday(){
+  var t = today(), log = S.habitLog[t] || {};
+  var done = S.habits.filter(function(h){ return log[h.id]; }).length;
+  var w = el("div", { class:"wrap" });
+  var hr = new Date().getHours();
+  w.appendChild(header((hr < 12 ? "Morning" : hr < 18 ? "Afternoon" : "Evening") + ", " + S.settings.name, fmtDay(t)));
+  w.appendChild(morningCard());
+  w.appendChild(shoulderCard());
+  if (S.injury && S.injury.active) w.appendChild(injuryCard());
+  w.appendChild(todayEventsCard());
+  var card = el("div", { class:"card" }, [
+    el("div", { class:"row between" }, [el("h2", { text:"Daily checklist" }), el("span", { class:"pill", text: done + " / " + S.habits.length })])
+  ]);
+  S.habits.forEach(function(h){
+    var on = !!log[h.id], late = !on && dueNow(h);
+    var st = streakFor(h);
+    card.appendChild(el("div", { class:"check", role:"checkbox", "aria-checked": on ? "true" : "false", tabindex:"0",
+      onclick:function(){ toggleHabit(h.id); },
+      onkeydown:function(e){ if (e.key === " " || e.key === "Enter"){ e.preventDefault(); toggleHabit(h.id); } } }, [
+      el("div", { class:"box" + (on ? " on" : "") }, [icon(CHECK)]),
+      el("div", { class:"grow" }, [
+        el("div", { text:h.name, style: on ? "text-decoration:line-through;opacity:.6" : "" }),
+        el("div", { class:"small " + (late ? "due" : "muted"), text: late ? "Due since " + h.time : h.time + (st > 1 ? "  ·  " + st + " day streak" : "") })
+      ])
+    ]));
+  });
+  w.appendChild(card);
+
+  var wt = S.weights.filter(function(x){ return x.date === t; })[0];
+  if (false) w.appendChild(el("div", { class:"card flat row between" }, [
+    el("div", { class:"grow", text:"No weigh-in logged today" }),
+    el("button", { class:"btn sm", type:"button", onclick:function(){ go("body"); }, text:"Log it" })
+  ]));
+  var td = S.sessions.filter(function(s){ return s.date === t; });
+  w.appendChild(el("div", { class:"card" }, [
+    el("h3", { text:"Training" }),
+    el("div", { class:"muted", text: td.length ? td.length + " session logged today. Nice." : (S.active ? "Workout in progress." : "Nothing logged yet today.") }),
+    el("div", { style:"margin-top:10px" }, [el("button", { class:"btn primary block", type:"button", onclick:function(){ go("train"); }, text: S.active ? "Back to workout" : "Start training" })])
+  ]));
+  return w;
+}
+function toggleHabit(id){
+  var t = today(); S.habitLog[t] = S.habitLog[t] || {};
+  S.habitLog[t][id] = !S.habitLog[t][id];
+  save(); render();
+}
+
+/* ---------- injury / modified training ---------- */
+function ridingOnHold(){ return !!(S.injury && S.injury.active && !S.injury.rideClear); }
+function holdBanner(){
+  return el("div", { class:"card", style:"border-color:#c0392b" }, [
+    el("h3", { text:"Riding is on hold" }),
+    el("div", { class:"small", text:"Your doctor said riding can start again once your shoulder strength is back. Until then, do your shoulder routine and the gym work. Your mom or dad switches this in Settings when the doctor says you are cleared." })
+  ]);
+}
+function rehabRecent(n){ return (S.rehab || []).slice(-n); }
+function injuryBanner(){
+  var inj = S.injury || {};
+  return el("div", { class:"card", style:"border-color:var(--accent,#FF6600)" }, [
+    el("div", { class:"row between" }, [el("h3", { text:"Modified training" }), el("span", { class:"pill", text: inj.area || "injury" })]),
+    el("div", { class:"small muted", text:"Follow what your doctor, physical therapist and " + S.settings.trainerName + " say. Skip anything that hurts or loads the injured area. A skipped exercise is logged as skipped, not missed." + (inj.note ? " Notes: " + inj.note : "") })
+  ]);
+}
+function injuryCard(){
+  var t = today(), inj = S.injury || {};
+  var cur = (S.rehab || []).filter(function(x){ return x.date === t; })[0] || { date:t, pain:0, did:false, note:"" };
+  var didOn = !!cur.did;
+  var pain = el("input", { type:"range", min:"0", max:"10", step:"1", value:String(cur.pain || 0), "aria-label":"Pain today, 0 to 10" });
+  var out = el("b", { text:String(cur.pain || 0) + " / 10" });
+  pain.addEventListener("input", function(){ out.textContent = pain.value + " / 10"; });
+  var box = el("div", { class:"box" + (didOn ? " on" : "") }, [icon(CHECK)]);
+  var did = el("div", { class:"check", role:"checkbox", "aria-checked": didOn ? "true" : "false", tabindex:"0", onclick:function(){ didOn = !didOn; box.className = "box" + (didOn ? " on" : ""); did.setAttribute("aria-checked", didOn ? "true" : "false"); } }, [box, el("div", { class:"grow", text:"Did my rehab work today" })]);
+  var note = el("input", { type:"text", value:cur.note || "", placeholder:"How does it feel? Anything new?" });
+  var recent = rehabRecent(7);
+  var c = el("div", { class:"card" }, [
+    el("div", { class:"row between" }, [el("h2", { text:"Recovery check-in" }), el("span", { class:"pill", text: inj.area || "injury" })]),
+    el("div", { class:"small muted", text:"Modified training until your doctor and coach clear you." + (inj.since ? " Since " + fmtDay(inj.since) + "." : "") }),
+    el("div", { class:"field", style:"margin-top:10px" }, [el("label", { text:"Pain right now (0 = none, 10 = worst)" }), el("div", { class:"row between" }, [pain, out])]),
+    did,
+    el("div", { class:"field" }, [el("label", { text:"Notes" }), note]),
+    el("button", { class:"btn primary block", type:"button", text:"Save check-in", onclick:function(){
+      S.rehab = (S.rehab || []).filter(function(x){ return x.date !== t; });
+      S.rehab.push({ date:t, pain:parseInt(pain.value, 10) || 0, did:didOn, note:note.value.trim() });
+      S.rehab.sort(function(a, b){ return a.date < b.date ? -1 : 1; });
+      save(); toast("Saved"); render();
+    } })
+  ]);
+  if (recent.length > 1) c.appendChild(spark(recent.map(function(x){ return x.pain; })));
+  if (cur.pain >= 7) c.appendChild(el("div", { class:"due small", text:"Pain is high. Tell your parents and " + S.settings.trainerName + " today, and stop anything that makes it worse." }));
+  c.appendChild(el("button", { class:"btn sm ghost", type:"button", style:"margin-top:10px", text:"My doctor cleared me - back to full training", onclick:function(){
+    if (confirm("Only do this once your doctor or PT has cleared you. Switch back to full training?")){ S.injury.active = false; S.injury.cleared = today(); save(); render(); } } }));
+  return c;
+}
+function rehabText(){
+  var inj = S.injury || {}, r = rehabRecent(7);
+  if (!inj.active && !r.length) return "";
+  var t = "\nInjury / recovery" + (inj.area ? " - " + inj.area : "") + (inj.active ? " (modified training)" : " (cleared " + (inj.cleared || "") + ")") + (inj.note ? "\nDoctor/PT notes: " + inj.note : "") + "\n";
+  r.forEach(function(x){ t += "  " + fmtDay(x.date) + ": pain " + x.pain + "/10, rehab " + (x.did ? "done" : "not done") + (x.note ? " - " + x.note : "") + "\n"; });
+  return t;
+}
+function rehabDoc(){
+  var inj = S.injury || {}, r = rehabRecent(7);
+  if (!inj.active && !r.length) return "";
+  var h = "<h2>Injury / recovery" + (inj.area ? " - " + esc(inj.area) : "") + (inj.active ? " (modified training)" : "") + "</h2>" + (inj.note ? "<p>Doctor/PT notes: " + esc(inj.note) + "</p>" : "");
+  if (r.length){
+    h += "<table><tr><th>Date</th><th>Pain (0-10)</th><th>Rehab done</th><th>Notes</th></tr>";
+    r.forEach(function(x){ h += "<tr><td>" + esc(fmtDay(x.date)) + "</td><td>" + x.pain + "</td><td>" + (x.did ? "yes" : "no") + "</td><td>" + esc(x.note || "") + "</td></tr>"; });
+    h += "</table>";
+  }
+  return h;
+}
+/* ---------- morning check-in ---------- */
+function rateSel(v){
+  var opts = [el("option", { value:"", text:"--" })];
+  for (var i = 0; i <= 10; i++) opts.push(el("option", { value:String(i), text:String(i) }));
+  var s = el("select", {}, opts); if (v != null) s.value = String(v); return s;
+}
+function morningCard(){
+  var t = today(), wt = S.weights.filter(function(x){ return x.date === t; })[0], wl = (S.wellness || {})[t];
+  if (wt && wl && wl.done){
+    return el("div", { class:"card flat row between" }, [
+      el("div", { class:"grow" }, [el("div", { text:"Morning check-in done" }),
+        el("div", { class:"small muted", text:wt.lb + " lb · slept " + (wl.sleep != null ? wl.sleep + " h" : "--") + " · sore " + (wl.soreness != null ? wl.soreness : "--") + "/10 · energy " + (wl.energy != null ? wl.energy : "--") + "/10" })]),
+      el("button", { class:"btn sm ghost", type:"button", text:"Edit", onclick:function(){ S.wellness[t].done = false; save(); render(); } })
+    ]);
+  }
+  var late = new Date().getHours() >= 10;
+  var wi = el("input", { type:"number", inputmode:"decimal", step:"0.1", placeholder:"lb" }); if (wt) wi.value = wt.lb;
+  var sl = el("input", { type:"number", inputmode:"decimal", step:"0.5", placeholder:"hours" }); if (wl && wl.sleep != null) sl.value = wl.sleep;
+  var so = rateSel(wl && wl.soreness), en = rateSel(wl && wl.energy);
+  return el("div", { class:"card" }, [
+    el("div", { class:"row between" }, [el("h2", { text:"Morning weigh-in" }), el("span", { class:"pill", text: late ? "Do this now" : "First thing" })]),
+    el("div", { class:"small " + (late ? "due" : "muted"), text:"Weigh right after you wake up and use the bathroom, before you eat or drink, same scale every day. Then answer the quick questions." }),
+    el("div", { class:"row", style:"margin-top:10px" }, [
+      el("div", { class:"field grow" }, [el("label", { text:"Weight (lb)" }), wi]),
+      el("div", { class:"field grow" }, [el("label", { text:"Sleep (hours)" }), sl])
+    ]),
+    el("div", { class:"row" }, [
+      el("div", { class:"field grow" }, [el("label", { text:"Soreness 0-10" }), so]),
+      el("div", { class:"field grow" }, [el("label", { text:"Energy 0-10" }), en])
+    ]),
+    el("button", { class:"btn primary block", style:"margin-top:12px", type:"button", text:"Save check-in", onclick:function(){
+      var lb = num(wi.value);
+      if (lb == null){ toast("Enter your weight first"); return; }
+      S.weights = S.weights.filter(function(x){ return x.date !== t; }); S.weights.push({ date:t, lb:lb });
+      S.weights.sort(function(a, b){ return a.date < b.date ? -1 : 1; });
+      S.wellness = S.wellness || {};
+      S.wellness[t] = { sleep:num(sl.value), soreness: so.value === "" ? null : parseInt(so.value, 10), energy: en.value === "" ? null : parseInt(en.value, 10), done:true };
+      S.rides.filter(function(e){ return e.date === t; }).forEach(function(e){
+        if (e.ready.weight == null) e.ready.weight = lb; if (e.fuel.preWt == null) e.fuel.preWt = lb;
+        if (e.ready.sleep == null) e.ready.sleep = S.wellness[t].sleep; if (e.ready.soreness == null) e.ready.soreness = S.wellness[t].soreness; if (e.ready.energy == null) e.ready.energy = S.wellness[t].energy;
+      });
+      save(); toast("Saved"); render();
+    } })
+  ]);
+}
+
+/* ---------- RIDE DAYS & RACE DAYS ---------- */
+var WEATHER = ["Sunny", "Partly cloudy", "Cloudy", "Windy", "Light rain", "Rain", "Hot and humid", "Cold"];
+var SURFACE = ["Hardpack", "Intermediate", "Loam", "Sand", "Mud", "Rutted", "Wet", "Dusty", "Mixed"];
+var SESSION_LABELS = ["Practice", "Qualifying", "Moto 1", "Moto 2", "Moto 3", "Main event", "Session"];
+function lapSec(t){
+  t = String(t == null ? "" : t).trim(); if (!t) return null;
+  var m = t.match(/^(\d+):(\d{1,2}(?:\.\d+)?)$/); if (m) return parseInt(m[1], 10) * 60 + parseFloat(m[2]);
+  var n = parseFloat(t); return isNaN(n) ? null : n;
+}
+function lapFmt(sec){ if (sec == null) return "--"; var m = Math.floor(sec / 60), s = sec - m * 60; return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1); }
+function blankBike(){
+  return { name:S.settings.bikeName || "KTM", forkComp:"", forkReb:"", forkSpring:"", forkHeight:"", shockComp:"", shockReb:"", shockSag:"", shockSpring:"",
+    tireF:"", tireR:"", psiF:"", psiR:"", sprocketF:"", sprocketR:"", mapping:"", bars:"", notes:"" };
+}
+function eventById(id){ return S.rides.filter(function(e){ return e.id === id; })[0]; }
+function bestLapOf(e){ var b = null; (e.sessions || []).forEach(function(s){ var v = lapSec(s.best); if (v != null && (b == null || v < b)) b = v; }); return b; }
+function loadOf(e){ var n = 0; (e.sessions || []).forEach(function(s){ if (s.rpe && s.minutes) n += s.rpe * s.minutes; }); return n; }
+function sweatInfo(e){
+  var a = num(e.fuel.preWt), b = num(e.fuel.postWt); if (a == null || b == null || a <= 0) return null;
+  var lost = Math.round((a - b) * 10) / 10, pct = Math.round(lost / a * 1000) / 10, drink = lost > 0 ? Math.round(lost * 20) : 0;
+  var msg = lost <= 0 ? "Weight held or went up. Hydration looks fine." : pct < 1 ? "Small loss. Keep sipping." : pct < 2 ? "Mild fluid loss. Drink about " + drink + " oz over the next 2 hours."
+    : "Over 2% down. Drink about " + drink + " oz over the next 2 to 4 hours with something salty, and plan more fluid before the next ride.";
+  return { lost:lost, pct:pct, msg:msg };
+}
+function fld(label, obj, key, o){
+  o = o || {};
+  var i = o.area ? el("textarea", { rows:String(o.rows || 3), placeholder:o.ph || "", style:"min-height:80px" })
+    : el("input", { type:o.type || "text", inputmode:o.mode || null, step:o.step || null, placeholder:o.ph || "" });
+  i.value = obj[key] == null ? "" : obj[key];
+  i.addEventListener("change", function(){ obj[key] = o.num ? num(i.value) : i.value.trim(); save(); if (o.again) o.again(); });
+  return el("div", { class:"field" + (o.grow ? " grow" : "") }, [el("label", { text:label }), i]);
+}
+function selFld(label, obj, key, list, o){
+  o = o || {};
+  var s = el("select", {}, [el("option", { value:"", text:"--" })].concat(list.map(function(x){ return el("option", { value:x, text:x }); })));
+  s.value = obj[key] || "";
+  s.addEventListener("change", function(){ obj[key] = s.value; save(); if (o.again) o.again(); });
+  return el("div", { class:"field" + (o.grow ? " grow" : "") }, [el("label", { text:label }), s]);
+}
+function newEvent(kind){
+  var last = S.rides.length ? S.rides[S.rides.length - 1] : null, t = today();
+  var wt = S.weights.filter(function(x){ return x.date === t; })[0], wl = (S.wellness || {})[t] || {};
+  var e = { id:uid(), date:t, kind:kind, pre:{ shoulder:false }, title: kind === "race" ? "Race day" : "Ride day", track:"", location:"", schedule:"",
+    cond:{ temp:null, weather:"", surface:"", notes:"" },
+    bike: last ? JSON.parse(JSON.stringify(last.bike)) : blankBike(),
+    ready:{ weight: wt ? wt.lb : null, sleep:wl.sleep != null ? wl.sleep : null, soreness:wl.soreness != null ? wl.soreness : null, energy:wl.energy != null ? wl.energy : null },
+    sessions:[], fuel:{ preWt: wt ? wt.lb : null, postWt:null, fluidOz:null, inRide:"", meals:"", plan:null },
+    journal:{ good:"", fix:"", coach:"", goal:"" }, post:{ crashed:false, crashNote:"", mech:"", rpe:null, result:"" } };
+  S.rides.push(e); save(); openEvent(e.id);
+}
+var evModal = null;
+function reopenEvent(id){
+  var old = document.querySelector(".sheet"), top = old ? old.scrollTop : 0;
+  if (evModal) evModal.close();
+  openEvent(id);
+  var nu = document.querySelector(".sheet"); if (nu) nu.scrollTop = top;
+}
+function sec(title, kids, sub){
+  return el("div", { class:"card flat", style:"margin-top:10px" }, [el("h3", { text:title }), sub ? el("div", { class:"small muted", text:sub }) : null].concat(kids));
+}
+function openEvent(id){
+  var e = eventById(id); if (!e) return;
+  var again = function(){ reopenEvent(id); };
+  var kids = [];
+  if (ridingOnHold()) kids.push(holdBanner());
+  kids.push(el("div", { class:"row" }, [
+    el("button", { class:"btn grow" + (e.kind === "ride" ? " primary" : ""), type:"button", text:"Ride day", onclick:function(){ e.kind = "ride"; if (/^Race day/.test(e.title)) e.title = "Ride day"; save(); again(); } }),
+    el("button", { class:"btn grow" + (e.kind === "race" ? " primary" : ""), type:"button", text:"Race day", onclick:function(){ e.kind = "race"; if (/^Ride day/.test(e.title)) e.title = "Race day"; save(); again(); } })
+  ]));
+  var dt = el("input", { type:"date", value:e.date }); dt.addEventListener("change", function(){ if (dt.value){ e.date = dt.value; save(); render(); } });
+  kids.push(el("div", { class:"row", style:"margin-top:10px" }, [
+    el("div", { class:"field grow" }, [el("label", { text:"Date" }), dt]),
+    fld("Title", e, "title", { grow:true })
+  ]));
+  kids.push(el("div", { class:"row" }, [fld("Track", e, "track", { grow:true, ph:"e.g. Loretta Lynn's" }), fld("Location", e, "location", { grow:true })]));
+  kids.push(fld(e.kind === "race" ? "Schedule (gate times)" : "Plan for the day", e, "schedule", { ph: e.kind === "race" ? "e.g. Practice 9:00, Moto 1 12:10, Moto 2 15:30" : "e.g. 4 x 15 min motos, work on whoops" }));
+
+  e.pre = e.pre || { shoulder:false };
+  kids.push(sec("Before you ride", [
+    el("div", { class:"check", role:"checkbox", "aria-checked": e.pre.shoulder ? "true" : "false", tabindex:"0", onclick:function(){ e.pre.shoulder = !e.pre.shoulder; save(); again(); } }, [
+      el("div", { class:"box" + (e.pre.shoulder ? " on" : "") }, [icon(CHECK)]), el("div", { class:"grow", text:"Shoulder routine done before gearing up" })]),
+    el("button", { class:"btn block", type:"button", text:"Do my shoulder routine now", onclick:function(){ evModal.close(); evModal = null; openRehabRun({ eventId:e.id }); } })
+  ], "Do this before you gear up. Ask your doctor or PT whether a shorter version is OK right before riding."));
+  kids.push(sec("Conditions", [
+    el("div", { class:"row" }, [fld("Temp (F)", e.cond, "temp", { grow:true, num:true, type:"number", mode:"numeric" }), selFld("Weather", e.cond, "weather", WEATHER, { grow:true })]),
+    selFld("Track surface", e.cond, "surface", SURFACE),
+    fld("Track notes (ruts, braking bumps, lines)", e.cond, "notes", { area:true })
+  ]));
+
+  var b = e.bike;
+  kids.push(sec("Bike setup", [
+    el("button", { class:"btn sm", type:"button", text:"Copy setup from my last ride", onclick:function(){
+      var prev = S.rides.filter(function(x){ return x.id !== e.id && x.date <= e.date; }).sort(function(a, c){ return a.date < c.date ? 1 : -1; })[0];
+      if (!prev){ toast("No earlier ride to copy"); return; }
+      e.bike = JSON.parse(JSON.stringify(prev.bike)); save(); again(); toast("Copied from " + fmtDay(prev.date));
+    } }),
+    fld("Bike", b, "name", {}),
+    el("div", { class:"small muted", text:"Fork" }),
+    el("div", { class:"row" }, [fld("Compression", b, "forkComp", { grow:true, ph:"clicks out" }), fld("Rebound", b, "forkReb", { grow:true, ph:"clicks out" })]),
+    el("div", { class:"row" }, [fld("Spring / air", b, "forkSpring", { grow:true }), fld("Fork height", b, "forkHeight", { grow:true, ph:"mm" })]),
+    el("div", { class:"small muted", text:"Shock" }),
+    el("div", { class:"row" }, [fld("Compression", b, "shockComp", { grow:true }), fld("Rebound", b, "shockReb", { grow:true })]),
+    el("div", { class:"row" }, [fld("Race sag (mm)", b, "shockSag", { grow:true }), fld("Spring rate", b, "shockSpring", { grow:true })]),
+    el("div", { class:"small muted", text:"Tires" }),
+    el("div", { class:"row" }, [fld("Front tire", b, "tireF", { grow:true }), fld("Rear tire", b, "tireR", { grow:true })]),
+    el("div", { class:"row" }, [fld("Front PSI", b, "psiF", { grow:true, mode:"decimal" }), fld("Rear PSI", b, "psiR", { grow:true, mode:"decimal" })]),
+    el("div", { class:"small muted", text:"Drivetrain and controls" }),
+    el("div", { class:"row" }, [fld("Front sprocket", b, "sprocketF", { grow:true }), fld("Rear sprocket", b, "sprocketR", { grow:true })]),
+    el("div", { class:"row" }, [fld("Engine map", b, "mapping", { grow:true }), fld("Bar / lever position", b, "bars", { grow:true })]),
+    fld("Setup notes / what you changed and why", b, "notes", { area:true })
+  ], "Write down every change so you can see what actually made him faster."));
+
+  kids.push(sec("How he feels before riding", [
+    el("div", { class:"row" }, [fld("Morning weight (lb)", e.ready, "weight", { grow:true, num:true, type:"number", mode:"decimal", step:"0.1" }), fld("Sleep (hours)", e.ready, "sleep", { grow:true, num:true, type:"number", mode:"decimal", step:"0.5" })]),
+    el("div", { class:"row" }, [fld("Soreness 0-10", e.ready, "soreness", { grow:true, num:true, type:"number", mode:"numeric" }), fld("Energy 0-10", e.ready, "energy", { grow:true, num:true, type:"number", mode:"numeric" })])
+  ]));
+
+  var sessKids = [];
+  (e.sessions || []).forEach(function(s, idx){
+    sessKids.push(el("div", { class:"card", style:"margin-top:8px" }, [
+      el("div", { class:"row between" }, [selFld("Session", s, "label", SESSION_LABELS, { grow:true }),
+        el("button", { class:"btn sm ghost danger", type:"button", text:"Remove", onclick:function(){ e.sessions.splice(idx, 1); save(); again(); } })]),
+      el("div", { class:"row" }, [fld("Laps", s, "laps", { grow:true, num:true, type:"number", mode:"numeric" }), fld("Minutes", s, "minutes", { grow:true, num:true, type:"number", mode:"numeric" })]),
+      el("div", { class:"row" }, [fld("Best lap", s, "best", { grow:true, ph:"1:42.3" }), fld(e.kind === "race" ? "Finish" : "Position", s, "position", { grow:true, ph:"e.g. 4th" })]),
+      el("div", { class:"row" }, [fld("Effort 1-10", s, "rpe", { grow:true, num:true, type:"number", mode:"numeric" }), fld("Avg HR", s, "avgHr", { grow:true, num:true, type:"number", mode:"numeric" })]),
+      fld("What happened (starts, lines, mistakes)", s, "notes", { area:true })
+    ]));
+  });
+  kids.push(sec(e.kind === "race" ? "Motos and sessions" : "Sessions", sessKids.concat([
+    el("button", { class:"btn sm", type:"button", style:"margin-top:10px", text:"+ Add a session", onclick:function(){
+      var def = e.kind === "race" ? (e.sessions.length === 0 ? "Practice" : e.sessions.length === 1 ? "Qualifying" : "Moto " + (e.sessions.length - 1)) : "Session";
+      e.sessions.push({ id:uid(), label:def, laps:null, minutes:null, best:"", position:"", rpe:null, avgHr:null, notes:"" }); save(); again();
+    } })
+  ])));
+
+  var sw = sweatInfo(e);
+  var fuelKids = [
+    el("div", { class:"row" }, [fld("Weight before riding (lb)", e.fuel, "preWt", { grow:true, num:true, type:"number", mode:"decimal", step:"0.1" }), fld("Weight after riding (lb)", e.fuel, "postWt", { grow:true, num:true, type:"number", mode:"decimal", step:"0.1", again:again })]),
+    sw ? el("div", { class:"card flat" }, [el("b", { text:"Fluid loss: " + sw.lost + " lb (" + sw.pct + "%)" }), el("div", { class:"small muted", text:sw.msg + " General guidance, not medical advice." })]) : null,
+    el("div", { class:"row" }, [fld("Fluids during (oz)", e.fuel, "fluidOz", { grow:true, num:true, type:"number", mode:"numeric" })]),
+    fld("Fuel during riding (gels, chews, drink mix)", e.fuel, "inRide", { area:true }),
+    fld("What he ate and drank today", e.fuel, "meals", { area:true, rows:4 }),
+    el("button", { class:"btn primary block", type:"button", text: e.fuel.plan ? "Rebuild the fuel plan" : "Build the fuel and hydration plan", onclick:function(){
+      toast("Building the plan... about 20 seconds");
+      var ev = { kind:e.kind, date:e.date, tempF:e.cond.temp, weather:e.cond.weather, surface:e.cond.surface, schedule:e.schedule, sessions:(e.sessions || []).map(function(s){ return { label:s.label, minutes:s.minutes, laps:s.laps }; }),
+        morningWeightLb:e.ready.weight, sleepHours:e.ready.sleep, soreness:e.ready.soreness, energy:e.ready.energy };
+      callApi("plan-raceday", { profile:planProfile(), event:ev }).then(function(r){ e.fuel.plan = r.plan; save(); again(); toast("Plan ready"); })
+        .catch(function(err){ toast(err.message || "Couldn't build the plan"); });
+    } })
+  ];
+  if (e.fuel.plan){
+    var p = e.fuel.plan;
+    (p.timeline || []).forEach(function(x){
+      fuelKids.push(el("div", { class:"check", style:"flex-direction:column;align-items:stretch;gap:2px;margin-top:6px" }, [
+        el("b", { text:x.when + " - " + x.what }), el("div", { class:"small muted", text:(x.items || []).join(" · ") }), x.why ? el("div", { class:"small", text:x.why }) : null
+      ]));
+    });
+    if (p.hydration) fuelKids.push(el("div", { class:"small", style:"margin-top:8px", text:"Hydration: " + p.hydration }));
+    if (p.notes) fuelKids.push(el("div", { class:"small muted", text:p.notes }));
+  }
+  kids.push(sec("Fuel and hydration", fuelKids));
+
+  kids.push(sec("Journal", [
+    fld("What went well", e.journal, "good", { area:true }),
+    fld("What to work on", e.journal, "fix", { area:true }),
+    fld("What " + S.settings.trainerName + " said", e.journal, "coach", { area:true }),
+    fld("Goal for next time", e.journal, "goal", { area:true })
+  ]));
+
+  var crash = el("div", { class:"check", role:"checkbox", "aria-checked": e.post.crashed ? "true" : "false", tabindex:"0", onclick:function(){ e.post.crashed = !e.post.crashed; save(); again(); } }, [
+    el("div", { class:"box" + (e.post.crashed ? " on" : "") }, [icon(CHECK)]), el("div", { class:"grow", text:"He crashed today" })]);
+  kids.push(sec("After the day", [
+    crash,
+    e.post.crashed ? fld("What happened, anything sore", e.post, "crashNote", { area:true }) : null,
+    fld("Bike problems or repairs", e.post, "mech", { area:true }),
+    el("div", { class:"row" }, [fld("Overall effort 1-10", e.post, "rpe", { grow:true, num:true, type:"number", mode:"numeric" }), fld(e.kind === "race" ? "Overall result" : "Summary", e.post, "result", { grow:true, ph: e.kind === "race" ? "e.g. 3-2, 2nd overall" : "" })])
+  ]));
+
+  kids.push(el("button", { class:"btn primary block", style:"margin-top:12px", type:"button", text:"Send to " + S.settings.trainerName, onclick:function(){ sendEvent(e); } }));
+  kids.push(el("button", { class:"btn block", type:"button", text:"Done", onclick:function(){ evModal.close(); evModal = null; render(); } }));
+  kids.push(el("button", { class:"btn block danger", type:"button", text:"Delete this day", onclick:function(){
+    if (confirm("Delete this ride day and everything in it?")){ S.rides = S.rides.filter(function(x){ return x.id !== e.id; }); save(); evModal.close(); evModal = null; render(); } } }));
+  evModal = sheet((e.kind === "race" ? "Race day - " : "Ride day - ") + fmtDay(e.date), kids);
+}
+function eventText(e){
+  var b = e.bike || {}, t = (e.kind === "race" ? "RACE DAY" : "RIDE DAY") + " - " + S.settings.name + " - " + fmtDay(e.date) + "\n" + (e.title || "") + (e.track ? " at " + e.track : "") + (e.location ? ", " + e.location : "") + "\n";
+  if (e.schedule) t += "Schedule: " + e.schedule + "\n";
+  t += "\nConditions: " + [e.cond.temp != null ? e.cond.temp + "F" : "", e.cond.weather, e.cond.surface].filter(Boolean).join(", ") + (e.cond.notes ? "\nTrack: " + e.cond.notes : "") + "\n";
+  t += "\nBike: " + (b.name || "") + "\n  Fork comp " + (b.forkComp || "-") + " / reb " + (b.forkReb || "-") + " / spring " + (b.forkSpring || "-") + " / height " + (b.forkHeight || "-") +
+    "\n  Shock comp " + (b.shockComp || "-") + " / reb " + (b.shockReb || "-") + " / sag " + (b.shockSag || "-") + " / spring " + (b.shockSpring || "-") +
+    "\n  Tires F " + (b.tireF || "-") + " @ " + (b.psiF || "-") + " psi, R " + (b.tireR || "-") + " @ " + (b.psiR || "-") + " psi" +
+    "\n  Sprockets " + (b.sprocketF || "-") + "/" + (b.sprocketR || "-") + ", map " + (b.mapping || "-") + ", bars " + (b.bars || "-") + (b.notes ? "\n  Notes: " + b.notes : "") + "\n";
+  t += "\nBefore: weight " + (e.ready.weight != null ? e.ready.weight + " lb" : "-") + ", sleep " + (e.ready.sleep != null ? e.ready.sleep + " h" : "-") + ", soreness " + (e.ready.soreness != null ? e.ready.soreness : "-") + "/10, energy " + (e.ready.energy != null ? e.ready.energy : "-") + "/10\n";
+  (e.sessions || []).forEach(function(s){ t += "\n" + (s.label || "Session") + ": " + [s.laps != null ? s.laps + " laps" : "", s.minutes != null ? s.minutes + " min" : "", s.best ? "best " + s.best : "", s.position ? "finish " + s.position : "", s.rpe != null ? "effort " + s.rpe + "/10" : "", s.avgHr != null ? "avg HR " + s.avgHr : ""].filter(Boolean).join(", ") + (s.notes ? "\n  " + s.notes : "") + "\n"; });
+  var sw = sweatInfo(e);
+  t += "\nFuel: pre " + (e.fuel.preWt != null ? e.fuel.preWt : "-") + " lb, post " + (e.fuel.postWt != null ? e.fuel.postWt : "-") + " lb" + (sw ? " (lost " + sw.lost + " lb, " + sw.pct + "%)" : "") + ", fluids " + (e.fuel.fluidOz != null ? e.fuel.fluidOz + " oz" : "-") + (e.fuel.inRide ? "\n  During: " + e.fuel.inRide : "") + (e.fuel.meals ? "\n  Ate: " + e.fuel.meals : "") + "\n";
+  var j = e.journal || {};
+  if (j.good || j.fix || j.coach || j.goal) t += "\nJournal\n" + (j.good ? "  Went well: " + j.good + "\n" : "") + (j.fix ? "  Work on: " + j.fix + "\n" : "") + (j.coach ? "  Coach said: " + j.coach + "\n" : "") + (j.goal ? "  Next goal: " + j.goal + "\n" : "");
+  if (e.post.crashed || e.post.mech || e.post.result || e.post.rpe != null) t += "\nAfter: " + (e.post.crashed ? "crashed (" + (e.post.crashNote || "no details") + "); " : "") + (e.post.mech ? "bike: " + e.post.mech + "; " : "") + (e.post.rpe != null ? "effort " + e.post.rpe + "/10; " : "") + (e.post.result ? "result " + e.post.result : "") + "\n";
+  if (e.pre) t += "\nShoulder routine before riding: " + (e.pre.shoulder ? "done" : "not done") + "\n";
+  return t + rehabText() + rehabText2();
+}
+function sendEvent(e){
+  var txt = eventText(e), fname = S.settings.name + "-" + (e.kind === "race" ? "race" : "ride") + "-day-" + e.date + ".doc", subj = S.settings.name + " - " + (e.kind === "race" ? "race" : "ride") + " day " + fmtDay(e.date);
+  var html = '<html><head><meta charset="utf-8"><title>' + esc(subj) + '</title><style>body{font-family:Calibri,Arial,sans-serif}</style></head><body><pre style="font-family:Calibri,Arial,sans-serif;font-size:11pt;white-space:pre-wrap">' + esc(txt) + '</pre></body></html>';
+  var blob = new Blob(["﻿", html], { type:"application/msword" }), f = new File([blob], fname, { type:"application/msword" });
+  if (navigator.canShare && navigator.canShare({ files:[f] })) navigator.share({ files:[f], title:subj, text:"Ride log from " + S.settings.name }).catch(function(){});
+  else { var a = el("a", { href:URL.createObjectURL(blob), download:fname }); document.body.appendChild(a); a.click(); a.remove();
+    location.href = "mailto:" + encodeURIComponent(S.settings.trainerEmail || "") + "?subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent(txt.slice(0, 1800)); }
+}
+function viewRide(){
+  var w = el("div", { class:"wrap" });
+  w.appendChild(header("Ride & Race", "Track every day like a factory team"));
+  if (ridingOnHold()) w.appendChild(holdBanner());
+  w.appendChild(el("div", { class:"row" }, [
+    el("button", { class:"btn primary grow", type:"button", text:"+ Ride day", onclick:function(){ newEvent("ride"); } }),
+    el("button", { class:"btn grow", type:"button", text:"+ Race day", onclick:function(){ newEvent("race"); } })
+  ]));
+  var list = S.rides.slice().sort(function(a, b){ return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+  if (!list.length){
+    w.appendChild(el("div", { class:"card" }, [el("h2", { text:"Start your season log" }),
+      el("p", { class:"muted", text:"Log every ride and race: track and conditions, bike setup, motos and lap times, weight before and after, what he ate and drank, and a short journal. Over time you can see what setup, fuel and sleep actually go with his fastest days." })]));
+    return w;
+  }
+  var races = list.filter(function(e){ return e.kind === "race"; }).length, crashes = list.filter(function(e){ return e.post && e.post.crashed; }).length;
+  var sweats = list.map(sweatInfo).filter(Boolean), avgSweat = sweats.length ? Math.round(sweats.reduce(function(s, x){ return s + x.pct; }, 0) / sweats.length * 10) / 10 : null;
+  var rpes = list.filter(function(e){ return e.post && e.post.rpe != null; }).map(function(e){ return e.post.rpe; });
+  var season = el("div", { class:"card" }, [el("h2", { text:"Season so far" }),
+    el("div", { class:"macro", style:"margin:10px 0" }, [
+      el("div", {}, [el("b", { text:String(list.length) }), el("span", { text:"days" })]), el("div", {}, [el("b", { text:String(races) }), el("span", { text:"races" })]),
+      el("div", {}, [el("b", { text:String(crashes) }), el("span", { text:"crashes" })]), el("div", {}, [el("b", { text: avgSweat != null ? avgSweat + "%" : "--" }), el("span", { text:"avg fluid loss" })])
+    ])]);
+  var byTrack = {};
+  list.slice().reverse().forEach(function(e){ var bl = bestLapOf(e); if (e.track && bl != null){ (byTrack[e.track] = byTrack[e.track] || []).push({ date:e.date, best:bl }); } });
+  Object.keys(byTrack).forEach(function(tr){
+    var arr = byTrack[tr], best = Math.min.apply(null, arr.map(function(x){ return x.best; })), last = arr[arr.length - 1], prev = arr.length > 1 ? arr[arr.length - 2] : null;
+    var trend = prev ? (last.best < prev.best ? "faster by " + (prev.best - last.best).toFixed(1) + "s" : last.best > prev.best ? "slower by " + (last.best - prev.best).toFixed(1) + "s" : "same") : "first time";
+    season.appendChild(el("div", { class:"check" }, [el("div", { class:"grow" }, [el("div", { text:tr }), el("div", { class:"small muted", text:"Last " + lapFmt(last.best) + " (" + trend + ")" })]), el("b", { text:"Best " + lapFmt(best) })]));
+  });
+  var loads = list.slice().reverse().map(loadOf).filter(function(x){ return x > 0; });
+  if (loads.length > 1){ season.appendChild(el("div", { class:"small muted", style:"margin-top:8px", text:"Training load per day (effort x minutes)" })); season.appendChild(spark(loads)); }
+  var pre = list.slice().reverse().map(function(e){ return num(e.fuel.preWt); }).filter(function(x){ return x != null; });
+  if (pre.length > 1){ season.appendChild(el("div", { class:"small muted", style:"margin-top:8px", text:"Morning weight on ride and race days" })); season.appendChild(spark(pre)); }
+  if (rpes.length) season.appendChild(el("div", { class:"small muted", style:"margin-top:8px", text:"Average overall effort: " + (Math.round(rpes.reduce(function(s, x){ return s + x; }, 0) / rpes.length * 10) / 10) + " / 10" }));
+  w.appendChild(season);
+  list.forEach(function(e){
+    var bl = bestLapOf(e), sw = sweatInfo(e);
+    w.appendChild(el("div", { class:"card", onclick:function(){ openEvent(e.id); }, style:"cursor:pointer" }, [
+      el("div", { class:"row between" }, [el("h3", { text:(e.track || e.title || (e.kind === "race" ? "Race day" : "Ride day")) }), el("span", { class:"pill", text: e.kind === "race" ? "Race" : "Ride" })]),
+      el("div", { class:"small muted", text: fmtDay(e.date) + (bl != null ? " · best lap " + lapFmt(bl) : "") + (sw ? " · lost " + sw.lost + " lb" : "") + (e.post && e.post.crashed ? " · crash" : "") + ((e.sessions || []).length ? " · " + e.sessions.length + " session" + (e.sessions.length > 1 ? "s" : "") : "") })
+    ]));
+  });
+  return w;
+}
+function todayEventsCard(){
+  var t = today(), list = S.rides.filter(function(e){ return e.date === t; });
+  if (list.length) return el("div", { class:"card" }, [el("h3", { text: list[0].kind === "race" ? "Race day today" : "Ride day today" })].concat(list.map(function(e){
+    return el("button", { class:"btn primary block", style:"margin-top:8px", type:"button", text:"Open " + (e.track || e.title), onclick:function(){ openEvent(e.id); } }); })));
+  if (ridingOnHold()) return holdBanner();
+  return el("div", { class:"card flat row between" }, [el("div", { class:"grow", text:"Riding or racing today?" }),
+    el("button", { class:"btn sm", type:"button", text:"Ride day", onclick:function(){ newEvent("ride"); } }), el("button", { class:"btn sm", type:"button", text:"Race day", onclick:function(){ newEvent("race"); } })]);
+}
+
+/* ---------- shoulder rehab program (from the doctor's sheet) ---------- */
+// Typed in exactly as written on the Tallahassee Orthopedic Clinic / Dr. Hector Mejia home exercise sheet (HEP2go, dated Nov 25, 2018, pages 1 and 2).
+// The doses are NOT changed by the app. The single-arm-row weight was left blank on the sheet, so it has to be filled in with his doctor or PT.
+function defaultShoulderPlan(){
+  return {
+    name:"Shoulder rehab", active:true, perDay:1, time:"07:30", backupTime:"18:30",
+    source:"Dr. Hector Mejia, Tallahassee Orthopedic Clinic (HEP2go sheet dated Nov 25, 2018)",
+    restSec:30,
+    exercises:[
+      { id:"er", name:"Elastic band shoulder external rotation (ER)", reps:10, hold:1, sets:3,
+        how:"While holding an elastic band at your side with your elbow bent, start with your hand near your stomach and then pull the band away. Keep your elbow at your side the entire time." },
+      { id:"ir", name:"Elastic band shoulder internal rotation (IR)", reps:10, hold:0, sets:3,
+        how:"While holding an elastic band at your side with your elbow bent, start with your hand away from your stomach, then pull the band towards your stomach. Keep your elbow near your side the entire time." },
+      { id:"ext", name:"Elastic band shoulder extension", reps:10, hold:0, sets:3,
+        how:"While holding an elastic band in front of you with your elbows straight, pull the band down and back towards your side." },
+      { id:"flex", name:"Elastic band shoulder flexion", reps:10, hold:0, sets:3,
+        how:"While holding an elastic band at your side, draw your arm up in front of you keeping your elbow straight." },
+      { id:"row", name:"Unilateral / single arm rows", reps:10, hold:0, sets:3, bothSides:true,
+        how:"Stand (or sit on the edge of a chair or on a therapy ball). Keep hands off knees/legs and keep your back straight to work your core. Secure the resistive band in a door. Pull back, bending your elbow and squeezing your shoulder blade. Return to the starting position and repeat. Perform on the opposite side." },
+      { id:"rowwt", name:"Single arm row (free weight or band)", reps:10, hold:0, sets:3, needsWeight:true, weightLb:null, useBand:true, bothSides:false,
+        how:"Standing with your feet staggered (opposite arm to leg), begin in a supported bent position, chest pointing downward. Holding a free weight, bend at the elbow and rotate your upper back like you are trying to start a lawnmower. Return the weight with control to the inside of the opposite side knee." },
+      { id:"scap", name:"Scapular retractions", reps:10, hold:5, sets:3,
+        how:"Draw your shoulder blades back and down." }
+    ]
+  };
+}
+function rehabPlan(){
+  if (!S.rehabPlan || !S.rehabPlan.exercises) S.rehabPlan = defaultShoulderPlan();
+  S.rehabPlan.exercises.forEach(function(x){ if (x.id === "rowwt"){ x.name = "Single arm row (free weight or band)"; if (!x.weightLb && x.useBand === undefined) x.useBand = true; } });
+  return S.rehabPlan;
+}
+function rehabToday(){ return (S.rehabLog || {})[today()] || null; }
+function rehabStreak(){
+  var n = 0, d = new Date(), log = S.rehabLog || {};
+  if (!(log[dstr(d)] && log[dstr(d)].done)) d.setDate(d.getDate() - 1);
+  for (var i = 0; i < 400; i++){ var k = dstr(d); if (log[k] && log[k].done){ n++; d.setDate(d.getDate() - 1); } else break; }
+  return n;
+}
+function rehabDue(){ var p = rehabPlan(), n = new Date(); return (pad(n.getHours()) + ":" + pad(n.getMinutes())) >= p.time; }
+function shoulderCard(){
+  var p = rehabPlan(); if (!p.active) return el("div", { class:"card flat" }, [el("div", { class:"small muted", text:"Shoulder rehab is turned off. Turn it on in Settings." })]);
+  var lg = rehabToday(), done = !!(lg && lg.done), late = !done && rehabDue(), st = rehabStreak();
+  var dots = [];
+  for (var i = 6; i >= 0; i--){ var d = new Date(); d.setDate(d.getDate() - i); var k = dstr(d), on = !!((S.rehabLog || {})[k] && S.rehabLog[k].done); dots.push(el("span", { class:"pill", style:"margin-right:4px;" + (on ? "" : "opacity:.35"), text:["S","M","T","W","T","F","S"][d.getDay()] })); }
+  var c = el("div", { class:"card", style: late ? "border-color:#c0392b" : "" }, [
+    el("div", { class:"row between" }, [el("h2", { text:"Shoulder routine" }), el("span", { class:"pill", text: done ? "Done today" : (late ? "Due now" : "Due " + p.time) })]),
+    el("div", { class:"small " + (late ? "due" : "muted"), text: done ? "Nice work. " + (st > 1 ? st + " days in a row." : "") : "7 exercises, 3 sets each. Do it exactly like your doctor's sheet says. Takes about 15 minutes." }),
+    el("div", { style:"margin:10px 0" }, dots),
+    el("button", { class:"btn primary block", type:"button", text: done ? "Do it again" : "Start my shoulder routine", onclick:function(){ openRehabRun({}); } })
+  ]);
+  if (lg && lg.skipped && lg.skipped.length) c.appendChild(el("div", { class:"small due", style:"margin-top:8px", text:"Skipped today: " + lg.skipped.map(function(id){ var x = p.exercises.filter(function(e){ return e.id === id; })[0]; return x ? x.name : id; }).join(", ") + ". Ask your doctor or PT about these." }));
+  return c;
+}
+var rehabRun = null, rehabModal = null;
+function openRehabRun(opts){
+  var p = rehabPlan();
+  rehabRun = { i:0, set:1, side:0, skipped:[], sets:{}, detail:[], eventId: opts && opts.eventId || null, startedAt:Date.now() };
+  keepAwake(true);
+  drawRehabStep();
+}
+function closeRehabRun(){ if (rehabModal){ rehabModal.close(); rehabModal = null; } rehabRun = null; keepAwake(false); stopRestSilent(); render(); }
+function holdTimer(sec, btn){
+  var left = sec; btn.disabled = true; btn.textContent = "Hold... " + left;
+  var t = setInterval(function(){ left--; if (left <= 0){ clearInterval(t); beep(); btn.disabled = false; btn.textContent = "Hold " + sec + " s again"; } else btn.textContent = "Hold... " + left; }, 1000);
+}
+function drawRehabStep(){
+  var p = rehabPlan(), r = rehabRun; if (!r) return;
+  if (rehabModal) rehabModal.close();
+  if (r.i >= p.exercises.length){ finishRehab(); return; }
+  var ex = p.exercises[r.i], kids = [];
+  kids.push(el("div", { class:"small muted", text:"Exercise " + (r.i + 1) + " of " + p.exercises.length }));
+  kids.push(el("h2", { style:"margin:4px 0 8px", text:ex.name }));
+  kids.push(el("div", { class:"pill", text: ex.sets + " sets of " + ex.reps + (ex.hold ? " · hold " + ex.hold + " s each" : "") + (ex.bothSides ? " · both sides" : "") }));
+  kids.push(el("p", { style:"margin:12px 0", text:ex.how }));
+  if (ex.needsWeight && !ex.weightLb && !ex.useBand){
+    var wi = el("input", { type:"number", inputmode:"decimal", step:"0.5", placeholder:"pounds" });
+    kids.push(el("div", { class:"card flat" }, [
+      el("div", { class:"due small", text:"The doctor's sheet left the weight blank for this one. Ask your doctor or physical therapist how heavy before you do it." }),
+      el("div", { class:"field" }, [el("label", { text:"Weight they told you (lb)" }), wi]),
+      el("button", { class:"btn primary block", type:"button", text:"Save the weight", onclick:function(){ var v = num(wi.value); if (v == null || v <= 0){ toast("Enter the weight first"); return; } ex.weightLb = v; save(); drawRehabStep(); } }),
+      el("button", { class:"btn block ghost", type:"button", text:"Skip this one for now", onclick:function(){ r.skipped.push(ex.id); r.i++; r.set = 1; drawRehabStep(); } })
+    ]));
+  } else {
+    if (ex.needsWeight){
+      var swBox = [el("div", { class:"small muted", text:(ex.weightLb ? "Using a " + ex.weightLb + " lb free weight" : "Using the resistance band") + ". This exercise works either way." })];
+      if (ex.weightLb) swBox.push(el("button", { class:"btn sm ghost", type:"button", text:"Switch to the band", onclick:function(){ ex.weightLb = null; ex.useBand = true; save(); drawRehabStep(); } }));
+      else {
+        var wi2 = el("input", { type:"number", inputmode:"decimal", step:"0.5", placeholder:"lb" });
+        swBox.push(el("div", { class:"row", style:"margin-top:6px" }, [wi2, el("button", { class:"btn sm", type:"button", text:"Use a free weight", onclick:function(){ var v = num(wi2.value); if (v == null || v <= 0){ toast("Enter the weight first"); return; } ex.weightLb = v; ex.useBand = false; save(); drawRehabStep(); } })]));
+      }
+      kids.push(el("div", { class:"card flat" }, swBox));
+    }
+    var setsNow = r.set;
+    kids.push(el("div", { class:"stat", style:"text-align:center;margin:10px 0", text:"Set " + setsNow + " of " + ex.sets }));
+    if (ex.hold){ var hb = el("button", { class:"btn block", type:"button", text:"Hold timer: " + ex.hold + " s" }); hb.addEventListener("click", function(){ holdTimer(ex.hold, hb); }); kids.push(hb); }
+    kids.push(el("div", { class:"small muted", text:"Do " + ex.reps + " slow reps" + (ex.hold ? ", holding " + ex.hold + " s at the top of each" : "") + ", then tap done." }));
+    // log every set: reps actually done, what he used, and how it felt
+    var lastSet = r.detail.filter(function(d){ return d.id === ex.id; }).slice(-1)[0];
+    var repsA = el("input", { type:"number", inputmode:"numeric", value:String(ex.reps) });
+    var repsB = ex.bothSides ? el("input", { type:"number", inputmode:"numeric", value:String(ex.reps) }) : null;
+    var resI = el("input", { type:"text", placeholder:"e.g. red band, or 5 lb", value: ex.weightLb ? ex.weightLb + " lb" : (lastSet ? lastSet.resist : (ex.lastResist || "")) });
+    var painI = rateSel(0); painI.value = "0";
+    kids.push(el("div", { class:"row" }, ex.bothSides
+      ? [el("div", { class:"field grow" }, [el("label", { text:"Right side reps" }), repsA]), el("div", { class:"field grow" }, [el("label", { text:"Left side reps" }), repsB])]
+      : [el("div", { class:"field grow" }, [el("label", { text:"Reps you did" }), repsA])]));
+    kids.push(el("div", { class:"row" }, [el("div", { class:"field grow" }, [el("label", { text:"Band color / weight" }), resI]), el("div", { class:"field grow" }, [el("label", { text:"Pain 0-10" }), painI])]));
+    kids.push(el("button", { class:"btn primary block", style:"margin-top:10px", type:"button", text:"Save set " + setsNow, onclick:function(){
+      var pain = parseInt(painI.value, 10) || 0;
+      r.detail.push({ id:ex.id, name:ex.name, set:setsNow, reps:num(repsA.value), repsLeft: repsB ? num(repsB.value) : null, resist:resI.value.trim(), pain:pain, at:new Date().toISOString() });
+      if (resI.value.trim()) ex.lastResist = resI.value.trim();
+      r.sets[ex.id] = setsNow;
+      if (pain >= 7){
+        r.painFlag = true; save();
+        if (confirm("Pain was " + pain + " out of 10. Stop this exercise and tell your parents?")){ r.skipped.push(ex.id); r.i++; r.set = 1; drawRehabStep(); return; }
+      }
+      if (setsNow >= ex.sets){ r.i++; r.set = 1; drawRehabStep(); }
+      else { r.set++; startRest(p.restSec || 30); drawRehabStep(); }
+    } }));
+    kids.push(el("button", { class:"btn block ghost", type:"button", text:"This hurts - skip this exercise", onclick:function(){
+      if (confirm("Skip this exercise? Tell your parents if it hurt.")){ r.skipped.push(ex.id); r.i++; r.set = 1; drawRehabStep(); } } }));
+  }
+  kids.push(el("div", { class:"small muted", style:"margin-top:10px", text:"If anything hurts sharply, stop and tell your parents." }));
+  kids.push(el("button", { class:"btn block danger", type:"button", text:"Stop for now", onclick:function(){ if (confirm("Stop the routine? It won't count as done.")) closeRehabRun(); } }));
+  rehabModal = sheet("Shoulder routine", kids);
+}
+function finishRehab(){
+  var r = rehabRun, p = rehabPlan(), t = today();
+  S.rehabLog = S.rehabLog || {};
+  var complete = r.skipped.length === 0;
+  var prior = S.rehabLog[t], run = { at:new Date().toISOString(), complete:complete, skipped:r.skipped.slice(), sets:r.sets, detail:r.detail, painFlag:!!r.painFlag, minutes:Math.round((Date.now() - r.startedAt) / 60000) };
+  var runs = (prior && prior.runs) ? prior.runs.slice() : [];
+  runs.push(run);
+  S.rehabLog[t] = { done:true, complete:complete, at:run.at, skipped:run.skipped, sets:run.sets, detail:run.detail, painFlag:run.painFlag, minutes:run.minutes, runs:runs };
+  if (r.eventId){ var ev = eventById(r.eventId); if (ev){ ev.pre = ev.pre || {}; ev.pre.shoulder = true; ev.pre.shoulderAt = new Date().toISOString(); } }
+  save();
+  var evId = r.eventId;
+  toast(complete ? "Routine done. " + (rehabStreak() > 1 ? rehabStreak() + " days in a row" : "Great job") : "Routine saved with skipped exercises");
+  closeRehabRun();
+  if (evId) openEvent(evId);
+}
+function rehabIcs(){
+  var p = rehabPlan(), pad2 = function(n){ return (n < 10 ? "0" : "") + n; };
+  var d = new Date(), ymd = d.getFullYear() + pad2(d.getMonth() + 1) + pad2(d.getDate());
+  function ev(uid, hhmm, title, desc){
+    var hm = hhmm.replace(":", "") + "00";
+    return ["BEGIN:VEVENT", "UID:" + uid + "@app62", "DTSTAMP:" + ymd + "T000000Z", "DTSTART:" + ymd + "T" + hm, "DTEND:" + ymd + "T" + (parseInt(hhmm.slice(0, 2), 10) * 10000 + parseInt(hhmm.slice(3), 10) * 100 + 1500 + "").padStart(6, "0"),
+      "RRULE:FREQ=DAILY", "SUMMARY:" + title, "DESCRIPTION:" + desc, "BEGIN:VALARM", "TRIGGER:PT0M", "ACTION:DISPLAY", "DESCRIPTION:" + title, "END:VALARM", "END:VEVENT"].join("\r\n");
+  }
+  var body = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//62//Shoulder rehab//EN", "CALSCALE:GREGORIAN",
+    ev("shoulder-main", p.time, "Shoulder routine", "Do your shoulder exercises exactly like your doctor's sheet. Open 62 and tap Start."),
+    ev("shoulder-backup", p.backupTime, "Did you do your shoulder routine?", "If not yet, do it now. Open 62 and tap Start."), "END:VCALENDAR"].join("\r\n");
+  var blob = new Blob([body], { type:"text/calendar" }), a = el("a", { href:URL.createObjectURL(blob), download:"shoulder-routine.ics" });
+  document.body.appendChild(a); a.click(); a.remove();
+  toast("Open the file to add the daily reminders to your calendar");
+}
+function rehabText2(){
+  var p = rehabPlan(), log = S.rehabLog || {}, t = "";
+  if (!p.active) return "";
+  var days = [], lines = [];
+  for (var i = 6; i >= 0; i--){ var d = new Date(); d.setDate(d.getDate() - i); var k = dstr(d); lines.push(fmtDay(k) + ": " + (log[k] && log[k].done ? (log[k].complete ? "done" : "done, skipped " + (log[k].skipped || []).length) : "not done")); }
+  var lastKey = Object.keys(log).filter(function(k){ return log[k] && log[k].detail && log[k].detail.length; }).sort().slice(-1)[0], det = "";
+  if (lastKey){
+    det = "  Set by set, " + fmtDay(lastKey) + ":\n";
+    log[lastKey].detail.forEach(function(x){ det += "    " + x.name + " set " + x.set + ": " + (x.reps != null ? x.reps : "?") + (x.repsLeft != null ? "/" + x.repsLeft : "") + " reps" + (x.resist ? ", " + x.resist : "") + ", pain " + x.pain + "/10\n"; });
+  }
+  return "\nShoulder routine (" + p.source + ")\n  " + lines.join("\n  ") + "\n" + det;
+}
+
+/* ---------- TRAIN ---------- */
+var rest = { end:0, total:0, timer:null, beeped:false };
+var audioCtx = null, wakeLock = null;
+function beep(){
+  try{
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.22, 0.44].forEach(function(off){
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+      var t0 = audioCtx.currentTime + off; g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+      o.start(t0); o.stop(t0 + 0.2);
+    });
+  }catch(e){}
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+}
+function startRest(sec){
+  if (!sec) return;
+  rest.end = Date.now() + sec * 1000; rest.total = sec; rest.beeped = false;
+  try{ audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume(); }catch(e){}
+  clearInterval(rest.timer);
+  rest.timer = setInterval(tickRest, 250);
+  render();
+}
+function stopRest(){ clearInterval(rest.timer); rest.end = 0; render(); }
+function tickRest(){
+  var left = (rest.end - Date.now()) / 1000, bar = document.getElementById("restbar");
+  if (!bar) return;
+  if (left <= 0 && !rest.beeped){ rest.beeped = true; beep(); bar.classList.add("over"); }
+  var t = bar.querySelector(".t"), l = bar.querySelector(".l");
+  if (left > 0){ t.textContent = mmss(left); l.textContent = "Rest"; }
+  else { t.textContent = "GO"; l.textContent = "Next set"; if (left < -30) stopRest(); }
+}
+function restBarEl(){
+  var left = (rest.end - Date.now()) / 1000;
+  return el("div", { class:"restbar" + (left <= 0 ? " over" : ""), id:"restbar" }, [
+    el("div", { class:"t", text: left > 0 ? mmss(left) : "GO" }),
+    el("div", { class:"grow" }, [el("div", { class:"l", text: left > 0 ? "Rest" : "Next set" }), el("div", { class:"l", id:"restbar-hr", text: hrs.bpm ? "♥ " + hrs.bpm : "" })]),
+    el("button", { type:"button", onclick:function(){ rest.end += 15000; rest.beeped = false; render(); }, text:"+15s" }),
+    el("button", { type:"button", onclick:stopRest, text:"Skip" })
+  ]);
+}
+function lastWeightFor(name){
+  var key = name.toLowerCase();
+  for (var i = S.sessions.length - 1; i >= 0; i--){
+    var e = S.sessions[i].entries.filter(function(x){ return x.name.toLowerCase() === key; })[0];
+    if (e){ var done = e.sets.filter(function(s){ return s.done && s.w != null; }); if (done.length) return done[done.length - 1].w; }
+  }
+  return null;
+}
+/* ---------- live heart rate (Bluetooth) ----------
+   Works with any standard BLE heart-rate source: a chest strap (Polar H10, Garmin HRM...) or a Garmin watch
+   with "Broadcast Heart Rate" turned on. Web Bluetooth on Android/desktop Chrome; the Capacitor BLE plugin
+   when the app is wrapped as a real iPhone app (iOS Safari has no Bluetooth). */
+var HR_SVC = "0000180d-0000-1000-8000-00805f9b34fb", HR_CHR = "00002a37-0000-1000-8000-00805f9b34fb";
+var ZONES = [
+  { n:"Rest",     lo:0,    color:"#8A939D" },
+  { n:"Easy",     lo:0.50, color:"#3DA5F4" },
+  { n:"Aerobic",  lo:0.60, color:"#3DD07F" },
+  { n:"Tempo",    lo:0.70, color:"#F6C90E" },
+  { n:"Hard",     lo:0.80, color:"#FF4D3D" },
+  { n:"Max",      lo:0.90, color:"#E0245E" }
+];
+var hrs = { bpm:null, at:0, status:"off", name:"", demoTimer:null, native:false, dev:null, lastTs:0, lastSave:0 };
+function parseHeartRate(dv){
+  var flags = dv.getUint8(0);
+  return (flags & 1) ? dv.getUint16(1, true) : dv.getUint8(1);
+}
+function zoneIdx(b){ var f = b / (S.settings.maxHr || 200), z = 0; for (var i = 0; i < ZONES.length; i++) if (f >= ZONES[i].lo) z = i; return z; }
+function onBpm(b){
+  if (!(b > 25 && b < 260)) return;
+  var now = Date.now(), dt = hrs.lastTs ? Math.min(5, (now - hrs.lastTs) / 1000) : 0;
+  hrs.bpm = b; hrs.at = now; hrs.lastTs = now; hrs.status = "live";
+  if (S.active){
+    var h = S.active.hr = S.active.hr || { sum:0, secs:0, max:0, zone:[0,0,0,0,0,0], pts:[] };
+    h.sum += b * dt; h.secs += dt; h.zone[zoneIdx(b)] += dt; if (b > h.max) h.max = b;
+    if (!h.pts.length || now - h.pts[h.pts.length - 1][0] >= 10000) h.pts.push([now, b]);
+    if (now - hrs.lastSave > 20000){ hrs.lastSave = now; save(); }
+  }
+  updateHrDom();
+}
+function hrStripEl(){
+  var d = el("div", { class:"card", id:"hrstrip" }); fillHrStrip(d); return d;
+}
+function fillHrStrip(d){
+  d.textContent = "";
+  var live = hrs.status === "live" && Date.now() - hrs.at < 8000;
+  if (!live){
+    var msg = hrs.status === "connecting" ? "Connecting…" : hrs.status === "live" ? "Lost the signal — reconnecting…" : "Heart rate";
+    d.appendChild(el("div", { class:"row between" }, [
+      el("div", {}, [el("div", { class:"small muted", text:msg }), el("div", { class:"small muted", text: hrs.status === "off" ? "Chest strap or Garmin watch (broadcast mode)" : hrs.name })]),
+      el("div", { class:"row" }, [
+        el("button", { class:"btn sm primary", type:"button", style:"font-size:17px", text: hrs.status === "off" ? "Connect" : "Retry", onclick:connectHr }),
+        el("button", { class:"btn sm ghost", type:"button", text:"Demo", onclick:startDemoHr })
+      ])
+    ]));
+    return;
+  }
+  var z = ZONES[zoneIdx(hrs.bpm)], h = S.active && S.active.hr;
+  d.appendChild(el("div", { class:"row between" }, [
+    el("div", { class:"row", style:"gap:14px" }, [
+      el("div", { class:"stat", style:"font-size:56px;color:" + z.color, text:String(hrs.bpm) }),
+      el("div", {}, [el("div", { style:"font-weight:700;color:" + z.color, text:"♥ " + z.n.toUpperCase() }), el("div", { class:"small muted", text:"bpm" })])
+    ]),
+    el("div", { class:"small muted", style:"text-align:right" }, [
+      el("div", { text: h && h.secs ? "avg " + Math.round(h.sum / h.secs) : "" }),
+      el("div", { text: h ? "max " + h.max : "" }),
+      el("button", { class:"btn sm ghost", type:"button", text:"Disconnect", onclick:disconnectHr })
+    ])
+  ]));
+  var bar = el("div", { style:"display:flex;height:8px;border-radius:4px;overflow:hidden;margin-top:10px;background:var(--panel2)" });
+  var tot = h ? h.zone.reduce(function(a, b){ return a + b; }, 0) : 0;
+  if (tot > 0) ZONES.forEach(function(zz, i){ if (h.zone[i] > 0) bar.appendChild(el("div", { style:"width:" + (100 * h.zone[i] / tot) + "%;background:" + zz.color })); });
+  d.appendChild(bar);
+}
+function updateHrDom(){
+  var d = document.getElementById("hrstrip"); if (d) fillHrStrip(d);
+  var r = document.getElementById("restbar-hr");
+  if (r) r.textContent = hrs.bpm ? "♥ " + hrs.bpm : "";
+}
+function connectHr(){
+  var cap = window.Capacitor, native = cap && cap.isNativePlatform && cap.isNativePlatform() && cap.Plugins && cap.Plugins.BluetoothLe;
+  hrs.status = "connecting"; updateHrDom();
+  if (native){
+    var BLE = cap.Plugins.BluetoothLe;
+    BLE.initialize().then(function(){ return BLE.requestDevice({ services:[HR_SVC] }); }).then(function(dev){
+      hrs.name = dev.name || "Heart rate sensor"; hrs.dev = dev.deviceId; hrs.native = true;
+      return BLE.connect({ deviceId:dev.deviceId }, function(){ hrs.status = "lost"; updateHrDom(); setTimeout(function(){ if (hrs.status === "lost") connectHr(); }, 2000); })
+        .then(function(){ return BLE.startNotifications({ deviceId:dev.deviceId, service:HR_SVC, characteristic:HR_CHR }, function(v){ onBpm(parseHeartRate(v)); }); });
+    }).catch(function(e){ hrs.status = "off"; updateHrDom(); toast("Couldn't connect — is the strap on / watch broadcasting?"); });
+    return;
+  }
+  if (!navigator.bluetooth){
+    hrs.status = "off"; updateHrDom();
+    toast("Bluetooth heart rate needs the 62 iPhone app or Chrome on Android. Try Demo to see the screen."); return;
+  }
+  navigator.bluetooth.requestDevice({ filters:[{ services:["heart_rate"] }] }).then(function(dev){
+    hrs.name = dev.name || "Heart rate sensor";
+    function link(){
+      return dev.gatt.connect().then(function(s){ return s.getPrimaryService("heart_rate"); })
+        .then(function(s){ return s.getCharacteristic("heart_rate_measurement"); })
+        .then(function(c){ c.addEventListener("characteristicvaluechanged", function(e){ onBpm(parseHeartRate(e.target.value)); }); return c.startNotifications(); });
+    }
+    dev.addEventListener("gattserverdisconnected", function(){ hrs.status = "lost"; updateHrDom(); setTimeout(function(){ if (hrs.status === "lost") link().catch(function(){}); }, 2000); });
+    return link();
+  }).catch(function(e){ hrs.status = "off"; updateHrDom(); if (e && e.name !== "NotFoundError") toast("Couldn't connect to the heart rate sensor"); });
+}
+function disconnectHr(){
+  try{ if (hrs.native && window.Capacitor.Plugins.BluetoothLe && hrs.dev) window.Capacitor.Plugins.BluetoothLe.disconnect({ deviceId:hrs.dev }); }catch(e){}
+  clearInterval(hrs.demoTimer); hrs.status = "off"; hrs.bpm = null; hrs.lastTs = 0; updateHrDom(); render();
+}
+function startDemoHr(){
+  clearInterval(hrs.demoTimer); hrs.name = "Demo signal"; var t0 = Date.now();
+  hrs.demoTimer = setInterval(function(){
+    var s = (Date.now() - t0) / 1000;
+    onBpm(Math.round(135 + 40 * Math.sin(s / 14) + 8 * Math.sin(s / 3)));
+  }, 1000);
+  onBpm(120);
+}
+setInterval(function(){ if (hrs.status === "live" && Date.now() - hrs.at >= 8000) updateHrDom(); }, 2000);
+function hrSummary(a){
+  var h = a.hr; if (!h || !h.secs) return null;
+  return { avg:Math.round(h.sum / h.secs), max:h.max, zoneMin:h.zone.map(function(s){ return Math.round(s / 6) / 10; }) };
+}
+
+function viewTrain(){
+  var w = el("div", { class:"wrap" });
+  w.appendChild(header("Train", S.active ? S.active.dayName : "Programs from your coach"));
+  if (S.injury && S.injury.active) w.appendChild(injuryBanner());
+  if (S.active){ renderRunner(w); return w; }
+  inboxCards().forEach(function(c){ w.appendChild(c); });
+
+  if (!S.programs.length) w.appendChild(el("div", { class:"card" }, [
+    el("h2", { text:"Load your program" }),
+    el("p", { class:"muted", text:"Upload what your coach sent (PDF or Word), or paste it. 62 turns it into a workout with rest timers and a weight/rep log." })
+  ]));
+  S.programs.forEach(function(p){
+    var c = el("div", { class:"card" }, [
+      el("div", { class:"row between" }, [el("h2", { text:p.name }), el("button", { class:"btn sm ghost danger", type:"button", text:"Delete", onclick:function(){
+        if (confirm("Delete \"" + p.name + "\"? Logged sessions stay.")){ S.programs = S.programs.filter(function(x){ return x.id !== p.id; }); save(); render(); } } })])
+    ]);
+    p.days.forEach(function(d){
+      c.appendChild(el("div", { class:"check" }, [
+        el("div", { class:"grow" }, [el("div", { text:d.name }), el("div", { class:"small muted", text: d.exercises.length + " exercises" })]),
+        el("button", { class:"btn sm", type:"button", text:"Start", onclick:function(){ startSession(p, d); } })
+      ]));
+    });
+    w.appendChild(c);
+  });
+  w.appendChild(el("button", { class:"btn primary block", type:"button", text:"+ Add a program", onclick:openImport }));
+  w.appendChild(historyCard());
+  return w;
+}
+function startSession(p, d){
+  S.active = { id:uid(), date:today(), programId:p.id, programName:p.name, dayName:d.name, startedAt:Date.now(),
+    entries: d.exercises.map(function(ex){
+      var last = lastWeightFor(ex.name), reps = parseInt(ex.reps, 10) || null;
+      var sets = []; for (var i = 0; i < (ex.sets || 3); i++) sets.push({ w:last, r:reps, done:false });
+      return { name:ex.name, target:{ sets:ex.sets, reps:ex.reps, rest:ex.rest, notes:ex.notes || "" }, sets:sets };
+    }) };
+  save(); keepAwake(true); render();
+}
+function keepAwake(on){
+  try{ if (on && navigator.wakeLock){ navigator.wakeLock.request("screen").then(function(l){ wakeLock = l; }).catch(function(){}); }
+       else if (!on && wakeLock){ wakeLock.release(); wakeLock = null; } }catch(e){}
+}
+function renderRunner(w){
+  var a = S.active;
+  var tot = 0, dn = 0; a.entries.forEach(function(e){ e.sets.forEach(function(s){ tot++; if (s.done) dn++; }); });
+  w.appendChild(el("div", { class:"card row between" }, [
+    el("div", {}, [el("div", { class:"stat", text: dn + "/" + tot }), el("div", { class:"small muted", text:"sets done" })]),
+    el("button", { class:"btn primary", type:"button", text:"Finish", onclick:finishSession })
+  ]));
+  w.appendChild(hrStripEl());
+  a.entries.forEach(function(en){
+    var c = el("div", { class:"card" }, [
+      el("div", { class:"row between" }, [el("h2", { text:en.name }), el("span", { class:"pill", text: (en.target.sets || en.sets.length) + " × " + (en.target.reps || "—") + (en.target.rest ? " · " + en.target.rest + "s rest" : "") })]),
+      en.target.notes ? el("div", { class:"small muted", text:en.target.notes }) : null
+    ]);
+    var grid = el("div", { class:"sets", style:"margin-top:10px" }, [
+      el("div", { class:"hd", text:"Set" }), el("div", { class:"hd", text:"Weight (lb)" }), el("div", { class:"hd", text:"Reps" }), el("div", { class:"hd", text:"" })
+    ]);
+    en.sets.forEach(function(s, i){
+      var wi = el("input", { type:"number", inputmode:"decimal", step:"any", value: s.w == null ? "" : s.w, "aria-label":"Weight set " + (i+1),
+        onchange:function(){ s.w = num(wi.value); save(); } });
+      var ri = el("input", { type:"number", inputmode:"numeric", value: s.r == null ? "" : s.r, "aria-label":"Reps set " + (i+1),
+        onchange:function(){ s.r = num(ri.value); save(); } });
+      var dnb = el("button", { class:"done" + (s.done ? " on" : ""), type:"button", "aria-label":"Mark set " + (i+1) + " done", "aria-pressed": s.done ? "true" : "false",
+        onclick:function(){
+          s.w = num(wi.value); s.r = num(ri.value); s.done = !s.done;
+          // next set inherits this weight so he only edits when it changes
+          if (s.done && en.sets[i+1] && !en.sets[i+1].done && en.sets[i+1].w == null) en.sets[i+1].w = s.w;
+          save();
+          if (s.done) startRest(en.target.rest || 90); else render();
+        } }, [icon(CHECK)]);
+      grid.appendChild(el("div", { class:"setn", text:String(i+1) })); grid.appendChild(wi); grid.appendChild(ri); grid.appendChild(dnb);
+    });
+    c.appendChild(grid);
+    if (S.injury && S.injury.active) c.appendChild(el("button", { class:"btn sm ghost" + (en.skipped ? " danger" : ""), type:"button", style:"margin-top:8px", text: en.skipped ? "Skipped because of injury (tap to undo)" : "Skip this one - injury", onclick:function(){ en.skipped = !en.skipped; save(); render(); } }));
+    c.appendChild(el("div", { class:"row", style:"margin-top:10px" }, [
+      el("button", { class:"btn sm ghost", type:"button", text:"+ Set", onclick:function(){ var l = en.sets[en.sets.length-1]; en.sets.push({ w:l ? l.w : null, r:l ? l.r : null, done:false }); save(); render(); } }),
+      en.sets.length > 1 ? el("button", { class:"btn sm ghost", type:"button", text:"− Set", onclick:function(){ en.sets.pop(); save(); render(); } }) : null
+    ]));
+    w.appendChild(c);
+  });
+  w.appendChild(el("button", { class:"btn block danger", type:"button", text:"Cancel workout (discard)", onclick:function(){
+    if (confirm("Discard this workout?")){ S.active = null; save(); stopRestSilent(); keepAwake(false); render(); } } }));
+}
+function stopRestSilent(){ clearInterval(rest.timer); rest.end = 0; }
+function finishSession(){
+  var a = S.active;
+  var any = a.entries.some(function(e){ return e.sets.some(function(s){ return s.done; }); });
+  if (!any && !confirm("No sets are marked done. Save anyway?")) return;
+  a.entries = a.entries.map(function(e){ return { name:e.name, target:e.target, skipped:!!e.skipped, sets: e.skipped ? [] : e.sets.filter(function(s){ return s.done; }) }; }).filter(function(e){ return e.sets.length || e.skipped; });
+  a.durationMin = Math.round((Date.now() - a.startedAt) / 60000);
+  var hsum = hrSummary(a); a.hrSummary = hsum; delete a.hr;
+  S.sessions.push(a); S.active = null; save(); stopRestSilent(); keepAwake(false);
+  toast("Workout saved");
+  openExport([a], "Workout saved. Send it to " + S.settings.trainerName + "?");
+  render();
+}
+function historyCard(){
+  var c = el("div", { class:"card" }, [el("div", { class:"row between" }, [el("h2", { text:"History" }),
+    S.sessions.length ? el("button", { class:"btn sm", type:"button", text:"Export & email", onclick:openExportPicker }) : null])]);
+  if (!S.sessions.length){ c.appendChild(el("div", { class:"muted", text:"Finished workouts show up here." })); return c; }
+  S.sessions.slice(-8).reverse().forEach(function(s){
+    var vol = 0; s.entries.forEach(function(e){ e.sets.forEach(function(x){ vol += (x.w || 0) * (x.r || 0); }); });
+    c.appendChild(el("div", { class:"check", onclick:function(){ openExport([s], null); } }, [
+      el("div", { class:"grow" }, [el("div", { text:s.dayName + " — " + s.programName }), el("div", { class:"small muted", text: fmtDay(s.date) + " · " + (s.durationMin || 0) + " min · " + Math.round(vol).toLocaleString() + " lb moved" })]),
+      el("span", { class:"muted", text:"›" })
+    ]));
+  });
+  return c;
+}
+
+/* ---------- program import ---------- */
+function parseProgramText(text, nameHint){
+  var lines = text.replace(/\r/g, "").split("\n").map(function(l){ return l.replace(/^[\s•\-–*·•]+/, "").trim(); }).filter(Boolean);
+  var setRx = /(\d{1,2})\s*(?:x|×|sets?\s*(?:of|x)?)\s*(\d{1,3}(?:\s*[-–]\s*\d{1,3})?\s*(?:seconds|secs|sec|min|s)?|amrap|max|failure)/i;
+  var restRx = /rest\s*:?\s*(\d+(?:\.\d+)?)\s*(seconds|secs|sec|minutes|mins|min|s|m)?\b|(\d+(?:\.\d+)?)\s*(seconds|secs|sec|minutes|mins|min|s|m)\s*rest/i;
+  var dayRx = /^(day\s*\d+|workout\s*[a-z0-9]+|session\s*\d+|week\s*\d+|monday|tuesday|wednesday|thursday|friday|saturday|sunday|upper|lower|push|pull|legs|full body|[a-z ]{3,30}\s*day)\b/i;
+  var days = [], cur = null;
+  function ensure(n){ if (!cur){ cur = { name:n || "Workout", exercises:[] }; days.push(cur); } }
+  lines.forEach(function(line){
+    var m = line.match(setRx);
+    if (m){
+      ensure();
+      var rr = line.match(restRx), restSec = null;
+      if (rr){ var v = parseFloat(rr[1] || rr[3]), u = (rr[2] || rr[4] || "s").toLowerCase(); restSec = Math.round(/^m/.test(u) ? v * 60 : v); }
+      var name = line.slice(0, m.index).replace(/^[A-Za-z]?\d{0,2}[.)]\s+/, "").replace(/[:\-–|,]+\s*$/, "").trim();
+      var notes = (line.slice(m.index + m[0].length).replace(restRx, "").replace(/^[\s,;:\-–|@]+/, "").trim());
+      if (!name){ name = "Exercise " + (cur.exercises.length + 1); }
+      cur.exercises.push({ name:name, sets:parseInt(m[1], 10), reps:m[2].replace(/\s+/g, ""), rest: restSec || 90, notes:notes });
+    } else if (dayRx.test(line) && line.length < 60 && !/\d+\s*(lb|kg|reps)/i.test(line)){
+      cur = { name: line.replace(/[:\-–]+\s*$/, ""), exercises:[] }; days.push(cur);
+    } else if (cur && cur.exercises.length && line.length < 140 && !/^[a-z]/.test(line) === false){
+      // continuation / coaching note belongs to the previous exercise
+      var last = cur.exercises[cur.exercises.length - 1]; last.notes = (last.notes ? last.notes + " " : "") + line;
+    }
+  });
+  days = days.filter(function(d){ return d.exercises.length; });
+  return days.length ? { id:uid(), name:nameHint || "My program", days:days } : null;
+}
+function readDocxText(file){
+  var ready = window.JSZip ? Promise.resolve() : loadScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js");
+  return ready.catch(function(){ throw new Error("The Word reader didn't load — check your connection."); }).then(function(){ return file.arrayBuffer(); }).then(function(buf){ return window.JSZip.loadAsync(buf); }).then(function(z){
+    var f = z.file("word/document.xml"); if (!f) throw new Error("That doesn't look like a Word (.docx) file.");
+    return f.async("string");
+  }).then(function(xml){
+    return xml.replace(/<w:tab\/>/g, "\t").replace(/<\/w:p>/g, "\n").replace(/<w:br\/>/g, "\n").replace(/<[^>]+>/g, "")
+      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  });
+}
+function fileToB64(file){
+  return new Promise(function(res, rej){ var r = new FileReader(); r.onload = function(){ res(String(r.result).split(",")[1]); }; r.onerror = rej; r.readAsDataURL(file); });
+}
+function openImport(){
+  var status = el("div", { class:"small muted" });
+  var nameI = el("input", { type:"text", placeholder:"Program name (e.g. Off-season Strength)" });
+  var ta = el("textarea", { placeholder:"Or paste the program here:\n\nDay 1 - Lower\nBack Squat 4x6 rest 2 min\nRomanian Deadlift 3x8 rest 90s\n\nDay 2 - Upper\nBench Press 4x8 rest 90s" });
+  var file = el("input", { type:"file", accept:".pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" });
+  var m = sheet("Add a program", [
+    el("div", { class:"field" }, [el("label", { text:"Program name" }), nameI]),
+    el("div", { class:"field" }, [el("label", { text:"Upload from coach (PDF or Word)" }), file]),
+    ta, status,
+    el("div", { class:"row" }, [
+      el("button", { class:"btn grow", type:"button", text:"Cancel", onclick:function(){ m.close(); } }),
+      el("button", { class:"btn primary grow", type:"button", text:"Build it", onclick:build })
+    ])
+  ]);
+  function addProgram(p, nm){ p.name = nm || p.name; S.programs.push(p); save(); m.close(); render(); toast("Program added — " + p.days.length + " day" + (p.days.length > 1 ? "s" : "")); }
+  function build(){
+    var nm = nameI.value.trim(), f = file.files && file.files[0];
+    status.textContent = "Reading…";
+    var job;
+    if (f){
+      var ext = (f.name.split(".").pop() || "").toLowerCase();
+      if (ext === "docx") job = readDocxText(f).then(function(t){ return fromText(t, nm); });
+      else if (ext === "pdf") job = fromPdf(f, nm);
+      else job = f.text().then(function(t){ return fromText(t, nm); });
+    } else if (ta.value.trim()) job = Promise.resolve(fromText(ta.value, nm));
+    else { status.textContent = "Pick a file or paste a program first."; return; }
+    Promise.resolve(job).then(function(p){ if (p) addProgram(p, nm || p.name || (f && f.name.replace(/\.[^.]+$/, ""))); })
+      .catch(function(e){ status.textContent = e.message || "Couldn't read that."; });
+  }
+  function fromText(t, nm){
+    // AI reading is far better than the pattern reader on messy coach documents; use it when connected.
+    function local(){
+      var p = parseProgramText(t, nm);
+      if (!p) throw new Error("I couldn't find sets and reps in that. Lines like \"Back Squat 4x6 rest 2 min\" work.");
+      return p;
+    }
+    if (CFG.api && cloud.session && navigator.onLine) return callApi("parse-program", { text:t.slice(0, 40000) }).then(function(r){ return r.program; }, local);
+    return local();
+  }
+  function fromPdf(f, nm){
+    if (!(CFG.api && cloud.session && navigator.onLine)) throw new Error("Reading PDFs needs a connection and a sign-in. Try again with signal, or paste the text below.");
+    return fileToB64(f).then(function(b){ return callApi("parse-program", { pdf:b }); }).then(function(r){ return r.program; });
+  }
+}
+function callApi(fn, body){
+  return fetch(CFG.api + "/functions/v1/" + fn, { method:"POST", headers:{ "Content-Type":"application/json", "Authorization":"Bearer " + (cloud.session ? cloud.session.access_token : CFG.key), "apikey":CFG.key }, body:JSON.stringify(body) })
+    .then(function(r){ return r.json().then(function(j){ if (!r.ok || j.error) throw new Error(j.error || "Server error"); return j; }); });
+}
+
+/* ---------- export to coach ---------- */
+function bwLabel(name){ return /pull|chin|push|plank|dip|lunge|sit-?up|crunch|burpee|jump|squat jump|mountain|bear|hang|bridge|raise/i.test(name) ? "BW" : "—"; }
+function sessionsText(list){
+  return list.map(function(s){
+    var t = s.dayName + " — " + s.programName + "\n" + fmtDay(s.date) + (s.durationMin ? " (" + s.durationMin + " min)" : "") + (s.hrSummary ? "  ·  HR avg " + s.hrSummary.avg + ", max " + s.hrSummary.max : "") + "\n";
+    s.entries.forEach(function(e){ if (e.skipped){ t += "  " + e.name + ": skipped (injury)\n"; return; } t += "  " + e.name + ": " + e.sets.map(function(x){ return (x.w != null ? x.w + "lb" : bwLabel(e.name)) + "×" + (x.r != null ? x.r : "?"); }).join(", ") + "\n"; });
+    return t;
+  }).join("\n") + rehabText() + rehabText2();
+}
+function sessionsDoc(list){
+  var h = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>Workout log</title>' +
+    '<style>body{font-family:Calibri,Arial,sans-serif}h1{font-size:20pt}h2{font-size:14pt;margin-bottom:2pt}table{border-collapse:collapse;margin-bottom:10pt}td,th{border:1px solid #888;padding:3pt 8pt;text-align:center}th{background:#eee}</style></head><body>' +
+    '<h1>' + esc(S.settings.name) + ' — Workout Log</h1>';
+  list.forEach(function(s){
+    h += '<h2>' + esc(s.dayName) + ' <small>(' + esc(s.programName) + ')</small></h2><p>' + esc(fmtDay(s.date)) + (s.durationMin ? ' · ' + s.durationMin + ' min' : '') + (s.hrSummary ? ' · Heart rate avg ' + s.hrSummary.avg + ', max ' + s.hrSummary.max + ' bpm' : '') + '</p>';
+    s.entries.forEach(function(e){
+      if (e.skipped){ h += '<p><b>' + esc(e.name) + '</b> - skipped because of injury</p>'; return; }
+      h += '<p><b>' + esc(e.name) + '</b>' + (e.target && e.target.reps ? ' <i>(target ' + esc(e.target.sets) + '×' + esc(e.target.reps) + ')</i>' : '') + '</p><table><tr><th>Set</th><th>Weight (lb)</th><th>Reps</th></tr>';
+      e.sets.forEach(function(x, i){ h += '<tr><td>' + (i+1) + '</td><td>' + (x.w != null ? esc(x.w) : esc(bwLabel(e.name))) + '</td><td>' + (x.r != null ? esc(x.r) : '') + '</td></tr>'; });
+      h += '</table>';
+    });
+  });
+  return h + rehabDoc() + '</body></html>';
+}
+function openExportPicker(){
+  var since = S.lastExport || "";
+  var list = S.sessions.filter(function(s){ return !since || s.date > since; });
+  if (!list.length) list = S.sessions.slice(-5);
+  openExport(list, since ? "Everything since your last email (" + fmtDay(since) + ")" : "Your recent workouts");
+}
+function openExport(list, msg){
+  var fname = S.settings.name + "-workouts-" + today() + ".doc";
+  var m = sheet("Send to " + S.settings.trainerName, [
+    msg ? el("div", { class:"muted", text:msg }) : null,
+    el("pre", { style:"white-space:pre-wrap;font-family:var(--body);font-size:15px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;max-height:34vh;overflow:auto;margin:0", text:sessionsText(list) }),
+    !S.settings.trainerEmail ? el("div", { class:"due small", text:"Add your trainer's email in Settings (⚙) so this fills in automatically." }) : null,
+    el("button", { class:"btn primary block", type:"button", text:"Email as a Word document", onclick:function(){
+      var blob = new Blob(["﻿", sessionsDoc(list)], { type:"application/msword" });
+      var f = new File([blob], fname, { type:"application/msword" });
+      var subj = S.settings.name + " — workout log " + fmtDay(today());
+      var done = function(){ S.lastExport = today(); save(); };
+      if (navigator.canShare && navigator.canShare({ files:[f] })){
+        navigator.share({ files:[f], title:subj, text:"Workout log from " + S.settings.name }).then(done).catch(function(){});
+      } else {
+        var a = el("a", { href:URL.createObjectURL(blob), download:fname }); document.body.appendChild(a); a.click(); a.remove();
+        location.href = "mailto:" + encodeURIComponent(S.settings.trainerEmail) + "?subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent("Log attached.\n\n" + sessionsText(list).slice(0, 1500));
+        done();
+      }
+    } }),
+    el("button", { class:"btn block", type:"button", text:"Email as text (no attachment)", onclick:function(){
+      location.href = "mailto:" + encodeURIComponent(S.settings.trainerEmail) + "?subject=" + encodeURIComponent(S.settings.name + " — workout log") + "&body=" + encodeURIComponent(sessionsText(list).slice(0, 1800));
+      S.lastExport = today(); save();
+    } }),
+    el("button", { class:"btn block ghost", type:"button", text:"Close", onclick:function(){ m.close(); } })
+  ]);
+}
+
+/* ---------- FUEL ---------- */
+function viewFood(){
+  var w = el("div", { class:"wrap" });
+  w.appendChild(header("Fuel", "Photo your plate"));
+  var t = today(), meals = S.meals.filter(function(m){ return m.date === t; });
+  var tot = { kcal:0, protein:0, carbs:0, fat:0 };
+  meals.forEach(function(m){ if (m.est){ tot.kcal += m.est.kcal || 0; tot.protein += m.est.protein || 0; tot.carbs += m.est.carbs || 0; tot.fat += m.est.fat || 0; } });
+  w.appendChild(el("div", { class:"card" }, [
+    el("div", { class:"muted small", text:"Today so far (estimates)" }),
+    el("div", { class:"macro", style:"margin-top:8px" }, [
+      el("div", {}, [el("b", { text:Math.round(tot.kcal) }), el("span", { text:"kcal" })]),
+      el("div", {}, [el("b", { text:Math.round(tot.protein) + "g" }), el("span", { text:"protein" })]),
+      el("div", {}, [el("b", { text:Math.round(tot.carbs) + "g" }), el("span", { text:"carbs" })]),
+      el("div", {}, [el("b", { text:Math.round(tot.fat) + "g" }), el("span", { text:"fat" })])
+    ])
+  ]));
+  w.appendChild(planCard());
+  var cam = el("input", { type:"file", accept:"image/*", capture:"environment", style:"display:none", onchange:function(){ if (cam.files[0]) addMeal(cam.files[0]); } });
+  w.appendChild(cam);
+  w.appendChild(el("button", { class:"btn primary block", type:"button", text:"📷  Photo my plate", onclick:function(){ cam.click(); } }));
+  if (!CFG.api) w.appendChild(el("div", { class:"small muted", text:"Photos save now. Calorie and nutrient estimates switch on when the 62 server is connected." }));
+  if (!meals.length) w.appendChild(el("div", { class:"card flat muted", text:"No meals logged today." }));
+  meals.slice().reverse().forEach(function(m){ w.appendChild(mealCard(m)); });
+  return w;
+}
+function mealCard(m){
+  var c = el("div", { class:"card" }, [
+    el("div", { class:"row" }, [
+      m.thumb ? el("img", { class:"thumb", src:m.thumb, alt:"Meal photo" }) : null,
+      el("div", { class:"grow" }, [
+        el("div", { text: m.label || (new Date(m.at).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" })) }),
+        m.est ? el("div", { class:"small muted", text: Math.round(m.est.kcal) + " kcal · " + Math.round(m.est.protein) + "p / " + Math.round(m.est.carbs) + "c / " + Math.round(m.est.fat) + "f" })
+              : el("div", { class:"small muted", text: m.pending ? "Analyzing…" : "Not analyzed yet" })
+      ]),
+      el("button", { class:"btn sm ghost danger", type:"button", text:"✕", "aria-label":"Delete meal", onclick:function(){ S.meals = S.meals.filter(function(x){ return x.id !== m.id; }); save(); render(); } })
+    ])
+  ]);
+  if (m.est && m.est.items) c.appendChild(el("div", { class:"small muted", style:"margin-top:8px", text:m.est.items.map(function(i){ return i.name + (i.grams ? " (~" + i.grams + "g)" : ""); }).join(", ") }));
+  if (m.est && m.est.micros){
+    var mi = Object.keys(m.est.micros).map(function(k){ return k + " " + m.est.micros[k]; }).join(" · ");
+    c.appendChild(el("div", { class:"small", style:"margin-top:6px", text:mi }));
+  }
+  if (m.est && m.est.note) c.appendChild(el("div", { class:"small muted", style:"margin-top:6px", text:m.est.note }));
+  return c;
+}
+function shrink(file, max, q){
+  return new Promise(function(res, rej){
+    var url = URL.createObjectURL(file), img = new Image();
+    img.onload = function(){
+      var r = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement("canvas");
+      c.width = Math.round(img.width * r); c.height = Math.round(img.height * r);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c.toDataURL("image/jpeg", q));
+    };
+    img.onerror = function(){ rej(new Error("Couldn't open that photo.")); }; img.src = url;
+  });
+}
+function addMeal(file){
+  Promise.all([shrink(file, 1024, 0.8), shrink(file, 160, 0.7)]).then(function(r){
+    var m = { id:uid(), date:today(), at:Date.now(), thumb:r[1], pending:!!CFG.api, est:null };
+    S.meals.push(m); save(); render();
+    if (CFG.api){
+      callApi("analyze-meal", { image:r[0].split(",")[1] }).then(function(j){ m.est = j.estimate; m.pending = false; save(); render(); })
+        .catch(function(e){ m.pending = false; save(); render(); toast(e.message); });
+    }
+  }).catch(function(e){ toast(e.message); });
+}
+
+/* ---------- meal plan + shopping list ---------- */
+function avgWeightLb(){ var w = S.weights.slice(-7); return w.length ? w.reduce(function(s, x){ return s + x.lb; }, 0) / w.length : null; }
+function planProfile(){
+  var cut = dstr(new Date(Date.now() - 14 * 86400000));
+  var recent = S.sessions.filter(function(s){ return s.date >= cut; });
+  var mins = recent.reduce(function(s, x){ return s + (x.durationMin || 0); }, 0);
+  var lb = avgWeightLb();
+  return { age:14, sex:"male", heightInches:S.settings.heightIn, weightPounds: lb ? Math.round(lb * 10) / 10 : null,
+    sport:"motocross racing (youth)", gymSessionsLast14Days:recent.length, gymMinutesLast14Days:mins,
+    rideOrTrackDaysPerWeek:S.settings.rideDays, allergies:S.settings.allergies || "none", dislikes:S.settings.dislikes || "none given",
+    restingHrRecent: S.hr.length ? S.hr[S.hr.length - 1].rest : null,
+    injury: (S.injury && S.injury.active) ? { area:S.injury.area || "unspecified", doctorOrPtNotes:S.injury.note || "", since:S.injury.since } : null };
+}
+function planCard(){
+  var c = el("div", { class:"card" }, [el("div", { class:"row between" }, [el("h2", { text:"Meal plan" }),
+    S.plan ? el("span", { class:"pill", text:"Built " + fmtDay(S.plan.date) }) : null])]);
+  if (!S.plan){
+    c.appendChild(el("div", { class:"muted", style:"margin:6px 0 10px", text:"A week of meals sized to your height, weight and how hard you're training — with the grocery list ready to send to " + S.settings.momName + "." }));
+  } else {
+    var tg = S.plan.plan.targets;
+    c.appendChild(el("div", { class:"macro", style:"margin:10px 0" }, [
+      el("div", {}, [el("b", { text:tg.kcalLow + "–" + tg.kcalHigh }), el("span", { text:"kcal" })]),
+      el("div", {}, [el("b", { text:tg.proteinG + "g" }), el("span", { text:"protein" })]),
+      el("div", {}, [el("b", { text:tg.carbsG + "g" }), el("span", { text:"carbs" })]),
+      el("div", {}, [el("b", { text:tg.fatG + "g" }), el("span", { text:"fat" })])
+    ]));
+    c.appendChild(el("div", { class:"small muted", text:tg.why }));
+    c.appendChild(el("div", { class:"row", style:"margin-top:12px" }, [
+      el("button", { class:"btn grow", type:"button", text:"See the week", onclick:openPlanWeek }),
+      el("button", { class:"btn primary grow", type:"button", text:"Shopping list", onclick:openShopping })
+    ]));
+  }
+  c.appendChild(el("button", { class:"btn block" + (S.plan ? " ghost" : " primary"), style:"margin-top:10px", type:"button", text: S.plan ? "Rebuild for this week" : "Build my plan", onclick:buildPlan }));
+  return c;
+}
+function buildPlan(){
+  var pr = planProfile();
+  if (!pr.heightInches || !pr.weightPounds){ toast("Add your height in ⚙ Settings and log a weigh-in first"); if (!pr.heightInches) openSettings(); return; }
+  toast("Building your week… about 30 seconds");
+  callApi("plan-meals", { profile:pr }).then(function(r){
+    S.plan = { date:today(), plan:r.plan, checked:{} }; save(); render(); toast("Plan ready");
+  }).catch(function(e){ toast(e.message || "Couldn't build the plan"); });
+}
+function openPlanWeek(){
+  var pl = S.plan.plan, kids = [];
+  pl.days.forEach(function(d){
+    var c = el("div", { class:"card" }, [el("div", { class:"row between" }, [el("h3", { text:d.day }), el("span", { class:"pill", text:d.type })])]);
+    d.meals.forEach(function(m){
+      c.appendChild(el("div", { class:"check", style:"flex-direction:column;align-items:stretch;gap:2px" }, [
+        el("div", { class:"row between" }, [el("b", { text:m.slot + " — " + m.name }), el("span", { class:"small muted", text:m.kcal + " kcal · " + m.protein + "g P" })]),
+        el("div", { class:"small muted", text:m.items.join(" · ") })
+      ]));
+    });
+    kids.push(c);
+  });
+  kids.push(el("div", { class:"small muted", text:pl.notes }));
+  var m = sheet("Your week", kids.concat([el("button", { class:"btn block", type:"button", text:"Close", onclick:function(){ m.close(); } })]));
+}
+function shoppingText(onlyOpen){
+  var pl = S.plan.plan, out = "Shopping list for " + S.settings.name + " (week of " + fmtDay(S.plan.date) + ")\n";
+  pl.shopping.forEach(function(a){
+    var rows = a.items.filter(function(i){ return !onlyOpen || !S.plan.checked[a.aisle + "|" + i.name]; });
+    if (!rows.length) return;
+    out += "\n" + a.aisle.toUpperCase() + "\n" + rows.map(function(i){ return "• " + i.name + " — " + i.qty; }).join("\n") + "\n";
+  });
+  return out;
+}
+function openShopping(){
+  var pl = S.plan.plan, kids = [];
+  pl.shopping.forEach(function(a){
+    var c = el("div", { class:"card" }, [el("h3", { text:a.aisle })]);
+    a.items.forEach(function(i){
+      var k = a.aisle + "|" + i.name, on = !!S.plan.checked[k];
+      c.appendChild(el("div", { class:"check", onclick:function(){ S.plan.checked[k] = !S.plan.checked[k]; save(); modal.close(); openShopping(); } }, [
+        el("div", { class:"box" + (on ? " on" : "") }, [icon(CHECK)]),
+        el("div", { class:"grow", style: on ? "text-decoration:line-through;opacity:.6" : "", text:i.name }),
+        el("div", { class:"small muted", text:i.qty })
+      ]));
+    });
+    kids.push(c);
+  });
+  var modal = sheet("Shopping list", kids.concat([
+    el("button", { class:"btn primary block", type:"button", text:"Send to " + S.settings.momName, onclick:function(){
+      var txt = shoppingText(true), subj = S.settings.name + "'s shopping list";
+      if (navigator.share) navigator.share({ title:subj, text:txt }).catch(function(){});
+      else location.href = "mailto:" + encodeURIComponent(S.settings.momEmail || "") + "?subject=" + encodeURIComponent(subj) + "&body=" + encodeURIComponent(txt);
+    } }),
+    el("button", { class:"btn block", type:"button", text:"Email it", onclick:function(){
+      location.href = "mailto:" + encodeURIComponent(S.settings.momEmail || "") + "?subject=" + encodeURIComponent(S.settings.name + "'s shopping list") + "&body=" + encodeURIComponent(shoppingText(true));
+    } }),
+    !S.settings.momEmail ? el("div", { class:"due small", text:"Add " + S.settings.momName + "'s email in Settings (⚙) so Email fills it in." }) : null,
+    el("button", { class:"btn block ghost", type:"button", text:"Close", onclick:function(){ modal.close(); } })
+  ]));
+}
+
+/* ---------- BODY ---------- */
+function viewBody(){
+  var w = el("div", { class:"wrap" });
+  w.appendChild(header("Body", "Weight & heart rate"));
+  var t = today();
+  var wi = el("input", { type:"number", inputmode:"decimal", step:"0.1", placeholder:"lb" });
+  var hi = el("input", { type:"number", inputmode:"numeric", placeholder:"bpm" });
+  var cur = S.weights.filter(function(x){ return x.date === t; })[0], curH = S.hr.filter(function(x){ return x.date === t; })[0];
+  if (cur) wi.value = cur.lb; if (curH) hi.value = curH.rest;
+  w.appendChild(el("div", { class:"card" }, [
+    el("h2", { text:"Today's check-in" }),
+    el("div", { class:"row", style:"margin-top:10px" }, [
+      el("div", { class:"field grow" }, [el("label", { text:"Morning weight" }), wi]),
+      el("div", { class:"field grow" }, [el("label", { text:"Resting HR" }), hi])
+    ]),
+    el("button", { class:"btn primary block", style:"margin-top:12px", type:"button", text:"Save", onclick:function(){
+      var lb = num(wi.value), hr = num(hi.value);
+      if (lb != null){ S.weights = S.weights.filter(function(x){ return x.date !== t; }); S.weights.push({ date:t, lb:lb }); S.weights.sort(function(a, b){ return a.date < b.date ? -1 : 1; }); }
+      if (hr != null){ S.hr = S.hr.filter(function(x){ return x.date !== t; }); S.hr.push({ date:t, rest:hr }); S.hr.sort(function(a, b){ return a.date < b.date ? -1 : 1; }); }
+      save(); toast("Saved"); render();
+    } })
+  ]));
+  var ws = S.weights.slice(-30);
+  if (ws.length){
+    var last7 = ws.slice(-7), avg = last7.reduce(function(s, x){ return s + x.lb; }, 0) / last7.length;
+    var card = el("div", { class:"card" }, [
+      el("div", { class:"row between" }, [el("h2", { text:"Weight trend" }), el("div", { class:"stat", text:avg.toFixed(1) })]),
+      el("div", { class:"small muted", text:"7-day average (lb). Daily numbers bounce — the average is what matters." })
+    ]);
+    card.appendChild(spark(ws.map(function(x){ return x.lb; })));
+    w.appendChild(card);
+  }
+  var hs = S.hr.slice(-30);
+  if (hs.length > 1){
+    var hc = el("div", { class:"card" }, [el("h2", { text:"Resting heart rate" }), el("div", { class:"small muted", text:"Lower and steadier over weeks usually means better recovery." })]);
+    hc.appendChild(spark(hs.map(function(x){ return x.rest; }))); w.appendChild(hc);
+  }
+  w.appendChild(el("div", { class:"card flat" }, [
+    el("h3", { text:"Garmin" }),
+    el("div", { class:"small muted", text:"Automatic sync of heart rate and weigh-ins from Garmin is the next piece. On iPhone it comes in through Apple Health. Until then, type the morning numbers in above." })
+  ]));
+  return w;
+}
+function spark(vals){
+  var W = 320, H = 110, p = 8, mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals);
+  if (mx === mn){ mx += 1; mn -= 1; }
+  var pts = vals.map(function(v, i){ return [p + (W - 2*p) * (vals.length === 1 ? 0.5 : i / (vals.length - 1)), H - p - (H - 2*p) * (v - mn) / (mx - mn)]; });
+  var d = pts.map(function(q, i){ return (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1); }).join(" ");
+  var s = el("div", { class:"chart" });
+  var last = pts[pts.length - 1];
+  s.innerHTML = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" height="100%" role="img" aria-label="Trend chart"><path d="' + d + ' L' + last[0] + ' ' + (H - p) + ' L' + pts[0][0] + ' ' + (H - p) + ' Z" fill="var(--accent-soft)"/>' +
+    '<path d="' + d + '" fill="none" stroke="var(--plate)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/><circle cx="' + last[0] + '" cy="' + last[1] + '" r="5" fill="var(--plate)"/></svg>';
+  return s;
+}
+
+/* ---------- sheets & settings ---------- */
+function sheet(title, kids){
+  var back = el("div", { class:"modal", onclick:function(e){ if (e.target === back) api.close(); } });
+  var sh = el("div", { class:"sheet", role:"dialog", "aria-label":title }, [el("h2", { text:title })].concat(kids));
+  back.appendChild(sh); document.body.appendChild(back);
+  var api = { close:function(){ back.remove(); } };
+  return api;
+}
+function openSettings(){
+  var nm = el("input", { type:"text", value:S.settings.name });
+  var tn = el("input", { type:"text", value:S.settings.trainerName });
+  var te = el("input", { type:"email", value:S.settings.trainerEmail, placeholder:"coach@example.com", autocapitalize:"off" });
+  var hgt = el("input", { type:"number", inputmode:"decimal", step:"0.5", value:S.settings.heightIn == null ? "" : S.settings.heightIn });
+  var rdd = el("input", { type:"number", inputmode:"numeric", min:"0", max:"7", value:S.settings.rideDays });
+  var mhr = el("input", { type:"number", inputmode:"numeric", min:"150", max:"230", value:S.settings.maxHr || 200 });
+  var alg = el("input", { type:"text", value:S.settings.allergies || "", placeholder:"e.g. peanuts, or none" });
+  var dsl = el("input", { type:"text", value:S.settings.dislikes || "", placeholder:"e.g. fish, mushrooms" });
+  var mn = el("input", { type:"text", value:S.settings.momName || "Mom" });
+  var me = el("input", { type:"email", value:S.settings.momEmail || "", autocapitalize:"off" });
+  var inj = S.injury || { active:false, area:"", note:"" };
+  var injOn = el("select", {}, [el("option", { value:"no", text:"No - full training" }), el("option", { value:"yes", text:"Yes - modified training" })]); injOn.value = inj.active ? "yes" : "no";
+  var injArea = el("input", { type:"text", value:inj.area || "", placeholder:"e.g. left wrist" });
+  var injNote = el("input", { type:"text", value:inj.note || "", placeholder:"What the doctor or PT said (limits, clearance date)" });
+  var injRide = el("select", {}, [el("option", { value:"hold", text:"On hold until the doctor says strength is back" }), el("option", { value:"clear", text:"Cleared to ride" })]); injRide.value = inj.rideClear ? "clear" : "hold";
+  var rpl = rehabPlan();
+  var rOn = el("select", {}, [el("option", { value:"yes", text:"On" }), el("option", { value:"no", text:"Off" })]); rOn.value = rpl.active ? "yes" : "no";
+  var rTime = el("input", { type:"time", value:rpl.time || "07:30" });
+  var rBackup = el("input", { type:"time", value:rpl.backupTime || "18:30" });
+  var m = sheet("Settings", [
+    el("div", { class:"field" }, [el("label", { text:"Athlete name" }), nm]),
+    el("div", { class:"field" }, [el("label", { text:"Trainer's name" }), tn]),
+    el("div", { class:"field" }, [el("label", { text:"Trainer's email" }), te]),
+    el("div", { class:"row" }, [
+      el("div", { class:"field grow" }, [el("label", { text:"Height (inches)" }), hgt]),
+      el("div", { class:"field grow" }, [el("label", { text:"Ride days / week" }), rdd]),
+      el("div", { class:"field grow" }, [el("label", { text:"Max HR" }), mhr])
+    ]),
+    el("div", { class:"field" }, [el("label", { text:"Allergies" }), alg]),
+    el("div", { class:"field" }, [el("label", { text:"Foods he won't eat" }), dsl]),
+    el("hr", { class:"hr" }),
+    el("div", { class:"field" }, [el("label", { text:"Injured right now?" }), injOn]),
+    el("div", { class:"field" }, [el("label", { text:"What is hurt" }), injArea]),
+    el("div", { class:"field" }, [el("label", { text:"Doctor / PT notes" }), injNote]),
+    el("div", { class:"field" }, [el("label", { text:"Riding" }), injRide]),
+    el("hr", { class:"hr" }),
+    el("div", { class:"field" }, [el("label", { text:"Daily shoulder routine" }), rOn]),
+    el("div", { class:"row" }, [el("div", { class:"field grow" }, [el("label", { text:"Reminder time" }), rTime]), el("div", { class:"field grow" }, [el("label", { text:"Backup reminder" }), rBackup])]),
+    el("button", { class:"btn block", type:"button", text:"Add daily reminders to my calendar", onclick:function(){ var rp = rehabPlan(); rp.time = rTime.value || rp.time; rp.backupTime = rBackup.value || rp.backupTime; save(); rehabIcs(); } }),
+    el("div", { class:"row" }, [
+      el("div", { class:"field grow" }, [el("label", { text:"Mom's name" }), mn]),
+      el("div", { class:"field grow" }, [el("label", { text:"Mom's email" }), me])
+    ]),
+    el("button", { class:"btn primary block", type:"button", text:"Save", onclick:function(){
+      S.settings.name = nm.value.trim() || "Declan"; S.settings.trainerName = tn.value.trim() || "Coach"; S.settings.trainerEmail = te.value.trim();
+      S.settings.heightIn = num(hgt.value); S.settings.rideDays = num(rdd.value) == null ? 3 : num(rdd.value); S.settings.maxHr = num(mhr.value) || 200; S.settings.allergies = alg.value.trim(); S.settings.dislikes = dsl.value.trim();
+      S.settings.momName = mn.value.trim() || "Mom"; S.settings.momEmail = me.value.trim();
+      var wasOn = !!(S.injury && S.injury.active), nowOn = injOn.value === "yes";
+      S.injury = { active:nowOn, area:injArea.value.trim(), note:injNote.value.trim(), since: nowOn ? ((S.injury && S.injury.since) || today()) : (S.injury && S.injury.since) || null, rideClear: injRide.value === "clear", cleared: (wasOn && !nowOn) ? today() : (S.injury && S.injury.cleared) || null };
+      var rp2 = rehabPlan(); rp2.active = rOn.value === "yes"; rp2.time = rTime.value || rp2.time; rp2.backupTime = rBackup.value || rp2.backupTime;
+      save(); m.close(); render(); } }),
+    el("hr", { class:"hr" }),
+    cloud.session ? el("button", { class:"btn block", type:"button", text:"Send this week's report to " + S.settings.trainerName + " now", onclick:function(){
+      toast("Sending...");
+      callApi("weekly-coach-report", { force:true }).then(function(r){ toast(r.sent ? "Sent to " + r.to : (r.note || "Couldn't send")); }).catch(function(e){ toast(e.message || "Couldn't send"); });
+    } }) : null,
+    el("div", { class:"small muted", text:"Every Sunday at 9 pm, " + S.settings.trainerName + " gets the week's training, ride/race days, weight, heart rate, recovery and habits by email automatically." }),
+    el("div", { class:"small muted", text: cloud.session ? "Signed in. " + (cloud.status || "Your data backs up automatically.") : "Not signed in — data is only on this phone." }),
+    cloud.session ? el("button", { class:"btn block", type:"button", text:"Sign out", onclick:function(){ cloud.client.auth.signOut().then(function(){ cloud.session = null; cloud.needLogin = true; m.close(); render(); }); } }) : null,
+    el("button", { class:"btn block danger", type:"button", text:"Erase everything on this phone", onclick:function(){
+      if (confirm("Erase ALL workouts, weights and photos on this phone? This can't be undone.")){ localStorage.removeItem(KEY); S = defaults(); m.close(); render(); } } })
+  ]);
+}
+
+/* ---------- cloud: login, backup/sync, coach inbox ---------- */
+// External libraries load in the background so a weak gym signal can never block the app from opening.
+function loadScript(src){
+  return new Promise(function(res, rej){
+    var s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = function(){ rej(new Error("offline")); };
+    document.head.appendChild(s);
+  });
+}
+function initCloud(){
+  if (!window.supabase){
+    return loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js").then(initCloud, function(){ cloud.status = "offline"; });
+  }
+  cloud.client = window.supabase.createClient(CFG.api, CFG.key, { auth:{ persistSession:true, autoRefreshToken:true } });
+  // the reset link in the email opens the app and lands here
+  cloud.client.auth.onAuthStateChange(function(ev, session){
+    if (ev === "PASSWORD_RECOVERY"){ cloud.session = session; cloud.recovery = true; cloud.needLogin = false; render(); }
+  });
+  return cloud.client.auth.getSession().then(function(r){
+    cloud.session = r.data && r.data.session;
+    if (!cloud.session){ cloud.needLogin = navigator.onLine; render(); return; }
+    return afterLogin();
+  }).catch(function(){ render(); });
+}
+function afterLogin(){
+  cloud.needLogin = false;
+  return pullState().then(loadInbox).then(function(){ render(); });
+}
+function pullState(){
+  return cloud.client.from("app_state").select("data,updated_at").eq("user_id", cloud.session.user.id).maybeSingle().then(function(r){
+    if (r.error || !r.data) { queuePush(); return; }
+    var remote = r.data.data || {}, rt = remote._updatedAt || r.data.updated_at;
+    // newest copy wins; a fresh phone (nothing logged) always takes the cloud copy
+    var localEmpty = !S.sessions.length && !S.programs.length && !S.weights.length && !S.meals.length;
+    if (localEmpty || (rt && (!S._updatedAt || rt > S._updatedAt))){
+      var d = defaults(); for (var k in d) if (!(k in remote)) remote[k] = d[k];
+      S = remote; try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){}
+    } else if (S._updatedAt && (!rt || S._updatedAt > rt)) queuePush();
+  });
+}
+function queuePush(){
+  if (!cloud.client || !cloud.session) return;
+  clearTimeout(cloud.pushTimer);
+  cloud.pushTimer = setTimeout(pushNow, 1500);
+}
+function pushNow(){
+  if (!cloud.client || !cloud.session || !navigator.onLine) return;
+  cloud.client.from("app_state").upsert({ user_id:cloud.session.user.id, data:S, updated_at:new Date().toISOString() }).then(function(r){
+    cloud.status = r.error ? "sync problem" : "backed up " + new Date().toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+  });
+}
+function loadInbox(){
+  return cloud.client.from("programs_inbox").select("*").eq("user_id", cloud.session.user.id).in("status", ["new","failed"]).order("received_at", { ascending:false }).then(function(r){
+    cloud.inbox = r.data || [];
+    // A program the coach emailed that was read successfully goes straight into the app (Joe 2026-10-12: no extra tap).
+    var fresh = cloud.inbox.filter(function(x){ return x.status === "new" && x.program; }), added = 0;
+    fresh.forEach(function(it){
+      if (S.programs.some(function(x){ return x.inboxId === it.id; })) return;
+      var p = it.program; p.id = p.id || uid(); p.inboxId = it.id; p.fromCoach = true; p.addedAt = today();
+      S.programs.unshift(p); added++;
+      cloud.client.from("programs_inbox").update({ status:"accepted" }).eq("id", it.id).then(function(){});
+    });
+    cloud.inbox = cloud.inbox.filter(function(x){ return !(x.status === "new" && x.program); });
+    if (added){ save(); toast(added === 1 ? "New program from " + S.settings.trainerName + " added" : added + " new programs added"); render(); }
+  });
+}
+function acceptInbox(item){
+  var p = item.program; if (!p) return;
+  S.programs.push(p); save();
+  cloud.client.from("programs_inbox").update({ status:"accepted" }).eq("id", item.id).then(function(){});
+  cloud.inbox = cloud.inbox.filter(function(x){ return x.id !== item.id; });
+  toast("Program added"); render();
+}
+function dismissInbox(item){
+  cloud.client.from("programs_inbox").update({ status:"dismissed" }).eq("id", item.id).then(function(){});
+  cloud.inbox = cloud.inbox.filter(function(x){ return x.id !== item.id; }); render();
+}
+function inboxCards(){
+  return cloud.inbox.map(function(it){
+    if (it.status === "failed") return el("div", { class:"card" }, [
+      el("div", { class:"row between" }, [el("h3", { text:"Couldn't read an email from " + (it.from_email || "coach") }), el("button", { class:"btn sm ghost", type:"button", text:"Dismiss", onclick:function(){ dismissInbox(it); } })]),
+      el("div", { class:"small muted", text:(it.file_name ? it.file_name + " — " : "") + (it.error || "Unknown problem") + ". You can add it with \"+ Add a program\" instead." })
+    ]);
+    var days = (it.program.days || []).length;
+    return el("div", { class:"card", style:"border-color:var(--plate)" }, [
+      el("span", { class:"pill", text:"New from your coach" }),
+      el("h2", { style:"margin-top:8px", text:it.program.name || it.subject || "New program" }),
+      el("div", { class:"small muted", text:days + " workout day" + (days === 1 ? "" : "s") + (it.file_name ? " · " + it.file_name : "") }),
+      el("div", { class:"row", style:"margin-top:10px" }, [
+        el("button", { class:"btn grow", type:"button", text:"Not now", onclick:function(){ dismissInbox(it); } }),
+        el("button", { class:"btn primary grow", type:"button", text:"Add it", onclick:function(){ acceptInbox(it); } })
+      ])
+    ]);
+  });
+}
+function viewLogin(){
+  var em = el("input", { type:"email", autocomplete:"username", autocapitalize:"off", placeholder:"Email", value:"" });
+  var pw = el("input", { type:"password", autocomplete:"current-password", placeholder:"Password" });
+  var msg = el("div", { class:"small due" });
+  var go = function(){
+    msg.textContent = "Signing in…";
+    cloud.client.auth.signInWithPassword({ email:em.value.trim(), password:pw.value }).then(function(r){
+      if (r.error){ msg.textContent = "That email or password didn't work."; return; }
+      cloud.session = r.data.session; afterLogin();
+    });
+  };
+  pw.addEventListener("keydown", function(e){ if (e.key === "Enter") go(); });
+  return el("div", { class:"wrap", style:"padding-top:60px" }, [
+    el("div", { class:"top" }, [el("div", { class:"plate", text:"62" }), el("div", { class:"grow" }, [el("h1", { text:"Sign in" }), el("div", { class:"sub", text:"One time on this phone" })])]),
+    el("div", { class:"card" }, [
+      el("div", { class:"field" }, [el("label", { text:"Email" }), em]),
+      el("div", { class:"field", style:"margin-top:10px" }, [el("label", { text:"Password" }), pw]),
+      msg,
+      el("button", { class:"btn primary block", style:"margin-top:12px", type:"button", text:"Sign in", onclick:go }),
+      el("button", { class:"btn block ghost", style:"margin-top:8px", type:"button", text:"Forgot password?", onclick:function(){
+        var addr = em.value.trim();
+        if (!addr){ msg.textContent = "Type your email above first."; return; }
+        msg.className = "small muted"; msg.textContent = "Sending…";
+        cloud.client.auth.resetPasswordForEmail(addr, { redirectTo: location.origin + location.pathname }).then(function(r){
+          msg.className = r.error ? "small due" : "small muted";
+          msg.textContent = r.error ? "Couldn't send that right now. Ask Dad to reset it." : "If that email has an account, a reset link is on its way. Check spam too.";
+        });
+      } })
+    ])
+  ]);
+}
+function viewReset(){
+  var a = el("input", { type:"password", autocomplete:"new-password", placeholder:"New password (6+ characters)" });
+  var b = el("input", { type:"password", autocomplete:"new-password", placeholder:"Type it again" });
+  var msg = el("div", { class:"small due" });
+  return el("div", { class:"wrap", style:"padding-top:60px" }, [
+    el("div", { class:"top" }, [el("div", { class:"plate", text:"62" }), el("div", { class:"grow" }, [el("h1", { text:"New password" })])]),
+    el("div", { class:"card" }, [
+      el("div", { class:"field" }, [el("label", { text:"New password" }), a]),
+      el("div", { class:"field", style:"margin-top:10px" }, [el("label", { text:"Again" }), b]),
+      msg,
+      el("button", { class:"btn primary block", style:"margin-top:12px", type:"button", text:"Save password", onclick:function(){
+        if (a.value.length < 6){ msg.textContent = "Use at least 6 characters."; return; }
+        if (a.value !== b.value){ msg.textContent = "Those don't match."; return; }
+        cloud.client.auth.updateUser({ password:a.value }).then(function(r){
+          if (r.error){ msg.textContent = r.error.message; return; }
+          cloud.recovery = false; toast("Password changed"); afterLogin();
+        });
+      } })
+    ])
+  ]);
+}
+
+/* ---------- boot ---------- */
+if ("serviceWorker" in navigator) window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
+document.addEventListener("visibilitychange", function(){
+  if (!document.hidden && S.active) keepAwake(true);
+  if (!document.hidden && rest.end) tickRest();
+  if (document.hidden) pushNow();
+  else if (cloud.session) loadInbox().then(function(){ if (tab === "train" && !S.active) render(); });
+});
+window.addEventListener("online", function(){ if (cloud.session) pushNow(); else initCloud(); });
+render();
+initCloud();
+})();
+</script>
+</body>
+</html>
