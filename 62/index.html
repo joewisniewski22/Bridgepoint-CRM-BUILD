@@ -240,6 +240,7 @@ function viewToday(){
     el("div", { class:"muted", text: td.length ? td.length + " session logged today. Nice." : (S.active ? "Workout in progress." : "Nothing logged yet today.") }),
     el("div", { style:"margin-top:10px" }, [el("button", { class:"btn primary block", type:"button", onclick:function(){ go("train"); }, text: S.active ? "Back to workout" : "Start training" })])
   ]));
+  w.appendChild(suggestCard());
   return w;
 }
 function toggleHabit(id){
@@ -787,6 +788,57 @@ function rehabText2(){
     log[lastKey].detail.forEach(function(x){ det += "    " + x.name + " set " + x.set + ": " + (x.reps != null ? x.reps : "?") + (x.repsLeft != null ? "/" + x.repsLeft : "") + " reps" + (x.resist ? ", " + x.resist : "") + ", pain " + x.pain + "/10\n"; });
   }
   return "\nShoulder routine (" + p.source + ")\n  " + lines.join("\n  ") + "\n" + det;
+}
+
+/* ---------- beta suggestion box ---------- */
+function suggestCard(){
+  return el("div", { class:"card flat row between" }, [
+    el("div", { class:"grow" }, [el("div", { text:"Beta test: got an idea?" }), el("div", { class:"small muted", text:"Tell us what to fix or add. Dad sees it." })]),
+    el("button", { class:"btn sm primary", type:"button", text:"Suggest", onclick:openSuggest })
+  ]);
+}
+function openSuggest(){
+  var kind = "idea", sending = false;
+  var ta = el("textarea", { rows:"5", placeholder:"What should we add, fix, or make easier?", style:"min-height:110px" });
+  var kinds = [["idea", "I have an idea"], ["broken", "Something is broken"], ["confusing", "Something is confusing"]];
+  var kindBtns = kinds.map(function(k){
+    var b = el("button", { class:"btn sm" + (k[0] === kind ? " primary" : ""), type:"button", text:k[1], onclick:function(){ kind = k[0]; kindBtns.forEach(function(x, i){ x.className = "btn sm" + (kinds[i][0] === kind ? " primary" : ""); }); } });
+    return b;
+  });
+  var listBox = el("div", { style:"margin-top:12px" });
+  var m = sheet("Suggestion box", [
+    el("div", { class:"small muted", text:"This app is a beta test. Anything you tell us gets read, and we will build the good ones." }),
+    el("div", { class:"row", style:"flex-wrap:wrap;margin-top:8px" }, kindBtns),
+    el("div", { class:"field", style:"margin-top:10px" }, [ta]),
+    el("button", { class:"btn primary block", type:"button", text:"Send it", onclick:function(){
+      var txt = ta.value.trim();
+      if (txt.length < 3){ toast("Write a few words first"); return; }
+      if (sending) return; sending = true;
+      callApi("submit-suggestion", { text:txt, kind:kind, screen:tab }).then(function(){
+        toast("Sent. Thanks!"); ta.value = ""; sending = false; loadMine();
+      }).catch(function(e){ sending = false; toast((e && e.message) || "Couldn't send. Try again when you have signal."); });
+    } }),
+    listBox,
+    el("button", { class:"btn block ghost", type:"button", text:"Close", onclick:function(){ m.close(); } })
+  ]);
+  function loadMine(){
+    if (!cloud.session) return;
+    cloud.client.from("suggestions").select("text,kind,status,response,created_at").eq("user_id", cloud.session.user.id).order("created_at", { ascending:false }).limit(15).then(function(r){
+      listBox.textContent = "";
+      var rows = r.data || [];
+      if (!rows.length) return;
+      listBox.appendChild(el("h3", { text:"Your suggestions" }));
+      rows.forEach(function(x){
+        var st = x.status === "done" ? "Done" : x.status === "planned" ? "Planned" : x.status === "no" ? "Not now" : "Sent";
+        listBox.appendChild(el("div", { class:"check", style:"flex-direction:column;align-items:stretch;gap:2px" }, [
+          el("div", { class:"row between" }, [el("span", { class:"small muted", text:fmtDay(String(x.created_at).slice(0, 10)) }), el("span", { class:"pill", text:st })]),
+          el("div", { text:x.text }),
+          x.response ? el("div", { class:"small", text:"Dad / Claude: " + x.response }) : null
+        ]));
+      });
+    });
+  }
+  loadMine();
 }
 
 /* ---------- TRAIN ---------- */
@@ -1456,6 +1508,7 @@ function openSettings(){
   var rTime = el("input", { type:"time", value:rpl.time || "07:30" });
   var rBackup = el("input", { type:"time", value:rpl.backupTime || "18:30" });
   var m = sheet("Settings", [
+    el("button", { class:"btn block", type:"button", text:"Suggestion box - tell us what to add or fix", onclick:function(){ m.close(); openSuggest(); } }),
     el("div", { class:"field" }, [el("label", { text:"Athlete name" }), nm]),
     el("div", { class:"field" }, [el("label", { text:"Trainer's name" }), tn]),
     el("div", { class:"field" }, [el("label", { text:"Trainer's email" }), te]),
