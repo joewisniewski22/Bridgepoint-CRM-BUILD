@@ -1011,7 +1011,7 @@ function kiaviBridgeTier(f) { return f >= 760 ? "760" : f >= 720 ? "720" : f >= 
 // Other products are the 30-yr fixed's price plus a flat adjustment (zero
 // variance in 186 quotes): 5/1 ARM -0.375, 7/1 ARM -0.25, interest-only
 // +0.25 (<=60% LTV) / +0.50 (65-70%) / +0.625 (75%); IO stops at 75% LTV.
-// Rules from Kiavi's engine: min loan $100,000, max $1,500,000, FICO 660+,
+// Rules from Kiavi's engine: min loan $75,000 (rental, per Joe 10/13), max $1,500,000, FICO 660+,
 // DSCR 0.80+, max LTV 65% (FICO <680 or DSCR <1.00) / 70% (680-699) / 75%
 // (700+) / 80% (700+, SFR purchase, DSCR >= 1.10); max loan floors to $250;
 // cash-out max $500,000 cash in hand; rate floor 7.125%. Rate/term refis
@@ -1023,7 +1023,8 @@ const KIAVI_RENTAL_LADDER = {"7.125":-0.68,"7.25":0,"7.375":0.6175,"7.5":1.2331,
 const KIAVI_RENTAL_LLPA = {"B|660|50":0.951,"B|660|55":1.201,"B|660|60":1.326,"B|660|65":1.576,"B|680|50":0.7009,"B|680|55":0.826,"B|680|60":1.076,"B|680|65":1.326,"B|680|70":1.951,"B|700|50":-0.0491,"B|700|55":0.0759,"B|700|60":0.201,"B|700|65":0.5759,"B|700|70":0.826,"B|700|75":1.576,"B|700|80":3.451,"B|720|50":-0.5491,"B|720|55":-0.2991,"B|720|60":-0.174,"B|720|65":0.2009,"B|720|70":0.3259,"B|720|75":1.076,"B|720|80":2.326,"B|740|50":-0.5491,"B|740|55":-0.2991,"B|740|60":-0.174,"B|740|65":-0.0491,"B|740|70":0.0759,"B|740|75":0.951,"B|740|80":1.701,"B|760|50":-0.6741,"B|760|55":-0.4241,"B|760|60":-0.299,"B|760|65":-0.1741,"B|760|70":-0.0491,"B|760|75":0.826,"B|760|80":1.576,"B|780|50":-0.6741,"B|780|55":-0.4241,"B|780|60":-0.299,"B|780|65":-0.1741,"B|780|70":-0.0491,"B|780|75":0.826,"B|780|80":1.576,"B|800|50":-0.6741,"B|800|55":-0.4241,"B|800|60":-0.299,"B|800|65":-0.1741,"B|800|70":-0.0491,"B|800|75":0.826,"B|800|80":1.576,"d|da|50":0.75,"d|da|55":0.75,"d|da|60":1.25,"d|da|65":1.25,"d|db|50":0.25,"d|db|55":0.25,"d|db|60":0.25,"d|db|65":0.25,"d|db|70":0.5,"d|db|75":0.5,"d|dc|50":0.25,"d|dc|55":0.25,"d|dc|60":0.25,"d|dc|65":0.25,"d|dc|70":0.25,"d|dc|75":0.25,"d|dc|80":0.25,"pp|0|50":1,"pp|0|55":1,"pp|0|60":1,"pp|0|65":1,"pp|0|70":1,"pp|0|75":1,"pp|0|80":1,"pp|1|50":0.75,"pp|1|55":0.75,"pp|1|60":0.75,"pp|1|65":0.75,"pp|1|70":0.75,"pp|1|75":0.75,"pp|1|80":0.75,"pp|2|50":0.5,"pp|2|55":0.5,"pp|2|60":0.5,"pp|2|65":0.5,"pp|2|70":0.5,"pp|2|75":0.5,"pp|2|80":0.5,"pp|5|50":-0.5,"pp|5|55":-0.5,"pp|5|60":-0.5,"pp|5|65":-0.5,"pp|5|70":-0.5,"pp|5|75":-0.5,"pp|5|80":-0.5,"pt|2-4plex|50":0.375,"pt|2-4plex|55":0.375,"pt|2-4plex|60":0.5,"pt|2-4plex|65":0.5,"pt|2-4plex|70":0.625,"pt|2-4plex|75":0.875,"pt|condo|50":0,"pt|condo|55":0,"pt|condo|60":0,"pt|condo|65":0,"pt|condo|70":0.125,"pt|condo|75":0.375,"refi|50":0.25,"refi|55":0.25,"refi|60":0.375,"refi|65":0.375,"refi|70":0.625,"refi|75":0.875,"z|z1|50":1,"z|z1|55":1,"z|z1|60":1,"z|z1|65":1,"z|z1|70":1,"z|z1|75":1,"z|z1|80":1,"z|z2|50":0.25,"z|z2|55":0.25,"z|z2|60":0.25,"z|z2|65":0.25,"z|z2|70":0.25,"z|z2|75":0.25,"z|z2|80":0.25};
 const KIAVI_RENTAL_PRODUCT_ADJ = { fixed: 0, arm5: -0.375, arm7: -0.25 };
 function kiaviRentalIoAdj(ltvTier) { return ltvTier <= 60 ? 0.25 : ltvTier <= 70 ? 0.5 : 0.625; }
-const KIAVI_RENTAL_MIN_LOAN = 100000;
+// DSCR minimum dropped to $75,000 (Joe 2026-10-13). Bridge and fix & flip stay at $100,000 until Joe says otherwise.
+const KIAVI_RENTAL_MIN_LOAN = 75000;
 const KIAVI_RENTAL_MAX_LOAN = 1500000;
 const KIAVI_RENTAL_MAX_CASHOUT = 500000;
 // 1e-7 slack: floating-point division can put an exact boundary loan (e.g. 55.0000001%) in the next tier.
@@ -1264,7 +1265,7 @@ function kiaviRental(s, out, unit, st) {
       if (a5) opts.push({ program: "5/1 ARM · " + lt + "% LTV", rate: a5.rate, price: 100, dscr: a5.dscr, loanAmount: loan });
     }
   }
-  if (!opts.length) { out.reason = "No Kiavi rental tier fits: needs 660+ credit, DSCR 0.80+ (1.00+ above 65% LTV), and a $100,000-$1,500,000 loan."; return out; }
+  if (!opts.length) { out.reason = "No Kiavi rental tier fits: needs 660+ credit, DSCR 0.80+ (1.00+ above 65% LTV), and a $75,000-$1,500,000 loan."; return out; }
   out.eligible = true;
   out.options = opts;
   out.loanAmountUsed = maxLoanFound;
