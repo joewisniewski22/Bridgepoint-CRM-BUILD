@@ -124,7 +124,7 @@ var DEFAULT_HABITS = [
 ];
 function defaults(){
   return { programs:[], sessions:[], active:null, habits:DEFAULT_HABITS, habitLog:{}, weights:[], hr:[], meals:[],
-           settings:{ name:"Declan", trainerEmail:"robb@coachrobb.com", trainerName:"Coach Robb", heightIn:null, momName:"Mom", momEmail:"nicbodt@gmail.com", allergies:"", dislikes:"", rideDays:3, maxHr:200 }, lastExport:null, plan:null, injury:{ active:true, area:"shoulder", note:"Surgery is planned. Doctor: strengthening the rotator cuff and the muscles around it before surgery is fine, and riding can restart once shoulder strength is back.", since:null, rideClear:false }, rehab:[], wellness:{}, rides:[], rehabLog:{} };
+           settings:{ name:"Declan", trainerEmail:"robb@coachrobb.com", trainerName:"Coach Robb", heightIn:null, momName:"Mom", momEmail:"nicbodt@gmail.com", allergies:"", dislikes:"", rideDays:3, maxHr:200 }, lastExport:null, plan:null, injury:{ active:true, area:"shoulder", note:"Surgery is planned. Doctor: strengthening the rotator cuff and the muscles around it before surgery is fine, and riding can restart once shoulder strength is back.", since:null, rideClear:false }, rehab:[], wellness:{}, rides:[], rehabLog:{}, mobLog:{}, mindLog:{} };
 }
 var S = load();
 function load(){
@@ -209,6 +209,8 @@ function viewToday(){
   var hr = new Date().getHours();
   w.appendChild(header((hr < 12 ? "Morning" : hr < 18 ? "Afternoon" : "Evening") + ", " + S.settings.name, fmtDay(t)));
   w.appendChild(morningCard());
+  w.appendChild(mindsetCard());
+  w.appendChild(mobilityCard());
   w.appendChild(shoulderCard());
   if (S.injury && S.injury.active) w.appendChild(injuryCard());
   w.appendChild(todayEventsCard());
@@ -772,8 +774,8 @@ function rehabIcs(){
       "RRULE:FREQ=DAILY", "SUMMARY:" + title, "DESCRIPTION:" + desc, "BEGIN:VALARM", "TRIGGER:PT0M", "ACTION:DISPLAY", "DESCRIPTION:" + title, "END:VALARM", "END:VEVENT"].join("\r\n");
   }
   var body = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//62//Shoulder rehab//EN", "CALSCALE:GREGORIAN",
-    ev("shoulder-main", p.time, "Shoulder routine", "Do your shoulder exercises exactly like your doctor's sheet. Open 62 and tap Start."),
-    ev("shoulder-backup", p.backupTime, "Did you do your shoulder routine?", "If not yet, do it now. Open 62 and tap Start."), "END:VCALENDAR"].join("\r\n");
+    ev("shoulder-main", p.time, "Morning routine", "Weigh in, say your champion quote out loud, do your stretches, then your shoulder routine. Open 62 and go top to bottom."),
+    ev("shoulder-backup", p.backupTime, "Did you finish your morning routine?", "Quote, stretches and shoulder routine. If not yet, do it now. Open 62."), "END:VCALENDAR"].join("\r\n");
   var blob = new Blob([body], { type:"text/calendar" }), a = el("a", { href:URL.createObjectURL(blob), download:"shoulder-routine.ics" });
   document.body.appendChild(a); a.click(); a.remove();
   toast("Open the file to add the daily reminders to your calendar");
@@ -840,6 +842,137 @@ function openSuggest(){
     });
   }
   loadMine();
+}
+
+/* ---------- champion mindset: quote of the day, said out loud ---------- */
+// Only quotes that trace to a documented source (interview, ad, book, press conference). The wording can differ a little between
+// outlets; the version used here is the best-documented one. More can be added to this list any time.
+var QUOTES = [
+  { q:"I hated every minute of it. But I said to myself, 'Suffer now, and live the rest of your life as a champion.'", who:"Muhammad Ali", role:"boxing", src:"1978 interview" },
+  { q:"I've failed over and over and over again in my life. And that is why I succeed.", who:"Michael Jordan", role:"basketball", src:"Nike ad, 1997" },
+  { q:"I really think a champion is defined not by their wins but by how they can recover when they fall.", who:"Serena Williams", role:"tennis", src:"2013 US Open press conference" },
+  { q:"I raced scared and I never took anything for granted.", who:"Ricky Carmichael", role:"motocross", src:"podcast interview" },
+  { q:"If we were going to be racing 20 minute races, we were going to do double that.", who:"Ricky Carmichael", role:"motocross", src:"interview on his training" },
+  { q:"I am building a fire, and every day I train, I add more fuel. At just the right moment, I light the match.", who:"Mia Hamm", role:"soccer", src:"Go For The Goal, 1999" },
+  { q:"There may be people that have more talent than you, but there's no excuse for anyone to work harder than you do.", who:"Derek Jeter", role:"baseball", src:"" },
+  { q:"I've got a theory that if you give 100 percent all of the time, somehow things will work out in the end.", who:"Larry Bird", role:"basketball", src:"" },
+  { q:"Everything negative, pressure, challenges, is all an opportunity for me to rise.", who:"Kobe Bryant", role:"basketball", src:"" },
+  { q:"You miss 100 percent of the shots you don't take.", who:"Wayne Gretzky", role:"hockey", src:"" },
+  { q:"Success is no accident. It is hard work, perseverance, learning, studying, sacrifice, and most of all, love of what you are doing.", who:"Pele", role:"soccer", src:"" },
+  { q:"Talent without working hard is nothing.", who:"Cristiano Ronaldo", role:"soccer", src:"" },
+  { q:"You can't put a limit on anything. The more you dream, the farther you get.", who:"Michael Phelps", role:"swimming", src:"" },
+  { q:"Today I will do what others won't, so tomorrow I can do what others can't.", who:"Jerry Rice", role:"football", src:"" },
+  { q:"I can accept failure, everyone fails at something. But I can't accept not trying.", who:"Michael Jordan", role:"basketball", src:"I Can't Accept Not Trying, 1994" },
+  { q:"Champions aren't made in gyms. Champions are made from something they have deep inside them: a desire, a dream, a vision.", who:"Muhammad Ali", role:"boxing", src:"" },
+  { q:"The last three or four reps is what makes the muscle grow.", who:"Arnold Schwarzenegger", role:"bodybuilding", src:"Pumping Iron, 1977" },
+  { q:"Champions keep playing until they get it right.", who:"Billie Jean King", role:"tennis", src:"" },
+  { q:"I don't think limits.", who:"Usain Bolt", role:"sprinting", src:"" }
+];
+var CREED = ["I am prepared.", "I did the work.", "I do everything like a champion."];
+function quoteOfDay(){ var d = new Date(), n = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000); return QUOTES[n % QUOTES.length]; }
+function mindsetCard(){
+  var t = today(), q = quoteOfDay(); S.mindLog = S.mindLog || {};
+  var lg = S.mindLog[t] || { said:0 }, done = lg.said >= 3;
+  var c = el("div", { class:"card", style:"border-color:var(--plate)" }, [
+    el("div", { class:"row between" }, [el("h2", { text:"Champion mindset" }), el("span", { class:"pill", text: done ? "Done" : lg.said + " of 3" })]),
+    el("p", { style:"font-size:1.25em;line-height:1.35;margin:10px 0 4px", text:"“" + q.q + "”" }),
+    el("div", { class:"small muted", text:"— " + q.who + ", " + q.role + (q.src ? " (" + q.src + ")" : "") })
+  ]);
+  if (!done){
+    c.appendChild(el("div", { class:"small", style:"margin-top:10px", text:"Find a quiet spot. Stand tall, chin up. Say it out loud, slow and strong, 3 times. If people are around, go somewhere alone first." }));
+    c.appendChild(el("button", { class:"btn primary block", style:"margin-top:10px", type:"button", text:"I said it out loud (" + lg.said + " of 3)", onclick:function(){
+      S.mindLog[t] = { said:(lg.said || 0) + 1 }; save(); if (S.mindLog[t].said >= 3) toast("Now say your champion lines"); render(); } }));
+  } else {
+    c.appendChild(el("div", { style:"margin-top:10px" }, [el("div", { class:"small muted", text:"Now say these out loud, once:" })].concat(CREED.map(function(x){ return el("div", { style:"font-weight:700", text:x }); }))));
+  }
+  return c;
+}
+
+/* ---------- morning stretch routine (no shoulder stretching) ---------- */
+var MOBILITY = [
+  { id:"catcow", name:"Seated cat-cow", sec:45, sides:1, video:"https://www.youtube.com/watch?v=Xq3nUS-Y2q4",
+    how:"Sit tall in a chair with your hands resting on your knees. Breathe in, arch your back and lift your chest. Breathe out, round your back and tuck your chin. Slow and smooth.", why:"Loosens your spine so you can move on the bike." },
+  { id:"twist", name:"Seated spine turn", sec:30, sides:2, video:"https://www.youtube.com/watch?v=pLerj04KsHw",
+    how:"Sit tall with your hands resting on your thighs. Turn your chest slowly to one side, turning from your middle back. Hips and knees stay facing forward. Keep your arms relaxed and do not pull on anything.", why:"Lets you turn and look through corners without your lower back doing all the work." },
+  { id:"neck", name:"Neck side tilt (gentle)", sec:20, sides:2, video:"https://www.youtube.com/watch?v=fA08D3nj-hs",
+    how:"Sit tall. Slowly lower one ear toward the same shoulder with your nose pointing forward. Do not use your hand to pull, and do not reach down with the other arm. Let the weight of your head do the work.", why:"Keeps your neck loose for looking ahead at speed." },
+  { id:"forearm", name:"Forearm and wrist stretch", sec:20, sides:2, video:"https://www.youtube.com/watch?v=rQlDHgTUbO0",
+    how:"Sit with your forearm resting on your thigh, palm up, elbow bent and low. With your other hand, gently pull your fingers back toward you. Then turn your palm down and gently press the back of your hand. Keep your elbow low and your shoulder relaxed. If your shoulder doesn't like it, skip this one.", why:"Helps stop arm pump and tired forearms on long motos." },
+  { id:"ankle", name:"Ankle rocks (knee to wall)", sec:30, sides:2, video:"https://www.youtube.com/watch?v=uippmmTdoWw",
+    how:"Stand facing a wall with one foot about 4 inches from it and your hands on your hips. Keep your heel flat and slowly push your knee forward to touch the wall, then back. Smooth and slow.", why:"Ankles that bend well let you stand on the pegs in attack position." },
+  { id:"calf", name:"Calf stretch on a step", sec:30, sides:2, video:"https://www.youtube.com/watch?v=yhnBpnrhRpk",
+    how:"Stand with the ball of one foot on the edge of a step, the other foot beside it. Let that heel sink down slowly with your knee straight. Rest your fingertips lightly on a rail or wall. Do not lean your body weight on your arm.", why:"Your calves tie into your ankles, knees and boots." },
+  { id:"squat", name:"Deep squat hold", sec:45, sides:1, video:"https://www.youtube.com/watch?v=0wzrgyAurT8",
+    how:"Feet a little wider than your shoulders, toes turned out a bit. Sit down as low as is comfortable with your heels down and chest up. Hold your hands together at your chest, or rest them low on a door frame. Do not push or pull with your shoulders.", why:"Opens your hips and ankles for standing and sitting on the bike." },
+  { id:"hipflex", name:"Kneeling hip flexor stretch", sec:30, sides:2, video:"https://www.youtube.com/watch?v=UU7Nqd_Dric",
+    how:"Kneel on one knee on a pillow with the other foot flat in front of you. Put your hands on your hips. Squeeze the glute of the back leg and gently shift your hips forward. Stay tall and do not arch your lower back.", why:"Your hip flexors get tight from the riding position." },
+  { id:"butterfly", name:"Butterfly stretch", sec:30, sides:1, video:"https://www.youtube.com/watch?v=giwBs8Eqq6M",
+    how:"Sit tall with the soles of your feet together and knees out. Rest your hands on your ankles or feet, no pulling. Hinge forward a little from the hips with a flat back and let your knees relax down.", why:"Your inner thighs grip the bike all day." },
+  { id:"hamstring", name:"Doorway hamstring stretch", sec:30, sides:2, video:"https://www.youtube.com/watch?v=0BAhVvpJmDw",
+    how:"Lie on your back with your hips close to a door frame. Rest one leg straight up against the frame while the other leg stays flat on the floor. Slide closer or farther to change the stretch. Your arms rest by your sides.", why:"Loose hamstrings protect your lower back when you land and brake." },
+  { id:"seatedfig4", name:"Seated figure-4 glute stretch", sec:30, sides:2, video:"https://www.youtube.com/watch?v=TgP5CBBGISE",
+    how:"Sit tall in a chair. Rest one ankle on the other thigh just above the knee. Keep your back flat and lean forward from the hips until you feel it in your buttock. Rest your hands on your legs, no pulling.", why:"Your glutes and outer hips take the hits on rough tracks." },
+  { id:"lyingtwist", name:"Lying spinal twist", sec:30, sides:2, video:"https://www.youtube.com/watch?v=mNdJti7ZwKI",
+    how:"Lie on your back with your knees bent. Let both knees fall slowly to one side. Rest your arms on your belly, not out to the sides. Let gravity do the work.", why:"Releases your lower back after time in the riding position." },
+  { id:"child", name:"Child's pose (arms by your sides)", sec:45, sides:1, video:"https://www.youtube.com/watch?v=kH12QrSGedM",
+    how:"Kneel on a mat and sit your hips back toward your heels. Fold forward and let your arms rest along your sides, palms up. Rest your forehead on the floor or a pillow and breathe slowly.", why:"A calm, loose finish." }
+];
+function mobToday(){ return (S.mobLog || {})[today()] || null; }
+function mobStreak(){
+  var n = 0, d = new Date(), log = S.mobLog || {};
+  if (!(log[dstr(d)] && log[dstr(d)].done)) d.setDate(d.getDate() - 1);
+  for (var i = 0; i < 400; i++){ var k = dstr(d); if (log[k] && log[k].done){ n++; d.setDate(d.getDate() - 1); } else break; }
+  return n;
+}
+function mobilityCard(){
+  S.mobLog = S.mobLog || {};
+  var lg = mobToday(), done = !!(lg && lg.done), st = mobStreak();
+  var mins = Math.round(MOBILITY.reduce(function(s, x){ return s + x.sec * x.sides; }, 0) / 60) + 4;
+  return el("div", { class:"card" }, [
+    el("div", { class:"row between" }, [el("h2", { text:"Morning stretch" }), el("span", { class:"pill", text: done ? "Done today" : "About " + mins + " min" })]),
+    el("div", { class:"small muted", text: done ? "Nice work." + (st > 1 ? " " + st + " days in a row." : "") : MOBILITY.length + " stretches for a motocross rider. Every one has a video if you don't know it. No shoulder stretching." }),
+    el("button", { class:"btn primary block", style:"margin-top:10px", type:"button", text: done ? "Do it again" : "Start my stretches", onclick:openMobilityRun })
+  ]);
+}
+var mobRun = null, mobModal = null, mobTimer = null;
+function openMobilityRun(){ mobRun = { i:0, side:1, skipped:[], startedAt:Date.now(), running:false }; keepAwake(true); drawMobStep(); }
+function closeMobilityRun(){ clearInterval(mobTimer); mobTimer = null; if (mobModal){ mobModal.close(); mobModal = null; } mobRun = null; keepAwake(false); render(); }
+function drawMobStep(){
+  var r = mobRun; if (!r) return;
+  clearInterval(mobTimer); mobTimer = null; if (mobModal) mobModal.close();
+  if (r.i >= MOBILITY.length){ finishMobility(); return; }
+  var ex = MOBILITY[r.i], kids = [];
+  kids.push(el("div", { class:"small muted", text:"Stretch " + (r.i + 1) + " of " + MOBILITY.length }));
+  kids.push(el("h2", { style:"margin:4px 0 8px", text:ex.name }));
+  kids.push(el("div", { class:"pill", text: ex.sec + " seconds" + (ex.sides === 2 ? " each side" : "") }));
+  kids.push(el("p", { style:"margin:12px 0", text:ex.how }));
+  kids.push(el("div", { class:"small muted", text:"Why it helps you ride: " + ex.why }));
+  kids.push(el("a", { class:"btn block", style:"margin-top:10px;text-align:center;text-decoration:none", href:ex.video, target:"_blank", rel:"noopener", text:"Watch how it's done (video)" }));
+  var label = ex.sides === 2 ? "Side " + r.side + " of 2" : "Hold";
+  kids.push(el("div", { class:"stat", style:"text-align:center;margin:12px 0", text:label }));
+  var go = el("button", { class:"btn primary block", type:"button", text:"Start " + ex.sec + " seconds" });
+  go.addEventListener("click", function(){
+    var left = ex.sec; go.disabled = true; go.textContent = left + " seconds left";
+    mobTimer = setInterval(function(){
+      left--;
+      if (left <= 0){
+        clearInterval(mobTimer); mobTimer = null; beep();
+        if (ex.sides === 2 && r.side === 1){ r.side = 2; toast("Switch sides"); drawMobStep(); }
+        else { r.i++; r.side = 1; drawMobStep(); }
+      } else go.textContent = left + " seconds left";
+    }, 1000);
+  });
+  kids.push(go);
+  kids.push(el("button", { class:"btn block ghost", type:"button", text:"Skip this one (it hurts or I can't)", onclick:function(){ r.skipped.push(ex.id); r.i++; r.side = 1; drawMobStep(); } }));
+  kids.push(el("div", { class:"small due", style:"margin-top:10px", text:"No shoulder stretching. If anything pulls on your shoulder, stop and skip it. Sharp pain: stop and tell your parents." }));
+  kids.push(el("button", { class:"btn block danger", type:"button", text:"Stop for now", onclick:function(){ if (confirm("Stop the stretches? They won't count as done.")) closeMobilityRun(); } }));
+  mobModal = sheet("Morning stretch", kids);
+}
+function finishMobility(){
+  var r = mobRun, t = today(); S.mobLog = S.mobLog || {};
+  S.mobLog[t] = { done:true, complete:r.skipped.length === 0, skipped:r.skipped.slice(), minutes:Math.round((Date.now() - r.startedAt) / 60000), at:new Date().toISOString() };
+  save(); toast(mobStreak() > 1 ? "Stretches done. " + mobStreak() + " days in a row" : "Stretches done. Great job");
+  closeMobilityRun();
 }
 
 /* ---------- TRAIN ---------- */
