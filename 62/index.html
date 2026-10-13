@@ -124,7 +124,7 @@ var DEFAULT_HABITS = [
 ];
 function defaults(){
   return { programs:[], sessions:[], active:null, habits:DEFAULT_HABITS, habitLog:{}, weights:[], hr:[], meals:[],
-           settings:{ name:"Declan", trainerEmail:"robb@coachrobb.com", trainerName:"Coach Robb", heightIn:null, momName:"Mom", momEmail:"nicbodt@gmail.com", allergies:"", dislikes:"", rideDays:3, maxHr:200 }, lastExport:null, plan:null, injury:{ active:true, area:"shoulder", note:"Surgery is planned. Doctor: strengthening the rotator cuff and the muscles around it before surgery is fine, and riding can restart once shoulder strength is back.", since:null, rideClear:false }, rehab:[], wellness:{}, rides:[], rehabLog:{}, mobLog:{}, mindLog:{}, bikes:defaultBikes(), plan:{ days:{} } };
+           settings:{ name:"Declan", trainerEmail:"robb@coachrobb.com", trainerName:"Coach Robb", heightIn:null, momName:"Mom", momEmail:"nicbodt@gmail.com", allergies:"", dislikes:"", rideDays:3, maxHr:200 }, lastExport:null, plan:null, injury:{ active:true, area:"shoulder", note:"Surgery is planned. Doctor: strengthening the rotator cuff and the muscles around it before surgery is fine, and riding can restart once shoulder strength is back.", since:null, rideClear:false }, rehab:[], wellness:{}, rides:[], rehabLog:{}, mobLog:{}, mindLog:{}, bikes:defaultBikes(), plan:{ days:{} }, tracks:[] };
 }
 var S = load();
 function load(){
@@ -375,7 +375,7 @@ function lapSec(t){
 }
 function lapFmt(sec){ if (sec == null) return "--"; var m = Math.floor(sec / 60), s = sec - m * 60; return m + ":" + (s < 10 ? "0" : "") + s.toFixed(1); }
 function blankBike(){
-  return { name:S.settings.bikeName || "KTM", forkComp:"", forkReb:"", forkSpring:"", forkHeight:"", shockComp:"", shockReb:"", shockSag:"", shockSpring:"",
+  return { name:S.settings.bikeName || "KTM", forkComp:"", forkReb:"", forkSpring:"", forkHeight:"", shockComp:"", shockHs:"", shockReb:"", shockSag:"", shockFree:"", shockSpring:"",
     tireF:"", tireR:"", psiF:"", psiR:"", sprocketF:"", sprocketR:"", mapping:"", bars:"", notes:"" };
 }
 function eventById(id){ return S.rides.filter(function(e){ return e.id === id; })[0]; }
@@ -475,8 +475,8 @@ function openEvent(id){
     el("div", { class:"row" }, [fld("Compression", b, "forkComp", { grow:true, ph:"clicks out" }), fld("Rebound", b, "forkReb", { grow:true, ph:"clicks out" })]),
     el("div", { class:"row" }, [fld("Spring / air", b, "forkSpring", { grow:true }), fld("Fork height", b, "forkHeight", { grow:true, ph:"mm" })]),
     el("div", { class:"small muted", text:"Shock" }),
-    el("div", { class:"row" }, [fld("Compression", b, "shockComp", { grow:true }), fld("Rebound", b, "shockReb", { grow:true })]),
-    el("div", { class:"row" }, [fld("Race sag (mm)", b, "shockSag", { grow:true }), fld("Spring rate", b, "shockSpring", { grow:true })]),
+    el("div", { class:"row" }, [fld("Compression (low-speed)", b, "shockComp", { grow:true }), fld("High-speed comp", b, "shockHs", { grow:true }), fld("Rebound", b, "shockReb", { grow:true })]),
+    el("div", { class:"row" }, [fld("Race sag (mm)", b, "shockSag", { grow:true }), fld("Free sag (mm)", b, "shockFree", { grow:true }), fld("Spring rate", b, "shockSpring", { grow:true })]),
     el("div", { class:"small muted", text:"Tires" }),
     el("div", { class:"row" }, [fld("Front tire", b, "tireF", { grow:true }), fld("Rear tire", b, "tireR", { grow:true })]),
     el("div", { class:"row" }, [fld("Front PSI", b, "psiF", { grow:true, mode:"decimal" }), fld("Rear PSI", b, "psiR", { grow:true, mode:"decimal" })]),
@@ -485,6 +485,7 @@ function openEvent(id){
     el("div", { class:"row" }, [fld("Engine map", b, "mapping", { grow:true }), fld("Bar / lever position", b, "bars", { grow:true })]),
     fld("Setup notes / what you changed and why", b, "notes", { area:true })
   ], "Write down every change so you can see what actually made him faster."));
+  susSections(e, again).forEach(function(n){ kids.push(n); });
 
   kids.push(sec("How he feels before riding", [
     el("div", { class:"row" }, [fld("Morning weight (lb)", e.ready, "weight", { grow:true, num:true, type:"number", mode:"decimal", step:"0.1" }), fld("Sleep (hours)", e.ready, "sleep", { grow:true, num:true, type:"number", mode:"decimal", step:"0.5" })]),
@@ -566,6 +567,10 @@ function eventText(e){
     "\n  Shock comp " + (b.shockComp || "-") + " / reb " + (b.shockReb || "-") + " / sag " + (b.shockSag || "-") + " / spring " + (b.shockSpring || "-") +
     "\n  Tires F " + (b.tireF || "-") + " @ " + (b.psiF || "-") + " psi, R " + (b.tireR || "-") + " @ " + (b.psiR || "-") + " psi" +
     "\n  Sprockets " + (b.sprocketF || "-") + "/" + (b.sprocketR || "-") + ", map " + (b.mapping || "-") + ", bars " + (b.bars || "-") + (b.notes ? "\n  Notes: " + b.notes : "") + "\n";
+  if (e.sus){
+    var sy = susSymptoms(e).map(function(id){ var s = symById(id); return s ? s.label : id; });
+    if (sy.length || e.sus.feel || (e.sus.changes || []).length) t += "\nSuspension: " + (e.sus.feel ? "bike feel " + e.sus.feel + "/5; " : "") + (sy.length ? "reported: " + sy.join(", ") + "; " : "") + ((e.sus.changes || []).length ? "changed: " + e.sus.changes.map(function(c){ return c.label + " " + (c.from || "?") + " to " + (c.to || "?"); }).join(", ") : "") + "\n";
+  }
   t += "\nBefore: weight " + (e.ready.weight != null ? e.ready.weight + " lb" : "-") + ", sleep " + (e.ready.sleep != null ? e.ready.sleep + " h" : "-") + ", soreness " + (e.ready.soreness != null ? e.ready.soreness : "-") + "/10, energy " + (e.ready.energy != null ? e.ready.energy : "-") + "/10\n";
   (e.sessions || []).forEach(function(s){ t += "\n" + (s.label || "Session") + ": " + [s.laps != null ? s.laps + " laps" : "", s.minutes != null ? s.minutes + " min" : "", s.best ? "best " + s.best : "", s.position ? "finish " + s.position : "", s.rpe != null ? "effort " + s.rpe + "/10" : "", s.avgHr != null ? "avg HR " + s.avgHr : ""].filter(Boolean).join(", ") + (s.notes ? "\n  " + s.notes : "") + "\n"; });
   var sw = sweatInfo(e);
@@ -1046,6 +1051,12 @@ function openBikeEdit(id){
   kids.push(fld("What Declan likes", b, "declanLikes", { area:true, rows:2 }));
   kids.push(fld("What Dad likes", b, "dadLikes", { area:true, rows:2 }));
   kids.push(fld("Notes", b, "notes", { area:true, rows:3 }));
+  var tg = tgt(b);
+  kids.push(el("h3", { style:"margin-top:12px", text:"Setup targets" }));
+  kids.push(el("div", { class:"small muted", text:"From the owner's manual or the mechanic. The suspension suggestions check Declan's setup against these. Free sag of 30-40 mm is the usual starting range." }));
+  kids.push(el("div", { class:"row" }, [fld("Race sag target (mm)", tg, "raceSag", { grow:true, mode:"decimal" }), fld("Free sag min", tg, "freeMin", { grow:true, num:true, type:"number", mode:"decimal" }), fld("Free sag max", tg, "freeMax", { grow:true, num:true, type:"number", mode:"decimal" })]));
+  kids.push(fld("Declan's weight when the springs were chosen (lb)", tg, "setupWeight", { num:true, type:"number", mode:"decimal" }));
+  kids.push(el("button", { class:"btn block", type:"button", text:"See this bike's setup history", onclick:function(){ openSetupHistory(id); } }));
   if (b.status === "current"){
     kids.push(el("div", { class:"small muted", text:"Hours from your ride logs: " + bikeHours(b) + (b.hoursOffset ? " (including " + b.hoursOffset + " h you added by hand)" : "") }));
     kids.push(fld("Hours already on it before you started logging", b, "hoursOffset", { num:true, type:"number", mode:"decimal" }));
@@ -1061,6 +1072,245 @@ function openBikeEdit(id){
   bikeEditModal = sheet(b.name, kids);
 }
 var bikeEditModal = null;
+
+/* ---------- suspension: track profiles, feedback, advice routed to the right person ---------- */
+// Joe 2026-10-13: feedback from Declan or the team -> recommendation -> the person who can act. Robb trains and is not at the track, so bike setup goes to the mechanic (Dad until there is one).
+// Rules are published starting points (tuning order: tires, sag, spring rate, then clickers), never orders for Declan. The manual and the mechanic come first.
+var TERRAIN = ["Sand", "Loam", "Intermediate", "Hard pack", "Mixed", "Mud / wet"];
+var ROUGHNESS = ["Smooth", "Some chop", "Braking bumps and ruts", "Very rough"];
+var SYMPTOMS = [
+  { id:"f-bottom", part:"Front", label:"Front bottoms out" },
+  { id:"f-dive", part:"Front", label:"Front dives under braking" },
+  { id:"f-harsh", part:"Front", label:"Front harsh / deflects on chop" },
+  { id:"f-push", part:"Front", label:"Front pushes or washes in corners" },
+  { id:"f-shake", part:"Front", label:"Headshake" },
+  { id:"r-bottom", part:"Rear", label:"Rear bottoms out on landings" },
+  { id:"r-kick", part:"Rear", label:"Rear kicks up over bumps" },
+  { id:"r-pack", part:"Rear", label:"Rear packs down in whoops / repeated bumps" },
+  { id:"r-harsh", part:"Rear", label:"Rear harsh on square edges" },
+  { id:"r-wallow", part:"Rear", label:"Rear feels soft / squats" },
+  { id:"good", part:"Both", label:"Felt great, nothing to change" }
+];
+var SUS_AREAS = [["suspension", "Suspension"], ["technique", "Technique"], ["body", "Body / recovery"], ["bike", "Bike condition"]];
+var SUS_RULES = {
+  "f-bottom": { move:"Add 1-2 clicks of fork compression damping (clicker turned in). Change both legs the same.", then:"If it still bottoms: ask the mechanic about fork oil level or a stiffer spring for his weight.", why:"More compression damping slows the fork as it nears the end of its travel." },
+  "f-dive": { move:"Add 1-2 clicks of fork compression damping (turned in), both legs.", then:"Check that front and rear sag are balanced, and that the fork spring suits his weight.", why:"Diving under braking means the fork is using too much of its travel too early." },
+  "f-harsh": { move:"Open the fork compression 1-2 clicks (turned out), both legs.", then:"If still harsh: ask the mechanic to check the fork spring is not too stiff for his weight, and whether the fork needs a service.", why:"Less compression damping lets the fork move more easily over small hits." },
+  "f-push": { move:"Check front tire pressure and that front and rear sag are balanced before changing any clicker.", then:"Mechanic's call on fork height or clicker changes.", why:"Pushing in corners is often about balance and tire pressure, not damping alone." },
+  "f-shake": { move:"Safety check first: front axle and fork clamp bolts tight, steering head bearings not loose, front tire pressure.", then:"If it stays, ask the mechanic to look at fork rebound and the steering stem.", why:"Loose parts and tire pressure cause headshake more often than clicker settings do." },
+  "r-bottom": { move:"If it bottoms only on big landings, add 1-2 clicks of high-speed compression on the shock. If it bottoms everywhere, add 1-2 clicks of low-speed compression.", then:"If it still bottoms: confirm race sag and free sag, then ask about a stiffer shock spring.", why:"Compression damping resists the shock reaching the end of its stroke." },
+  "r-kick": { move:"Slow the shock rebound 1-2 clicks (turned in).", then:"Check race sag and spring rate first if you have not. Slowing rebound is not always the fix.", why:"A rear that kicks up is returning too fast after each hit." },
+  "r-pack": { move:"Speed up the shock rebound 1-2 clicks (turned out).", then:"Check race sag and spring rate if it keeps packing down.", why:"A rear that packs down in repeated bumps is not recovering fast enough between hits." },
+  "r-harsh": { move:"Open the shock high-speed compression 1-2 clicks (turned out). If the shock has no high-speed clicker, open low-speed compression 1 click.", then:"If still harsh, ask the mechanic whether the shock spring is too stiff for his weight.", why:"Square-edge hits are fast shaft movements, which high-speed compression controls." },
+  "r-wallow": { move:"Check race sag first. If sag is correct, add 1 click of low-speed compression on the shock.", then:"If sag cannot be set without lots of preload, the spring is likely too soft.", why:"A soft, squatting rear is usually sag or spring rate before damping." }
+};
+var susFrom = null, susArea = "suspension", susSel = [], susChgPart = "shockComp";
+var SETUP_FIELDS = [["forkComp", "Fork comp"], ["forkReb", "Fork reb"], ["forkSpring", "Fork spring"], ["forkHeight", "Fork height"], ["shockComp", "Shock comp"], ["shockHs", "Shock high-speed comp"], ["shockReb", "Shock reb"], ["shockSag", "Race sag"], ["shockFree", "Free sag"], ["shockSpring", "Shock spring"], ["psiF", "Front PSI"], ["psiR", "Rear PSI"]];
+function symById(id){ return SYMPTOMS.filter(function(s){ return s.id === id; })[0]; }
+function trackKey(n){ return String(n == null ? "" : n).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+function trackProfile(name, make){
+  var k = trackKey(name); if (!k) return null;
+  S.tracks = S.tracks || [];
+  var t = S.tracks.filter(function(x){ return x.key === k; })[0];
+  if (!t && make && k.length >= 3){ t = { key:k, name:String(name).trim(), terrain:"", rough:"", notes:"" }; S.tracks.push(t); save(); }
+  return t || null;
+}
+function mechName(){ return S.settings.mechanicName || "Dad"; }
+function tgt(b){ b.tgt = b.tgt || { raceSag:"", freeMin:30, freeMax:40, setupWeight:null }; return b.tgt; }
+function latestWeight(e){ var w = e && e.ready && e.ready.weight; if (w != null) return w; var l = (S.weights || []).slice().sort(function(a, c){ return a.date < c.date ? 1 : -1; })[0]; return l ? l.lb : null; }
+function lastAtTrack(e){
+  var k = trackKey(e.track); if (!k) return null;
+  return S.rides.filter(function(x){ return x.id !== e.id && trackKey(x.track) === k && x.date <= e.date; }).sort(function(a, c){ return a.date < c.date ? 1 : -1; })[0] || null;
+}
+function susSymptoms(e){
+  var cnt = {}, order = [];
+  ((e.sus && e.sus.fb) || []).forEach(function(f){ if (f.area !== "suspension") return; (f.sym || []).forEach(function(id){ if (id === "good") return; if (!cnt[id]){ cnt[id] = 0; order.push(id); } cnt[id]++; }); });
+  return order.sort(function(a, c){ return cnt[c] - cnt[a]; });
+}
+function setupLine(b){
+  b = b || {};
+  return "Fork comp " + (b.forkComp || "-") + " / reb " + (b.forkReb || "-") + " / spring " + (b.forkSpring || "-") + " / height " + (b.forkHeight || "-") +
+    "; Shock comp " + (b.shockComp || "-") + " / HS " + (b.shockHs || "-") + " / reb " + (b.shockReb || "-") + " / race sag " + (b.shockSag || "-") + " / free sag " + (b.shockFree || "-") + " / spring " + (b.shockSpring || "-") +
+    "; Tires " + (b.psiF || "-") + "/" + (b.psiR || "-") + " psi";
+}
+function susAdvice(e){
+  var b = e.bike || {}, bp = bikeById(e.bikeId), tg = bp ? tgt(bp) : { raceSag:"", freeMin:30, freeMax:40, setupWeight:null };
+  var fix = [], watch = [], later = [], first = null, routed = [];
+  if (num(b.psiF) == null || num(b.psiR) == null) fix.push("Write down front and rear tire pressure. It changes how the suspension feels, so settle it before touching a clicker.");
+  var sag = num(b.shockSag), tsag = num(tg.raceSag);
+  if (sag != null && tsag != null && Math.abs(sag - tsag) > 6) fix.push("Race sag is " + sag + " mm and the target is " + tsag + " mm. Set sag first with Declan in full gear on the bike, measured the same way every time.");
+  if (tsag == null) watch.push("No race sag target is saved for this bike yet. Get it from the manual or the mechanic and add it under My bikes.");
+  var fs = num(b.shockFree), fmin = num(tg.freeMin), fmax = num(tg.freeMax);
+  if (fs != null && fmin != null && fs < fmin) fix.push("Free sag is " + fs + " mm, under the usual " + fmin + "-" + fmax + " mm range. The shock spring may be too soft for him. Ask the mechanic about a stiffer spring before changing clickers.");
+  if (fs != null && fmax != null && fs > fmax) fix.push("Free sag is " + fs + " mm, over the usual " + fmin + "-" + fmax + " mm range. The shock spring may be too stiff for him. Ask the mechanic about a lighter spring before changing clickers.");
+  var sw = num(tg.setupWeight), cw = latestWeight(e);
+  if (sw != null && cw != null && Math.abs(cw - sw) >= 5) fix.push("He is " + cw + " lb now and the springs were chosen at " + sw + " lb. Re-check race sag and free sag, because the spring rate may no longer fit.");
+  var syms = susSymptoms(e), rules = syms.map(function(id){ return { id:id, r:SUS_RULES[id] }; }).filter(function(x){ return x.r; });
+  if (rules.length){
+    if (fix.length) later = rules; else { first = rules[0]; later = rules.slice(1); }
+  }
+  var tp = trackProfile(e.track);
+  if (tp && tp.terrain){
+    var T = { "Sand":"Sand is soft: watch for the rear squatting and bottoming in deep ruts. Harsh complaints are less likely.", "Hard pack":"Hard ground: harshness, front deflection and the rear kicking over chop are the likely complaints.", "Loam":"Loam breaks down as the day goes on: ruts and braking bumps get bigger by Moto 2, so get feedback between motos.", "Intermediate":"Intermediate ground changes through the day. Get feedback between sessions.", "Mixed":"Mixed ground: note which section each symptom happens in.", "Mud / wet":"Wet or muddy: mud adds weight to the bike, so re-check sag and tire pressure." }[tp.terrain];
+    if (T) watch.push(T);
+  }
+  if (e.cond && e.cond.temp != null && (e.cond.temp >= 85 || e.cond.temp <= 50)) watch.push("It is " + e.cond.temp + "F. Heat thins suspension oil and cold thickens it, so the clickers will feel different. Re-check after the first session.");
+  ((e.sus && e.sus.fb) || []).forEach(function(f){
+    if (f.area === "technique") routed.push({ to:"robb", id:f.id, title:"Technique feedback", text:(f.from || "Team") + ": " + (f.note || "(no note)") });
+    if (f.area === "body") routed.push({ to:"parent", id:f.id, title:"Body / recovery feedback", text:(f.from || "Team") + ": " + (f.note || "(no note)") });
+    if (f.area === "bike") routed.push({ to:"mechanic", id:f.id, title:"Bike condition", text:(f.from || "Team") + ": " + (f.note || "(no note)") });
+  });
+  return { fix:fix, first:first, later:later, watch:watch, routed:routed };
+}
+function toLabel(to){ return to === "robb" ? S.settings.trainerName : to === "parent" ? "parents" : mechName(); }
+function adviceMessage(e, extra){
+  var tp = trackProfile(e.track), bp = bikeById(e.bikeId), syms = susSymptoms(e).map(function(id){ var s = symById(id); return s ? s.label : id; });
+  return S.settings.name + " - " + (e.kind === "race" ? "race" : "ride") + " day " + fmtDay(e.date) + " - " + (e.track || "no track named") + (tp && tp.terrain ? " (" + tp.terrain + (tp.rough ? ", " + tp.rough : "") + ")" : "") + "\n" +
+    "Bike: " + (bp ? bp.name : (e.bike && e.bike.name) || "-") + "\n" + (e.cond && e.cond.temp != null ? "Temp " + e.cond.temp + "F " : "") + ((e.cond && e.cond.weather) || "") + "\n\n" +
+    "Current setup: " + setupLine(e.bike) + "\n" + (syms.length ? "Reported: " + syms.join("; ") + "\n" : "") + ((e.sus && e.sus.feel) ? "Feel: " + e.sus.feel + "/5\n" : "") + "\n" + extra +
+    "\n\nOne change at a time. The manual and the mechanic come first; these are starting points from published tuning guides.";
+}
+function sendRouted(e, to, subject, extra, btn){
+  if (!(CFG.api && cloud.session && navigator.onLine)){ toast("Needs signal and a sign-in to send"); return; }
+  if (btn){ btn.disabled = true; }
+  callApi("route-feedback", { to:to, subject:subject, text:adviceMessage(e, extra) })
+    .then(function(r){ toast("Sent to " + (r.sentTo || toLabel(to))); if (btn){ btn.textContent = "Sent"; } })
+    .catch(function(err){ if (btn) btn.disabled = false; toast(err.message || "Couldn't send"); });
+}
+function chipRow(list, isOn, onTap){
+  return el("div", { class:"row", style:"flex-wrap:wrap;gap:6px;margin-top:6px" }, list.map(function(k){
+    return el("button", { class:"btn sm" + (isOn(k[0]) ? " primary" : ""), type:"button", text:k[1], onclick:function(){ onTap(k[0]); } }); }));
+}
+function susSections(e, again){
+  e.sus = e.sus || { fb:[], changes:[], feel:null };
+  e.sus.fb = e.sus.fb || []; e.sus.changes = e.sus.changes || [];
+  var out = [];
+  // track profile
+  var tp = trackProfile(e.track, true), tk = [];
+  if (!tp){ tk.push(el("div", { class:"small muted", text:"Type the track name above and the app builds a profile for it and remembers it." })); }
+  else {
+    tk.push(el("div", { class:"row" }, [selFld("Ground", tp, "terrain", TERRAIN, { grow:true, again:again }), selFld("How rough", tp, "rough", ROUGHNESS, { grow:true, again:again })]));
+    tk.push(fld("Notes about this track (what it does to the bike)", tp, "notes", { area:true, rows:2 }));
+    var prev = lastAtTrack(e);
+    if (prev){
+      var pb = prev.bike || {}, ps = (prev.sus && prev.sus.fb) || [], psy = [];
+      ps.forEach(function(f){ (f.sym || []).forEach(function(id){ var s = symById(id); if (s && psy.indexOf(s.label) < 0) psy.push(s.label); }); });
+      var pbk = bikeById(prev.bikeId);
+      tk.push(el("div", { class:"card flat", style:"margin-top:8px" }, [
+        el("b", { text:"Last time here: " + fmtDay(prev.date) + (pbk ? " on the " + pbk.name : "") }),
+        el("div", { class:"small", text:setupLine(pb) }),
+        prev.sus && prev.sus.feel ? el("div", { class:"small", text:"Bike feel: " + prev.sus.feel + "/5" + (bestLapOf(prev) != null ? " · best lap " + lapFmt(bestLapOf(prev)) : "") }) : null,
+        psy.length ? el("div", { class:"small", text:"Reported: " + psy.join("; ") }) : null,
+        ((prev.sus && prev.sus.changes) || []).length ? el("div", { class:"small", text:"Changed that day: " + prev.sus.changes.map(function(c){ return c.label + " " + (c.from || "?") + " to " + (c.to || "?"); }).join("; ") }) : null,
+        (!prev.bikeId || prev.bikeId === e.bikeId) ? el("button", { class:"btn sm", type:"button", style:"margin-top:6px", text:"Start from that setup", onclick:function(){ var nm = e.bike && e.bike.name; e.bike = JSON.parse(JSON.stringify(prev.bike)); if (nm) e.bike.name = nm; save(); again(); toast("Setup copied from " + fmtDay(prev.date)); } }) : el("div", { class:"small muted", text:"That was a different bike, so its setup is not copied." })
+      ]));
+    } else tk.push(el("div", { class:"small muted", style:"margin-top:6px", text:"First time logged here. Whatever you record today becomes the starting point next time." }));
+  }
+  out.push(sec("Track profile", tk, "The app remembers each track so the next visit starts from what worked."));
+
+  // feedback
+  var kids = [], from = susFrom || S.settings.name || "Declan";
+  kids.push(el("div", { class:"small muted", text:"Who is telling us?" }));
+  var people = [S.settings.name || "Declan", "Dad", "Mom", "Mechanic", S.settings.trainerName || "Coach"].map(function(n){ return [n, n]; });
+  kids.push(chipRow(people, function(k){ return k === from; }, function(k){ susFrom = k; again(); }));
+  kids.push(el("div", { class:"small muted", style:"margin-top:10px", text:"About what?" }));
+  kids.push(chipRow(SUS_AREAS, function(k){ return k === susArea; }, function(k){ susArea = k; susSel = []; again(); }));
+  if (susArea === "suspension"){
+    ["Front", "Rear", "Both"].forEach(function(part){
+      kids.push(el("div", { class:"small muted", style:"margin-top:8px", text:part === "Both" ? "Or" : part }));
+      kids.push(chipRow(SYMPTOMS.filter(function(s){ return s.part === part; }).map(function(s){ return [s.id, s.label]; }), function(k){ return susSel.indexOf(k) >= 0; }, function(k){
+        var i = susSel.indexOf(k); if (i >= 0) susSel.splice(i, 1); else susSel.push(k); again(); }));
+    });
+  }
+  var nt = el("input", { type:"text", placeholder: susArea === "suspension" ? "Where on the track, what it did (optional)" : "What was said" });
+  kids.push(el("div", { class:"field", style:"margin-top:8px" }, [nt]));
+  kids.push(el("button", { class:"btn primary block", type:"button", text:"Add this feedback", onclick:function(){
+    var note = nt.value.trim();
+    if (susArea === "suspension" ? (!susSel.length && !note) : !note){ toast(susArea === "suspension" ? "Pick what it did, or write a note" : "Write what was said"); return; }
+    e.sus.fb.push({ id:uid(), ts:new Date().toISOString(), from:from, area:susArea, sym:susSel.slice(), symText:susSel.map(function(id){ var s = symById(id); return s ? s.label : id; }), note:note });
+    susSel = []; save(); again(); toast("Added"); } }));
+  e.sus.fb.forEach(function(f, idx){
+    var an = (SUS_AREAS.filter(function(a){ return a[0] === f.area; })[0] || [0, f.area])[1];
+    kids.push(el("div", { class:"check", style:"flex-direction:column;align-items:stretch;gap:2px;margin-top:6px" }, [
+      el("b", { text:f.from + " · " + an }), (f.symText || []).length ? el("div", { class:"small", text:f.symText.join("; ") }) : null, f.note ? el("div", { class:"small muted", text:f.note }) : null,
+      el("button", { class:"btn sm ghost danger", type:"button", style:"align-self:flex-start", text:"Remove", onclick:function(){ e.sus.fb.splice(idx, 1); save(); again(); } })]));
+  });
+  kids.push(el("div", { class:"small muted", style:"margin-top:12px", text:"How did the bike feel overall? 1 = fighting it, 5 = perfect" }));
+  kids.push(chipRow([[1, "1"], [2, "2"], [3, "3"], [4, "4"], [5, "5"]], function(k){ return e.sus.feel === k; }, function(k){ e.sus.feel = e.sus.feel === k ? null : k; save(); again(); }));
+  out.push(sec("Suspension feedback", kids, "Anyone can add this. Declan can say how it felt, or Dad can enter it from the fence."));
+
+  // advice, routed
+  var ad = susAdvice(e), ak = [];
+  ak.push(el("div", { class:"small muted", text:"Starting points from published tuning guides, in the usual order: tires, then sag, then spring rate, then clickers. These go to " + mechName() + ", not to Declan. One change at a time." }));
+  ad.fix.forEach(function(t){ ak.push(el("div", { class:"card flat", style:"margin-top:8px;border-left:4px solid var(--plate)" }, [el("b", { text:"Check this first" }), el("div", { class:"small", text:t })])); });
+  if (ad.first){
+    var sy = symById(ad.first.id), r = ad.first.r, msg = "Try first (" + (sy ? sy.label : ad.first.id) + "):\n" + r.move + "\n\nWhy: " + r.why + "\nIf that is not enough: " + r.then;
+    var sb = el("button", { class:"btn primary block", type:"button", style:"margin-top:8px", text:"Send to " + mechName(), onclick:function(){ sendRouted(e, "mechanic", "62 bike: " + (sy ? sy.label : "setup change"), msg, sb); } });
+    ak.push(el("div", { class:"card", style:"margin-top:8px" }, [el("b", { text:"Try first: " + (sy ? sy.label : "") }), el("div", { text:r.move }), el("div", { class:"small muted", text:"Why: " + r.why }), el("div", { class:"small", text:"If that is not enough: " + r.then }), sb]));
+  } else if (!ad.fix.length && !ad.later.length) ak.push(el("div", { class:"small muted", style:"margin-top:8px", text:"Add suspension feedback above and the suggestion appears here." }));
+  if (ad.later.length){
+    ak.push(el("div", { class:"small muted", style:"margin-top:8px", text:ad.fix.length ? "After the checks above, in this order:" : "If the first change does not fix it:" }));
+    ad.later.forEach(function(x){ var s2 = symById(x.id); ak.push(el("div", { class:"small", text:"• " + (s2 ? s2.label : x.id) + ": " + x.r.move })); });
+  }
+  if (ad.watch.length){ ak.push(el("div", { class:"small muted", style:"margin-top:8px", text:"Watch for" })); ad.watch.forEach(function(t){ ak.push(el("div", { class:"small", text:"• " + t })); }); }
+  ad.routed.forEach(function(x){
+    var rb = el("button", { class:"btn sm", type:"button", text:"Send to " + toLabel(x.to), onclick:function(){ sendRouted(e, x.to, "62 " + x.title.toLowerCase(), x.title + ":\n" + x.text, rb); } });
+    ak.push(el("div", { class:"card flat", style:"margin-top:8px" }, [el("b", { text:x.title + " to " + toLabel(x.to) }), el("div", { class:"small", text:x.text }), rb]));
+  });
+  out.push(sec("What to do about it", ak));
+
+  // changes made
+  var ck = [], cparts = SETUP_FIELDS.map(function(f){ return [f[0], f[1]]; });
+  e.sus.changes.forEach(function(c, idx){
+    ck.push(el("div", { class:"check", style:"flex-direction:column;align-items:stretch;gap:2px;margin-top:6px" }, [el("b", { text:c.label + ": " + (c.from || "?") + " to " + (c.to || "?") }), el("div", { class:"small muted", text:"by " + c.by + " at " + new Date(c.ts).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) }),
+      el("button", { class:"btn sm ghost danger", type:"button", style:"align-self:flex-start", text:"Remove from log", onclick:function(){ e.sus.changes.splice(idx, 1); save(); again(); } })]));
+  });
+  var sel = el("select", {}, cparts.map(function(k){ return el("option", { value:k[0], text:k[1] }); })); sel.value = susChgPart;
+  sel.addEventListener("change", function(){ susChgPart = sel.value; again(); });
+  var cur = (e.bike || {})[susChgPart];
+  var toI = el("input", { type:"text", placeholder:"New setting" });
+  ck.push(el("div", { class:"small muted", style:"margin-top:8px", text:"Changed something? Log it here. The setup numbers above update to match." }));
+  ck.push(el("div", { class:"row" }, [el("div", { class:"field grow" }, [el("label", { text:"What" }), sel]), el("div", { class:"field grow" }, [el("label", { text:"Was " + (cur || "(blank)") + ", now" }), toI])]));
+  ck.push(el("button", { class:"btn block", type:"button", text:"Log the change", onclick:function(){
+    if (!toI.value.trim()){ toast("Write the new setting"); return; }
+    var lab = (cparts.filter(function(k){ return k[0] === susChgPart; })[0] || [0, susChgPart])[1];
+    e.sus.changes.push({ id:uid(), ts:new Date().toISOString(), field:susChgPart, label:lab, from:cur || "", to:toI.value.trim(), by:(!susFrom || susFrom === S.settings.name) ? mechName() : susFrom });
+    e.bike[susChgPart] = toI.value.trim(); save(); again(); toast("Logged"); } }));
+  if (e.bikeId) ck.push(el("button", { class:"btn block ghost", type:"button", text:"See this bike's setup history", onclick:function(){ openSetupHistory(e.bikeId); } }));
+  out.push(sec("Changes made today", ck));
+  return out;
+}
+function setupDiff(a, b){
+  var d = []; SETUP_FIELDS.forEach(function(f){ var x = String((a || {})[f[0]] == null ? "" : a[f[0]]).trim(), y = String((b || {})[f[0]] == null ? "" : b[f[0]]).trim(); if (x !== y && (x || y)) d.push(f[1] + " " + (x || "-") + " to " + (y || "-")); });
+  return d;
+}
+var histModal = null;
+function openSetupHistory(bikeId){
+  var bp = bikeById(bikeId); if (!bp) return;
+  var rs = S.rides.filter(function(x){ return x.bikeId === bikeId; }).sort(function(a, c){ return a.date < c.date ? -1 : 1; });
+  var kids = [el("div", { class:"small muted", text:"Every day on this bike, newest first, with what changed since the day before. The best lap and best feel are marked so you can see which setup worked." })];
+  if (!rs.length) kids.push(el("div", { class:"card flat", style:"margin-top:8px", text:"No ride days on this bike yet." }));
+  var bestLap = null, bestFeel = null;
+  rs.forEach(function(r){ var l = bestLapOf(r); if (l != null && (bestLap == null || l < bestLap)) bestLap = l; var f = r.sus && r.sus.feel; if (f != null && (bestFeel == null || f > bestFeel)) bestFeel = f; });
+  var prev = null, cards = [];
+  rs.forEach(function(r){
+    var l = bestLapOf(r), f = r.sus && r.sus.feel, diff = prev ? setupDiff(prev.bike, r.bike) : [], tp = trackProfile(r.track), syms = [];
+    ((r.sus && r.sus.fb) || []).forEach(function(x){ (x.symText || []).forEach(function(t){ if (syms.indexOf(t) < 0) syms.push(t); }); });
+    cards.push(el("div", { class:"card", style:"margin-top:8px" }, [
+      el("div", { class:"row between" }, [el("b", { text:fmtDay(r.date) + (r.track ? " · " + r.track : "") }), el("span", { class:"pill", text:(l != null ? lapFmt(l) : "no lap") + (f != null ? " · feel " + f + "/5" : "") })]),
+      tp && tp.terrain ? el("div", { class:"small muted", text:tp.terrain + (tp.rough ? " · " + tp.rough : "") }) : null,
+      el("div", { class:"small", text:setupLine(r.bike) }),
+      diff.length ? el("div", { class:"small", text:"Changed since last time: " + diff.join("; ") }) : (prev ? el("div", { class:"small muted", text:"Same setup as last time." }) : null),
+      syms.length ? el("div", { class:"small", text:"Reported: " + syms.join("; ") }) : null,
+      (l != null && l === bestLap) ? el("span", { class:"pill", style:"margin-top:4px", text:"Best lap on this bike" }) : null,
+      (f != null && f === bestFeel && rs.length > 1) ? el("span", { class:"pill", style:"margin:4px 0 0 4px", text:"Best feel" }) : null
+    ]));
+    prev = r;
+  });
+  cards.reverse().forEach(function(c){ kids.push(c); });
+  kids.push(el("button", { class:"btn block ghost", style:"margin-top:10px", type:"button", text:"Close", onclick:function(){ histModal.close(); } }));
+  histModal = sheet(bp.name + " setup history", kids);
+}
 
 /* ---------- flexible plan: day types, following Robb's program or not, week planner ---------- */
 var DAY_TYPES = [["ride", "Ride day"], ["race", "Race weekend"], ["gym", "Gym only"], ["recovery", "Recovery"], ["rest", "Rest day"], ["bikedown", "Bike down / video study"]];
@@ -1790,6 +2040,8 @@ function openSettings(){
   var dsl = el("input", { type:"text", value:S.settings.dislikes || "", placeholder:"e.g. fish, mushrooms" });
   var mn = el("input", { type:"text", value:S.settings.momName || "Mom" });
   var me = el("input", { type:"email", value:S.settings.momEmail || "", autocapitalize:"off" });
+  var mcn = el("input", { type:"text", value:S.settings.mechanicName || "Dad" });
+  var mce = el("input", { type:"email", value:S.settings.mechanicEmail || "", autocapitalize:"off", placeholder:"leave blank until there is one" });
   var inj = S.injury || { active:false, area:"", note:"" };
   var injOn = el("select", {}, [el("option", { value:"no", text:"No - full training" }), el("option", { value:"yes", text:"Yes - modified training" })]); injOn.value = inj.active ? "yes" : "no";
   var injArea = el("input", { type:"text", value:inj.area || "", placeholder:"e.g. left wrist" });
@@ -1826,10 +2078,14 @@ function openSettings(){
       el("div", { class:"field grow" }, [el("label", { text:"Mom's name" }), mn]),
       el("div", { class:"field grow" }, [el("label", { text:"Mom's email" }), me])
     ]),
+    el("div", { class:"row" }, [
+      el("div", { class:"field grow" }, [el("label", { text:"Mechanic's name (gets bike setup suggestions)" }), mcn]),
+      el("div", { class:"field grow" }, [el("label", { text:"Mechanic's email (optional)" }), mce])
+    ]),
     el("button", { class:"btn primary block", type:"button", text:"Save", onclick:function(){
       S.settings.name = nm.value.trim() || "Declan"; S.settings.trainerName = tn.value.trim() || "Coach"; S.settings.trainerEmail = te.value.trim();
       S.settings.heightIn = num(hgt.value); S.settings.rideDays = num(rdd.value) == null ? 3 : num(rdd.value); S.settings.maxHr = num(mhr.value) || 200; S.settings.allergies = alg.value.trim(); S.settings.dislikes = dsl.value.trim();
-      S.settings.momName = mn.value.trim() || "Mom"; S.settings.momEmail = me.value.trim();
+      S.settings.momName = mn.value.trim() || "Mom"; S.settings.momEmail = me.value.trim(); S.settings.mechanicName = mcn.value.trim() || "Dad"; S.settings.mechanicEmail = mce.value.trim();
       var wasOn = !!(S.injury && S.injury.active), nowOn = injOn.value === "yes";
       S.injury = { active:nowOn, area:injArea.value.trim(), note:injNote.value.trim(), since: nowOn ? ((S.injury && S.injury.since) || today()) : (S.injury && S.injury.since) || null, rideClear: injRide.value === "clear", cleared: (wasOn && !nowOn) ? today() : (S.injury && S.injury.cleared) || null };
       var rp2 = rehabPlan(); rp2.active = rOn.value === "yes"; rp2.time = rTime.value || rp2.time; rp2.backupTime = rBackup.value || rp2.backupTime;
