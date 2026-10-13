@@ -156,4 +156,7 @@ foreach ($p in ($pages | Sort-Object { $_.canon })) { $sm += "  <url><loc>$domai
 $sm += "</urlset>`n"
 [IO.File]::WriteAllText((Join-Path $outDir "sitemap.xml"), $sm, (New-Object Text.UTF8Encoding($false)))
 [IO.File]::WriteAllText((Join-Path $outDir "robots.txt"), "User-agent: *`nAllow: /`nDisallow: /thank-you/`nDisallow: /funded-shell/`nSitemap: $domain/sitemap.xml`nSitemap: $domain/funded-sitemap.xml`n", (New-Object Text.UTF8Encoding($false)))
+# Search-engine ownership files (Google Search Console etc.) must sit at the site root.
+$verifyDir = Join-Path (Join-Path $root "tools") "site-verify"
+if (Test-Path $verifyDir) { Copy-Item (Join-Path $verifyDir "*") $outDir -Force }
 Write-Output ("Built " + $pages.Count + " indexable pages into " + $outDir + " (base '" + $Base + "')")
