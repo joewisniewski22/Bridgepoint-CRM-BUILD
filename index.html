@@ -6101,10 +6101,15 @@ function rowToEmailRecord(r){
     openedAt:r.opened_at||null, openCount:r.open_count||0
   };
 }
+var lastEmailSig = null;
 function refreshEmails(){
   if (!sb) return;
   sb.from("emails").select("*").order("created_at", { ascending:false }).then(function(res){
     if (res.error || !res.data) return;
+    // Don't re-draw the page (and disturb anyone mid-typing) when nothing changed since the last poll.
+    var sig = res.data.length + ":" + res.data.map(function(r){ return r.id + (r.delivery_status || "") + (r.open_count || 0) + (r.opened_at || ""); }).join("|");
+    if (sig === lastEmailSig && state.emails && state.emails.length) return;
+    lastEmailSig = sig;
     state.emails = res.data.map(rowToEmailRecord);
     render();
   });
@@ -10479,6 +10484,25 @@ function render(){
     keepInputs.push({ sel: form ? ('form[data-form="text-message-send"][data-lead="' + form.dataset.lead + '"] input[name="body"]') : ('input[data-action="' + el.dataset.action + '"]'),
       val: el.value, focused: el === ae, range: el === ae ? [el.selectionStart, el.selectionEnd] : null });
   });
+  // Open pop-up forms (reply/compose email, notes, call logs...): keep what's been typed across background re-renders.
+  // Joe + Fiore 2026-10-13: typing a reply made the text vanish every few seconds, because a background refresh rebuilt the whole
+  // modal from its original defaults. Only applies when the SAME modal is still open and the re-render wasn't caused by a click/submit;
+  // a field is restored only if the new render still has the same default as the old one (so a handler that deliberately changes a
+  // field, like picking a template, still wins).
+  var modalSnap = null;
+  try {
+    var mh0 = document.getElementById("modal-host");
+    if (mh0 && ui.modal && window.__modalRef === ui.modal && (Date.now() - (window.__lastUserAction || 0)) > 700) {
+      modalSnap = [];
+      mh0.querySelectorAll("input[name], textarea[name], select[name]").forEach(function(el){
+        if (el.type === "hidden" || el.type === "file" || el.type === "password" || el.type === "submit") return;
+        var fm = el.closest("form");
+        var def = el.tagName === "SELECT" ? (Array.prototype.filter.call(el.options, function(o){ return o.defaultSelected; })[0] || {}).value : (el.type === "checkbox" || el.type === "radio" ? el.defaultChecked : el.defaultValue);
+        modalSnap.push({ form: fm ? ((fm.getAttribute("data-form") || "") + "|" + (fm.getAttribute("data-lead") || "")) : "", name: el.name, type: el.type, value: el.value, checked: el.checked, def: def,
+          focused: el === ae, range: (el === ae && el.selectionStart != null) ? [el.selectionStart, el.selectionEnd] : null, scroll: el.scrollTop });
+      });
+    }
+  } catch(snapErr){ modalSnap = null; }
   if (ui.adLanding){
     app.innerHTML = renderAdLanding();
     var toastHostAL = ui.toast ? ('<div class="toast toast-' + (ui.toastType||"success") + '" id="toast-host">' + esc(ui.toast) + '</div>') : '<span id="toast-host" style="display:none"></span>';
@@ -10574,6 +10598,31 @@ function render(){
       if (mm) app.insertAdjacentHTML("beforeend", mm);
     }
   } catch(modalErr){ console.error("render(): modal failed to build", modalErr); }
+  // Put back what was typed in the open modal (see the snapshot at the top of render()).
+  try {
+    var mh1 = document.getElementById("modal-host");
+    if (modalSnap && modalSnap.length && mh1) {
+      modalSnap.forEach(function(s){
+        var cands = mh1.querySelectorAll('[name="' + s.name + '"]');
+        var el = null;
+        for (var ci = 0; ci < cands.length; ci++) {
+          var fm2 = cands[ci].closest("form");
+          var key2 = fm2 ? ((fm2.getAttribute("data-form") || "") + "|" + (fm2.getAttribute("data-lead") || "")) : "";
+          if (key2 === s.form && (s.type !== "radio" || cands[ci].value === s.value || true)) { el = cands[ci]; if (s.type !== "radio") break; if (cands[ci].value === s.value) break; }
+        }
+        if (!el || el.type !== s.type) return;
+        var newDef = el.tagName === "SELECT" ? (Array.prototype.filter.call(el.options, function(o){ return o.defaultSelected; })[0] || {}).value : (el.type === "checkbox" || el.type === "radio" ? el.defaultChecked : el.defaultValue);
+        if (newDef !== s.def) return; // the render deliberately changed this field's default; leave it
+        if (el.type === "checkbox" || el.type === "radio") { el.checked = s.checked; }
+        else if (el.value !== s.value) { el.value = s.value; }
+        if (s.focused) {
+          try { el.focus(); if (s.range && el.setSelectionRange) el.setSelectionRange(s.range[0], s.range[1]); } catch(fe){}
+          if (s.scroll) el.scrollTop = s.scroll;
+        }
+      });
+    }
+  } catch(restoreErr){ console.error("render(): couldn't restore typed text", restoreErr); }
+  window.__modalRef = ui.modal;
   try {
     var livePanel = renderLiveCallPanel();
     if (livePanel) app.insertAdjacentHTML("beforeend", livePanel);
@@ -20698,6 +20747,7 @@ appEl.addEventListener("drop", function(e){
 });
 
 appEl.addEventListener("click", function(e){
+  window.__lastUserAction = Date.now();
   try {
   var backdrop = e.target.closest && e.target.closest("[data-action='backdrop']");
   if (backdrop && e.target === backdrop){
@@ -21501,6 +21551,7 @@ appEl.addEventListener("input", function(e){
 });
 
 appEl.addEventListener("submit", function(e){
+  window.__lastUserAction = Date.now();
   var form = e.target;
   if (!form.dataset || !form.dataset.form) return;
   e.preventDefault();
