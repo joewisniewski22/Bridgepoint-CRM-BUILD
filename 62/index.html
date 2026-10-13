@@ -124,7 +124,7 @@ var DEFAULT_HABITS = [
 ];
 function defaults(){
   return { programs:[], sessions:[], active:null, habits:DEFAULT_HABITS, habitLog:{}, weights:[], hr:[], meals:[],
-           settings:{ name:"Declan", trainerEmail:"robb@coachrobb.com", trainerName:"Coach Robb", heightIn:null, momName:"Mom", momEmail:"nicbodt@gmail.com", allergies:"", dislikes:"", rideDays:3, maxHr:200 }, lastExport:null, plan:null, injury:{ active:true, area:"shoulder", note:"Surgery is planned. Doctor: strengthening the rotator cuff and the muscles around it before surgery is fine, and riding can restart once shoulder strength is back.", since:null, rideClear:false }, rehab:[], wellness:{}, rides:[], rehabLog:{}, mobLog:{}, mindLog:{} };
+           settings:{ name:"Declan", trainerEmail:"robb@coachrobb.com", trainerName:"Coach Robb", heightIn:null, momName:"Mom", momEmail:"nicbodt@gmail.com", allergies:"", dislikes:"", rideDays:3, maxHr:200 }, lastExport:null, plan:null, injury:{ active:true, area:"shoulder", note:"Surgery is planned. Doctor: strengthening the rotator cuff and the muscles around it before surgery is fine, and riding can restart once shoulder strength is back.", since:null, rideClear:false }, rehab:[], wellness:{}, rides:[], rehabLog:{}, mobLog:{}, mindLog:{}, bikes:defaultBikes(), plan:{ days:{} } };
 }
 var S = load();
 function load(){
@@ -208,12 +208,14 @@ function viewToday(){
   var w = el("div", { class:"wrap" });
   var hr = new Date().getHours();
   w.appendChild(header((hr < 12 ? "Morning" : hr < 18 ? "Afternoon" : "Evening") + ", " + S.settings.name, fmtDay(t)));
+  w.appendChild(todayPlanCard());
   w.appendChild(morningCard());
   w.appendChild(mindsetCard());
   w.appendChild(mobilityCard());
   w.appendChild(shoulderCard());
   if (S.injury && S.injury.active) w.appendChild(injuryCard());
-  w.appendChild(todayEventsCard());
+  var tdPlan = planDay(today());
+  if (!(tdPlan && tdPlan.type) || S.rides.some(function(e){ return e.date === today(); })) w.appendChild(todayEventsCard());
   var card = el("div", { class:"card" }, [
     el("div", { class:"row between" }, [el("h2", { text:"Daily checklist" }), el("span", { class:"pill", text: done + " / " + S.habits.length })])
   ]);
@@ -406,7 +408,7 @@ function newEvent(kind){
   var wt = S.weights.filter(function(x){ return x.date === t; })[0], wl = (S.wellness || {})[t] || {};
   var e = { id:uid(), date:t, kind:kind, pre:{ shoulder:false }, title: kind === "race" ? "Race day" : "Ride day", track:"", location:"", schedule:"",
     cond:{ temp:null, weather:"", surface:"", notes:"" },
-    bike: last ? JSON.parse(JSON.stringify(last.bike)) : blankBike(),
+    bikeId: (last && last.bikeId) || (ownedBikes()[0] && ownedBikes()[0].id) || null, bike: last ? JSON.parse(JSON.stringify(last.bike)) : blankBike(),
     ready:{ weight: wt ? wt.lb : null, sleep:wl.sleep != null ? wl.sleep : null, soreness:wl.soreness != null ? wl.soreness : null, energy:wl.energy != null ? wl.energy : null },
     sessions:[], fuel:{ preWt: wt ? wt.lb : null, postWt:null, fluidOz:null, inRide:"", meals:"", plan:null },
     journal:{ good:"", fix:"", coach:"", goal:"" }, post:{ crashed:false, crashNote:"", mech:"", rpe:null, result:"" } };
@@ -454,11 +456,21 @@ function openEvent(id){
   var b = e.bike;
   kids.push(sec("Bike setup", [
     el("button", { class:"btn sm", type:"button", text:"Copy setup from my last ride", onclick:function(){
-      var prev = S.rides.filter(function(x){ return x.id !== e.id && x.date <= e.date; }).sort(function(a, c){ return a.date < c.date ? 1 : -1; })[0];
+      var prev = S.rides.filter(function(x){ return x.id !== e.id && x.date <= e.date && (!e.bikeId || x.bikeId === e.bikeId); }).sort(function(a, c){ return a.date < c.date ? 1 : -1; })[0];
       if (!prev){ toast("No earlier ride to copy"); return; }
       e.bike = JSON.parse(JSON.stringify(prev.bike)); save(); again(); toast("Copied from " + fmtDay(prev.date));
     } }),
-    fld("Bike", b, "name", {}),
+    (function(){
+      var bs = el("select", {}, bikeList().filter(function(x){ return x.status !== "sold"; }).map(function(x){ return el("option", { value:x.id, text:x.name + " (" + x.kind + ")" }); }));
+      bs.value = e.bikeId || ""; 
+      bs.addEventListener("change", function(){
+        e.bikeId = bs.value; var nb = bikeById(e.bikeId);
+        var prevSame = S.rides.filter(function(x){ return x.id !== e.id && x.bikeId === e.bikeId && x.date <= e.date; }).sort(function(a, c){ return a.date < c.date ? 1 : -1; })[0];
+        e.bike = prevSame ? JSON.parse(JSON.stringify(prevSame.bike)) : blankBike(); e.bike.name = nb ? nb.name : e.bike.name;
+        save(); again(); toast(prevSame ? "Loaded the setup from your last ride on this bike" : "New bike, blank setup");
+      });
+      return el("div", { class:"field" }, [el("label", { text:"Which bike" }), bs]);
+    })(),
     el("div", { class:"small muted", text:"Fork" }),
     el("div", { class:"row" }, [fld("Compression", b, "forkComp", { grow:true, ph:"clicks out" }), fld("Rebound", b, "forkReb", { grow:true, ph:"clicks out" })]),
     el("div", { class:"row" }, [fld("Spring / air", b, "forkSpring", { grow:true }), fld("Fork height", b, "forkHeight", { grow:true, ph:"mm" })]),
@@ -576,6 +588,7 @@ function viewRide(){
   var w = el("div", { class:"wrap" });
   w.appendChild(header("Ride & Race", "Track every day like a factory team"));
   if (ridingOnHold()) w.appendChild(holdBanner());
+  w.appendChild(weekPlanCard());
   w.appendChild(el("div", { class:"row" }, [
     el("button", { class:"btn primary grow", type:"button", text:"+ Ride day", onclick:function(){ newEvent("ride"); } }),
     el("button", { class:"btn grow", type:"button", text:"+ Race day", onclick:function(){ newEvent("race"); } })
@@ -985,6 +998,139 @@ function finishMobility(){
   S.mobLog[t] = { done:true, complete:r.skipped.length === 0, skipped:r.skipped.slice(), minutes:Math.round((Date.now() - r.startedAt) / 60000), at:new Date().toISOString() };
   save(); toast(mobStreak() > 1 ? "Stretches done. " + mobStreak() + " days in a row" : "Stretches done. Great job");
   closeMobilityRun();
+}
+
+/* ---------- bikes ---------- */
+function defaultBikes(){
+  return [
+    { id:"ktm125", name:"KTM 125 SX", kind:"125 two-stroke", status:"current", dadLikes:"", declanLikes:"", notes:"His race bike for now. He keeps racing 125s.", hoursOffset:0, maint:[] },
+    { id:"fc250f", name:"Husqvarna FC 250 Factory Edition", kind:"250F four-stroke", status:"considering", dadLikes:"", declanLikes:"Wants to try the lower rear.", notes:"Not signed yet. Declan's call until he signs.", hoursOffset:0, maint:[] },
+    { id:"ktm250", name:"KTM 250 SX-F", kind:"250F four-stroke", status:"considering", dadLikes:"Dad prefers the KTM.", declanLikes:"", notes:"Not signed yet. Declan's call until he signs.", hoursOffset:0, maint:[] }
+  ];
+}
+function bikeList(){ if (!S.bikes || !S.bikes.length) S.bikes = defaultBikes(); return S.bikes; }
+function bikeById(id){ return bikeList().filter(function(b){ return b.id === id; })[0]; }
+function ownedBikes(){ return bikeList().filter(function(b){ return b.status === "current"; }); }
+function bikeHours(b){
+  var min = 0; (S.rides || []).forEach(function(e){ if (e.bikeId === b.id) (e.sessions || []).forEach(function(s){ min += s.minutes || 0; }); });
+  return Math.round(min / 6) / 10 + (b.hoursOffset || 0);
+}
+var BIKE_STATUS = [["current", "Mine now"], ["considering", "Thinking about it"], ["sold", "Sold / not getting it"]];
+function bikeStatusLabel(s){ var x = BIKE_STATUS.filter(function(k){ return k[0] === s; })[0]; return x ? x[1] : s; }
+function openBikes(){
+  var kids = [el("div", { class:"small muted", text:"Each bike keeps its own setup and hours. Bikes marked Thinking about it are not bought yet, so the choice stays open until it is signed." })];
+  bikeList().forEach(function(b){
+    kids.push(el("div", { class:"card", style:"margin-top:8px;cursor:pointer", onclick:function(){ bikesModal.close(); openBikeEdit(b.id); } }, [
+      el("div", { class:"row between" }, [el("h3", { text:b.name }), el("span", { class:"pill", text:bikeStatusLabel(b.status) })]),
+      el("div", { class:"small muted", text:b.kind + (b.status === "current" ? " · " + bikeHours(b) + " h on it" : "") }),
+      b.declanLikes ? el("div", { class:"small", text:"Declan: " + b.declanLikes }) : null,
+      b.dadLikes ? el("div", { class:"small", text:"Dad: " + b.dadLikes }) : null
+    ]));
+  });
+  kids.push(el("button", { class:"btn block", style:"margin-top:10px", type:"button", text:"+ Add a bike", onclick:function(){
+    var nb = { id:uid(), name:"New bike", kind:"", status:"considering", dadLikes:"", declanLikes:"", notes:"", hoursOffset:0, maint:[] };
+    S.bikes.push(nb); save(); bikesModal.close(); openBikeEdit(nb.id); } }));
+  kids.push(el("button", { class:"btn block ghost", type:"button", text:"Close", onclick:function(){ bikesModal.close(); } }));
+  bikesModal = sheet("My bikes", kids);
+}
+var bikesModal = null;
+function openBikeEdit(id){
+  var b = bikeById(id); if (!b) return;
+  var kids = [
+    fld("Name", b, "name", {}),
+    fld("Type", b, "kind", { ph:"e.g. 125 two-stroke, 250F four-stroke" })
+  ];
+  var st = el("select", {}, BIKE_STATUS.map(function(k){ return el("option", { value:k[0], text:k[1] }); })); st.value = b.status;
+  st.addEventListener("change", function(){ b.status = st.value; save(); });
+  kids.push(el("div", { class:"field" }, [el("label", { text:"Status" }), st]));
+  kids.push(fld("What Declan likes", b, "declanLikes", { area:true, rows:2 }));
+  kids.push(fld("What Dad likes", b, "dadLikes", { area:true, rows:2 }));
+  kids.push(fld("Notes", b, "notes", { area:true, rows:3 }));
+  if (b.status === "current"){
+    kids.push(el("div", { class:"small muted", text:"Hours from your ride logs: " + bikeHours(b) + (b.hoursOffset ? " (including " + b.hoursOffset + " h you added by hand)" : "") }));
+    kids.push(fld("Hours already on it before you started logging", b, "hoursOffset", { num:true, type:"number", mode:"decimal" }));
+    kids.push(el("h3", { style:"margin-top:12px", text:"Maintenance log" }));
+    (b.maint || []).slice().reverse().forEach(function(m){ kids.push(el("div", { class:"check", style:"flex-direction:column;align-items:stretch;gap:2px" }, [el("b", { text:fmtDay(m.date) + " - " + m.what }), m.hours != null ? el("div", { class:"small muted", text:"at " + m.hours + " h" }) : null])); });
+    var wi = el("input", { type:"text", placeholder:"What was done (oil, air filter, piston, chain...)" });
+    kids.push(el("div", { class:"field" }, [wi]));
+    kids.push(el("button", { class:"btn block", type:"button", text:"Add to the log", onclick:function(){
+      if (!wi.value.trim()){ toast("Write what was done first"); return; }
+      b.maint = b.maint || []; b.maint.push({ date:today(), what:wi.value.trim(), hours:bikeHours(b) }); save(); bikeEditModal.close(); openBikeEdit(id); toast("Added"); } }));
+  }
+  kids.push(el("button", { class:"btn primary block", style:"margin-top:12px", type:"button", text:"Done", onclick:function(){ bikeEditModal.close(); render(); } }));
+  bikeEditModal = sheet(b.name, kids);
+}
+var bikeEditModal = null;
+
+/* ---------- flexible plan: day types, following Robb's program or not, week planner ---------- */
+var DAY_TYPES = [["ride", "Ride day"], ["race", "Race weekend"], ["gym", "Gym only"], ["recovery", "Recovery"], ["rest", "Rest day"], ["bikedown", "Bike down / video study"]];
+var PROGRAM_CHOICES = [["follow", "Following Robb's program"], ["modified", "Modified"], ["skip", "Not today"]];
+var PLAN_REASONS = ["Weather", "Bike", "Travel", "Sick", "Sore / injury", "Other"];
+function typeLabel(t){ var x = DAY_TYPES.filter(function(k){ return k[0] === t; })[0]; return x ? x[1] : "Not planned"; }
+function planDay(date){ S.plan = S.plan || { days:{} }; S.plan.days = S.plan.days || {}; return S.plan.days[date] || null; }
+function planDaySet(date, patch){
+  S.plan = S.plan || { days:{} }; S.plan.days = S.plan.days || {};
+  var cur = S.plan.days[date] || { type:"", program:"follow", reason:"", note:"" };
+  Object.keys(patch).forEach(function(k){ cur[k] = patch[k]; });
+  S.plan.days[date] = cur; save();
+}
+function addDaysStr(date, n){ var d = new Date(date + "T12:00:00"); d.setDate(d.getDate() + n); return dstr(d); }
+var planModal = null;
+function openPlanDay(date){
+  var d = planDay(date) || { type:"", program:"follow", reason:"", note:"" };
+  var again = function(){ if (planModal) planModal.close(); openPlanDay(date); };
+  var kids = [];
+  kids.push(el("div", { class:"small muted", text:"What is the plan for this day?" }));
+  var tr = el("div", { class:"row", style:"flex-wrap:wrap;gap:6px;margin-top:6px" }, DAY_TYPES.map(function(k){
+    return el("button", { class:"btn sm" + (d.type === k[0] ? " primary" : ""), type:"button", text:k[1], onclick:function(){ planDaySet(date, { type:k[0] }); again(); } }); }));
+  kids.push(tr);
+  kids.push(el("div", { class:"small muted", style:"margin-top:12px", text:"Training plan from Robb for this day" }));
+  kids.push(el("div", { class:"row", style:"flex-wrap:wrap;gap:6px;margin-top:6px" }, PROGRAM_CHOICES.map(function(k){
+    return el("button", { class:"btn sm" + (d.program === k[0] ? " primary" : ""), type:"button", text:k[1], onclick:function(){ planDaySet(date, { program:k[0] }); again(); } }); })));
+  if (d.program && d.program !== "follow"){
+    kids.push(el("div", { class:"small muted", style:"margin-top:12px", text:"Why the change?" }));
+    kids.push(el("div", { class:"row", style:"flex-wrap:wrap;gap:6px;margin-top:6px" }, PLAN_REASONS.map(function(r){
+      return el("button", { class:"btn sm" + (d.reason === r ? " primary" : ""), type:"button", text:r, onclick:function(){ planDaySet(date, { reason:r }); again(); } }); })));
+    var note = el("input", { type:"text", value:d.note || "", placeholder:"What are we doing instead?" });
+    note.addEventListener("change", function(){ planDaySet(date, { note:note.value.trim() }); });
+    kids.push(el("div", { class:"field", style:"margin-top:10px" }, [el("label", { text:"What we did instead" }), note]));
+  }
+  kids.push(el("button", { class:"btn block", style:"margin-top:12px", type:"button", text:"Move this plan to the next day", onclick:function(){
+    var next = addDaysStr(date, 1), a = S.plan.days[date], b = S.plan.days[next];
+    S.plan.days[next] = a; if (b) S.plan.days[date] = b; else delete S.plan.days[date]; save(); planModal.close(); render(); toast("Moved to " + fmtDay(next)); } }));
+  kids.push(el("button", { class:"btn primary block", type:"button", text:"Done", onclick:function(){ planModal.close(); render(); } }));
+  planModal = sheet(fmtDay(date), kids);
+}
+function weekPlanCard(){
+  var c = el("div", { class:"card" }, [el("h2", { text:"Plan my week" }), el("div", { class:"small muted", text:"Tap a day to set what it is. Plans change with weather, bikes and travel, so change them any time." })]);
+  var row = el("div", { style:"display:flex;gap:6px;overflow-x:auto;margin-top:10px" });
+  for (var i = 0; i < 7; i++){
+    (function(i){
+      var dt = addDaysStr(today(), i), p = planDay(dt), d = new Date(dt + "T12:00:00");
+      row.appendChild(el("button", { class:"btn sm" + (i === 0 ? " primary" : ""), style:"min-width:76px;flex-direction:column;line-height:1.2", type:"button", onclick:function(){ openPlanDay(dt); } }, [
+        el("div", { text:["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][d.getDay()] }),
+        el("div", { style:"font-size:11px;opacity:.8", text: p && p.type ? typeLabel(p.type).split(" ")[0] : "set" }),
+        p && p.program && p.program !== "follow" ? el("div", { style:"font-size:10px;opacity:.8", text:p.program === "skip" ? "no program" : "modified" }) : null
+      ]));
+    })(i);
+  }
+  c.appendChild(row);
+  c.appendChild(el("button", { class:"btn block ghost", style:"margin-top:10px", type:"button", text:"My bikes", onclick:openBikes }));
+  return c;
+}
+function todayPlanCard(){
+  var t = today(), p = planDay(t);
+  if (!p || !p.type) return el("div", { class:"card flat row between" }, [el("div", { class:"grow", text:"What is the plan today?" }), el("button", { class:"btn sm primary", type:"button", text:"Set it", onclick:function(){ openPlanDay(t); } })]);
+  var prog = (PROGRAM_CHOICES.filter(function(k){ return k[0] === p.program; })[0] || PROGRAM_CHOICES[0])[1];
+  var c = el("div", { class:"card" }, [
+    el("div", { class:"row between" }, [el("h3", { text:"Today: " + typeLabel(p.type) }), el("button", { class:"btn sm", type:"button", text:"Change", onclick:function(){ openPlanDay(t); } })]),
+    el("div", { class:"small muted", text:prog + (p.reason ? " (" + p.reason + ")" : "") + (p.note ? " - " + p.note : "") })
+  ]);
+  if ((p.type === "ride" || p.type === "race") && !ridingOnHold() && !S.rides.some(function(e){ return e.date === t; })){
+    c.appendChild(el("button", { class:"btn primary block", style:"margin-top:8px", type:"button", text:"Start today's ride log", onclick:function(){ newEvent(p.type === "race" ? "race" : "ride"); } }));
+  }
+  if (p.type === "ride" || p.type === "race") c.appendChild(ridingOnHold() ? holdBanner() : el("div", { class:"small muted", style:"margin-top:6px", text:"Which bike? Pick it in the ride log." }));
+  return c;
 }
 
 /* ---------- TRAIN ---------- */
