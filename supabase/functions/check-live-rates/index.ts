@@ -15,6 +15,7 @@
 import { RCN_GEO_DATE, RCN_KILLED, RCN_REDUCE, RCN_TARGET, RCN_TARGET_NAMES } from "./rcn_geo.ts";
 import { checkVelocity, velocityGet, velocityPost } from "./velocity.ts";
 import { checkLend } from "./lend.ts";
+import { checkHomeXpress } from "./homex.ts";
 import { RCN_LTR_AREAS, RCN_LTR_ZIP, RCN_LTR_GEO_DATE } from "./rcn_ltr_geo.ts";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -2074,6 +2075,7 @@ const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult
   { key: "ad", check: checkAD },
   { key: "velocity", check: (s: Scenario) => checkVelocity(s as any) },
   { key: "lend", check: (s: Scenario) => checkLend(s as any) },
+  { key: "homex", check: (s: Scenario) => checkHomeXpress(s as any, stateFromAddress) },
 ];
 
 // ---------------------------------------------------------------------
@@ -2150,7 +2152,7 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
       r.assumptions = ["Short-term rental at Constructive: full recourse, 1.15 min DSCR on 12-month STR history (or long-term comparable rent), active STR listing and 2 months of platform deposits required."].concat(r.assumptions || []);
     } else if (r.lender === "NextRes") {
       r.assumptions = ["Short-term rental priced by NextRes's own engine (short-term rental flag on)."].concat(r.assumptions || []);
-    } else if (!((r.lender === "A&D Mortgage" || r.lender === "RCN Capital") && (r as any).strPriced)) {
+    } else if (!((r.lender === "A&D Mortgage" || r.lender === "RCN Capital" || r.lender === "HomeXpress") && (r as any).strPriced)) {
       (r as any).strUnverified = true;
       r.assumptions = ["Short-term rental: confirm " + r.lender + " takes STRs and how it counts the rent before quoting."].concat(r.assumptions || []);
     }
