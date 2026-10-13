@@ -60,7 +60,16 @@ const OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", 
 const CITIZENSHIP_STATUSES = ["US Citizen", "Permanent Resident", "Foreign National", "ITIN"];
 const PREPAY_TERMS = ["5yr", "3yr", "2yr", "1yr", "none"];
 
-async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string, unknown> | null): Promise<string> {
+// How to answer the questions loan officers ask all day (Joe 2026-10-13: "i field way too many dumb questions from the LOs every day").
+const SCENARIO_PLAYBOOK = "\n\nSCENARIO Q&A PLAYBOOK -- answer like a sharp senior loan officer who wants the LO to stop needing to ask. LOs send short, messy questions (\"740 fico dscr ohio 250k purchase rents 2100 can we do 80%?\").\n" +
+  "- Parse loosely: k = thousand, \"taxes 3600/yr\" = annualTaxes, \"80%\" = leverage on price/value, \"rents 2100\" = monthly rent, state names or ZIP = the property state. If a ZIP or city is given use it as the address.\n" +
+  "- If the essentials are there (loan type, state, credit score, price or value, plus rent for rentals or rehab + ARV for flips), run check_scenario IMMEDIATELY and fill everything else with the defaults, then say what you assumed. Ask ONE short question only when an essential is missing -- the single most important one -- never a list of questions.\n" +
+  "- Reply shape: (1) verdict in the first line (\"Yes, that places.\" / \"Not at 80%, but it works at 75%.\" / \"No -- here's why.\"); (2) the max loan or leverage and the 2-3 best options (rate, loan, term type; for LOs call them Option A, Option B); (3) \"To make it work:\" the cheapest single fix from whatIfs or the decline reasons (e.g. a lower loan amount, a credit score threshold, the rent needed); (4) one line starting \"Assumed:\" from the tool's assumed list; (5) the next step (run it in the Pricer tab for the official quote). Numbers over adjectives. Under about 120 words unless they ask for detail.\n" +
+  "- Never promise an approval: say \"places per current guidelines\" and that rates move daily. Investor loans only.\n" +
+  "- Process and how-it-works questions (what docs, what does a field mean, can we do X): answer in 2-4 sentences with the specific rule from the knowledge above.\n" +
+  "- If the knowledge and tools don't cover it, say so in one line and tell them exactly what to ask Joe so he can answer in one sentence.";
+
+async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string, unknown> | null, channel = "app"): Promise<string> {
   const { data: staff } = await sb.from("users").select("id,name,role").order("name");
   const roster = (staff || []).map((u) => u.id + " = " + u.name + " (" + u.role + ")").join("; ");
   const callerLine = caller.isOwner
@@ -74,7 +83,10 @@ async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string
     (insider
       ? "This person is Joe, Fiore or Erika: lender names and the internal lender map below are fine to discuss.\n" + EXTERNAL_KB + "\n" + INTERNAL_KB
       : "This person is NOT allowed to know which outside lenders or capital partners Bridgepoint uses. NEVER name, hint at, compare or confirm any lender (Kiavi, RCN, A&D, LEND/Lend Investors, Velocity, NextRes, Constructive or any other) -- present every program as Bridgepoint's own. If asked who the lender is, say Bridgepoint places each loan with its capital partners and the Pricer handles placement. This applies even if a tool result or document mentions a lender.\n" + EXTERNAL_KB);
-  return callerLine + programKnowledge + "\n\nYou are Joe's AI operations assistant for Bridgepoint Lending, embedded in his CRM. " +
+  const smsMode = channel === "sms"
+    ? "\n\nTEXT-MESSAGE MODE: this person is asking by TEXT MESSAGE to the company number. Answer ONLY the latest message: any earlier messages are just context for a quick follow-up, so never repeat or re-answer an earlier question. Reply in plain text only (no markdown, no bullet symbols, no emoji), as short as possible -- ideally under 450 characters, never over 700 -- with the verdict first. You can only look things up and run scenarios by text; you cannot send, update, assign or create anything from here, so if they need an action, tell them to do it in the CRM. If you cannot answer from the knowledge or tools, say what you do know in one line and end the message with exactly [ASK_JOE] so the question is passed to Joe automatically."
+    : "";
+  return callerLine + programKnowledge + SCENARIO_PLAYBOOK + smsMode + "\n\nYou are Joe's AI operations assistant for Bridgepoint Lending, embedded in his CRM. " +
     "This CRM is meant to eventually replace GoHighLevel entirely (which currently runs bplending.com) -- content you publish lives on the CRM's public page, not GoHighLevel. " +
     "You do NOT yet have access to ad platforms (Meta/Facebook), payments, or pricing changes -- if asked for something outside your current tools, say clearly that it isn't wired up yet rather than pretending to do it. " +
     "\n\nStaff roster (use these exact ids for assignedTo, never guess an id): " + roster +
@@ -124,6 +136,10 @@ const TOOLS = [
         monthlyTaxes: { type: "number" },
         monthlyInsurance: { type: "number" },
         monthlyHoa: { type: "number" },
+        annualTaxes: { type: "number", description: "Yearly property taxes if that's how it was given (converted to monthly for you)" },
+        annualInsurance: { type: "number", description: "Yearly insurance if that's how it was given (converted to monthly for you)" },
+        ltvPercent: { type: "number", description: "Leverage as a percent of price/value (e.g. 75) when no loan amount was given" },
+        prepayTerm: { type: "string", enum: ["5yr", "3yr", "2yr", "1yr", "none"], description: "Rental prepay. Leave out for the default 5-year." },
         experienceDeals: { type: "number", description: "Completed deals in 3 years (for ground-up: completed ground-up builds)" },
         citizenshipStatus: { type: "string", enum: ["US Citizen", "Permanent Resident", "Non-Permanent Resident", "Foreign National", "ITIN"] },
         entityType: { type: "string", enum: ["LLC", "Corporation", "Individual"] },
@@ -437,30 +453,71 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     const lt = String(input.loanType || "DSCR");
     const rtl = ["Fix & Flip", "Bridge", "Ground Up Construction"].includes(lt);
     const mixed = lt === "Mixed-Use";
-    const scenario: Record<string, unknown> = {
+    // Conveniences so a messy question ("taxes 3600/yr", "80% LTV") maps straight in without the model doing the arithmetic.
+    const valueBasis = Number(input.purchasePrice ?? input.currentValue ?? 0) || null;
+    const num = (v: unknown) => (v == null || v === "" || isNaN(Number(v)) ? null : Number(v));
+    const loanFromLtv = !input.loanAmount && input.ltvPercent && valueBasis ? Math.round(valueBasis * Number(input.ltvPercent) / 100 / 500) * 500 : null;
+    const monthlyTaxes = num(input.monthlyTaxes) ?? (num(input.annualTaxes) != null ? Math.round(Number(input.annualTaxes) / 12) : null);
+    const monthlyInsurance = num(input.monthlyInsurance) ?? (num(input.annualInsurance) != null ? Math.round(Number(input.annualInsurance) / 12) : null);
+    const assumed: string[] = [];
+    if (!input.citizenshipStatus) assumed.push("U.S. citizen");
+    if (!input.entityType) assumed.push("LLC borrower");
+    if (input.experienceDeals == null) assumed.push("no prior deals (first-time investor)");
+    if (!rtl && !input.prepayTerm) assumed.push("5-year prepay");
+    if (!rtl && !input.rentalType) assumed.push("long-term rental");
+    if (!rtl && monthlyTaxes == null) assumed.push("taxes/insurance not given, so DSCR is shown without them");
+    assumed.push("clean credit history, no recent credit events");
+    const base: Record<string, unknown> = {
       loanType: mixed ? "DSCR" : lt, transactionType: input.transactionType || "purchase", propertyAddress: addr, propertyState: st,
       propertyType: mixed ? "Mixed-Use" : (input.propertyType || "SFR"), numUnits: input.numUnits ?? null,
       creditScore: input.creditScore, purchasePrice: input.purchasePrice ?? null, currentValue: input.currentValue ?? null,
-      currentLoanBalance: input.currentLoanBalance ?? null, loanAmount: input.loanAmount ?? null,
+      currentLoanBalance: input.currentLoanBalance ?? null, loanAmount: input.loanAmount ?? loanFromLtv ?? null,
       rehabBudget: rtl ? (input.rehabBudget ?? null) : null, arv: rtl ? (input.arv ?? null) : null,
-      rentEstimate: rtl ? null : (input.rentEstimate ?? null), monthlyTaxes: rtl ? null : (input.monthlyTaxes ?? null),
-      monthlyInsurance: rtl ? null : (input.monthlyInsurance ?? null), monthlyHoa: rtl ? null : (input.monthlyHoa ?? 0),
+      rentEstimate: rtl ? null : (input.rentEstimate ?? null), monthlyTaxes: rtl ? null : monthlyTaxes,
+      monthlyInsurance: rtl ? null : monthlyInsurance, monthlyHoa: rtl ? null : (input.monthlyHoa ?? 0),
       experienceDeals: input.experienceDeals ?? 0, citizenshipStatus: input.citizenshipStatus || "US Citizen", entityType: input.entityType || "LLC",
-      rentalType: rtl ? null : (input.rentalType || "ltr"), termMonths: rtl ? (input.termMonths || 12) : 360, prepayTerm: rtl ? "none" : "5yr",
+      rentalType: rtl ? null : (input.rentalType || "ltr"), termMonths: rtl ? (input.termMonths || 12) : 360, prepayTerm: rtl ? "none" : (input.prepayTerm || "5yr"),
       pointsCharged: 0, guarantorFirstName: "Scenario", guarantorLastName: "Check", decliningMarket: "no", vacationArea: "no", creditEvent: "no", appraisalTransfer: "no", plansReady: "no",
     };
-    const res = await fetch(SUPABASE_URL + "/functions/v1/check-live-rates", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify({ lead: scenario }) }).then((r) => r.json()).catch(() => null);
-    if (!res || !res.ok) return { error: "pricer_unavailable", detail: "The pricer didn't answer -- suggest running it in the Pricer tab." };
-    const results: any[] = res.results || [];
+    const runPricer = async (sc: Record<string, unknown>) => {
+      const res = await fetch(SUPABASE_URL + "/functions/v1/check-live-rates", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify({ lead: sc }) }).then((r) => r.json()).catch(() => null);
+      return res && res.ok ? (res.results || []) as any[] : null;
+    };
+    const results = await runPricer(base);
+    if (!results) return { error: "pricer_unavailable", detail: "The pricer didn't answer -- suggest running it in the Pricer tab." };
     const eligible = results.filter((r) => r && r.eligible);
-    const opts = eligible.flatMap((r) => (r.options || []).map((o: any) => ({ lender: r.lender, rate: o.rate, loanAmount: o.loanAmount || r.loanAmountUsed || r.maxLoanAmount || null, maxLoan: r.maxLoanAmount || null, program: o.program, lenderPoints: rtl && o.price != null ? Math.round((o.price - 100) * 1000) / 1000 : null }))).filter((o) => isFinite(Number(o.rate))).sort((a, b) => a.rate - b.rate);
+    const opts = eligible.flatMap((r) => (r.options || []).map((o: any) => ({ lender: r.lender, rate: o.rate, price: o.price, dscr: o.dscr ?? null, loanAmount: o.loanAmount || r.loanAmountUsed || r.maxLoanAmount || null, maxLoan: r.maxLoanAmount || null, program: o.program, lenderPoints: rtl && o.price != null ? Math.round((o.price - 100) * 1000) / 1000 : null }))).filter((o) => isFinite(Number(o.rate))).sort((a, b) => a.rate - b.rate);
+
+    // "What would make it work" -- only when it doesn't place (or only places below the leverage asked): quietly price a few variants and report
+    // which single change fixes it. Numbers only, so it is safe for LOs (no lender names).
+    const summarize = (rs: any[] | null) => {
+      const el = (rs || []).filter((r) => r && r.eligible);
+      const rates = el.flatMap((r) => (r.options || []).map((o: any) => Number(o.rate))).filter((x) => isFinite(x));
+      const loan = Math.max(0, ...el.map((r) => Number(r.maxLoanAmount || r.loanAmountUsed || 0)));
+      return { placeable: el.length > 0, bestRate: rates.length ? Math.min(...rates) : null, loanAmount: loan || null };
+    };
+    const whatIfs: Array<Record<string, unknown>> = [];
+    const askedLoan = Number(base.loanAmount || 0);
+    if (!eligible.length || (askedLoan && eligible.every((r) => (r.loanAmountUsed || 0) < askedLoan - 1))) {
+      const jobs: Array<Promise<void>> = [];
+      if (askedLoan) jobs.push(runPricer({ ...base, loanAmount: null }).then((rs) => { const s = summarize(rs); if (s.placeable) whatIfs.push({ change: "no loan amount asked (find the most we can do)", maxLoanAmount: s.loanAmount, bestRate: s.bestRate }); }));
+      if (askedLoan && valueBasis) for (const pct of [75, 70, 65, 60]) {
+        const alt = Math.round(valueBasis * pct / 100 / 500) * 500;
+        if (alt < askedLoan - 500) jobs.push(runPricer({ ...base, loanAmount: alt }).then((rs) => { const s = summarize(rs); if (s.placeable) whatIfs.push({ change: "loan of $" + fmtUSD(alt) + " (" + pct + "% of value)", loanAmount: alt, bestRate: s.bestRate }); }));
+      }
+      const fico = Number(base.creditScore || 0);
+      if (fico) for (const add of [20, 40, 60]) if (fico + add <= 820) jobs.push(runPricer({ ...base, creditScore: fico + add }).then((rs) => { const s = summarize(rs); if (s.placeable) whatIfs.push({ change: "credit score " + (fico + add) + " instead of " + fico, bestRate: s.bestRate, loanAmount: s.loanAmount }); }));
+      if (!rtl && base.rentEstimate) for (const mult of [1.1, 1.25]) jobs.push(runPricer({ ...base, rentEstimate: Math.round(Number(base.rentEstimate) * mult / 25) * 25 }).then((rs) => { const s = summarize(rs); if (s.placeable) whatIfs.push({ change: "rent of $" + fmtUSD(Math.round(Number(base.rentEstimate) * mult / 25) * 25) + "/mo instead of $" + fmtUSD(Number(base.rentEstimate)), bestRate: s.bestRate, loanAmount: s.loanAmount }); }));
+      await Promise.all(jobs);
+      whatIfs.sort((a, b) => String(a.change).localeCompare(String(b.change)));
+    }
     if (isInsider(caller)) {
-      return { placeable: eligible.length > 0, options: opts.slice(0, 8), declines: results.filter((r) => r && !r.eligible).map((r) => ({ lender: r.lender, reason: r.reason })), note: "Staff view (lender names OK for this person)." };
+      return { placeable: eligible.length > 0, options: opts.slice(0, 8), declines: results.filter((r) => r && !r.eligible).map((r) => ({ lender: r.lender, reason: r.reason })), whatIfs, assumed, note: "Staff view (lender names OK for this person)." };
     }
     const scrub = (s: string) => String(s || "").replace(LENDER_NAME_RX, "the lender").replace(/the lender's? /gi, "").trim();
-    const best = opts.slice(0, 4).map((o) => ({ rate: o.rate, loanAmount: o.loanAmount, maxLoan: o.maxLoan, termType: String(o.program || "").replace(LENDER_NAME_RX, "").replace(/\s*·\s*$/, "").trim(), pointsToLender: o.lenderPoints }));
+    const best = opts.slice(0, 4).map((o) => ({ rate: o.rate, loanAmount: o.loanAmount, maxLoan: o.maxLoan, dscr: o.dscr, termType: String(o.program || "").replace(LENDER_NAME_RX, "").replace(/\s*·\s*$/, "").trim(), pointsToLender: o.lenderPoints }));
     const reasons = eligible.length ? [] : Array.from(new Set(results.filter((r) => r && !r.eligible && !r.unavailable && r.reason).map((r) => scrub(r.reason)))).slice(0, 6);
-    return { placeable: eligible.length > 0, options: best, reasonsNotPlaceable: reasons, note: "Present these as Bridgepoint's options (Option A, B...). Never mention or guess a lender. Rates move daily; the Pricer tab gives the official quote and term sheet." };
+    return { placeable: eligible.length > 0, options: best, reasonsNotPlaceable: reasons, whatIfs, assumed, note: "Present these as Bridgepoint's options (Option A, B...). Never mention or guess a lender. Rates move daily; the Pricer tab gives the official quote and term sheet." };
   }
   if (name === "list_closed_deals") {
     const limit = Math.min((input.limit as number) || 5, 20);
@@ -1142,6 +1199,12 @@ async function resolveCaller(req: Request, bodyUserId: string | undefined): Prom
   const authHeader = req.headers.get("Authorization") || "";
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
   if (!token || token === ANON_KEY) return null;
+  // Server-to-server (the text-message "ask" path in receive-text): the service key plus the staff member the text came from,
+  // matched to their phone number by the caller. Only reachable with the service key, never from the browser.
+  if (token === SERVICE_ROLE_KEY && bodyUserId) {
+    const { data: u } = await sb.from("users").select("id,name,role,full_access").eq("id", bodyUserId).single();
+    if (u) return { id: u.id, name: u.name, role: u.role, isOwner: u.role === "owner" || u.full_access === true };
+  }
   const sbAsCaller = createClient(SUPABASE_URL, ANON_KEY);
   const { data: authData, error: authErr } = await sbAsCaller.auth.getUser(token);
   if (authErr || !authData?.user) return null;
@@ -1186,8 +1249,11 @@ Deno.serve(async (req: Request) => {
     }
     const userId = caller.id;
 
-    const { data: history } = await sb.from("ai_chat_messages").select("role,content").eq("user_id", userId)
-      .order("created_at", { ascending: false }).limit(20);
+    // Text-message questions stand on their own (only the last 30 minutes count, for a quick follow-up); the in-app chat keeps its longer memory.
+    const smsChannel = body.channel === "sms";
+    let histQ = sb.from("ai_chat_messages").select("role,content").eq("user_id", userId);
+    if (smsChannel) histQ = histQ.gte("created_at", new Date(Date.now() - 30 * 60 * 1000).toISOString());
+    const { data: history } = await histQ.order("created_at", { ascending: false }).limit(smsChannel ? 6 : 20);
     const priorMessages = (history || []).reverse().map((m) => ({ role: m.role, content: m.content }));
 
     const userContent: Array<Record<string, unknown>> = [];
@@ -1199,7 +1265,11 @@ Deno.serve(async (req: Request) => {
 
     const messages: Array<Record<string, unknown>> = [...priorMessages, { role: "user", content: userContent }];
     const actionsTaken: Array<Record<string, unknown>> = [];
-    const systemPrompt = await buildSystemPrompt(caller, businessSnapshot);
+    // By text message only look-ups and scenario checks are allowed -- no sending/updating/assigning from a text (Joe 2026-10-13).
+    const channel = body.channel === "sms" ? "sms" : "app";
+    const SMS_TOOLS = new Set(["check_scenario", "search_leads", "get_lead_details", "list_closed_deals"]);
+    const toolsForCall = channel === "sms" ? TOOLS.filter((t) => SMS_TOOLS.has(t.name)) : TOOLS;
+    const systemPrompt = await buildSystemPrompt(caller, businessSnapshot, channel);
 
     let finalText = "";
     // Text written BEFORE a tool call (e.g. answering question 1, then running a scenario for
@@ -1209,7 +1279,7 @@ Deno.serve(async (req: Request) => {
       const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: MODEL, max_tokens: 4096, system: systemPrompt, messages, tools: TOOLS }),
+        body: JSON.stringify({ model: MODEL, max_tokens: channel === "sms" ? 1500 : 4096, system: systemPrompt, messages, tools: toolsForCall }),
       });
       const aiData = await aiRes.json();
       if (!aiRes.ok) {

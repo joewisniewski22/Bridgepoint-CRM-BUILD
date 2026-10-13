@@ -91,6 +91,36 @@ async function textStaff(phone: string | null | undefined, text: string) {
   }).catch(() => {});
 }
 
+// Not a question for the assistant: acknowledgements, one-word replies, STOP/HELP keywords, poll votes, very short fragments.
+function looksLikeQuestion(raw: string): boolean {
+  const t = (raw || "").trim();
+  if (t.length < 12 || t.length > 900) return false;
+  if (/^(stop|stopall|unsubscribe|cancel|end|quit|start|unstop|help|yes|no|ok|okay|k|thanks|thank you|thx|got it|sounds good|will do|done|perfect|great|awesome|nice|lol|haha)\b[\s!.,]*$/i.test(t)) return false;
+  if (/^[^a-z0-9]*$/i.test(t)) return false; // emoji / punctuation only
+  return /\?|\d|\b(can|could|should|how|what|when|where|why|does|do|is|are|will|would|need|want|who)\b/i.test(t);
+}
+const ASK_DAILY_LIMIT = 40;
+async function askAssistantBySms(sb: ReturnType<typeof createClient>, staff: { id: string; name: string; phone: string }, fromPhone: string, text: string) {
+  const fallback = async (why: string) => { console.log("receive-text: ask fallback", staff.id, why); await forwardToOwner(sb, fromPhone, (staff.name as string) + ": " + text); };
+  try {
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const { count } = await sb.from("ai_chat_messages").select("id", { count: "exact", head: true }).eq("user_id", staff.id).eq("role", "user").gte("created_at", since);
+    if ((count || 0) >= ASK_DAILY_LIMIT) { await fallback("daily limit"); return; }
+    const res = await fetch(SUPABASE_URL + "/functions/v1/owner-ai-command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY },
+      body: JSON.stringify({ message: text, userId: staff.id, channel: "sms" }),
+    }).then((r) => r.json()).catch(() => null);
+    let reply = res && res.ok && typeof res.reply === "string" ? res.reply.trim() : "";
+    if (!reply) { await fallback("no reply"); return; }
+    const askJoe = /\[ASK_JOE\]/i.test(reply);
+    reply = reply.replace(/\[ASK_JOE\]/gi, "").replace(/\*\*/g, "").replace(/^#+\s*/gm, "").trim();
+    if (reply.length > 900) reply = reply.slice(0, 880).replace(/\s+\S*$/, "") + "... (open the CRM Pricer for the full picture)";
+    await textStaff(staff.phone, reply + (askJoe ? "\n\nI passed this to Joe." : ""));
+    if (askJoe) await forwardToOwner(sb, fromPhone, (staff.name as string) + " asked the assistant (it couldn't fully answer): " + text);
+  } catch (e) { await fallback("error " + String(e)); }
+}
+
 async function routeStaffReplyToClient(sb: ReturnType<typeof createClient>, staff: { id: string; name: string; phone: string }, rawText: string): Promise<boolean> {
   const text = (rawText || "").trim();
   if (!text || text.length > 600) return false;
@@ -400,6 +430,15 @@ Deno.serve(async (req: Request) => {
         // Reply-by-text first (2026-10-12): if this is an answer to a client-text alert sent within the last 2 hours, it goes to that client.
         if (await routeStaffReplyToClient(sb, staffMatch as { id: string; name: string; phone: string }, msg.text)) {
           return new Response(JSON.stringify({ ok: true, routedToClient: true }), { headers: CORS_HEADERS });
+        }
+        // Ask-by-text (Joe 2026-10-13: "i field way too many dumb questions from the LOs"): a loan officer's text to the company number
+        // that isn't a reply to a client alert is a question for the AI assistant. It answers by text; anything it can't answer is passed
+        // to Joe's cell exactly as before. Joe's own texts and trivial acknowledgements never go to the assistant.
+        if (staffMatch.id !== "owner" && looksLikeQuestion(msg.text)) {
+          const work = askAssistantBySms(sb, staffMatch as { id: string; name: string; phone: string }, msg.from, msg.text);
+          const er = (globalThis as any).EdgeRuntime;
+          if (er && er.waitUntil) er.waitUntil(work); else await work;
+          return new Response(JSON.stringify({ ok: true, askedAssistant: true }), { headers: CORS_HEADERS });
         }
         // A text from a staff member's own phone. Otherwise it is NOT posted into any
         // borrower's portal chat anymore: staff texts now arrive on the same
