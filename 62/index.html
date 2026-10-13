@@ -336,7 +336,7 @@ function morningCard(){
   var sl = el("input", { type:"number", inputmode:"decimal", step:"0.5", placeholder:"hours" }); if (wl && wl.sleep != null) sl.value = wl.sleep;
   var so = rateSel(wl && wl.soreness), en = rateSel(wl && wl.energy);
   return el("div", { class:"card" }, [
-    el("div", { class:"row between" }, [el("h2", { text:"Morning weigh-in" }), el("span", { class:"pill", text: late ? "Do this now" : "First thing" })]),
+    el("div", { class:"row between" }, [el("h2", { text:"Morning weigh-in" }), el("span", { class:"pill", text: dueLabel("weigh", false) })]),
     el("div", { class:"small " + (late ? "due" : "muted"), text:"Weigh right after you wake up and use the bathroom, before you eat or drink, same scale every day. Then answer the quick questions." }),
     el("div", { class:"row", style:"margin-top:10px" }, [
       el("div", { class:"field grow" }, [el("label", { text:"Weight (lb)" }), wi]),
@@ -666,11 +666,11 @@ function rehabStreak(){
 function rehabDue(){ var p = rehabPlan(), n = new Date(); return (pad(n.getHours()) + ":" + pad(n.getMinutes())) >= p.time; }
 function shoulderCard(){
   var p = rehabPlan(); if (!p.active) return el("div", { class:"card flat" }, [el("div", { class:"small muted", text:"Shoulder rehab is turned off. Turn it on in Settings." })]);
-  var lg = rehabToday(), done = !!(lg && lg.done), late = !done && rehabDue(), st = rehabStreak();
+  var lg = rehabToday(), done = !!(lg && lg.done), late = !done && (dueLabel("rehab", false) === "Due now"), st = rehabStreak();
   var dots = [];
   for (var i = 6; i >= 0; i--){ var d = new Date(); d.setDate(d.getDate() - i); var k = dstr(d), on = !!((S.rehabLog || {})[k] && S.rehabLog[k].done); dots.push(el("span", { class:"pill", style:"margin-right:4px;" + (on ? "" : "opacity:.35"), text:["S","M","T","W","T","F","S"][d.getDay()] })); }
   var c = el("div", { class:"card", style: late ? "border-color:#c0392b" : "" }, [
-    el("div", { class:"row between" }, [el("h2", { text:"Shoulder routine" }), el("span", { class:"pill", text: done ? "Done today" : (late ? "Due now" : "Due " + t12(p.time)) })]),
+    el("div", { class:"row between" }, [el("h2", { text:"Shoulder routine" }), el("span", { class:"pill", text: done ? "Done today" : dueLabel("rehab", false) })]),
     el("div", { class:"small " + (late ? "due" : "muted"), text: done ? "Nice work. " + (st > 1 ? st + " days in a row." : "") : "7 exercises, 3 sets each. Do it exactly like your doctor's sheet says. Takes about 15 minutes." }),
     el("div", { style:"margin:10px 0" }, dots),
     el("button", { class:"btn primary block", type:"button", text: done ? "Do it again" : "Start my shoulder routine", onclick:function(){ openRehabRun({}); } })
@@ -844,6 +844,18 @@ function openSuggest(){
   loadMine();
 }
 
+/* ---------- alert times (set by the parents on the server; shown here, never editable from the phone) ---------- */
+var ALERT_DEFAULTS = { weigh:"07:00", mind:"07:10", mob:"07:20", rehab:"07:45" };
+function alertAt(id){ var t = (cloud.alerts || []).filter(function(x){ return x.id === id; })[0]; return t ? t.start : ALERT_DEFAULTS[id]; }
+function dueLabel(id, done){
+  if (done) return "Done";
+  var a = alertAt(id), n = new Date(), nowS = pad(n.getHours()) + ":" + pad(n.getMinutes());
+  return nowS >= a ? "Due now" : "Due " + t12(a);
+}
+function loadAlerts(){
+  if (!cloud.session || !cloud.client) return Promise.resolve();
+  return cloud.client.from("alert_config").select("tasks").eq("user_id", cloud.session.user.id).maybeSingle().then(function(r){ cloud.alerts = (r.data && r.data.tasks) || []; });
+}
 /* ---------- champion mindset: quote of the day, said out loud ---------- */
 // Only quotes that trace to a documented source (interview, ad, book, press conference). The wording can differ a little between
 // outlets; the version used here is the best-documented one. More can be added to this list any time.
@@ -874,7 +886,7 @@ function mindsetCard(){
   var t = today(), q = quoteOfDay(); S.mindLog = S.mindLog || {};
   var lg = S.mindLog[t] || { said:0 }, done = lg.said >= 3;
   var c = el("div", { class:"card", style:"border-color:var(--plate)" }, [
-    el("div", { class:"row between" }, [el("h2", { text:"Champion mindset" }), el("span", { class:"pill", text: done ? "Done" : lg.said + " of 3" })]),
+    el("div", { class:"row between" }, [el("h2", { text:"Champion mindset" }), el("span", { class:"pill", text: done ? "Done" : dueLabel("mind", false) + " · " + lg.said + " of 3" })]),
     el("p", { style:"font-size:1.25em;line-height:1.35;margin:10px 0 4px", text:"“" + q.q + "”" }),
     el("div", { class:"small muted", text:"— " + q.who + ", " + q.role + (q.src ? " (" + q.src + ")" : "") })
   ]);
@@ -929,7 +941,7 @@ function mobilityCard(){
   var lg = mobToday(), done = !!(lg && lg.done), st = mobStreak();
   var mins = Math.round(MOBILITY.reduce(function(s, x){ return s + x.sec * x.sides; }, 0) / 60) + 4;
   return el("div", { class:"card" }, [
-    el("div", { class:"row between" }, [el("h2", { text:"Morning stretch" }), el("span", { class:"pill", text: done ? "Done today" : "About " + mins + " min" })]),
+    el("div", { class:"row between" }, [el("h2", { text:"Morning stretch" }), el("span", { class:"pill", text: done ? "Done today" : dueLabel("mob", false) + " · ~" + mins + " min" })]),
     el("div", { class:"small muted", text: done ? "Nice work." + (st > 1 ? " " + st + " days in a row." : "") : MOBILITY.length + " stretches for a motocross rider. Every one has a video if you don't know it. No shoulder stretching." }),
     el("button", { class:"btn primary block", style:"margin-top:10px", type:"button", text: done ? "Do it again" : "Start my stretches", onclick:openMobilityRun })
   ]);
@@ -1643,6 +1655,8 @@ function openSettings(){
   var rBackup = el("input", { type:"time", value:rpl.backupTime || "18:30" });
   var m = sheet("Settings", [
     el("button", { class:"btn block", type:"button", text:"Suggestion box - tell us what to add or fix", onclick:function(){ m.close(); openSuggest(); } }),
+    el("div", { class:"card flat" }, [el("h3", { text:"Your alerts" }), el("div", { class:"small muted", text:"You get texts at these times, and they keep coming until you check the task off in this app. Your parents set the times." })].concat(
+      (cloud.alerts || []).map(function(a){ return el("div", { class:"small", text:t12(a.start) + " - " + a.label + (a.max ? "" : " (every " + a.every + " min until done)") }); }))),
     el("div", { class:"field" }, [el("label", { text:"Athlete name" }), nm]),
     el("div", { class:"field" }, [el("label", { text:"Trainer's name" }), tn]),
     el("div", { class:"field" }, [el("label", { text:"Trainer's email" }), te]),
@@ -1712,7 +1726,7 @@ function initCloud(){
 }
 function afterLogin(){
   cloud.needLogin = false;
-  return pullState().then(loadInbox).then(function(){ render(); });
+  return pullState().then(loadInbox).then(loadAlerts).then(function(){ render(); });
 }
 function pullState(){
   return cloud.client.from("app_state").select("data,updated_at").eq("user_id", cloud.session.user.id).maybeSingle().then(function(r){
@@ -1840,7 +1854,7 @@ document.addEventListener("visibilitychange", function(){
   if (!document.hidden && S.active) keepAwake(true);
   if (!document.hidden && rest.end) tickRest();
   if (document.hidden) pushNow();
-  else if (cloud.session) loadInbox().then(function(){ if (tab === "train" && !S.active) render(); });
+  else if (cloud.session) { loadAlerts().then(function(){ render(); }); loadInbox().then(function(){ if (tab === "train" && !S.active) render(); }); }
 });
 window.addEventListener("online", function(){ if (cloud.session) pushNow(); else initCloud(); });
 render();
