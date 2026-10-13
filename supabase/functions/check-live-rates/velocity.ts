@@ -106,6 +106,7 @@ export async function checkVelocity(s: VelScenario): Promise<any> {
   const pt = VEL_PROPERTY[s.propertyType] || (lt === "Mixed-Use" ? "MixedUse" : null);
   if (!pt) { out.reason = "Velocity property type not mapped for " + s.propertyType + "."; return out; }
   if (!s.creditScore && s.citizenshipStatus !== "Foreign National") { out.reason = "Needs a credit score."; return out; }
+  if (s.citizenshipStatus === "ITIN") { out.reason = "Velocity's ITIN rules aren't verified in this pricer -- ask Velocity directly."; return out; }
   if (s.citizenshipStatus === "Permanent Resident") out.assumptions.push("Velocity prices permanent residents the same as US citizens.");
   const refi = s.transactionType && s.transactionType !== "purchase";
   const value = refi ? (s.currentValue || s.purchasePrice) : (s.purchasePrice && s.currentValue ? Math.min(s.purchasePrice, s.currentValue) : (s.purchasePrice || s.currentValue));

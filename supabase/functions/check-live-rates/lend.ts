@@ -112,6 +112,7 @@ async function checkLendNc(s: S, out: any): Promise<any> {
   const no = (why: string) => { out.reason = why; return out; };
   if ((s.entityType || "LLC") === "Individual") return no("LEND ground-up requires an entity borrower.");
   if (s.citizenshipStatus === "Foreign National") return no("LEND doesn't lend to foreign nationals on ground-up.");
+  if (s.citizenshipStatus === "ITIN") return no("LEND's ITIN rules aren't modeled -- ask LEND directly.");
   const fico = Number(s.creditScore || 0);
   if (!fico) return no("Needs a credit score.");
   if (fico < 660) return no("LEND's ground-up minimum FICO is 660.");
@@ -182,6 +183,7 @@ function checkLendBridge(s: S, out: any): any {
   const no = (why: string) => { out.reason = why; return out; };
   if ((s.entityType || "LLC") === "Individual") return no("LEND bridge loans require an entity borrower (LLC/LP/Corp).");
   if (s.citizenshipStatus === "Foreign National") return no("LEND doesn't lend to foreign nationals on bridge loans.");
+  if (s.citizenshipStatus === "ITIN") return no("LEND's ITIN rules aren't modeled -- ask LEND directly.");
   const fico = Number(s.creditScore || 0);
   if (!fico) return no("Needs a credit score.");
   if (fico < LEND_BRIDGE.minFico) return no("LEND's bridge program needs a 700+ FICO.");
@@ -235,6 +237,7 @@ export async function checkLend(s: S): Promise<any> {
   // ---- borrower
   if ((s.entityType || "LLC") === "Individual") return no("LEND rehab loans require an entity borrower (LLC/LP/Corp) — individuals aren't eligible.");
   if (s.citizenshipStatus === "Foreign National") return no("LEND doesn't lend to foreign nationals on rehab loans.");
+  if (s.citizenshipStatus === "ITIN") return no("LEND's ITIN rules aren't modeled -- ask LEND directly.");
   const fico = Number(s.creditScore || 0);
   if (!fico) return no("Needs a credit score.");
   if (fico < 660) return no("LEND's minimum FICO is 660.");

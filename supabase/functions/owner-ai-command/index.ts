@@ -68,6 +68,7 @@ const SCENARIO_PLAYBOOK = "\n\nSCENARIO Q&A PLAYBOOK -- answer like a sharp seni
   "- Reply shape: (1) verdict in the first line (\"Yes, that places.\" / \"Not at 80%, but it works at 75%.\" / \"No -- here's why.\"); (2) the max loan or leverage and the 2-3 best options (rate, loan, term type; for LOs call them Option A, Option B); (3) \"To make it work:\" the cheapest single fix from whatIfs or the decline reasons (e.g. a lower loan amount, a credit score threshold, the rent needed); (4) one line starting \"Assumed:\" from the tool's assumed list; (5) the next step (run it in the Pricer tab for the official quote). Numbers over adjectives. Under about 120 words unless they ask for detail.\n" +
   "- Never promise an approval: say \"places per current guidelines\" and that rates move daily. Investor loans only.\n" +
   "- LEVERAGE / STRUCTURE questions (\"can a first-timer get 90% of purchase and 100% of rehab?\", \"how much will they fund on a flip?\", \"what's the max LTV?\"): do NOT answer from the ratio tables alone -- \"LTC\" is measured differently by different partners. Price a sample deal with check_scenario (use their numbers; if none, pick round ones and say so, e.g. $200k purchase, $100k rehab, $450k ARV, with the credit score and experience they gave) and answer from what it returns: initialAdvance and initialPctOfPurchase, rehabFundedPct, totalPctOfArv. If the pricer's best answer is YES, say yes plainly even if the general table sounds different. For Joe, Fiore and Erika also say which lender gives the best structure and the credit-score cutoffs (for example, under 720 the rehab funded is limited).\n" +
+  "- LENDER-SPECIFIC questions from Joe, Fiore or Erika (\"what would Kiavi do on this?\", \"who is best for a 680 first-timer?\", \"does HomeXpress take short-term rentals?\"): use the lender map in the knowledge above, and for any deal-specific answer call check_scenario with onlyLender set to that lender (use a blended run with no onlyLender when comparing lenders). Never guess a lender's rule: if the map doesn't say, price a sample deal through that lender and report what it returns. Remember the pricer's lender coverage: A&D and HomeXpress are DSCR only; Velocity doesn't fund rehab; Kiavi doesn't price ground-up, foreign nationals or 5+ units; LEND is flip/bridge/ground-up only; RCN live pricing is sometimes down (then its numbers are estimates); NextRes's pricer is sometimes unreachable (then it says so).\n" +
   "- Process and how-it-works questions (what docs, what does a field mean, can we do X): answer in 2-4 sentences with the specific rule from the knowledge above.\n" +
   "- If the knowledge and tools don't cover it, say so in one line and tell them exactly what to ask Joe so he can answer in one sentence.";
 
@@ -86,7 +87,7 @@ async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string
       ? "This person is Joe, Fiore or Erika: lender names and the internal lender map below are fine to discuss.\n" + EXTERNAL_KB + "\n" + INTERNAL_KB
       : "This person is NOT allowed to know which outside lenders or capital partners Bridgepoint uses. NEVER name, hint at, compare or confirm any lender (Kiavi, RCN, A&D, LEND/Lend Investors, Velocity, NextRes, Constructive or any other) -- present every program as Bridgepoint's own. If asked who the lender is, say Bridgepoint places each loan with its capital partners and the Pricer handles placement. This applies even if a tool result or document mentions a lender.\n" + EXTERNAL_KB);
   const smsMode = channel === "sms"
-    ? "\n\nTEXT-MESSAGE MODE: this person is asking by TEXT MESSAGE to the company number. Answer ONLY the latest message: any earlier messages are just context for a quick follow-up, so never repeat or re-answer an earlier question. Reply in plain text only (no markdown, no bullet symbols, no emoji), as short as possible -- ideally under 450 characters, never over 700 -- with the verdict first. You can only look things up and run scenarios by text; you cannot send, update, assign or create anything from here, so if they need an action, tell them to do it in the CRM. If you cannot answer from the knowledge or tools, say what you do know in one line and end the message with exactly [ASK_JOE] so the question is passed to Joe automatically."
+    ? "\n\nTEXT-MESSAGE MODE: this person is asking by TEXT MESSAGE to the company number. Reply in plain text only (no markdown, no bullet symbols, no emoji), as short as possible -- ideally under 450 characters, never over 700 -- with the verdict first. You can only look things up and run scenarios by text; you cannot send, update, assign or create anything from here, so if they need an action, tell them to do it in the CRM. If you cannot answer from the knowledge or tools, say what you do know in one line and end the message with exactly [ASK_JOE] so the question is passed to Joe automatically."
     : "";
   return callerLine + programKnowledge + SCENARIO_PLAYBOOK + smsMode + "\n\nYou are Joe's AI operations assistant for Bridgepoint Lending, embedded in his CRM. " +
     "This CRM is meant to eventually replace GoHighLevel entirely (which currently runs bplending.com) -- content you publish lives on the CRM's public page, not GoHighLevel. " +
@@ -147,6 +148,7 @@ const TOOLS = [
         entityType: { type: "string", enum: ["LLC", "Corporation", "Individual"] },
         rentalType: { type: "string", enum: ["ltr", "str"] },
         termMonths: { type: "number" },
+        onlyLender: { type: "string", enum: ["constructive", "rcn", "kiavi", "ad", "nextres", "velocity", "lend", "homex"], description: "STAFF ONLY (Joe, Fiore, Erika): price the deal through just this one lender to answer 'what would Kiavi / RCN / A&D / NextRes / Velocity / LEND / HomeXpress / Constructive do on this?'. Ignored for everyone else." },
       },
       required: ["loanType", "propertyAddress", "creditScore"],
     },
@@ -481,8 +483,10 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
       rentalType: rtl ? null : (input.rentalType || "ltr"), termMonths: rtl ? (input.termMonths || 12) : 360, prepayTerm: rtl ? "none" : (input.prepayTerm || "5yr"),
       pointsCharged: 0, guarantorFirstName: "Scenario", guarantorLastName: "Check", decliningMarket: "no", vacationArea: "no", creditEvent: "no", appraisalTransfer: "no", plansReady: "no",
     };
+    // Joe, Fiore and Erika can ask what ONE lender would do ("what would Kiavi do on this?"); everyone else always gets the blended Bridgepoint view.
+    const only = isInsider(caller) && ["constructive", "rcn", "kiavi", "ad", "nextres", "velocity", "lend", "homex"].includes(String(input.onlyLender || "")) ? [String(input.onlyLender)] : null;
     const runPricer = async (sc: Record<string, unknown>) => {
-      const res = await fetch(SUPABASE_URL + "/functions/v1/check-live-rates", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify({ lead: sc }) }).then((r) => r.json()).catch(() => null);
+      const res = await fetch(SUPABASE_URL + "/functions/v1/check-live-rates", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify(only ? { lead: sc, lenders: only } : { lead: sc }) }).then((r) => r.json()).catch(() => null);
       return res && res.ok ? (res.results || []) as any[] : null;
     };
     const results = await runPricer(base);
@@ -1264,11 +1268,11 @@ Deno.serve(async (req: Request) => {
     }
     const userId = caller.id;
 
-    // Text-message questions stand on their own (only the last 30 minutes count, for a quick follow-up); the in-app chat keeps its longer memory.
+    // Text-message questions stand on their own; the in-app chat keeps its longer memory.
     const smsChannel = body.channel === "sms";
     let histQ = sb.from("ai_chat_messages").select("role,content").eq("user_id", userId);
-    if (smsChannel) histQ = histQ.gte("created_at", new Date(Date.now() - 30 * 60 * 1000).toISOString());
-    const { data: history } = await histQ.order("created_at", { ascending: false }).limit(smsChannel ? 6 : 20);
+    // (Tested 10/13: with even a few minutes of history the assistant kept re-answering the previous text, so each text is fully stand-alone.)
+    const { data: history } = smsChannel ? { data: [] as Array<{ role: string; content: string }> } : await histQ.order("created_at", { ascending: false }).limit(20);
     const priorMessages = (history || []).reverse().map((m) => ({ role: m.role, content: m.content }));
 
     const userContent: Array<Record<string, unknown>> = [];

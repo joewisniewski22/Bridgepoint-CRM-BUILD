@@ -848,6 +848,8 @@ function nextresCeiling(s: Scenario): number | null {
   return basis ? basis * 0.85 : null;
 }
 async function checkNextres(s: Scenario): Promise<LenderResult> {
+  // NextRes's property-type map has no land: an unmapped type used to fall back to SFR-Detached and quote vacant land as a house (audit 10/13/26).
+  if (s.propertyType === "Land") return { lender: "NextRes", eligible: false, reason: "NextRes land loans aren't priced here -- ask NextRes directly." };
   if (s.loanAmount) {
     const r = await checkNextresAt(s);
     return { ...r, loanAmountUsed: s.loanAmount };
@@ -1515,7 +1517,7 @@ async function checkAD(s: Scenario): Promise<LenderResult> {
   // A&D state prepay rules (same document): no prepay (buydown required) in some states / below
   // some loan sizes; shorter caps in others. Returns the prepay A&D will actually allow.
   const yrs: Record<string, number> = { "5yr": 5, "3yr": 3, "2yr": 2, "1yr": 1, none: 0 };
-  const units12 = s.propertyType !== "2-4 Unit" || (s as any).units == null || (s as any).units <= 2;
+  const units12 = !(s.propertyType === "2-4 Unit" && Number((s as any).numUnits) >= 3);
   const pppFor = (loan: number): string => {
     const individual = s.entityType === "Individual";
     if (["AK","AR","KS","MI","MN","NM","RI"].includes(st)) return "none";

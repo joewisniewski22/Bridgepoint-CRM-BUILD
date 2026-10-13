@@ -182,7 +182,10 @@ export async function checkHomeXpress(s: S, stateFromAddress: (a: string | null)
     return 102.75;
   };
 
-  const tiers = s.loanAmount ? [Math.min(80, s.loanAmount / value * 100)] : [80, 75, 70, 65, 60, 55, 50];
+  if (s.loanAmount && s.loanAmount / value * 100 > 80 + 1e-9) return no("HomeXpress maxes out at 80% LTV (the loan is " + Math.round(s.loanAmount / value * 1000) / 10 + "% of value).");
+  if (cit === "fn" && s.entityType === "Individual") return no("HomeXpress foreign nationals must close in an entity with a domestic agent.");
+  const isEntity = s.entityType !== "Individual";
+  const tiers = s.loanAmount ? [s.loanAmount / value * 100] : [80, 75, 70, 65, 60, 55, 50];
   let firstReason = "";
   for (const ltv of tiers) {
     const loan = s.loanAmount || Math.floor(value * ltv / 100 / 500) * 500;
@@ -220,14 +223,14 @@ export async function checkHomeXpress(s: S, stateFromAddress: (a: string | null)
     const cap = capOf(pp.key);
     const assumptions = [
       "HomeXpress model: measured from HomeXpress's own pricing engine on 10/13/26 (rate sheet 10/13/26 7:00 AM), 30-day lock, 30-yr fixed and 40-yr interest-only. Clean credit history assumed.",
-      "Fees: HomeXpress Non-QM business underwriting $1,695, administration $149, entity review $595" + (st === "TX" ? ", TX doc review $150" : "") + ". Broker compensation: up to 5.000% from the borrower (business purpose) and price above 100 up to " + cap.toFixed(3) + " (yield spread" + (cap <= 100 ? ": not allowed in " + st + " at this prepay" : "") + ").",
+      "Fees: HomeXpress Non-QM business underwriting $1,695, administration $149" + (isEntity ? ", entity review $595" : "") + (st === "TX" ? ", TX doc review $150" : "") + ". Broker compensation: up to 5.000% from the borrower (business purpose) and price above 100 up to " + cap.toFixed(3) + " (yield spread" + (cap <= 100 ? ": not allowed in " + st + " at this prepay" : "") + ").",
     ];
     if (pp.note) assumptions.unshift(pp.note);
     if (isStr) assumptions.push("Short-term rental: rent counted at 80% of gross (HomeXpress's 20% reduction), +STR adjustment, max 75% LTV.");
     if (cit === "fn") assumptions.push("Foreign national: must close in an entity with a domestic agent; max 75% purchase / 70% refinance; DSCR only.");
     const res: any = {
       lender: L, eligible: true, source: "model", options, loanAmountUsed: loan, maxLoanAmount: loan, assumptions,
-      fees: { lenderFee: 1695 + 149 + 595 + (st === "TX" ? 150 : 0) },
+      fees: { lenderFee: 1695 + 149 + (isEntity ? 595 : 0) + (st === "TX" ? 150 : 0) },
       compCaps: { maxBrokerPoints: 5, maxYsp: Math.max(0, round3(cap - 100)), yspRatePerPoint: 0.3 },
     };
     if (isStr) res.strPriced = true;
