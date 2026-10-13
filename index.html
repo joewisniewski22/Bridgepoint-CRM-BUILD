@@ -614,6 +614,84 @@ td.num,th.num{text-align:right;font-family:var(--font-mono)}
 @media (max-width:700px){
   .call-float{left:8px !important;right:8px !important;top:auto !important;bottom:8px;width:auto}
 }
+/* ---- Mailbox (Outlook-style) ---- */
+.mb{ display:grid; grid-template-columns:200px 340px minmax(0,1fr); height:calc(100vh - 150px); min-height:480px; margin:0 24px 24px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); overflow:hidden; }
+.mb-folders{ background:var(--surface-2); border-right:1px solid var(--border); padding:12px 8px; display:flex; flex-direction:column; gap:2px; overflow-y:auto; }
+.mb-newbtn{ margin:0 4px 10px; justify-content:center; }
+.mb-folder{ display:flex; align-items:center; gap:9px; padding:8px 10px; border-radius:var(--radius-sm); cursor:pointer; font-size:13.5px; color:var(--ink); }
+.mb-folder:hover{ background:var(--border-soft); }
+.mb-folder.active{ background:var(--brand-tint); color:var(--brand); font-weight:600; }
+.mb-count{ margin-left:auto; font-size:11.5px; font-weight:600; color:var(--brand-ink); background:var(--brand); border-radius:10px; padding:1px 7px; }
+.mb-foot{ margin-top:auto; padding:10px 6px 0; line-height:1.4; }
+.mb-list{ border-right:1px solid var(--border); display:flex; flex-direction:column; min-width:0; min-height:0; }
+.mb-list-head{ padding:12px 12px 8px; border-bottom:1px solid var(--border-soft); display:flex; flex-direction:column; gap:8px; }
+.mb-list-title{ font-family:var(--font-display); font-size:17px; font-weight:600; }
+.mb-chips{ display:flex; gap:6px; flex-wrap:wrap; }
+.mb-chip{ border:1px solid var(--border); background:var(--surface); color:var(--ink-muted); border-radius:14px; padding:2px 10px; font-size:12px; cursor:pointer; font-family:inherit; }
+.mb-chip.on{ background:var(--brand); color:var(--brand-ink); border-color:var(--brand); }
+.mb-scroll{ overflow-y:auto; flex:1; min-height:0; }
+.mb-group{ padding:8px 12px 4px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint); font-weight:600; background:var(--surface); position:sticky; top:0; }
+.mb-item{ display:flex; gap:10px; padding:10px 12px; border-bottom:1px solid var(--border-soft); cursor:pointer; border-left:3px solid transparent; }
+.mb-item:hover{ background:var(--surface-2); }
+.mb-item.active{ background:var(--brand-tint); border-left-color:var(--brand); }
+.mb-item.unread .mb-who, .mb-item.unread .mb-subj{ font-weight:700; }
+.mb-avatar{ flex:0 0 34px; height:34px; border-radius:50%; background:var(--c-slate-bg); color:var(--c-slate); display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; }
+.mb-item-main{ min-width:0; flex:1; }
+.mb-item-top{ display:flex; justify-content:space-between; gap:8px; }
+.mb-who{ font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mb-when{ font-size:11.5px; color:var(--ink-faint); white-space:nowrap; }
+.mb-subj{ font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mb-dot{ display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--brand); margin-right:6px; vertical-align:middle; }
+.mb-n{ font-size:11px; color:var(--ink-muted); background:var(--border-soft); border-radius:8px; padding:0 6px; }
+.mb-prev{ font-size:12.5px; color:var(--ink-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mb-tags{ display:flex; gap:8px; align-items:center; font-size:12px; margin-top:2px; }
+.mb-tags:empty{ display:none; }
+.mb-lead{ color:var(--c-slate); font-size:11.5px; text-decoration:none; }
+.mb-more{ padding:12px; text-align:center; }
+.mb-read{ display:flex; flex-direction:column; min-width:0; min-height:0; }
+.mb-back{ display:none; padding:8px; border-bottom:1px solid var(--border-soft); }
+.mb-toolbar{ display:flex; flex-wrap:wrap; gap:4px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--border-soft); background:var(--surface-2); }
+.mb-tool{ border:0; background:transparent; color:var(--ink); padding:5px 9px; border-radius:var(--radius-sm); font-size:13px; cursor:pointer; font-family:inherit; text-decoration:none; }
+.mb-tool:hover{ background:var(--border-soft); }
+.mb-sep{ width:1px; height:18px; background:var(--border); margin:0 4px; }
+.mb-read-scroll{ overflow-y:auto; flex:1; min-height:0; padding:16px 20px 24px; }
+.mb-read-subject{ font-family:var(--font-display); font-size:21px; margin:0 0 14px; font-weight:600; text-wrap:balance; }
+.mb-msg{ border:1px solid var(--border-soft); border-radius:var(--radius); padding:12px 14px; margin-bottom:10px; background:var(--surface); }
+.mb-msg.collapsed{ cursor:pointer; background:var(--surface-2); }
+.mb-msg-head{ display:flex; gap:10px; align-items:flex-start; cursor:pointer; }
+.mb-msg-who{ flex:1; min-width:0; font-size:13.5px; }
+.mb-msg-who .hint{ font-size:12px; overflow-wrap:anywhere; }
+.mb-trunc{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mb-msg-when{ font-size:12px; color:var(--ink-faint); white-space:nowrap; }
+.mb-body{ white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.55; margin-top:12px; }
+.mb-body a{ color:var(--c-slate); }
+.mb-msg-foot{ display:flex; gap:10px; align-items:center; margin-top:10px; }
+.mb-atts, .mb-attach-row{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.mb-att{ border:1px solid var(--border); background:var(--surface-2); color:var(--ink); border-radius:var(--radius-sm); padding:4px 9px; font-size:12.5px; cursor:pointer; font-family:inherit; display:inline-flex; gap:6px; align-items:center; }
+.mb-att.static{ cursor:default; }
+.mb-att.add{ border-style:dashed; color:var(--ink-muted); }
+.mb-att:disabled{ opacity:.5; cursor:not-allowed; }
+.mb-quick{ margin-top:6px; }
+.mb-quick textarea{ width:100%; box-sizing:border-box; resize:vertical; }
+.mb-quick-bar{ display:flex; gap:8px; margin-top:6px; }
+.mb-blank{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; color:var(--ink-muted); }
+.mb-compose{ display:flex; flex-direction:column; min-height:0; flex:1; overflow-y:auto; }
+.mb-field{ display:flex; align-items:center; gap:10px; padding:6px 14px; border-bottom:1px solid var(--border-soft); }
+.mb-field label{ width:54px; font-size:12.5px; color:var(--ink-muted); }
+.mb-field .input{ flex:1; border:0; background:transparent; padding:6px 0; box-shadow:none; }
+.mb-from{ font-size:13px; flex:1; }
+.mb-c-body{ flex:1; min-height:240px; border:0; border-radius:0; padding:14px; font-size:14px; line-height:1.55; resize:none; box-shadow:none; background:var(--surface); }
+.mb-attach-row{ padding:8px 14px 14px; margin:0; border-top:1px solid var(--border-soft); }
+@media (max-width:1100px){
+  .mb{ grid-template-columns:1fr; margin:0 8px 8px; height:calc(100vh - 130px); }
+  .mb-folders{ flex-direction:row; flex-wrap:wrap; border-right:0; border-bottom:1px solid var(--border); padding:8px; }
+  .mb-newbtn{ margin:0 6px 0 0; }
+  .mb-foot{ display:none; }
+  .mb-read{ display:none; }
+  .mb-show-read .mb-list, .mb-show-read .mb-folders{ display:none; }
+  .mb-show-read .mb-read{ display:flex; }
+  .mb-back{ display:block; }
+}
 </style>
 <div id="app"></div>
 <script id="state-json" type="application/json">{"company":{"name":"Bridgepoint Lending","tagline":"Real Estate Financing Solutions"},"marketRates":{"dscr":{"label":"DSCR","previous":6.625,"current":6.375,"updatedAt":"2026-08-29"},"fixFlip":{"label":"Fix & Flip","previous":9.25,"current":8.75,"updatedAt":"2026-08-29"},"groundUp":{"label":"Ground Up Construction","previous":10.0,"current":9.5,"updatedAt":"2026-08-29"},"portfolio":{"label":"Portfolio / Blanket","previous":6.625,"current":6.375,"updatedAt":"2026-08-29"},"bridge":{"label":"Bridge","previous":9.25,"current":8.75,"updatedAt":"2026-08-29"},"mixedUse":{"label":"Mixed-Use","previous":9.75,"current":9.75,"updatedAt":"2026-06-01"}},"users":[],"notifications":[],"leads":[]}</script>
@@ -6098,7 +6176,10 @@ function rowToEmailRecord(r){
     subject:r.subject, body:r.body, sentBy:r.sent_by||null, createdAt:r.created_at,
     deliveryStatus:r.delivery_status||"sent", deliveredAt:r.delivered_at||null,
     bouncedAt:r.bounced_at||null, bounceReason:r.bounce_reason||null,
-    openedAt:r.opened_at||null, openCount:r.open_count||0
+    openedAt:r.opened_at||null, openCount:r.open_count||0,
+    mailboxUserId:r.mailbox_user_id||null, folder:r.folder||(r.direction==="inbound"?"inbox":"sent"), isRead:r.is_read!==false, isFlagged:!!r.is_flagged,
+    ccAddress:r.cc_address||"", bccAddress:r.bcc_address||"", threadKey:r.thread_key||null, attachments:Array.isArray(r.attachments)?r.attachments:[],
+    automated:!!r.automated
   };
 }
 var lastEmailSig = null;
@@ -6107,7 +6188,7 @@ function refreshEmails(){
   sb.from("emails").select("*").order("created_at", { ascending:false }).then(function(res){
     if (res.error || !res.data) return;
     // Don't re-draw the page (and disturb anyone mid-typing) when nothing changed since the last poll.
-    var sig = res.data.length + ":" + res.data.map(function(r){ return r.id + (r.delivery_status || "") + (r.open_count || 0) + (r.opened_at || ""); }).join("|");
+    var sig = res.data.length + ":" + res.data.map(function(r){ return r.id + (r.delivery_status || "") + (r.open_count || 0) + (r.opened_at || "") + (r.folder || "") + (r.is_read === false ? "u" : "r") + (r.is_flagged ? "f" : "") + (r.updated_at || ""); }).join("|");
     if (sig === lastEmailSig && state.emails && state.emails.length) return;
     lastEmailSig = sig;
     state.emails = res.data.map(rowToEmailRecord);
@@ -10469,6 +10550,7 @@ function render(){
   // on demand the next time a bound input is focused/typed into.
   document.querySelectorAll(".pac-container").forEach(function(el){ el.remove(); });
   var app = document.getElementById("app");
+  try { mbBeforeRender(); } catch(_){}
   // The call brief is a long page; keep the scroll position when it re-renders (e.g. after Get live rates).
   var briefScrollY = (ui.view === "brief") ? (window.pageYOffset || 0) : null;
   // The live call-notes box must keep focus and cursor when a call-state
@@ -10632,6 +10714,7 @@ function render(){
   app.insertAdjacentHTML("beforeend", toastHTML);
   initSignaturePads();
   initPlacesAutocomplete();
+  try { mbAfterRender(); } catch(_){}
   syncHistory();
   // Every render() replaces #app's innerHTML wholesale (see note above),
   // which resets any scrollable container's scrollTop to 0 -- including
@@ -18142,29 +18225,442 @@ function renderEmailChainBadge(e){
   }
   return '<span class="badge badge-neutral">Sent — delivery pending</span>';
 }
+/* ---------------------------------------------------------------------
+   Mailbox -- Outlook-style (Joe 2026-10-13: "a legitimate inbox/outbox/mailbox system in the crm where we can send/receive/store ... if it
+   could resemble outlook that would be good"). Three panes: folders | message list | reading pane (conversation view), compose pane with
+   Cc/Bcc, attachments and autosaved drafts. Data is public.emails (migration 113); everything is scoped by the database to your own mailbox
+   plus mail on loan files you can see. Typed text lives in ui.mail.compose on every keystroke, so a background refresh can never wipe it.
+--------------------------------------------------------------------- */
+var MB_FOLDERS = [
+  { key:"inbox", label:"Inbox", icon:"📥" }, { key:"drafts", label:"Drafts", icon:"📝" }, { key:"sent", label:"Sent Items", icon:"📤" },
+  { key:"archive", label:"Archive", icon:"🗄️" }, { key:"trash", label:"Deleted Items", icon:"🗑️" }, { key:"automated", label:"Automated", icon:"🤖" }
+];
+function mb(){ if (!ui.mail) ui.mail = { folder:"inbox", sel:null, search:"", filter:"all", compose:null, limit:150, expanded:{}, quick:"", saving:false }; return ui.mail; }
+function mbAll(){
+  return (state.emails || []).filter(function(e){
+    return e.mailboxUserId === ui.viewAs || (ui.viewAs === "owner" && !e.mailboxUserId && e.direction === "inbound");
+  });
+}
+function mbAddrOnly(s){ var m = /<([^>]+)>/.exec(s || ""); return (m ? m[1] : (s || "")).trim(); }
+function mbName(s){
+  s = String(s || "");
+  var m = /^\s*"?([^"<]+?)"?\s*<[^>]+>/.exec(s);
+  if (m && m[1].trim()) return m[1].trim();
+  var addr = mbAddrOnly(s).toLowerCase();
+  var lead = (state.leads || []).filter(function(l){ return l.email && l.email.toLowerCase() === addr; })[0];
+  if (lead) return lead.name;
+  var u = (state.users || state.team || []).filter ? (state.users || state.team || []).filter(function(x){ return x.email && x.email.toLowerCase() === addr; })[0] : null;
+  if (u) return u.name;
+  return addr || "(unknown)";
+}
+function mbInitials(s){ var n = mbName(s).replace(/[^A-Za-z ]/g, " ").trim().split(/\s+/); return ((n[0] || "?").charAt(0) + (n.length > 1 ? n[n.length - 1].charAt(0) : "")).toUpperCase(); }
+function mbStamp(iso){
+  var d = new Date(iso); if (isNaN(d.getTime())) return "";
+  var now = new Date(), midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()), days = Math.floor((midnight - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+  if (days <= 0) return d.toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" });
+  if (days === 1) return "Yesterday";
+  if (days < 7) return d.toLocaleDateString("en-US", { weekday:"short" });
+  return d.toLocaleDateString("en-US", d.getFullYear() === now.getFullYear() ? { month:"short", day:"numeric" } : { month:"short", day:"numeric", year:"numeric" });
+}
+function mbGroup(iso){
+  var d = new Date(iso), now = new Date(), midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var days = Math.floor((midnight - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+  if (days <= 0) return "Today"; if (days === 1) return "Yesterday"; if (days < 7) return "Earlier this week"; if (days < 14) return "Last week";
+  return d.toLocaleDateString("en-US", { month:"long", year:"numeric" });
+}
+function mbFull(iso){ var d = new Date(iso); return isNaN(d.getTime()) ? "" : d.toLocaleString("en-US", { weekday:"short", month:"short", day:"numeric", year:"numeric", hour:"numeric", minute:"2-digit" }); }
+function mbSize(n){ n = Number(n) || 0; return n > 1048576 ? (Math.round(n / 104857.6) / 10) + " MB" : n > 1024 ? Math.round(n / 1024) + " KB" : n + " B"; }
+function mbPreview(body){
+  var lines = String(body || "").split(/\r?\n/).filter(function(l){ return l.trim() && l.charAt(0) !== ">" && !/^(on .+ wrote:|-{2,}\s*original message|from:|sent:|to:|subject:)/i.test(l.trim()); });
+  return lines.join(" ").replace(/\s+/g, " ").slice(0, 110);
+}
+function mbLinkify(text){
+  return esc(text).replace(/(https?:\/\/[^\s<]+[^\s<.,;:!?)])/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+}
+function mbThreads(folder){
+  var rows = mbAll().filter(function(e){ return e.folder === folder; });
+  var map = {}, order = [];
+  rows.forEach(function(e){
+    var k = folder === "drafts" ? e.id : (e.threadKey || e.id);
+    if (!map[k]){ map[k] = { key:k, msgs:[] }; order.push(k); }
+    map[k].msgs.push(e);
+  });
+  var list = order.map(function(k){
+    var th = map[k]; th.msgs.sort(function(a, b){ return a.createdAt < b.createdAt ? -1 : 1; });
+    th.last = th.msgs[th.msgs.length - 1];
+    th.unread = th.msgs.filter(function(m){ return !m.isRead; }).length;
+    th.flagged = th.msgs.some(function(m){ return m.isFlagged; });
+    th.hasAtt = th.msgs.some(function(m){ return (m.attachments || []).length; });
+    return th;
+  });
+  list.sort(function(a, b){ return a.last.createdAt < b.last.createdAt ? 1 : -1; });
+  return list;
+}
+function mbThreadMsgs(key){
+  var s = mb();
+  var msgs = mbAll().filter(function(e){
+    if (s.folder === "drafts") return e.id === key;
+    if ((e.threadKey || e.id) !== key) return false;
+    if (s.folder === "trash") return e.folder === "trash";
+    return e.folder !== "trash" && e.folder !== "drafts";
+  });
+  msgs.sort(function(a, b){ return a.createdAt < b.createdAt ? -1 : 1; });
+  return msgs;
+}
+function mbFilterThreads(list){
+  var s = mb(), q = (s.search || "").trim().toLowerCase();
+  return list.filter(function(th){
+    if (s.filter === "unread" && !th.unread) return false;
+    if (s.filter === "flagged" && !th.flagged) return false;
+    if (s.filter === "attach" && !th.hasAtt) return false;
+    if (!q) return true;
+    return th.msgs.some(function(m){
+      var lead = m.leadId ? leadById(m.leadId) : null;
+      return ((m.subject || "") + " " + (m.body || "") + " " + (m.fromAddress || "") + " " + (m.toAddress || "") + " " + (m.ccAddress || "") + " " + (lead ? lead.name : "")).toLowerCase().indexOf(q) !== -1;
+    });
+  });
+}
+function mbCount(folder){ var n = 0; mbThreads(folder).forEach(function(th){ n += folder === "drafts" ? 1 : (th.unread ? 1 : 0); }); return n; }
+function mbUpdate(ids, patch){
+  var rowPatch = {}; Object.keys(patch).forEach(function(k){ rowPatch[({ isRead:"is_read", isFlagged:"is_flagged", folder:"folder", deletedAt:"deleted_at" })[k] || k] = patch[k]; });
+  ids.forEach(function(id){ var e = (state.emails || []).filter(function(x){ return x.id === id; })[0]; if (e) Object.keys(patch).forEach(function(k){ e[k] = patch[k]; }); });
+  if (sb && ids.length) sb.from("emails").update(rowPatch).in("id", ids).then(function(res){ if (res.error) console.error("mailbox update failed", res.error); });
+  lastEmailSig = null;
+}
+
+/* ---- list pane ---- */
+function mbListHTML(){
+  var s = mb(), threads = mbFilterThreads(mbThreads(s.folder)), shown = threads.slice(0, s.limit), lastGroup = "", rows = "";
+  shown.forEach(function(th){
+    var m = th.last, out = m.direction === "outbound", active = s.sel === th.key && !s.compose;
+    var g = mbGroup(m.createdAt);
+    if (g !== lastGroup){ rows += '<div class="mb-group">' + esc(g) + '</div>'; lastGroup = g; }
+    var lead = m.leadId ? leadById(m.leadId) : null;
+    var who = s.folder === "drafts" ? ("Draft" + (m.toAddress ? " — " + mbName(m.toAddress) : "")) : (out ? ("To: " + mbName(m.toAddress)) : mbName(m.fromAddress));
+    rows += '<div class="mb-item' + (th.unread ? ' unread' : '') + (active ? ' active' : '') + '" data-action="mb-select" data-key="' + esc(th.key) + '">' +
+      '<div class="mb-avatar">' + esc(mbInitials(out ? m.toAddress : m.fromAddress)) + '</div>' +
+      '<div class="mb-item-main">' +
+        '<div class="mb-item-top"><span class="mb-who">' + esc(who) + '</span><span class="mb-when">' + esc(mbStamp(m.createdAt)) + '</span></div>' +
+        '<div class="mb-subj">' + (th.unread ? '<span class="mb-dot"></span>' : '') + esc(m.subject || "(no subject)") + (th.msgs.length > 1 ? ' <span class="mb-n">' + th.msgs.length + '</span>' : '') + '</div>' +
+        '<div class="mb-prev">' + esc(mbPreview(m.body)) + '</div>' +
+        '<div class="mb-tags">' + (th.hasAtt ? '<span title="Has attachments">📎</span>' : '') + (th.flagged ? '<span title="Flagged" style="color:var(--c-rust)">⚑</span>' : '') + (lead ? '<span class="mb-lead">' + esc(lead.name) + '</span>' : '') + '</div>' +
+      '</div></div>';
+  });
+  var more = threads.length > shown.length ? '<div class="mb-more"><button class="btn btn-sm" data-action="mb-more">Show more (' + (threads.length - shown.length) + ' older)</button></div>' : "";
+  var empty = !shown.length ? '<div class="empty">' + (s.search ? 'Nothing matches your search.' : (s.folder === "inbox" ? 'Your inbox is empty.' : 'Nothing in ' + esc((MB_FOLDERS.filter(function(f){ return f.key === s.folder; })[0] || {}).label || "this folder") + '.')) + '</div>' : "";
+  var title = (MB_FOLDERS.filter(function(f){ return f.key === s.folder; })[0] || {}).label || "";
+  var filters = [["all", "All"], ["unread", "Unread"], ["flagged", "Flagged"], ["attach", "📎"]].map(function(f){ return '<button class="mb-chip' + (s.filter === f[0] ? ' on' : '') + '" data-action="mb-filter" data-filter="' + f[0] + '">' + f[1] + '</button>'; }).join("");
+  return '<div class="mb-list-head"><div class="mb-list-title">' + esc(title) + '</div>' +
+      '<input class="input" id="mb-search" data-action="mb-search" placeholder="Search mail" autocomplete="off" value="' + esc(s.search || "") + '">' +
+      '<div class="mb-chips">' + filters + (s.folder === "trash" ? '<button class="mb-chip" data-action="mb-empty-trash" style="margin-left:auto">Empty folder</button>' : (s.folder === "inbox" ? '<button class="mb-chip" data-action="mb-mark-all-read" style="margin-left:auto">Mark all read</button>' : "")) + '</div></div>' +
+    '<div class="mb-scroll">' + rows + more + empty + '</div>';
+}
+
+/* ---- reading pane ---- */
+function mbAttHTML(e){
+  var atts = e.attachments || [];
+  if (!atts.length) return "";
+  return '<div class="mb-atts">' + atts.map(function(a, i){
+    return '<button class="mb-att" data-action="mb-open-att" data-id="' + esc(e.id) + '" data-idx="' + i + '"' + (a.path ? "" : ' disabled title="This attachment was not stored"') + '>📎 ' + esc(a.name) + ' <span class="hint">' + esc(mbSize(a.size)) + '</span></button>';
+  }).join("") + '</div>';
+}
+function mbMsgHTML(e, open){
+  var out = e.direction === "outbound";
+  var lead = e.leadId ? leadById(e.leadId) : null;
+  var head = '<div class="mb-msg-head" data-action="mb-toggle-msg" data-id="' + esc(e.id) + '">' +
+    '<div class="mb-avatar">' + esc(mbInitials(out ? (e.fromAddress ? ((currentUser().name || "") + " <" + mbAddrOnly(e.fromAddress) + ">") : "Me") : e.fromAddress)) + '</div>' +
+    '<div class="mb-msg-who"><div><b>' + esc(out ? "You" : mbName(e.fromAddress)) + '</b> <span class="hint">' + esc(mbAddrOnly(e.fromAddress)) + '</span></div>' +
+      (open ? '<div class="hint">To: ' + esc(e.toAddress || "") + (e.ccAddress ? ' · Cc: ' + esc(e.ccAddress) : '') + (e.bccAddress ? ' · Bcc: ' + esc(e.bccAddress) : '') + '</div>' : '<div class="hint mb-trunc">' + esc(mbPreview(e.body)) + '</div>') + '</div>' +
+    '<div class="mb-msg-when">' + esc(open ? mbFull(e.createdAt) : mbStamp(e.createdAt)) + (e.isFlagged ? ' <span style="color:var(--c-rust)">⚑</span>' : '') + '</div></div>';
+  if (!open) return '<div class="mb-msg collapsed">' + head + '</div>';
+  return '<div class="mb-msg">' + head +
+    '<div class="mb-body">' + mbLinkify(e.body || "") + '</div>' + mbAttHTML(e) +
+    '<div class="mb-msg-foot">' + (out ? renderEmailChainBadge(e) : '') + (lead ? ' <a href="#" data-action="select-lead" data-lead="' + esc(lead.id) + '" class="mb-lead">📁 ' + esc(lead.name) + '</a>' : '') + '</div></div>';
+}
+function mbReadingHTML(){
+  var s = mb();
+  if (s.compose) return mbComposeHTML();
+  var msgs = s.sel ? mbThreadMsgs(s.sel) : [];
+  if (!msgs.length) return '<div class="mb-blank"><div style="font-size:42px">✉️</div><div>Select an item to read</div><div class="hint">Nothing is selected</div></div>';
+  var last = msgs[msgs.length - 1], draft = s.folder === "drafts", trash = s.folder === "trash";
+  var btn = function(a, label, extra){ return '<button class="mb-tool" data-action="' + a + '" data-id="' + esc(last.id) + '" data-key="' + esc(s.sel) + '"' + (extra || "") + '>' + label + '</button>'; };
+  var tools = draft ? btn("mb-edit-draft", "✏️ Edit") + btn("mb-discard-draft", "🗑️ Delete")
+    : (btn("mb-reply", "↩ Reply") + btn("mb-replyall", "↩↩ Reply all") + btn("mb-forward", "➡ Forward") + '<span class="mb-sep"></span>' +
+       (s.folder === "archive" ? btn("mb-move-inbox", "📥 Move to Inbox") : btn("mb-archive", "🗄️ Archive")) +
+       (trash ? btn("mb-restore", "↩ Restore") : btn("mb-delete", "🗑️ Delete")) + '<span class="mb-sep"></span>' +
+       btn("mb-flag", last.isFlagged ? "⚑ Unflag" : "⚑ Flag") + btn("mb-unread", "● Mark unread"));
+  var lead = last.leadId ? leadById(last.leadId) : null;
+  var cards = msgs.map(function(m, i){
+    var open = i === msgs.length - 1 || !m.isRead || s.expanded[m.id];
+    if (s.expanded[m.id] === false) open = false;
+    return mbMsgHTML(m, open);
+  }).join("");
+  var quick = (draft || trash) ? "" :
+    '<div class="mb-quick"><textarea class="textarea" id="mb-quick" data-action="mb-quick" rows="3" placeholder="Reply to ' + esc(mbName(last.direction === "outbound" ? last.toAddress : last.fromAddress)) + '…  (Ctrl+Enter to send)">' + esc(s.quick || "") + '</textarea>' +
+    '<div class="mb-quick-bar"><button class="btn btn-primary btn-sm" data-action="mb-quick-send" data-id="' + esc(last.id) + '">Send</button><button class="btn btn-sm" data-action="mb-reply" data-id="' + esc(last.id) + '">Open full editor</button></div></div>';
+  return '<div class="mb-toolbar">' + tools + (lead ? '<a href="#" class="mb-tool" style="margin-left:auto" data-action="select-lead" data-lead="' + esc(lead.id) + '">📁 View loan: ' + esc(lead.name) + '</a>' : '') + '</div>' +
+    '<div class="mb-read-scroll"><h2 class="mb-read-subject">' + esc(last.subject || "(no subject)") + '</h2>' + cards + quick + '</div>';
+}
+
+/* ---- compose pane ---- */
+function mbSignature(leadId){
+  var lead = leadId ? leadById(leadId) : null;
+  var u = lead ? (docLoanOfficer(lead) || currentUser()) : currentUser();
+  return "\n\n" + (u.name || "") + "\nBridgepoint Lending" + (u.phone ? "\n" + u.phone : "") + (u.email ? "\n" + u.email : "");
+}
+function mbNewCompose(init){
+  init = init || {};
+  var s = mb();
+  s.compose = { draftId:init.draftId || ("dr-" + (window.crypto && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2))),
+    to:init.to || "", cc:init.cc || "", bcc:init.bcc || "", subject:init.subject || "", body:(init.body != null ? init.body : mbSignature()),
+    leadId:init.leadId || null, attachments:init.attachments || [], showCc:!!(init.cc || init.bcc), dirty:false, savedAt:null, sending:false, uploading:0, focus:init.focus || (init.to ? "mb-c-body" : "mb-c-to"), cursorTop:!!init.cursorTop };
+  s.sel = null;
+}
+function mbComposeFrom(){
+  var c = mb().compose, lead = c && c.leadId ? leadById(c.leadId) : null;
+  var from = lead ? docLoanOfficer(lead) : currentUser();
+  return { user:from, note:(lead && from.id !== currentUser().id) ? ("Sends as " + from.name + " — the loan officer on this file.") : "" };
+}
+function mbComposeHTML(){
+  var c = mb().compose, f = mbComposeFrom();
+  var contacts = (state.leads || []).filter(function(l){ return l.email; }).slice(0, 500).map(function(l){ return '<option value="' + esc(l.email) + '">' + esc(l.name) + '</option>'; }).join("") +
+    ((state.users || state.team || []).filter ? (state.users || state.team || []) : []).filter(function(u){ return u.email; }).map(function(u){ return '<option value="' + esc(u.email) + '">' + esc(u.name) + '</option>'; }).join("");
+  var atts = (c.attachments || []).map(function(a, i){ return '<span class="mb-att static">📎 ' + esc(a.name) + ' <span class="hint">' + esc(mbSize(a.size)) + '</span> <a href="#" data-action="mb-remove-att" data-idx="' + i + '" title="Remove">✕</a></span>'; }).join("") + (c.uploading ? '<span class="hint">Uploading…</span>' : "");
+  return '<div class="mb-compose" id="mail-compose">' +
+    '<div class="mb-toolbar"><button class="btn btn-primary" data-action="mb-send"' + (c.sending ? ' disabled' : '') + '>' + (c.sending ? 'Sending…' : '➤ Send') + '</button>' +
+      '<button class="mb-tool" data-action="mb-save-draft">💾 Save draft</button><button class="mb-tool" data-action="mb-discard">🗑️ Discard</button>' +
+      '<span class="hint" style="margin-left:auto" id="mb-saved">' + (c.savedAt ? 'Draft saved ' + esc(mbStamp(c.savedAt)) : (c.dirty ? 'Unsaved changes' : '')) + '</span></div>' +
+    '<datalist id="mb-contacts">' + contacts + '</datalist>' +
+    '<div class="mb-field"><label>From</label><div class="mb-from">' + esc(f.user.name || "") + ' &lt;' + esc(f.user.email || "") + '&gt;' + (f.note ? ' <span class="hint">' + esc(f.note) + '</span>' : '') + '</div></div>' +
+    '<div class="mb-field"><label>To</label><input class="input" id="mb-c-to" data-mbfield="to" type="text" list="mb-contacts" autocomplete="off" value="' + esc(c.to) + '" placeholder="name@example.com (separate several with commas)">' +
+      (c.showCc ? '' : '<a href="#" class="hint" data-action="mb-show-cc">Cc / Bcc</a>') + '</div>' +
+    (c.showCc ? '<div class="mb-field"><label>Cc</label><input class="input" id="mb-c-cc" data-mbfield="cc" type="text" list="mb-contacts" autocomplete="off" value="' + esc(c.cc) + '"></div>' +
+      '<div class="mb-field"><label>Bcc</label><input class="input" id="mb-c-bcc" data-mbfield="bcc" type="text" list="mb-contacts" autocomplete="off" value="' + esc(c.bcc) + '"></div>' : '') +
+    '<div class="mb-field"><label>Subject</label><input class="input" id="mb-c-subject" data-mbfield="subject" type="text" autocomplete="off" value="' + esc(c.subject) + '"></div>' +
+    '<textarea class="textarea mb-c-body" id="mb-c-body" data-mbfield="body" placeholder="Write your message…  (Ctrl+Enter to send)">' + esc(c.body) + '</textarea>' +
+    '<div class="mb-attach-row">' + atts + '<label class="mb-att add">＋ Attach files<input type="file" multiple data-action="mb-file" style="display:none"></label></div>' +
+  '</div>';
+}
+
+/* ---- the screen ---- */
 function renderEmailInbox(){
   ensureEmailPolling();
-  var emails = myEmails();
-  var rows = emails.map(function(e){
-    var lead = e.leadId ? leadById(e.leadId) : null;
-    var expanded = ui.expandedEmailId === e.id;
-    var dirBadge = e.direction === "inbound" ? '<span class="badge badge-forest">Received</span>' : '<span class="badge badge-slate">Sent</span>';
-    var otherParty = e.direction === "inbound" ? e.fromAddress : e.toAddress;
-    return '<div class="queue-card">' +
-      '<div class="queue-main" data-action="toggle-email" data-id="' + e.id + '" style="cursor:pointer">' +
-        '<div class="queue-title">' + dirBadge + ' ' + renderEmailChainBadge(e) + ' ' + esc(e.subject||"(no subject)") + '</div>' +
-        '<div class="queue-reason">' + (e.direction==="inbound"?"From ":"To ") + esc(otherParty||"") + (lead ? (' · ' + esc(lead.name)) : '') + '</div>' +
-        '<div class="queue-meta"><span>' + fmtDate((e.createdAt||"").slice(0,10)) + '</span></div>' +
-        (expanded ? ('<div class="footnote" style="white-space:pre-wrap;padding-top:8px;border-top:1px solid var(--border-soft);margin-top:8px">' + esc(e.body||"") + '</div>') : '') +
-      '</div>' +
-      '<div class="queue-actions">' +
-        (lead ? ('<button class="btn btn-sm btn-ghost" data-action="select-lead" data-lead="' + lead.id + '">View Loan</button>') : '') +
-        '<button class="btn btn-sm" data-action="reply-email" data-id="' + e.id + '">Reply</button>' +
-      '</div>' +
-    '</div>';
+  var s = mb(), me = currentUser();
+  if (!s.compose && sb && !s.draftRestoreChecked){
+    s.draftRestoreChecked = true;
+    try { var bk = JSON.parse(sessionStorage.getItem("mbDraftBackup") || "null"); if (bk && bk.u === ui.viewAs && bk.c && (bk.c.body || bk.c.to || bk.c.subject)) { s.compose = bk.c; s.compose.sending = false; s.compose.uploading = 0; } } catch(_){}
+  }
+  var folders = MB_FOLDERS.map(function(f){
+    var n = mbCount(f.key);
+    return '<div class="mb-folder' + (s.folder === f.key ? ' active' : '') + '" data-action="mb-folder" data-folder="' + f.key + '"><span>' + f.icon + '</span><span>' + esc(f.label) + '</span>' + (n ? '<span class="mb-count">' + n + '</span>' : '') + '</div>';
   }).join("");
-  return topbar("Email", "Every email you've sent or received through the CRM — click one to read it, or start a new one.", '<button class="btn btn-primary" data-action="open-modal" data-modal="composeEmail">✉ Compose</button>') +
-    '<div class="content">' + (rows || '<div class="empty">No emails yet.</div>') + '</div>';
+  var showRead = s.compose || s.sel;
+  return topbar("Mail", "Your mailbox — " + esc(me.email || "") + " · sent mail is stored here and every loan file's emails are kept with it.", "") +
+    '<div class="mb' + (showRead ? ' mb-show-read' : '') + '">' +
+      '<div class="mb-folders"><button class="btn btn-primary mb-newbtn" data-action="mb-compose">✏️ New mail</button>' + folders +
+        '<div class="mb-foot hint">Mail you send from loan files is stored under the loan, and in Sent Items here. Automated messages the system sends for you are kept under Automated.</div></div>' +
+      '<div class="mb-list">' + mbListHTML() + '</div>' +
+      '<div class="mb-read"><div class="mb-back"><button class="btn btn-sm" data-action="mb-back">← Back</button></div>' + mbReadingHTML() + '</div>' +
+    '</div>';
+}
+
+/* ---- actions ---- */
+function mbSelect(key){
+  var s = mb();
+  if (s.compose && s.compose.dirty) mbSaveDraft(true);
+  s.compose = null; s.sel = key; s.quick = "";
+  var msgs = mbThreadMsgs(key), unread = msgs.filter(function(m){ return !m.isRead; }).map(function(m){ return m.id; });
+  if (s.folder === "drafts") return;
+  if (unread.length) mbUpdate(unread, { isRead:true });
+}
+function mbQuote(e){
+  var hdr = "\n\n-----Original Message-----\nFrom: " + (e.fromAddress || "") + "\nSent: " + mbFull(e.createdAt) + "\nTo: " + (e.toAddress || "") + (e.ccAddress ? "\nCc: " + e.ccAddress : "") + "\nSubject: " + (e.subject || "") + "\n\n";
+  return hdr + (e.body || "");
+}
+function mbReply(id, all, fwd){
+  var e = (state.emails || []).filter(function(x){ return x.id === id; })[0]; if (!e) return;
+  var me = (currentUser().email || "").toLowerCase();
+  var out = e.direction === "outbound";
+  var subj = e.subject || "";
+  var re = /^\s*re:/i.test(subj) ? subj : "Re: " + subj, fw = /^\s*(fw|fwd):/i.test(subj) ? subj : "Fwd: " + subj;
+  var to = fwd ? "" : (out ? (e.toAddress || "") : (e.fromAddress || ""));
+  var cc = "";
+  if (all && !fwd){
+    var others = ((e.toAddress || "") + "," + (e.ccAddress || "")).split(",").map(function(x){ return x.trim(); }).filter(function(x){ return x && mbAddrOnly(x).toLowerCase() !== me && mbAddrOnly(x).toLowerCase() !== mbAddrOnly(to).toLowerCase(); });
+    if (out) { to = e.toAddress || ""; others = (e.ccAddress || "").split(",").map(function(x){ return x.trim(); }).filter(Boolean); }
+    cc = others.join(", ");
+  }
+  var body = (mb().quick && !fwd ? mb().quick : "") + mbSignature(e.leadId) + mbQuote(e);
+  mbNewCompose({ to:to, cc:cc, subject:fwd ? fw : re, body:body, leadId:e.leadId || null, focus:"mb-c-body", cursorTop:true });
+  mb().quick = "";
+  render();
+}
+function mbSaveDraft(silent){
+  var s = mb(), c = s.compose; if (!c || !sb) return;
+  if (!c.to && !c.subject && !c.body.replace(/\s+/g, "") && !(c.attachments || []).length) return;
+  var me = currentUser(), f = mbComposeFrom();
+  var row = { id:c.draftId, mailbox_user_id:ui.viewAs, direction:"outbound", folder:"drafts", from_address:f.user.email || me.email || "", to_address:c.to || "", cc_address:c.cc || null, bcc_address:c.bcc || null,
+    subject:c.subject || "", body:c.body || "", lead_id:c.leadId || null, is_read:true, automated:false, sent_by:ui.viewAs, attachments:c.attachments || [],
+    thread_key:"draft|" + c.draftId, updated_at:new Date().toISOString() };
+  sb.from("emails").upsert(row).then(function(res){
+    if (res.error){ console.error("draft save failed", res.error); if (!silent) showToast("Couldn't save the draft — it is still in this window"); return; }
+    c.dirty = false; c.savedAt = new Date().toISOString();
+    var el = document.getElementById("mb-saved"); if (el) el.textContent = "Draft saved " + mbStamp(c.savedAt);
+    var rec = rowToEmailRecord(Object.assign({ created_at:c.savedAt }, row, { created_at:(((state.emails || []).filter(function(x){ return x.id === c.draftId; })[0] || {}).createdAt) || c.savedAt }));
+    var i = (state.emails || []).findIndex(function(x){ return x.id === c.draftId; });
+    if (i === -1) state.emails.unshift(rec); else state.emails[i] = rec;
+    lastEmailSig = null;
+  });
+}
+var mbSaveTimer = null;
+function mbScheduleSave(){
+  var c = mb().compose; if (!c) return;
+  try { sessionStorage.setItem("mbDraftBackup", JSON.stringify({ u:ui.viewAs, c:c })); } catch(_){}
+  if (mbSaveTimer) clearTimeout(mbSaveTimer);
+  mbSaveTimer = setTimeout(function(){ mbSaveDraft(true); }, 3000);
+}
+function mbSend(fromQuick){
+  var s = mb(), c = s.compose; if (!c || c.sending || !sb) return;
+  var to = (c.to || "").trim();
+  if (!to){ showToast("Add a recipient first"); return; }
+  if (c.uploading){ showToast("Wait for the attachments to finish uploading"); return; }
+  if (!c.leadId){
+    var first = mbAddrOnly(to.split(",")[0]).toLowerCase();
+    var lead = (state.leads || []).filter(function(l){ return l.email && l.email.toLowerCase() === first; })[0];
+    if (lead) c.leadId = lead.id;
+  }
+  var f = mbComposeFrom().user;
+  c.sending = true; render();
+  sb.functions.invoke("send-email", { body:{
+    leadId:c.leadId || null, to:to, cc:(c.cc || "").trim() || null, bcc:(c.bcc || "").trim() || null, subject:(c.subject || "").trim() || "(no subject)", text:c.body || "",
+    fromName:f.name, fromAddress:f.email, fromUserId:f.id, fromPhotoUrl:f.photoUrl || null, draftId:c.draftId, attachmentPaths:(c.attachments || []).filter(function(a){ return a.path; })
+  } }).then(function(res){
+    if (res.error || !res.data || !res.data.ok){ c.sending = false; showToast("Couldn't send — your message is still here. Try again."); return; }
+    try { sessionStorage.removeItem("mbDraftBackup"); } catch(_){}
+    if (mbSaveTimer) clearTimeout(mbSaveTimer);
+    state.emails = (state.emails || []).filter(function(x){ return x.id !== c.draftId; });
+    s.compose = null; lastEmailSig = null;
+    showToast("Message sent");
+    render();
+    refreshEmails();
+  }).catch(function(){ c.sending = false; showToast("Couldn't send — your message is still here. Try again."); });
+}
+function mbAddFiles(fileList){
+  var s = mb(), c = s.compose; if (!c || !sb) return;
+  var files = Array.prototype.slice.call(fileList || []);
+  var total = (c.attachments || []).reduce(function(n, a){ return n + (a.size || 0); }, 0);
+  files.forEach(function(file){
+    if (total + file.size > 9 * 1048576){ showToast(file.name + " would take this message over 9 MB — send it separately or share a link"); return; }
+    total += file.size; c.uploading = (c.uploading || 0) + 1;
+    var path = "drafts/" + ui.viewAs + "/" + c.draftId + "/" + Date.now() + "-" + file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    sb.storage.from("mail-attachments").upload(path, file, { contentType:file.type || "application/octet-stream", upsert:true }).then(function(res){
+      c.uploading = Math.max(0, (c.uploading || 1) - 1);
+      if (res.error){ showToast("Couldn't attach " + file.name); render(); return; }
+      c.attachments = (c.attachments || []).concat([{ name:file.name, size:file.size, contentType:file.type || "application/octet-stream", path:path }]);
+      c.dirty = true; mbScheduleSave(); render();
+    });
+  });
+  render();
+}
+function mbOpenAtt(id, idx){
+  var e = (state.emails || []).filter(function(x){ return x.id === id; })[0]; var a = e && (e.attachments || [])[idx];
+  if (!a || !a.path || !sb) return;
+  sb.storage.from("mail-attachments").createSignedUrl(a.path, 300).then(function(res){
+    if (res.error || !res.data){ showToast("Couldn't open that attachment"); return; }
+    window.open(res.data.signedUrl, "_blank");
+  });
+}
+function mbAction(action, t){
+  var s = mb();
+  if (action === "mb-folder"){ if (s.compose && s.compose.dirty) mbSaveDraft(true); s.folder = t.dataset.folder; s.sel = null; s.search = ""; s.filter = "all"; s.limit = 150; s.compose = null; }
+  else if (action === "mb-select"){ mbSelect(t.dataset.key); }
+  else if (action === "mb-back"){ if (s.compose && s.compose.dirty) mbSaveDraft(true); s.sel = null; s.compose = null; }
+  else if (action === "mb-filter"){ s.filter = t.dataset.filter; }
+  else if (action === "mb-more"){ s.limit += 150; }
+  else if (action === "mb-compose"){ mbNewCompose({}); }
+  else if (action === "mb-reply"){ mbReply(t.dataset.id, false, false); return; }
+  else if (action === "mb-replyall"){ mbReply(t.dataset.id, true, false); return; }
+  else if (action === "mb-forward"){ mbReply(t.dataset.id, false, true); return; }
+  else if (action === "mb-quick-send"){
+    var q = (s.quick || "").trim(); if (!q){ showToast("Type a reply first"); return; }
+    var e0 = (state.emails || []).filter(function(x){ return x.id === t.dataset.id; })[0]; if (!e0) return;
+    var re = /^\s*re:/i.test(e0.subject || "") ? e0.subject : "Re: " + (e0.subject || "");
+    var to0 = e0.direction === "outbound" ? e0.toAddress : e0.fromAddress;
+    mbNewCompose({ to:to0, subject:re, body:q + mbSignature(e0.leadId) + mbQuote(e0), leadId:e0.leadId || null });
+    s.quick = ""; mbSend(true); return;
+  }
+  else if (action === "mb-edit-draft"){
+    var d = (state.emails || []).filter(function(x){ return x.id === t.dataset.id; })[0]; if (!d) return;
+    mbNewCompose({ draftId:d.id, to:d.toAddress || "", cc:d.ccAddress || "", bcc:d.bccAddress || "", subject:d.subject || "", body:d.body || "", leadId:d.leadId || null, attachments:d.attachments || [], focus:"mb-c-body" });
+  }
+  else if (action === "mb-discard-draft"){ mbDeleteDraft(t.dataset.id); s.sel = null; }
+  else if (action === "mb-discard"){
+    var c0 = s.compose; if (c0){ if (mbSaveTimer) clearTimeout(mbSaveTimer); try { sessionStorage.removeItem("mbDraftBackup"); } catch(_){} mbDeleteDraft(c0.draftId); }
+    s.compose = null;
+  }
+  else if (action === "mb-save-draft"){ mbSaveDraft(false); showToast("Draft saved"); return; }
+  else if (action === "mb-send"){ mbSend(false); return; }
+  else if (action === "mb-show-cc"){ if (s.compose) s.compose.showCc = true; }
+  else if (action === "mb-remove-att"){ if (s.compose){ s.compose.attachments.splice(Number(t.dataset.idx), 1); s.compose.dirty = true; mbScheduleSave(); } }
+  else if (action === "mb-open-att"){ mbOpenAtt(t.dataset.id, Number(t.dataset.idx)); return; }
+  else if (action === "mb-toggle-msg"){ var id0 = t.dataset.id; var cur = s.expanded[id0]; var m0 = (state.emails || []).filter(function(x){ return x.id === id0; })[0]; var isOpen = cur === undefined ? (m0 && !m0.isRead) : cur; s.expanded[id0] = !isOpen; }
+  else if (action === "mb-flag"){ var ms = mbThreadMsgs(s.sel); var nf = !ms[ms.length - 1].isFlagged; mbUpdate(ms.map(function(m){ return m.id; }), { isFlagged:nf }); }
+  else if (action === "mb-unread"){ var ms2 = mbThreadMsgs(s.sel); mbUpdate([ms2[ms2.length - 1].id], { isRead:false }); s.sel = null; }
+  else if (action === "mb-archive"){ var ms3 = mbThreadMsgs(s.sel); mbUpdate(ms3.map(function(m){ return m.id; }), { folder:"archive" }); s.sel = null; showToast("Moved to Archive"); return; }
+  else if (action === "mb-move-inbox"){ var ms4 = mbThreadMsgs(s.sel); mbUpdate(ms4.map(function(m){ return m.id; }), { folder:"inbox" }); s.sel = null; }
+  else if (action === "mb-delete"){ var ms5 = mbThreadMsgs(s.sel); mbUpdate(ms5.map(function(m){ return m.id; }), { folder:"trash", deletedAt:new Date().toISOString() }); s.sel = null; showToast("Moved to Deleted Items"); return; }
+  else if (action === "mb-restore"){ var ms6 = mbThreadMsgs(s.sel); mbUpdate(ms6.map(function(m){ return m.id; }), { folder:(ms6[0].direction === "inbound" ? "inbox" : "sent"), deletedAt:null }); s.sel = null; }
+  else if (action === "mb-empty-trash"){
+    if (!confirm("Permanently delete everything in Deleted Items? This can't be undone.")) return;
+    var ids = mbAll().filter(function(e){ return e.folder === "trash"; }).map(function(e){ return e.id; });
+    state.emails = (state.emails || []).filter(function(e){ return ids.indexOf(e.id) === -1; });
+    if (sb && ids.length) sb.from("emails").delete().in("id", ids).then(function(){});
+    s.sel = null;
+  }
+  else if (action === "mb-mark-all-read"){ var unr = mbAll().filter(function(e){ return e.folder === "inbox" && !e.isRead; }).map(function(e){ return e.id; }); if (unr.length) mbUpdate(unr, { isRead:true }); }
+  render();
+}
+function mbDeleteDraft(id){
+  state.emails = (state.emails || []).filter(function(x){ return x.id !== id; });
+  if (sb) sb.from("emails").delete().eq("id", id).eq("folder", "drafts").then(function(){});
+}
+/* keep focus + cursor in the mailbox text fields across re-renders (render() calls these) */
+var mbFocusSnap = null;
+function mbBeforeRender(){
+  mbFocusSnap = null;
+  var ae = document.activeElement;
+  if (ae && ae.id && /^(mb-search|mb-quick|mb-c-to|mb-c-cc|mb-c-bcc|mb-c-subject|mb-c-body)$/.test(ae.id)) mbFocusSnap = { id:ae.id, a:ae.selectionStart, b:ae.selectionEnd, scroll:ae.scrollTop };
+}
+function mbAfterRender(){
+  var s = ui.mail;
+  if (ui.view !== "email" || !s) { mbFocusSnap = null; return; }
+  var id = mbFocusSnap && mbFocusSnap.id;
+  if (s.compose && s.compose.focus){ id = s.compose.focus; mbFocusSnap = { id:id, a:s.compose.cursorTop ? 0 : null, b:s.compose.cursorTop ? 0 : null }; s.compose.focus = null; s.compose.cursorTop = false; }
+  var el = id ? document.getElementById(id) : null;
+  if (el){
+    el.focus();
+    try { if (mbFocusSnap && mbFocusSnap.a != null) el.setSelectionRange(mbFocusSnap.a, mbFocusSnap.b); else if (el.setSelectionRange) { var L = (el.value || "").length; el.setSelectionRange(L, L); } if (mbFocusSnap && mbFocusSnap.scroll) el.scrollTop = mbFocusSnap.scroll; } catch(_){}
+  }
+  mbFocusSnap = null;
+}
+// typing never re-renders the compose pane: every keystroke is stored straight into ui.mail.compose (and backed up to this tab's storage)
+function mbBindEvents(){
+appEl.addEventListener("input", function(e){
+  var t = e.target; if (!t || !t.id) return;
+  var s = ui.mail; if (!s) return;
+  if (t.dataset && t.dataset.mbfield && s.compose){ s.compose[t.dataset.mbfield] = t.value; s.compose.dirty = true; var sv = document.getElementById("mb-saved"); if (sv) sv.textContent = "Unsaved changes"; mbScheduleSave(); return; }
+  if (t.id === "mb-quick"){ s.quick = t.value; return; }
+  if (t.id === "mb-search"){ s.search = t.value; render(); return; }
+});
+appEl.addEventListener("change", function(e){
+  var t = e.target; if (t && t.dataset && t.dataset.action === "mb-file"){ mbAddFiles(t.files); t.value = ""; }
+});
+appEl.addEventListener("keydown", function(e){
+  if (!(e.ctrlKey || e.metaKey) || e.key !== "Enter") return;
+  var t = e.target; if (!t || !t.id) return;
+  if (t.id === "mb-c-body" || t.id === "mb-c-subject" || t.id === "mb-c-to"){ e.preventDefault(); mbSend(false); }
+  else if (t.id === "mb-quick"){ e.preventDefault(); var b = document.querySelector('[data-action="mb-quick-send"]'); if (b) mbAction("mb-quick-send", b); }
+});
 }
 function modalSendTeamMessage(m){
   var names = (m.staff||[]).map(function(s){ return s.name; }).join(", ");
@@ -20660,6 +21156,7 @@ function modalLogCall(leadId){
    Event delegation
 --------------------------------------------------------------------- */
 var appEl = document.getElementById("app");
+mbBindEvents();
 // Lives outside appEl deliberately -- render() replaces appEl.innerHTML
 // wholesale on every state change, which would tear down and recreate
 // this element (killing the live audio stream) if it were part of the
@@ -20760,6 +21257,13 @@ appEl.addEventListener("click", function(e){
   if (!t) return;
   var action = t.dataset.action;
 
+  if (action.indexOf("mb-") === 0){
+    // Mailbox: inputs that merely carry a data-action (search, file picker, quick reply box) must not re-render on click.
+    if (e.preventDefault && t.tagName === "A") e.preventDefault();
+    if (action === "mb-file" || action === "mb-search" || action === "mb-quick") return;
+    mbAction(action, t);
+    return;
+  }
   if (action === "nav"){
     ui.view = t.dataset.view;
     if (ui.view!=="detail") ui.selectedLeadId=null;

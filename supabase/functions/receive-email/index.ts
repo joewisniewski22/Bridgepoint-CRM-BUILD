@@ -79,6 +79,29 @@ Deno.serve(async (req: Request) => {
     const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     const emailId = "em-" + crypto.randomUUID();
 
+    // Mailbox (2026-10-13): whose inbox this lands in -- the lead's assigned loan officer; with no lead, whoever last emailed this
+    // sender (so a reply to a manual send reaches the person who wrote); otherwise the owner. Attachments are copied to private storage.
+    let mailboxUser: string | null = null;
+    if (leadId) {
+      const { data: lr } = await sb.from("leads").select("assigned_to").eq("id", leadId).maybeSingle();
+      mailboxUser = (lr && lr.assigned_to) || null;
+    }
+    if (!mailboxUser && fromAddress) {
+      const { data: last } = await sb.from("emails").select("mailbox_user_id").eq("direction", "outbound").ilike("to_address", fromAddress.replace(/.*<([^>]+)>.*/, "$1").trim()).not("mailbox_user_id", "is", null).order("created_at", { ascending: false }).limit(1);
+      mailboxUser = (last && last[0] && last[0].mailbox_user_id) || null;
+    }
+    if (!mailboxUser) mailboxUser = "owner";
+    const attMeta: Array<{ name: string; size: number; contentType: string; path: string | null }> = [];
+    for (const att of attachments) {
+      if (!att.Content || !att.Name) continue;
+      try {
+        const bytes = base64ToBytes(att.Content);
+        const path = emailId + "/" + att.Name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const { error: upErr } = await sb.storage.from("mail-attachments").upload(path, bytes, { contentType: att.ContentType || "application/octet-stream", upsert: true });
+        attMeta.push({ name: att.Name, size: bytes.length, contentType: att.ContentType || "application/octet-stream", path: upErr ? null : path });
+      } catch (_) { attMeta.push({ name: att.Name, size: 0, contentType: att.ContentType || "", path: null }); }
+    }
+    const ccFull: Array<{ Email?: string }> = Array.isArray(payload.CcFull) ? payload.CcFull : [];
     await sb.from("emails").insert({
       id: emailId,
       lead_id: leadId,
@@ -88,6 +111,13 @@ Deno.serve(async (req: Request) => {
       subject: subject,
       body: text,
       postmark_message_id: payload.MessageID,
+      mailbox_user_id: mailboxUser,
+      folder: "inbox",
+      is_read: false,
+      cc_address: ccFull.map((c) => c.Email).filter(Boolean).join(", ") || null,
+      thread_key: subject.toLowerCase().replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, "") + "|" + (leadId || fromAddress.toLowerCase()),
+      attachments: attMeta,
+      html_body: typeof payload.HtmlBody === "string" ? payload.HtmlBody.slice(0, 200000) : null,
     });
 
     // Real text alert, not just an in-app notification -- Joe's explicit

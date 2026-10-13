@@ -76,6 +76,11 @@ Deno.serve(async (req: Request) => {
     // See send-text's initiatedBy for why this exists -- lets speed-to-lead
     // reporting count only genuine LO actions, not AI/automated ones.
     const initiatedBy: string = body.initiatedBy === "ai" ? "ai" : "staff";
+    // Mailbox fields (2026-10-13): Cc/Bcc, any number of attachments (base64), and the draft this send came from (deleted once sent).
+    const ccList: string = body.cc ? String(body.cc) : "";
+    const bccList: string = body.bcc ? String(body.bcc) : "";
+    const extraAtts: Array<{ name: string; contentType?: string; content: string }> = Array.isArray(body.attachments) ? body.attachments.filter((a: any) => a && a.name && a.content).slice(0, 10) : [];
+    const draftId: string | null = body.draftId ? String(body.draftId) : null;
 
     if (!to || !subject || !text) {
       return new Response(JSON.stringify({ error: "missing_fields" }), { status: 400, headers: CORS_HEADERS });
@@ -108,6 +113,19 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Files the compose pane uploaded to private storage (drafts/<user>/<draft>/...) -- pulled in here so the browser never has to base64 them.
+    const draftAttPaths: string[] = mailTrusted && Array.isArray(body.attachmentPaths)
+      ? body.attachmentPaths.map((a: any) => String(a && a.path || "")).filter((p: string) => p.startsWith("drafts/") && !p.includes("..")).slice(0, 10)
+      : [];
+    for (const p of draftAttPaths) {
+      const { data: blob } = await mailAuthSb.storage.from("mail-attachments").download(p);
+      if (!blob) continue;
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let bin = ""; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      const orig = (body.attachmentPaths as any[]).find((a: any) => a && a.path === p);
+      extraAtts.push({ name: (orig && orig.name) || p.split("/").pop()!.replace(/^\d+-/, ""), contentType: (orig && orig.contentType) || blob.type || "application/octet-stream", content: btoa(bin) });
+    }
+
     const plainText = ctaUrl ? text.split(CTA_MARKER).join(ctaUrl) : text;
     const replyTo = leadId ? insertPlusTag(INBOUND_ADDRESS, leadId) : INBOUND_ADDRESS;
 
@@ -123,15 +141,17 @@ Deno.serve(async (req: Request) => {
         To: to,
         // Optional CC (staff/server sends only -- anonymous callers are limited to
         // a staff member or the lead's own address above, so they can't use this).
-        ...(mailTrusted && body.cc ? { Cc: String(body.cc) } : {}),
+        ...(mailTrusted && ccList ? { Cc: ccList } : {}),
+        ...(mailTrusted && bccList ? { Bcc: bccList } : {}),
         ReplyTo: replyTo,
         Subject: subject,
         TextBody: plainText,
         HtmlBody: buildHtmlBody(text, fromPhotoUrl, ctaUrl),
         MessageStream: "outbound",
         TrackOpens: true,
-        ...(attachmentBase64 && attachmentName ? {
-          Attachments: [{ Name: attachmentName, Content: attachmentBase64, ContentType: attachmentContentType }],
+        ...((attachmentBase64 && attachmentName) || (mailTrusted && extraAtts.length) ? {
+          Attachments: (attachmentBase64 && attachmentName ? [{ Name: attachmentName, Content: attachmentBase64, ContentType: attachmentContentType }] : [])
+            .concat(mailTrusted ? extraAtts.map((a) => ({ Name: a.name, Content: a.content, ContentType: a.contentType || "application/octet-stream" })) : []),
         } : {}),
       }),
     });
@@ -143,6 +163,25 @@ Deno.serve(async (req: Request) => {
     const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     const emailId = "em-" + crypto.randomUUID();
 
+    // Mailbox fields: whose mailbox, which folder, which conversation, and the attachments (copied into private storage so they open later).
+    let mailboxUser: string | null = fromUserId;
+    if (!mailboxUser && leadId) {
+      const { data: lr } = await sb.from("leads").select("assigned_to").eq("id", leadId).maybeSingle();
+      mailboxUser = (lr && lr.assigned_to) || null;
+    }
+    const attMeta: Array<{ name: string; size: number; contentType: string; path: string | null }> = [];
+    const allAtts = (attachmentBase64 && attachmentName ? [{ name: attachmentName, contentType: attachmentContentType, content: attachmentBase64 }] : []).concat(mailTrusted ? extraAtts : []);
+    for (const a of allAtts) {
+      try {
+        const bin = atob(a.content); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const safe = a.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+        const path = emailId + "/" + safe;
+        const { error: upErr } = await sb.storage.from("mail-attachments").upload(path, bytes, { contentType: a.contentType || "application/octet-stream", upsert: true });
+        attMeta.push({ name: a.name, size: bytes.length, contentType: a.contentType || "application/octet-stream", path: upErr ? null : path });
+      } catch (_) { attMeta.push({ name: a.name, size: 0, contentType: a.contentType || "", path: null }); }
+    }
+    const isAutomated = initiatedBy === "ai" || !fromUserId;
+    const threadKey = subject.toLowerCase().replace(/^\s*((re|fw|fwd)\s*:\s*)+/i, "") + "|" + (leadId || to.trim().toLowerCase());
     await sb.from("emails").insert({
       id: emailId,
       lead_id: leadId,
@@ -153,7 +192,19 @@ Deno.serve(async (req: Request) => {
       body: plainText,
       sent_by: fromUserId,
       postmark_message_id: pmData.MessageID,
+      mailbox_user_id: mailboxUser,
+      folder: isAutomated ? "automated" : "sent",
+      automated: isAutomated,
+      is_read: true,
+      cc_address: ccList || null,
+      bcc_address: bccList || null,
+      thread_key: threadKey,
+      attachments: attMeta,
     });
+    if (draftId) {
+      await sb.from("emails").delete().eq("id", draftId).eq("folder", "drafts");
+    }
+    if (draftAttPaths.length) await sb.storage.from("mail-attachments").remove(draftAttPaths).catch(() => {});
 
     if (leadId) {
       const { data: leadRow } = await sb.from("leads").select("activity").eq("id", leadId).single();
