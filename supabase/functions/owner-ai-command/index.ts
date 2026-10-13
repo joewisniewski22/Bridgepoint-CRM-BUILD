@@ -62,10 +62,12 @@ const PREPAY_TERMS = ["5yr", "3yr", "2yr", "1yr", "none"];
 
 // How to answer the questions loan officers ask all day (Joe 2026-10-13: "i field way too many dumb questions from the LOs every day").
 const SCENARIO_PLAYBOOK = "\n\nSCENARIO Q&A PLAYBOOK -- answer like a sharp senior loan officer who wants the LO to stop needing to ask. LOs send short, messy questions (\"740 fico dscr ohio 250k purchase rents 2100 can we do 80%?\").\n" +
+  "- LO shorthand: on a fix & flip, \"construction\", \"rehab\", \"reno\" and \"the work\" all mean the REHAB budget; \"90% of purchase and 100% of construction\" is a flip structure question. Only treat it as ground-up (new build) if they say ground-up, new build, build from scratch, or vacant land.\n" +
   "- Parse loosely: k = thousand, \"taxes 3600/yr\" = annualTaxes, \"80%\" = leverage on price/value, \"rents 2100\" = monthly rent, state names or ZIP = the property state. If a ZIP or city is given use it as the address.\n" +
   "- If the essentials are there (loan type, state, credit score, price or value, plus rent for rentals or rehab + ARV for flips), run check_scenario IMMEDIATELY and fill everything else with the defaults, then say what you assumed. Ask ONE short question only when an essential is missing -- the single most important one -- never a list of questions.\n" +
   "- Reply shape: (1) verdict in the first line (\"Yes, that places.\" / \"Not at 80%, but it works at 75%.\" / \"No -- here's why.\"); (2) the max loan or leverage and the 2-3 best options (rate, loan, term type; for LOs call them Option A, Option B); (3) \"To make it work:\" the cheapest single fix from whatIfs or the decline reasons (e.g. a lower loan amount, a credit score threshold, the rent needed); (4) one line starting \"Assumed:\" from the tool's assumed list; (5) the next step (run it in the Pricer tab for the official quote). Numbers over adjectives. Under about 120 words unless they ask for detail.\n" +
   "- Never promise an approval: say \"places per current guidelines\" and that rates move daily. Investor loans only.\n" +
+  "- LEVERAGE / STRUCTURE questions (\"can a first-timer get 90% of purchase and 100% of rehab?\", \"how much will they fund on a flip?\", \"what's the max LTV?\"): do NOT answer from the ratio tables alone -- \"LTC\" is measured differently by different partners. Price a sample deal with check_scenario (use their numbers; if none, pick round ones and say so, e.g. $200k purchase, $100k rehab, $450k ARV, with the credit score and experience they gave) and answer from what it returns: initialAdvance and initialPctOfPurchase, rehabFundedPct, totalPctOfArv. If the pricer's best answer is YES, say yes plainly even if the general table sounds different. For Joe, Fiore and Erika also say which lender gives the best structure and the credit-score cutoffs (for example, under 720 the rehab funded is limited).\n" +
   "- Process and how-it-works questions (what docs, what does a field mean, can we do X): answer in 2-4 sentences with the specific rule from the knowledge above.\n" +
   "- If the knowledge and tools don't cover it, say so in one line and tell them exactly what to ask Joe so he can answer in one sentence.";
 
@@ -486,7 +488,16 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     const results = await runPricer(base);
     if (!results) return { error: "pricer_unavailable", detail: "The pricer didn't answer -- suggest running it in the Pricer tab." };
     const eligible = results.filter((r) => r && r.eligible);
-    const opts = eligible.flatMap((r) => (r.options || []).map((o: any) => ({ lender: r.lender, rate: o.rate, price: o.price, dscr: o.dscr ?? null, loanAmount: o.loanAmount || r.loanAmountUsed || r.maxLoanAmount || null, maxLoan: r.maxLoanAmount || null, program: o.program, lenderPoints: rtl && o.price != null ? Math.round((o.price - 100) * 1000) / 1000 : null }))).filter((o) => isFinite(Number(o.rate))).sort((a, b) => a.rate - b.rate);
+    // For flips/ground-up, spell out the structure so "X% of purchase and Y% of rehab" questions are answered from real numbers:
+    // initial advance (loan minus the rehab holdback) as % of purchase, rehab funded as % of the budget, total loan as % of ARV.
+    const rehabAsked = Number(base.rehabBudget || 0), buy = Number(base.purchasePrice || 0), arvN = Number(base.arv || 0);
+    const structure = (r: any, loan: number | null) => {
+      if (!rtl || !loan || !buy) return {};
+      const hold = r.rehabHoldback != null ? Number(r.rehabHoldback) : rehabAsked;
+      const pct = (a: number, b: number) => (b > 0 ? Math.round(a / b * 1000) / 10 : null);
+      return { initialAdvance: Math.round(loan - hold), initialPctOfPurchase: pct(loan - hold, buy), rehabFunded: Math.round(hold), rehabFundedPct: pct(hold, rehabAsked), totalPctOfArv: pct(loan, arvN), totalPctOfCost: pct(loan, buy + rehabAsked) };
+    };
+    const opts = eligible.flatMap((r) => (r.options || []).map((o: any) => { const loanAmt = o.loanAmount || r.loanAmountUsed || r.maxLoanAmount || null; return { lender: r.lender, rate: o.rate, price: o.price, dscr: o.dscr ?? null, loanAmount: loanAmt, maxLoan: r.maxLoanAmount || null, program: o.program, lenderPoints: rtl && o.price != null ? Math.round((o.price - 100) * 1000) / 1000 : null, ...structure(r, loanAmt) }; })).filter((o) => isFinite(Number(o.rate))).sort((a, b) => a.rate - b.rate);
 
     // "What would make it work" -- only when it doesn't place (or only places below the leverage asked): quietly price a few variants and report
     // which single change fixes it. Numbers only, so it is safe for LOs (no lender names).
@@ -512,12 +523,16 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
       whatIfs.sort((a, b) => String(a.change).localeCompare(String(b.change)));
     }
     if (isInsider(caller)) {
-      return { placeable: eligible.length > 0, options: opts.slice(0, 8), declines: results.filter((r) => r && !r.eligible).map((r) => ({ lender: r.lender, reason: r.reason })), whatIfs, assumed, note: "Staff view (lender names OK for this person)." };
+      const keep = (o: any) => ({ rate: o.rate, loanAmount: o.loanAmount, program: o.program, dscr: o.dscr, initialAdvance: o.initialAdvance, initialPctOfPurchase: o.initialPctOfPurchase, rehabFunded: o.rehabFunded, rehabFundedPct: o.rehabFundedPct, totalPctOfArv: o.totalPctOfArv, totalPctOfCost: o.totalPctOfCost });
+      const byLender = eligible.map((r) => { const os = opts.filter((o) => o.lender === r.lender); const maxO = os.slice().sort((a, b) => ((b.loanAmount || 0) - (a.loanAmount || 0)) || (a.rate - b.rate))[0]; return maxO ? { lender: r.lender, atMaxLoan: keep(maxO), lowestRate: { rate: os[0].rate, loanAmount: os[0].loanAmount } } : null; }).filter(Boolean).sort((a: any, b: any) => (b.atMaxLoan.loanAmount || 0) - (a.atMaxLoan.loanAmount || 0));
+      return { placeable: eligible.length > 0, byLender, options: opts.slice(0, 8), declines: results.filter((r) => r && !r.eligible).map((r) => ({ lender: r.lender, reason: r.reason })), whatIfs, assumed, note: "Staff view (lender names OK for this person). byLender shows each lender's BIGGEST loan (atMaxLoan, with initialPctOfPurchase / rehabFundedPct / totalPctOfArv) and its lowest rate; options are sorted by rate so they are mostly LOWER-leverage tiers -- for any how-much-can-we-get or leverage question use byLender.atMaxLoan, never options." };
     }
     const scrub = (s: string) => String(s || "").replace(LENDER_NAME_RX, "the lender").replace(/the lender's? /gi, "").trim();
-    const best = opts.slice(0, 4).map((o) => ({ rate: o.rate, loanAmount: o.loanAmount, maxLoan: o.maxLoan, dscr: o.dscr, termType: String(o.program || "").replace(LENDER_NAME_RX, "").replace(/\s*·\s*$/, "").trim(), pointsToLender: o.lenderPoints }));
+    const best = opts.slice(0, 4).map((o) => ({ rate: o.rate, loanAmount: o.loanAmount, maxLoan: o.maxLoan, dscr: o.dscr, initialAdvance: (o as any).initialAdvance, initialPctOfPurchase: (o as any).initialPctOfPurchase, rehabFundedPct: (o as any).rehabFundedPct, totalPctOfArv: (o as any).totalPctOfArv, totalPctOfCost: (o as any).totalPctOfCost, termType: String(o.program || "").replace(LENDER_NAME_RX, "").replace(/\s*·\s*$/, "").trim(), pointsToLender: o.lenderPoints }));
     const reasons = eligible.length ? [] : Array.from(new Set(results.filter((r) => r && !r.eligible && !r.unavailable && r.reason).map((r) => scrub(r.reason)))).slice(0, 6);
-    return { placeable: eligible.length > 0, options: best, reasonsNotPlaceable: reasons, whatIfs, assumed, note: "Present these as Bridgepoint's options (Option A, B...). Never mention or guess a lender. Rates move daily; the Pricer tab gives the official quote and term sheet." };
+    const maxOpt = opts.slice().sort((a, b) => ((b.loanAmount || 0) - (a.loanAmount || 0)) || (a.rate - b.rate))[0] as any;
+    const maxLeverage = maxOpt ? { rate: maxOpt.rate, loanAmount: maxOpt.loanAmount, initialAdvance: maxOpt.initialAdvance, initialPctOfPurchase: maxOpt.initialPctOfPurchase, rehabFundedPct: maxOpt.rehabFundedPct, totalPctOfArv: maxOpt.totalPctOfArv, totalPctOfCost: maxOpt.totalPctOfCost } : null;
+    return { placeable: eligible.length > 0, maxLeverage, options: best, reasonsNotPlaceable: reasons, whatIfs, assumed, note: "Present these as Bridgepoint's options (Option A, B...). Never mention or guess a lender. maxLeverage is the BIGGEST loan we can do on this deal (use it for any how-much-can-we-get or leverage question); options are sorted by rate, so they are mostly lower-leverage tiers. Rates move daily; the Pricer tab gives the official quote and term sheet." };
   }
   if (name === "list_closed_deals") {
     const limit = Math.min((input.limit as number) || 5, 20);
