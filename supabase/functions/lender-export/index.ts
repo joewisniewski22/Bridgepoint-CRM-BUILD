@@ -143,6 +143,7 @@ async function buildPackage(leadId: string, lender: string) {
     },
     trackRecord: tr.map((t: any) => ({ address: t.address, purchaseDate: t.purchaseDate, purchasePrice: t.purchasePrice, rehabBudget: t.rehabBudget, exitDate: t.exitDate, exitValue: t.exitValue, exitType: t.exitType })),
     reoOwns: l.reo_owns || null,
+    propertyQuestionnaire: (l.property_questionnaire && l.property_questionnaire.submittedAt) ? (l.property_questionnaire.answers || null) : null,
     reo: (Array.isArray(l.reo) ? l.reo : []).map((p: any) => ({ address: p.address, propertyType: p.propertyType, occupancy: p.occupancy, purchaseYear: p.purchaseYear, purchasePrice: p.purchasePrice, currentValue: p.currentValue, loanBalance: p.loanBalance, monthlyRent: p.monthlyRent })),
     documents: docs,
     mismo,

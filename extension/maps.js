@@ -308,6 +308,35 @@
         }
         res.skipped.push("SSN (type it yourself)", "Save & Next (click it yourself)");
       } },
+    // Phase 2 > Property Information: the borrower's own answers from our Property Questionnaire (declarations are never guessed).
+    // The Current/Past/Proposed use and operations pickers are drop-down widgets: a person picks those.
+    { name: "Velocity: property information", match: () => /AppraisalNavigation\/PropertyInformation/i.test(location.hash) && !!document.getElementById("YearOfConstruction"),
+      run: async (p, H, res) => {
+        const S = window.BPFill, a = p.propertyQuestionnaire;
+        if (!a) { res.missing.push("Property questionnaire not completed by the borrower yet"); return; }
+        const put = (id, v, name) => { const el = document.getElementById(id); if (v == null || v === "") { res.skipped.push(name || id); return; } if (el && S.setValue(el, String(v))) res.filled.push(name || id); else res.missing.push(name || id); };
+        const yn = (v) => (v === "Yes" ? "Yes" : v === "No" ? "No" : "");
+        put("YearOfConstruction", a.yearBuilt, "Year of construction");
+        put("NumOfBuildings", a.numBuildings, "Buildings");
+        put("NumOfTotalUnits", a.totalUnits, "Total units");
+        put("NumOfVacantUnits", a.vacantUnits, "Vacant units");
+        put("NumOfCurrentUnits", a.occupiedUnits, "Occupied units");
+        put("CrossStreets", a.crossStreets, "Cross streets");
+        put("AreaDescription", a.areaDescription, "Owner-occupied area description");
+        put("SiteSize", a.siteSize, "Site size"); put("SiteSizeUnits", a.siteSizeUnit || "Square feet", "Site size units");
+        put("BuildingSize", a.buildingSize, "Building size");
+        put("HasWaterSource", yn(a.waterSource), "Water source"); put("IsMunicipal", yn(a.municipal), "Municipality");
+        put("IsWetlands", yn(a.wetlands), "Wetlands"); put("RepairsNeeded", yn(a.repairsNeeded), "Repairs needed");
+        put("MultipleParcels", yn(a.multipleParcels), "Multiple parcels"); put("RecentSale", yn(a.recentSale), "Sold in 24 months");
+        put("MarijOrAdultEnt", yn(a.marijuanaAdult), "Marijuana / adult use"); put("SubjRegulation", yn(a.rentRegulated), "Rent regulation");
+        put("PollutionConditions", { not_known: "Not Known", known_nfa: "NFA", known_active: "active remediation" }[a.pollution], "Pollution conditions");
+        put("EnvironmentAssessment", yn(a.envAssessment), "Environmental assessment"); put("IsContaminated", yn(a.contamination), "Contamination knowledge");
+        put("DryCleanerOnSite", { none: "No dry cleaner", dropoff: "Drop off only", green: "green dry cleaning", perc: "perchloroethylene" }[a.dryCleaner], "Dry cleaner");
+        put("HasStorageTank", yn(a.storageTank), "Storage tanks"); put("HasStorageTankRemoved", yn(a.storageTankRemoved), "Storage tanks removed");
+        put("IsGenerator", yn(a.rcraGenerator), "RCRA generator"); put("HasOccupants", yn(a.occupantsRegulated), "Occupants handling regulated substances");
+        put("HasPendingSuit", yn(a.pendingSuit), "Pending lawsuit"); put("IsDamage", yn(a.waterDamage), "Water damage / mold claims"); put("IsWaterPlant", yn(a.moldPlan), "Mold management plan");
+        res.skipped.push("Current / past / proposed use + operations (pick in the drop-downs: borrower wrote: " + (a.currentUse || "—") + " / past: " + (a.pastUse || "—") + ")", "Save & Next (click it yourself)");
+      } },
   ];
 
   window.BP_MAPS = {
