@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Bridgepoint Lender Export",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Fills outside-lender applications and uploads documents from a Bridgepoint CRM loan file. Staff log in to the lender themselves and always submit by hand.",
   "permissions": ["storage", "tabs"],
   "host_permissions": [
@@ -12,7 +12,13 @@
     "https://app.kiavi.com/*",
     "https://aim.admortgage.com/*",
     "https://www.bplhub.com/*",
-    "https://bplhub.com/*"
+    "https://bplhub.com/*",
+    "https://www.generatevelocity.com/*",
+    "https://generatevelocity.com/*",
+    "https://commercial.nextres.com/*",
+    "https://www.leapplenderportal.com/*",
+    "https://xconnect-x1.homexmortgage.com/*",
+    "https://app.loanpass.io/*"
   ],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
@@ -27,7 +33,13 @@
         "https://app.kiavi.com/*",
         "https://aim.admortgage.com/*",
         "https://www.bplhub.com/*",
-        "https://bplhub.com/*"
+        "https://bplhub.com/*",
+        "https://www.generatevelocity.com/*",
+        "https://generatevelocity.com/*",
+        "https://commercial.nextres.com/*",
+        "https://www.leapplenderportal.com/*",
+        "https://xconnect-x1.homexmortgage.com/*",
+        "https://app.loanpass.io/*"
       ],
       "js": ["maps.js", "filler.js", "panel.js"],
       "run_at": "document_idle"

@@ -253,6 +253,10 @@
     Kiavi: { host: /kiavi\.com$/, pages: KIAVI_PAGES },
     "A&D": { host: /admortgage\.com$/, pages: AD_PAGES },
     Constructive: { host: /bplhub\.com$/, pages: [] }, // portal side panel (copy + attach); full map built on the next real Constructive file
-    NextRes: { host: null, pages: [] },
+    NextRes: { host: /nextres\.com$/, pages: [] },
+    Velocity: { host: /generatevelocity\.com$/, pages: [] }, // panel now; full map built in a mapping session on a Velocity draft
+    LEND: { host: /leapplenderportal\.com$/, pages: [] },
+    HomeXpress: { host: /homexmortgage\.com$/, pages: [] },
+    Dominion: { host: /loanpass\.io$/, pages: [] },
   };
 })();
