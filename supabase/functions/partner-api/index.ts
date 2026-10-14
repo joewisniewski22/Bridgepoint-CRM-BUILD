@@ -76,8 +76,34 @@ async function pickLO(partner: Record<string, unknown>): Promise<string> {
   return !error && data ? (data as string) : "owner";
 }
 
+// Sends a referred borrower their application link (from their assigned loan officer, by text + email). Bridgepoint copy only.
+async function sendApplication(partner: Record<string, unknown>, leadId: string) {
+  const { data: l } = await sb.from("leads").select("*").eq("id", leadId).eq("referral_partner_id", partner.id).maybeSingle();
+  if (!l) return { error: "We couldn't find that referral." };
+  if (["closed", "postclosing"].includes(String(l.stage)) || ["lost", "spam", "closed"].includes(String(l.status))) return { error: "This file is already closed out — call us if you need anything." };
+  const acts = (Array.isArray(l.activity) ? l.activity : []) as Record<string, unknown>[];
+  const recent = acts.filter((a) => a.kind === "partner-app-sent" && a.at && Date.now() - new Date(String(a.at)).getTime() < 12 * 3600000);
+  if (recent.length) return { error: "The application was already sent in the last few hours. Give them a bit, or call us." };
+  let token = l.application_token as string | null;
+  if (!token) { token = crypto.randomUUID(); await sb.from("leads").update({ application_token: token }).eq("id", leadId); }
+  const url = CLIENT_URL + "?apply=" + leadId + "&t=" + token;
+  const { data: lo } = await sb.from("users").select("id,name,email,phone,photo_url").eq("id", l.assigned_to).single();
+  const first = String(l.name || "there").split(/\s+/)[0], label = partnerLabel(partner), today = new Date().toISOString().slice(0, 10);
+  const loName = (lo && lo.name) || "your loan officer";
+  const msg = "Hi " + first + ", it's " + loName + " with Bridgepoint Lending. " + label + " asked me to get your application started. It takes about 10 minutes, and your information is kept secure. Here's your link: " + url + " — reply here or call (850) 279-8588 with any questions. (Reply STOP to opt out)";
+  let texted = false;
+  if (l.email) await post("send-email", { leadId, to: l.email, subject: "Your Bridgepoint Lending application", text: msg, fromName: loName, fromAddress: lo?.email, fromUserId: lo?.id, fromPhotoUrl: lo?.photo_url || null, initiatedBy: "ai" });
+  if (l.phone && !l.sms_opt_out) { await post("send-text", { leadId, to: l.phone, text: msg, fromName: loName, initiatedBy: "ai" }); texted = true; }
+  acts.push({ date: today, type: "system", kind: "partner-app-sent", at: new Date().toISOString(), text: "Application link sent to the borrower by " + label + " from the partner portal.", author: "System" });
+  const patch: Record<string, unknown> = { activity: acts };
+  if (["new", "attempting", "qualifying"].includes(String(l.stage))) { patch.stage = "app_sent"; patch.application_sent_at = today; }
+  await sb.from("leads").update(patch).eq("id", leadId);
+  if (lo) await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: lo.id, lead_id: leadId, kind: "hot-lead", text: (label + " just sent " + l.name + " their application link. Watch for it and follow up: " + CRM_URL + "?lead=" + leadId).slice(0, 400), date: today, read: false });
+  return { ok: true, emailed: !!l.email, texted };
+}
+
 // Creates the borrower's file under a loan officer, tagged to the partner. `consented` = the borrower checked the box themselves, or the partner attested.
-async function createReferralLead(partner: Record<string, unknown>, b: Record<string, unknown>, via: "link" | "partner") {
+async function createReferralLead(partner: Record<string, unknown>, b: Record<string, unknown>, via: "link" | "partner", opts: { skipWelcome?: boolean } = {}) {
   const name = clean(b.name, 80), email = clean(b.email, 120).toLowerCase();
   const phoneDigits = clean(b.phone, 30).replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
   const loanTypeRaw = clean(b.loanType, 40);
@@ -126,7 +152,7 @@ async function createReferralLead(partner: Record<string, unknown>, b: Record<st
   if (lo?.email) await post("send-email", { to: lo.email, subject: "New referral from " + label + ": " + name, text: alertText, fromName: "Bridgepoint CRM" });
 
   // Welcome to the borrower from their loan officer (consent recorded above). Deterministic copy, no AI.
-  if (lo) {
+  if (lo && !opts.skipWelcome) {
     const first = name.split(/\s+/)[0];
     const book = CLIENT_URL + "?book=" + assignee + "&forLead=" + id;
     const msg = "Hi " + first + ", it's " + lo.name + " with Bridgepoint Lending. " + label + " asked me to reach out about your " + (unsure ? "financing" : loanType) + " request. " +
@@ -134,7 +160,7 @@ async function createReferralLead(partner: Record<string, unknown>, b: Record<st
     await post("send-email", { leadId: id, to: email, subject: "Your loan request — Bridgepoint Lending", text: msg, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photo_url || null, initiatedBy: "ai" });
     await post("send-text", { leadId: id, to: phone, text: msg, fromName: lo.name, initiatedBy: "ai" });
   }
-  return { ok: true, leadId: id };
+  return { ok: true, leadId: id, applyUrl: via === "link" ? (CLIENT_URL + "?apply=" + id + "&t=" + appToken) : undefined };
 }
 
 // ---- pricing (Option A/B only; same scenario shaping as ai-price-lead) ----
@@ -263,7 +289,7 @@ Deno.serve(async (req: Request) => {
       const rows = (leads || []).map((l: any) => {
         const acts = Array.isArray(l.activity) ? l.activity : [];
         const last = acts.length ? String(acts[acts.length - 1].date || "") : "";
-        return { name: l.name, loanType: l.loan_type, property: l.property_address || null, loanAmount: l.loan_amount ? Number(l.loan_amount) : null,
+        return { id: l.id, name: l.name, loanType: l.loan_type, property: l.property_address || null, loanAmount: l.loan_amount ? Number(l.loan_amount) : null,
           status: plainStatus(l.stage, l.status), funded: l.stage === "closed" || l.stage === "postclosing", submitted: l.created_at, updated: last || l.created_at, contact: loName(l.assigned_to) };
       });
       const stats = { total: rows.length, active: rows.filter((r) => !r.funded && r.status !== "Not moving forward").length, funded: rows.filter((r) => r.funded).length };
@@ -278,8 +304,15 @@ Deno.serve(async (req: Request) => {
       return (r as any).error ? json({ error: (r as any).error }, 400) : json(r);
     }
     if (action === "submit_deal") {
-      const r = await createReferralLead(p, b, "partner");
-      return (r as any).error ? json({ error: (r as any).error }, 400) : json(r);
+      const wantApp = b.sendApplication === true;
+      const r: any = await createReferralLead(p, b, "partner", { skipWelcome: wantApp });
+      if (r.error) return json({ error: r.error }, 400);
+      if (wantApp && r.leadId) { const a: any = await sendApplication(p, r.leadId); return json({ ok: true, applicationSent: !!a.ok }); }
+      return json({ ok: true });
+    }
+    if (action === "send_application") {
+      const r: any = await sendApplication(p, clean(b.referralId, 20));
+      return r.error ? json({ error: r.error }, 400) : json(r);
     }
     return json({ error: "unknown_action" }, 400);
   } catch (e) {

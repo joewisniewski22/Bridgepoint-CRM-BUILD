@@ -126,6 +126,7 @@ noindex: true
             <div><label class="f">Property address (if known)</label><div class="in"><input name="propertyAddress"></div></div>
           </div>
           <div><label class="f">Notes for the loan officer (optional)</label><div class="in"><input name="notes" maxlength="400"></div></div>
+          <label class="consent"><input type="checkbox" name="sendApplication" checked><span>Also text and email the borrower their application link now, from their Bridgepoint loan officer.</span></label>
           <label class="consent"><input type="checkbox" name="consent"><span>I confirm this borrower asked me to share their information and agreed to be contacted by BridgePoint Lending by phone, text and email.</span></label>
           <div class="err" id="sd-err" role="alert" aria-live="polite"></div>
           <button class="btn btn-gold" type="submit" id="sd-btn">Send deal</button>
@@ -161,8 +162,15 @@ noindex: true
     $("pp-linkbox").value=j.partner.link;
     $("pp-stats").innerHTML='<div class="pp-stat"><b>'+j.stats.total+'</b>referred</div><div class="pp-stat"><b>'+j.stats.active+'</b>in progress</div><div class="pp-stat"><b>'+j.stats.funded+'</b>funded</div>';
     var rows=j.referrals.map(function(r){ var cls=r.funded?"ok":(r.status==="Not moving forward"?"no":"");
-      return '<tr><td><b>'+esc(r.name)+'</b><div class="pp-muted">'+esc(r.property||"")+'</div></td><td>'+esc(r.loanType||"")+(r.loanAmount?'<div class="pp-muted">'+money(r.loanAmount)+'</div>':'')+'</td><td><span class="pp-pill '+cls+'">'+esc(r.status)+'</span></td><td>'+esc(r.updated||"")+'</td><td>'+esc(r.contact||"")+'<div class="pp-muted">'+esc(j.partner.companyPhone)+'</div></td></tr>'; }).join("");
+      return '<tr><td><b>'+esc(r.name)+'</b><div class="pp-muted">'+esc(r.property||"")+'</div></td><td>'+esc(r.loanType||"")+(r.loanAmount?'<div class="pp-muted">'+money(r.loanAmount)+'</div>':'')+'</td><td><span class="pp-pill '+cls+'">'+esc(r.status)+'</span>'+((r.funded||r.status==="Not moving forward")?'':'<div style="margin-top:8px"><button class="btn" type="button" data-app="'+esc(r.id)+'" style="padding:6px 12px;font-size:.85rem">'+(/^Application sent/.test(r.status)?'Resend application':'Send application')+'</button> <span class="pp-muted" data-appmsg="'+esc(r.id)+'"></span></div>')+'</td><td>'+esc(r.updated||"")+'</td><td>'+esc(r.contact||"")+'<div class="pp-muted">'+esc(j.partner.companyPhone)+'</div></td></tr>'; }).join("");
     $("pp-rows").innerHTML=rows; $("pp-empty").hidden=j.referrals.length>0; }).catch(function(){ show(false); }); }
+  // "Send application": texts + emails the borrower their application link from their Bridgepoint loan officer
+  $("pp-rows").addEventListener("click",function(e){ var b=e.target.closest("button[data-app]"); if(!b) return; var id=b.getAttribute("data-app"), msg=document.querySelector('[data-appmsg="'+id+'"]');
+    if(!confirm("Text and email this borrower their application link now?")) return;
+    b.disabled=true; msg.textContent="Sending…";
+    call({action:"send_application",referralId:id}).then(function(res){ if(res.status===401){ signOut(); return; }
+      if(!res.ok){ msg.textContent=(res.j&&res.j.error)||"Couldn't send."; b.disabled=false; return; }
+      msg.textContent="Sent ✓"; setTimeout(load,1500); }).catch(function(){ msg.textContent="Couldn't send."; b.disabled=false; }); });
   $("pp-out").addEventListener("click",signOut);
   $("pp-copy").addEventListener("click",function(){ var b=$("pp-linkbox"); b.select(); try{ navigator.clipboard.writeText(b.value); }catch(e){ document.execCommand("copy"); } $("pp-copy").textContent="Copied ✓"; setTimeout(function(){ $("pp-copy").textContent="Copy link"; },1800); });
   Array.prototype.forEach.call($("pp-tabs").querySelectorAll("button"),function(b){ b.addEventListener("click",function(){
@@ -182,10 +190,10 @@ noindex: true
       $("pr-out").innerHTML=j.options.map(function(o){ return '<div class="pp-opt"><span><b>'+esc(o.label)+'</b><div class="pp-muted">'+esc(j.term)+'</div></span><span style="text-align:right"><b>'+esc(o.rate)+'%</b><div class="pp-muted">'+(o.loanAmount?'up to '+money(o.loanAmount):'')+'</div></span></div>'; }).join("")+'<p class="pp-muted">'+esc(j.note)+'</p>';
     }).catch(function(x){ $("pr-err").textContent=x.message; }).then(function(){ btn.disabled=false; btn.textContent="Get ballpark pricing"; }); });
   $("sdf").addEventListener("submit",function(e){ e.preventDefault(); $("sd-err").textContent="";
-    var d=new FormData($("sdf")), body={action:"submit_deal",consent:$("sdf").elements.consent.checked}; d.forEach(function(v,k){ if(k!=="consent") body[k]=v; });
+    var d=new FormData($("sdf")), body={action:"submit_deal",consent:$("sdf").elements.consent.checked,sendApplication:$("sdf").elements.sendApplication.checked}; d.forEach(function(v,k){ if(k!=="consent"&&k!=="sendApplication") body[k]=v; });
     var btn=$("sd-btn"); btn.disabled=true; btn.textContent="Sending…";
     call(body).then(function(res){ if(res.status===401){ signOut(); return; } if(!res.ok) throw new Error((res.j&&res.j.error)||"Something went wrong.");
-      $("sdf").reset(); $("sd-done").hidden=false; load(); }).catch(function(x){ $("sd-err").textContent=x.message; }).then(function(){ btn.disabled=false; btn.textContent="Send deal"; }); });
+      $("sdf").reset(); $("sdf").elements.sendApplication.checked=true; $("sd-done").hidden=false; load(); }).catch(function(x){ $("sd-err").textContent=x.message; }).then(function(){ btn.disabled=false; btn.textContent="Send deal"; }); });
   // magic link from the email: /partner/?e=...&c=123456
   var qp=new URLSearchParams(location.search), e0=qp.get("e"), c0=qp.get("c");
   if(e0&&c0){ history.replaceState(null,"",location.pathname); verify(e0.toLowerCase(),c0).catch(function(x){ show(false); $("lg-err1").textContent=x.message; }); }

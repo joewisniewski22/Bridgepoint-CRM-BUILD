@@ -68,7 +68,7 @@
         <button class="btn btn-gold" type="submit" id="r-btn">Send</button>
       </div>
     </form>
-    <div id="r-done" hidden><h2>Thanks &mdash; we&rsquo;ll be in touch.</h2><p class="sub">A BridgePoint loan officer will contact you shortly. Prefer to talk now? Call <a href="tel:+18502798588">(850) 279-8588</a>.</p></div>
+    <div id="r-done" hidden><h2>Thanks &mdash; we&rsquo;ll be in touch.</h2><p class="sub">A BridgePoint loan officer will contact you shortly. Want to get a head start? You can begin your application now (about 10 minutes). Prefer to talk? Call <a href="tel:+18502798588">(850) 279-8588</a>.</p><p><a class="btn btn-gold" id="r-apply" href="#" hidden>Start my application</a></p></div>
     <div id="r-bad" hidden><h2>This link isn&rsquo;t active.</h2><p class="sub">You can still reach us: call <a href="tel:+18502798588">(850) 279-8588</a> or <a href="/get-quote/">get a quote here</a>.</p></div>
   </div>
 </div></section>
@@ -96,7 +96,7 @@
     if(!f.elements.consent.checked) return err.textContent="Please check the box so we can contact you.";
     btn.disabled=true; btn.textContent="Sending…";
     call({action:"submit_lead",code:code,name:d.get("name"),phone:d.get("phone"),email:d.get("email"),loanType:d.get("loanType"),propertyAddress:d.get("propertyAddress"),notes:d.get("notes"),website:d.get("website"),consent:true})
-    .then(function(res){ if(!res.ok||!res.j.ok) throw new Error((res.j&&res.j.error)||"Something went wrong."); f.hidden=true; document.getElementById("r-done").hidden=false; document.querySelector("#rw .sub").hidden=true; })
+    .then(function(res){ if(!res.ok||!res.j.ok) throw new Error((res.j&&res.j.error)||"Something went wrong."); f.hidden=true; document.getElementById("r-done").hidden=false; document.querySelector("#rw .sub").hidden=true; if(res.j.applyUrl){ var a=document.getElementById("r-apply"); a.href=res.j.applyUrl; a.hidden=false; } })
     .catch(function(x){ err.textContent=x.message||"Something went wrong — please call (850) 279-8588."; btn.disabled=false; btn.textContent="Send"; });
   });
 })();
