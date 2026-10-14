@@ -95,6 +95,11 @@ Deno.serve(async (req: Request) => {
     "BY LO (this week's new inbound leads; applications = last 30 days)",
     ...rows.map((r: any) => "- " + r.name + ": " + r.leads + " leads, " + r.never + " never called, median first call " + r.median + ", " + r.fast + " within 5 min, reached " + r.reached + ", " + r.apps30 + " applications (30d)"),
   ];
+  // Goal pacing from the growth tracker (funded volume vs the monthly target, what it takes). Best-effort: the email goes out either way.
+  try {
+    const gp = await fetch(SUPABASE_URL + "/functions/v1/growth-tracker", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ secret: body.secret, mode: "summary" }) }).then((r) => r.json());
+    if (gp && gp.ok && Array.isArray(gp.lines)) lines.splice(2, 0, ...gp.lines, "");
+  } catch (_) { /* skip */ }
   const text = lines.join("\n");
   const { data: owner } = await sb.from("users").select("email").eq("id", "owner").single();
   const to = (body.to as string) || owner?.email;

@@ -11233,6 +11233,7 @@ function renderShell(){
         (isOwner() ? navItem("followups","📋","Follow-Up Center", (fuLoStats().reduce(function(s,r){ return s + r.over24; }, 0)) || null) : "") +
         (isOwner() ? navItem("webposts","🌐","Website Posts", wpPendingCount() || null) : "") +
         (isOwner() ? navItem("team","◈","Team") : "") +
+        (canSeeGrowth() ? navItem("growth","\uD83D\uDCC8","Growth Tracker") : "") +
         (isOwner() ? navItem("capital","\uD83C\uDFE6","Capital Readiness") : "") +
         (isOwner() ? navItem("payroll","$","Payroll") : "") +
         (isOwner() ? navItem("settings","⚙","Settings") : "") +
@@ -11272,6 +11273,7 @@ function renderShell(){
   else if (ui.view === "detail") body = renderLeadDetail();
   else if (ui.view === "followups") body = renderFollowUps();
   else if (ui.view === "webposts") body = renderWebsitePosts();
+  else if (ui.view === "growth") body = canSeeGrowth() ? renderGrowth() : renderToday();
   else if (ui.view === "capital") body = isOwner() ? renderCapitalReadiness() : renderToday();
   else if (ui.view === "team") body = renderTeam();
   else if (ui.view === "payroll") body = renderPayroll();
@@ -14268,6 +14270,78 @@ function addTermSheetOption(leadId, fd, file){
       });
     } else saveRow();
   }
+}
+/* ---------------------------------------------------------------------
+   Growth Tracker (Joe 2026-10-14: "track everything you need to make sure we hit that goal"). Owner + Fiore only; the numbers come from the
+   growth-tracker edge function (real CRM outcomes + the ad_spend_daily ledger), which re-checks who is asking.
+--------------------------------------------------------------------- */
+function canSeeGrowth(){ return isOwner() || (currentUser() && currentUser().id === "lo-fiore"); }
+function loadGrowth(force){
+  if (!sb || !canSeeGrowth()) return;
+  ui.gr = ui.gr || { days: 90, data: null, loading: false, error: false };
+  if (ui.gr.loading || (ui.gr.data && !force)) return;
+  ui.gr.loading = true;
+  sb.functions.invoke("growth-tracker", { body: { mode: "dashboard", windowDays: ui.gr.days } }).then(function(res){
+    ui.gr.loading = false;
+    if (res.error || !res.data || !res.data.ok){ ui.gr.error = true; } else { ui.gr.data = res.data; ui.gr.error = false; }
+    if (ui.view === "growth") render();
+  }).catch(function(){ ui.gr.loading = false; ui.gr.error = true; if (ui.view === "growth") render(); });
+}
+function renderGrowth(){
+  if (!canSeeGrowth()) return renderToday();
+  loadGrowth(false);
+  var gr = ui.gr || {}, d = gr.data;
+  var top = topbar("Growth Tracker", "Every number that decides whether we hit the goal — funded volume, pipeline, conversion, cost and speed. Updated live.", '<button class="btn btn-sm" data-action="growth-refresh">↻ Refresh</button>');
+  if (!d) return top + '<div class="content"><div class="empty">' + (gr.error ? "Couldn't load the tracker — tap Refresh to try again." : "Loading your numbers…") + '</div></div>';
+  var g = d.goal, t = d.thisMonth, b = d.backsolve, tot = d.funnel.totals;
+  var pct = function(a, c){ return c ? Math.round(a / c * 100) + "%" : "—"; };
+  var usd = function(n){ return n == null ? "—" : fmtUSD(Math.round(n)); };
+  var statusPill = t.status === "on_pace" ? '<span class="badge badge-forest">On pace</span>' : t.status === "behind" ? '<span class="badge badge-gold">Behind</span>' : '<span class="badge badge-rust">Far behind</span>';
+  var bar = function(val, max, color){ var w = max ? Math.min(100, Math.round(val / max * 100)) : 0; return '<div style="background:var(--surface-2);border-radius:6px;height:12px;overflow:hidden"><div style="width:' + w + '%;height:100%;background:' + color + '"></div></div>'; };
+  var maxM = Math.max(g.target, Math.max.apply(null, d.months.map(function(m){ return m.volume; })));
+  var monthBars = d.months.map(function(m){
+    var h = maxM ? Math.max(2, Math.round(m.volume / maxM * 100)) : 2, th = maxM ? Math.round(g.target / maxM * 100) : 100;
+    return '<div style="flex:1;min-width:46px;text-align:center"><div style="height:120px;position:relative;display:flex;align-items:flex-end;justify-content:center">' +
+      '<div style="position:absolute;left:0;right:0;bottom:' + th + '%;border-top:2px dashed var(--c-rust)"></div>' +
+      '<div style="width:60%;height:' + h + '%;background:' + (m.hit ? "var(--c-forest)" : "var(--brand)") + ';border-radius:4px 4px 0 0"></div></div>' +
+      '<div class="footnote" style="padding:4px 0 0"><b>' + usd(m.volume) + '</b><br>' + m.loans + ' loan' + (m.loans === 1 ? "" : "s") + '<br>' + esc(m.m.slice(2)) + '</div></div>';
+  }).join("");
+  var goalCard = '<div class="panel panel-pad" style="margin-bottom:14px">' +
+    '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div>' +
+      '<div class="rail-title">The goal</div>' +
+      '<div style="font-size:1.05rem;margin-top:4px"><b>' + usd(g.target) + ' funded per month for ' + g.streakRequired + ' months in a row</b>, then ' + usd(g.next) + ' a month</div>' +
+      '<div class="footnote" style="padding:4px 0 0">Deadline ' + esc(g.deadline) + ' (' + g.monthsLeft + ' months left). To finish on time the streak has to start by <b>' + esc(g.latestStreakStart) + '</b>. Months in a row so far: <b>' + g.streak + ' of ' + g.streakRequired + '</b>.</div>' +
+    '</div><div>' + statusPill + '</div></div>' +
+    '<div style="margin-top:12px"><div class="footnote" style="padding:0 0 4px">This month (' + esc(t.ym) + ', day ' + t.dayOfMonth + ' of ' + t.daysInMonth + '): <b>' + usd(t.volume) + '</b> funded (' + t.loans + ' loans) = ' + Math.round(t.pctOfTarget * 100) + '% of target</div>' + bar(t.volume, g.target, "var(--c-forest)") + '</div>' +
+    '<div class="footnote" style="padding:8px 0 0">Weighted pipeline ' + usd(t.weightedPipeline) + ' → projected finish <b>' + usd(t.projected) + '</b> vs ' + usd(g.target) + '. (Pipeline is weighted by how far along each loan is.)</div>' +
+    '<div style="display:flex;gap:6px;align-items:flex-end;margin-top:14px">' + monthBars + '</div>' +
+    '<div class="footnote" style="padding:6px 0 0">Bars = funded volume per month. The dashed line is the monthly target. Green = month hit.</div></div>';
+  var needRow = function(label, n){ return '<tr><td>' + label + '</td><td class="num">' + n.loans + '</td><td class="num">' + n.apps + '</td><td class="num">' + n.leads.toLocaleString() + '</td><td class="num">' + usd(n.adCost) + '</td></tr>'; };
+  var needCard = '<div class="panel panel-pad" style="margin-bottom:14px"><div class="rail-title">What it takes</div>' +
+    '<div class="footnote" style="padding:4px 0 8px">At your average funded loan of <b>' + usd(b.avgLoan) + '</b>, with today\'s conversion (' + Math.round(b.leadToApp * 100) + '% of leads finish an application, ' + Math.round(b.appToFunded * 100) + '% of applications fund' + (b.thinData ? " — early estimates, only a few funded loans so far" : "") + '):</div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Target per month</th><th>Funded loans</th><th>Completed apps</th><th>Leads</th><th>Ad spend</th></tr></thead><tbody>' + needRow(usd(b.forTarget.target), b.forTarget) + needRow(usd(b.forNext.target), b.forNext) + '</tbody></table></div>' +
+    '<div class="footnote" style="padding:10px 0 4px"><b>If conversion improves</b> (faster calls, better follow-up, more referral partners) the same ' + usd(g.target) + ' needs far fewer leads:</div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Conversion vs today</th><th>Lead → app</th><th>App → funded</th><th>Leads needed</th><th>Ad spend</th></tr></thead><tbody>' +
+    (b.scenarios || []).map(function(s){ return '<tr><td>' + (s.multiplier === 1 ? "Today" : s.multiplier + "×") + '</td><td class="num">' + Math.round(s.leadToApp * 100) + '%</td><td class="num">' + Math.round(s.appToFunded * 100) + '%</td><td class="num">' + s.leads.toLocaleString() + '</td><td class="num">' + usd(s.adCost) + '</td></tr>'; }).join("") + '</tbody></table></div></div>';
+  var pipeRows = (d.pipeDeals || []).map(function(p){ return '<tr><td><a href="#" data-action="select-lead" data-lead="' + esc(p.id) + '">' + esc(p.name) + '</a></td><td>' + esc(stageLabel(p.stage)) + '</td><td>' + esc(p.lo) + '</td><td class="num">' + usd(p.amount) + '</td><td class="num">' + usd(p.weighted) + '</td></tr>'; }).join("");
+  var pipeCard = '<div class="panel panel-pad" style="margin-bottom:14px"><div class="rail-title">Pipeline that can fund</div>' +
+    (pipeRows ? '<div class="table-wrap"><table><thead><tr><th>Borrower</th><th>Stage</th><th>Loan officer</th><th>Loan</th><th>Weighted</th></tr></thead><tbody>' + pipeRows + '</tbody></table></div>' : '<div class="hint">Nothing in docs / processing / underwriting / approved yet.</div>') + '</div>';
+  var srcRows = d.funnel.sources.map(function(f){
+    return '<tr><td><b>' + esc(f.source) + '</b></td><td class="num">' + f.leads + '</td><td class="num">' + pct(f.called, f.leads) + '</td><td class="num">' + f.appSent + '</td><td class="num">' + f.appDone + '</td><td class="num">' + f.processing + '</td><td class="num">' + f.funded + '</td><td class="num">' + usd(f.volume) + '</td>' +
+      '<td class="num">' + (f.spend ? usd(f.spend) : "—") + '</td><td class="num">' + usd(f.cpl) + '</td><td class="num">' + usd(f.costPerApp) + '</td><td class="num">' + usd(f.costPerFunded) + '</td></tr>';
+  }).join("");
+  var winSel = '<select class="select" data-action="growth-window" style="width:auto;display:inline-block">' + [30, 60, 90, 180].map(function(n){ return '<option value="' + n + '"' + (gr.days === n ? " selected" : "") + '>Last ' + n + ' days</option>'; }).join("") + '</select>';
+  var funnelCard = '<div class="panel panel-pad" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div class="rail-title">Funnel by source</div><div>' + winSel + '</div></div>' +
+    '<div class="footnote" style="padding:4px 0 8px">Leads created in the window and how far they got. Totals: ' + tot.leads + ' leads → ' + pct(tot.called, tot.leads) + ' called → ' + tot.appDone + ' completed apps (' + pct(tot.appDone, tot.leads) + ') → ' + tot.processing + ' in processing or beyond → ' + tot.funded + ' funded (' + usd(tot.volume) + '). Ad spend in window ' + usd(d.spend.leadGen) + (d.spend.cpl ? ' · cost per Facebook lead ' + usd(d.spend.cpl) : '') + (d.spend.costPerApp ? ' · cost per completed app ' + usd(d.spend.costPerApp) : '') + (d.spend.costPerFunded ? ' · cost per funded loan ' + usd(d.spend.costPerFunded) : '') + '.</div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Source</th><th>Leads</th><th>Called</th><th>App sent</th><th>App done</th><th>Proc.+</th><th>Funded</th><th>Volume</th><th>Ad spend</th><th>Per lead</th><th>Per app</th><th>Per funded</th></tr></thead><tbody>' + srcRows + '</tbody></table></div>' +
+    '<div class="footnote" style="padding:6px 0 0">How far a lead got is read from its current stage and application dates, so it is approximate for leads that were later marked lost.</div></div>';
+  var speedRows = (d.speed || []).map(function(s){ return '<tr><td>' + esc(s.lo) + '</td><td class="num">' + s.called + '</td><td class="num">' + (s.medianMinutes == null ? "—" : (s.medianMinutes < 90 ? s.medianMinutes + " min" : Math.round(s.medianMinutes / 60) + " hr")) + '</td><td class="num">' + (s.within5 == null ? "—" : s.within5 + "%") + '</td><td class="num">' + (s.uncalledOver1h ? '<b style="color:var(--c-rust)">' + s.uncalledOver1h + '</b>' : "0") + '</td></tr>'; }).join("");
+  var speedCard = '<div class="panel panel-pad" style="margin-bottom:14px"><div class="rail-title">Speed to lead (inbound leads, same window)</div>' +
+    '<div class="table-wrap"><table><thead><tr><th>Loan officer</th><th>Leads called</th><th>Median time to first call</th><th>Called within 5 min</th><th>Still uncalled after 1 hr</th></tr></thead><tbody>' + (speedRows || '<tr><td colspan="5">No data yet.</td></tr>') + '</tbody></table></div></div>';
+  var partnerRows = (d.partners || []).map(function(p){ return '<tr><td><b>' + esc(p.name) + '</b>' + (p.company ? '<div class="footnote">' + esc(p.company) + '</div>' : '') + '</td><td>' + esc(p.status) + '</td><td class="num">' + p.referred + '</td><td class="num">' + p.apps + '</td><td class="num">' + p.funded + '</td><td class="num">' + usd(p.volume) + '</td></tr>'; }).join("");
+  var partnerCard = '<div class="panel panel-pad" style="margin-bottom:14px"><div class="rail-title">Referral partners</div>' +
+    (partnerRows ? '<div class="table-wrap"><table><thead><tr><th>Partner</th><th>Status</th><th>Referred</th><th>Apps done</th><th>Funded</th><th>Volume</th></tr></thead><tbody>' + partnerRows + '</tbody></table></div>' : '<div class="hint">No partner activity yet.</div>') + '</div>';
+  return top + '<div class="content">' + goalCard + needCard + pipeCard + funnelCard + speedCard + partnerCard + '</div>';
 }
 // Restricted lender documents (owner / Fiore / Erika only -- the table and bucket enforce it, this panel is just the window onto them).
 function loadInternalLenderDocs(leadId){
@@ -21511,6 +21585,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "reveal-employee-ach"){ revealEmployeeAch(t.dataset.user); }
   else if (action === "hide-employee-ach"){ hideEmployeeAch(); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
+  else if (action === "growth-refresh"){ loadGrowth(true); showToast("Refreshing…"); }
   else if (action === "ild-open"){
     if (canViewOutsideLender() && sb && t.dataset.path){
       sb.storage.from("internal-lender-docs").createSignedUrl(t.dataset.path, 300).then(function(res){
@@ -21880,6 +21955,8 @@ appEl.addEventListener("change", function(e){
     setLoanType(t.dataset.lead, t.value);
   } else if (action === "set-outside-lender"){
     setOutsideLender(t.dataset.lead, t.value);
+  } else if (action === "growth-window"){
+    ui.gr = ui.gr || {}; ui.gr.days = Number(t.value) || 90; loadGrowth(true);
   } else if (action === "partner-fee"){
     updatePartnerField(t.dataset.id, { feePoints: t.value === "" ? null : Number(t.value) }, "Referral fee saved");
   } else if (action === "partner-lo"){
