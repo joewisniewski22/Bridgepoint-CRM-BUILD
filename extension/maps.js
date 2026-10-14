@@ -248,13 +248,73 @@
     } },
   ];
 
+  // ---------------- Velocity Mortgage Capital (Generate Velocity broker portal) ----------------
+  // Mapped 2026-10-14 on Tapia's real draft (loan 6723384190), AngularJS app with stable element ids. The borrower
+  // screen (phase 2 > Additional Information) is where the application data goes: DOB, home address, marital status,
+  // contact, rent/own, years, and the owned-properties list. NEVER touched: the SSN field, Save & Next, and anything
+  // in phase 3 / Submit -- the person types the SSN and saves by hand. The owned-property address is a Google Places
+  // box: we type it and try the keyboard pick; if Velocity doesn't take it, the panel says which one to click.
+  const VEL_TYPE = { "Single Family": "Single Family Residence", "Condo / Townhome": "Single Family Condo", "2-4 Unit": "2-4 Unit Investment", "Multifamily 5+": "5+ Multi-Family Units", "Mixed-Use": "Mixed Use", "Commercial": "Other", "Land": "Other" };
+  const VEL_PAGES = [
+    { name: "Velocity: borrower information", match: () => /AppraisalNavigation\/AdditionalInformation/i.test(location.hash) && !!document.getElementById("DOB_0"),
+      run: async (p, H, res) => {
+        const S = window.BPFill;
+        const g = p.borrower.guarantor || {};
+        const byId = (id) => document.getElementById(id);
+        const put = (id, v, name) => { const el = byId(id); if (v == null || v === "") { res.skipped.push(name || id); return; } if (el && S.setValue(el, String(v))) res.filled.push(name || id); else res.missing.push(name || id); };
+        const home = splitAddr(g.homeAddress || g.address);
+        put("DOB_0", S.FMT.mdy(g.dateOfBirth), "Date of birth");
+        put("CurrentAddress", home.street, "Home street");
+        put("City", home.city, "Home city");
+        put("PrimaryState", stateName(home.state), "Home state");
+        put("PostalCode", home.zip, "Home zip");
+        put("ApplicantEmail_0", g.email, "Email");
+        put("Marital_0", g.maritalStatus, "Marital status");
+        put("Phone1_0", String(g.phone || "").replace(/\D/g, "").slice(-10), "Phone");
+        put("PhoneType_0", g.phone ? "Mobile" : "", "Phone type");
+        put("RentOrOwn1", g.ownRent, "Rent or own");
+        put("NumberOfYears1", g.yearsAtAddress != null ? parseInt(g.yearsAtAddress, 10) : "", "Years at address");
+        if (p.borrower.entityName && byId("Entity1") && document.querySelector('[name="Entity1"]')) { const en = document.querySelector('input[name="Entity1"]'); if (en && !en.value) { S.setValue(en, p.borrower.entityName); res.filled.push("Entity name"); } }
+        // Other real estate owned (the SREO from the application).
+        const owns = p.reoOwns === "Yes" ? "Yes" : p.reoOwns === "No" ? "No" : "";
+        if (owns) {
+          const sel = byId("RealEstateOwned");
+          if (sel && S.setValue(sel, owns)) res.filled.push("Owns other real estate"); else res.missing.push("Owns other real estate");
+        }
+        const rows = owns === "Yes" ? (p.reo || []) : [];
+        const q = (m, i) => Array.from(document.querySelectorAll('[ng-model="' + m + '"]'))[i];
+        for (let i = 0; i < rows.length; i++) {
+          await H.sleep(500);
+          while (document.querySelectorAll('[ng-model="A.FullAddress"]').length < i + 1) {
+            const b = Array.from(document.querySelectorAll("button")).find((x) => /^add an additional address$/i.test((x.innerText || "").trim()));
+            if (!b) break; b.click(); await H.sleep(700);
+          }
+          const r = rows[i], tag = "Owned property " + (i + 1);
+          const fa = q("A.FullAddress", i);
+          if (!fa) { res.missing.push(tag + " (row not found)"); continue; }
+          fa.focus(); H.setNative(fa, r.address || ""); fa.dispatchEvent(new Event("input", { bubbles: true }));
+          await H.sleep(1800);
+          // Keyboard pick of the first Google suggestion (a real click is sometimes the only thing Google accepts).
+          const key = (k, c) => { const e = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }); Object.defineProperty(e, "keyCode", { get: () => c }); Object.defineProperty(e, "which", { get: () => c }); fa.dispatchEvent(e); };
+          key("ArrowDown", 40); await H.sleep(250); key("Enter", 13);
+          let got = false;
+          for (let t = 0; t < 8 && !got; t++) { await H.sleep(500); const s1 = q("A.Address1", i); got = !!(s1 && s1.value); }
+          (got ? res.filled : res.missing).push(got ? tag + " address" : tag + ": click Google's suggestion under Full Address (" + r.address + ")");
+          const ty = q("A.PropertyType", i); if (ty && r.propertyType && S.setValue(ty, VEL_TYPE[r.propertyType] || "Other")) res.filled.push(tag + " type");
+          const val = q("A.PropertyEstimatedValue", i); if (val && r.currentValue != null && S.setValue(val, String(Math.round(r.currentValue)))) res.filled.push(tag + " value");
+          const mo = q("A.ExistingMortgage", i); if (mo && r.loanBalance != null && S.setValue(mo, String(Math.round(r.loanBalance)))) res.filled.push(tag + " mortgage");
+        }
+        res.skipped.push("SSN (type it yourself)", "Save & Next (click it yourself)");
+      } },
+  ];
+
   window.BP_MAPS = {
     RCN: { host: /commerciallendingservicesllc\.com$/, pages: [RCN_PAGE] },
     Kiavi: { host: /kiavi\.com$/, pages: KIAVI_PAGES },
     "A&D": { host: /admortgage\.com$/, pages: AD_PAGES },
     Constructive: { host: /bplhub\.com$/, pages: [] }, // portal side panel (copy + attach); full map built on the next real Constructive file
     NextRes: { host: /nextres\.com$/, pages: [] },
-    Velocity: { host: /generatevelocity\.com$/, pages: [] }, // panel now; full map built in a mapping session on a Velocity draft
+    Velocity: { host: /generatevelocity\.com$/, pages: VEL_PAGES }, // borrower screen mapped 10/14/26 (loan 6723384190); loan details / docs screens still to map
     LEND: { host: /leapplenderportal\.com$/, pages: [] },
     HomeXpress: { host: /homexmortgage\.com$/, pages: [] },
     Dominion: { host: /loanpass\.io$/, pages: [] },

@@ -107,6 +107,8 @@ async function buildPackage(leadId: string, lender: string) {
     if (j && j.ok && j.xml) mismo = { fileName: "Bridgepoint-" + leadId + "-MISMO34.xml", xml: j.xml };
   }
   const tr = Array.isArray(l.track_record) ? l.track_record : [];
+  // The application the borrower filled in (DSCR or RTL): home address, marital status, own/rent and years at the address live there.
+  const appData: any = (/DSCR|Portfolio|Mixed/i.test(String(l.loan_type || "")) ? (l.dscr_app || l.rtl_app) : (l.rtl_app || l.dscr_app)) || {};
   // The file's loan officer: lender portals ask which broker officer owns the loan.
   const { data: lo } = l.assigned_to ? await sb.from("users").select("name,email").eq("id", l.assigned_to).maybeSingle() : { data: null as any };
   const prop = splitAddress(l.property_address);
@@ -126,8 +128,8 @@ async function buildPackage(leadId: string, lender: string) {
       entityName: l.entity_legal_name, entityType: l.entity_type,
       guarantor: {
         firstName: l.guarantor_first_name, middleName: l.guarantor_middle_name, lastName: l.guarantor_last_name, fullName: l.guarantor_name || l.name,
-        email: l.guarantor_email || l.email, phone: l.guarantor_phone || l.phone, dateOfBirth: l.birthday, address: l.guarantor_address,
-        citizenship: l.citizenship_status, countryOfDomicile: l.country_of_domicile, maritalStatus: l.marital_status, ownershipPct: l.guarantor_ownership_pct,
+        email: l.guarantor_email || l.email, phone: l.guarantor_phone || l.phone, dateOfBirth: l.birthday, address: l.guarantor_address, homeAddress: appData.homeAddress || l.guarantor_address, ownRent: appData.ownRent || null, yearsAtAddress: appData.yearsAtAddress || null,
+        citizenship: l.citizenship_status, countryOfDomicile: l.country_of_domicile, maritalStatus: appData.maritalStatus || l.marital_status, ownershipPct: l.guarantor_ownership_pct,
         creditScore: l.credit_score, experienceDeals: l.experience_deals, liquidity: l.liquidity, ssnLast4: l.guarantor_ssn_last4,
       },
       coGuarantor: l.co_first_name ? {
