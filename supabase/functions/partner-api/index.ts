@@ -186,10 +186,8 @@ async function priceDeal(b: Record<string, unknown>) {
   const top = picks.slice(0, 2);
   const term = rtl ? "12-month interest-only" : "30-year fixed";
   if (!top.length) {
-    const reasons = Array.from(new Set(((res.results || []) as any[]).filter((r) => r && !r.eligible && !r.unavailable && r.reason).map((r) => String(r.reason))));
-    // keep the explanation plain and lender-free
-    const plain = reasons.map((x) => x.replace(/\b(Kiavi|RCN|Velocity|Constructive|AVANA|A&D|NextRes|LEND|HomeXpress|RELIP)\b/gi, "our lenders")).slice(0, 3);
-    return { ok: true, options: [], reasons: plain, note: "Nothing places as entered. Call us — a small change to the structure often works." };
+    // Partners only ever see Bridgepoint talking: no reasons copied from anywhere else, no mention of lenders or sources.
+    return { ok: true, options: [], reasons: [], note: "This one needs a quick conversation with your Bridgepoint loan officer — a small change to the structure often makes it work. Call " + COMPANY_PHONE + "." };
   }
   return { ok: true, term, options: top.map((p, i) => ({ label: "Option " + ["A", "B"][i], rate: p.rate, loanAmount: p.loanAmount ? Math.round(p.loanAmount) : null })),
     note: "Estimates only. Final terms depend on the appraisal and underwriting, and fees and points are confirmed by your Bridgepoint loan officer." };

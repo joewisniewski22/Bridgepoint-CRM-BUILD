@@ -9,7 +9,7 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CRM_URL = "https://bridgepoint-crm-build.vercel.app/";
 const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type", "Access-Control-Allow-Methods": "POST, OPTIONS", "Content-Type": "application/json" };
-const KINDS = ["Real estate agent", "Wholesaler", "Contractor / builder", "CPA / attorney", "Loan officer / broker", "Other"];
+const KINDS = ["Real estate agent", "Wholesaler", "Contractor / builder", "CPA / attorney", "Loan officer / mortgage professional", "Other"];
 
 const clean = (v: unknown, max = 200) => (typeof v === "string" ? v.replace(/[\u0000-\u001f<>]/g, " ").trim().slice(0, max) : "");
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: CORS });
