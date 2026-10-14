@@ -106,6 +106,21 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const action = body.action;
 
+    // Read-only diagnostic (never returns the token): which permissions the posting token has, whether it reaches the Page
+    // and the Page's Instagram account, and whether it has the two permissions posting needs.
+    if (action === "token-check") {
+      const perms = await graphFetch("/me/permissions");
+      const granted = ((perms.data && perms.data.data) || []).filter((p: any) => p.status === "granted").map((p: any) => p.permission);
+      const pageTok = await graphFetch("/" + META_PAGE_ID, { fields: "name,instagram_business_account{id,username},access_token" });
+      const need = ["pages_manage_posts", "instagram_content_publish", "pages_read_engagement", "pages_messaging", "instagram_manage_comments", "instagram_manage_messages", "instagram_basic"];
+      return new Response(JSON.stringify({
+        ok: true, usingSocialToken: !!Deno.env.get("META_SOCIAL_TOKEN"), granted, missing: need.filter((n) => !granted.includes(n)),
+        page: pageTok.data && pageTok.data.name ? pageTok.data.name : null, pageTokenOk: !!(pageTok.data && pageTok.data.access_token),
+        instagram: pageTok.data && pageTok.data.instagram_business_account ? pageTok.data.instagram_business_account : null,
+        error: perms.data && perms.data.error ? { message: perms.data.error.message, code: perms.data.error.code } : null,
+      }), { headers: CORS_HEADERS });
+    }
+
     if (action === "list") {
       let query = sb.from("social_posts").select("*").order("scheduled_at", { ascending: true });
       if (body.status) query = query.eq("status", body.status);
