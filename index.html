@@ -849,6 +849,7 @@ var ES_DICT = {
   "One row per completed project — updates automatically based on Investing Experience above.":"Una fila por proyecto completado — se actualiza automáticamente según la Experiencia de Inversión indicada arriba.",
   "Enter a number above for Investing Experience to add project rows.":"Ingrese un número en Experiencia de Inversión para agregar filas de proyectos.",
   "Prior Project #":"Proyecto Anterior #", "Purchase Date":"Fecha de Compra", "Exit Type":"Tipo de Salida",
+  "Property Owned #":"Propiedad Poseída #", "Schedule of Real Estate Owned":"Lista de Bienes Raíces en Propiedad", "List every property you currently own, other than the one you are applying for. This becomes your Schedule of Real Estate Owned.":"Anote cada propiedad que posee actualmente, aparte de la que está solicitando. Esto se convierte en su Lista de Bienes Raíces en Propiedad.", "Do you currently own any other real estate?":"¿Es dueño de otros bienes raíces actualmente?", "How many properties do you own?":"¿Cuántas propiedades posee?", "Year Purchased":"Año de Compra", "Current Market Value":"Valor Actual de Mercado", "Mortgage Balance (0 if none)":"Saldo de la Hipoteca (0 si no tiene)", "Monthly Rent (0 if none)":"Renta Mensual (0 si no tiene)", "Single Family":"Casa Unifamiliar", "Condo / Townhome":"Condominio / Casa Adosada", "Commercial":"Comercial", "Tenant Occupied":"Ocupada por Inquilino", "Owner Occupied":"Ocupada por el Dueño", "Under Rehab":"En Remodelación",
   "Exit Date":"Fecha de Salida", "Exit Value (sale price or new loan amount)":"Valor de Salida (precio de venta o nuevo monto de préstamo)",
   "Sold":"Vendido", "Refinanced":"Refinanciado", "Still Own":"Todavía es Propietario",
   "Scope of Work":"Alcance del Trabajo",
@@ -1145,6 +1146,7 @@ var VI_DICT = {
   "One row per completed project — updates automatically based on Investing Experience above.":"Mỗi dòng là một dự án đã hoàn tất — tự động cập nhật theo Kinh nghiệm đầu tư ở trên.",
   "Enter a number above for Investing Experience to add project rows.":"Nhập một con số ở mục Kinh nghiệm đầu tư phía trên để thêm các dòng dự án.",
   "Prior Project #":"Dự án trước #", "Purchase Date":"Ngày mua", "Exit Type":"Hình thức thoái vốn",
+  "Property Owned #":"Bất động sản sở hữu #", "Schedule of Real Estate Owned":"Danh sách bất động sản đang sở hữu", "List every property you currently own, other than the one you are applying for. This becomes your Schedule of Real Estate Owned.":"Liệt kê mọi bất động sản anh/chị hiện đang sở hữu, ngoài bất động sản đang xin vay. Đây sẽ trở thành Danh sách bất động sản đang sở hữu của anh/chị.", "Do you currently own any other real estate?":"Anh/chị hiện có sở hữu bất động sản nào khác không?", "How many properties do you own?":"Anh/chị sở hữu bao nhiêu bất động sản?", "Year Purchased":"Năm mua", "Current Market Value":"Giá trị thị trường hiện tại", "Mortgage Balance (0 if none)":"Dư nợ thế chấp (0 nếu không có)", "Monthly Rent (0 if none)":"Tiền thuê hàng tháng (0 nếu không có)", "Single Family":"Nhà riêng", "Condo / Townhome":"Căn hộ / Nhà phố", "Commercial":"Thương mại", "Tenant Occupied":"Có người thuê", "Owner Occupied":"Chủ ở", "Under Rehab":"Đang sửa chữa",
   "Exit Date":"Ngày thoái vốn", "Exit Value (sale price or new loan amount)":"Giá trị thoái vốn (giá bán hoặc số tiền vay mới)",
   "Sold":"Đã bán", "Refinanced":"Đã tái cấp vốn", "Still Own":"Vẫn đang sở hữu",
   "Scope of Work":"Phạm vi công việc",
@@ -5582,7 +5584,7 @@ function leadToRow(l){
     entity_legal_name: l.entityLegalName || null,
     guarantor_first_name: l.guarantorFirstName || null, guarantor_middle_name: l.guarantorMiddleName || null, guarantor_last_name: l.guarantorLastName || null,
     guarantor_phone: l.guarantorPhone || null, guarantor_email: l.guarantorEmail || null, guarantor_address: l.guarantorAddress || null,
-    guarantor_ownership_pct: l.guarantorOwnershipPct || null, track_record: l.trackRecord || [],
+    guarantor_ownership_pct: l.guarantorOwnershipPct || null, track_record: l.trackRecord || [], reo: l.reo || [], reo_owns: l.reoOwns || null,
     co_first_name: l.coFirstName || null, co_middle_name: l.coMiddleName || null, co_last_name: l.coLastName || null, co_birthday: l.coBirthday || null,
     co_ownership_pct: l.coOwnershipPct || null, co_phone: l.coPhone || null, co_email: l.coEmail || null, co_address: l.coAddress || null,
     co_citizenship_status: l.coCitizenshipStatus || null, co_country_of_domicile: l.coCountryOfDomicile || null, co_credit_score: l.coCreditScore || null,
@@ -5642,7 +5644,7 @@ function rowToLead(r){
     entityLegalName: r.entity_legal_name || null,
     guarantorFirstName: r.guarantor_first_name || null, guarantorMiddleName: r.guarantor_middle_name || null, guarantorLastName: r.guarantor_last_name || null,
     guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null, guarantorAddress: r.guarantor_address || null, guarantorSsnLast4: r.guarantor_ssn_last4 || null,
-    guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [],
+    guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [], reo: r.reo || [], reoOwns: r.reo_owns || null,
     coFirstName: r.co_first_name || null, coMiddleName: r.co_middle_name || null, coLastName: r.co_last_name || null, coBirthday: r.co_birthday || null,
     coOwnershipPct: r.co_ownership_pct || null, coPhone: r.co_phone || null, coEmail: r.co_email || null, coAddress: r.co_address || null, coSsnLast4: r.co_ssn_last4 || null,
     coCitizenshipStatus: r.co_citizenship_status || null, coCountryOfDomicile: r.co_country_of_domicile || null, coCreditScore: r.co_credit_score || null,
@@ -5929,7 +5931,7 @@ function extractApplicationBaseFieldsFromForm(fd){
     leaseDetail: extractLeaseDetailFromForm(fd),
     transactionType: fd.get("transactionType"),
     prepayTerm: fd.get("prepayTerm"),
-    trackRecord: extractTrackRecordFromForm(fd), __co: coPatchFromForm(fd)
+    trackRecord: extractTrackRecordFromForm(fd), reoOwns: extractReoOwnsFromForm(fd), reo: extractReoFromForm(fd), __co: coPatchFromForm(fd)
   };
 }
 var applicationAutoSaveTimer = null;
@@ -9235,8 +9237,26 @@ function requestAiDocReview(lead, doc){
     }
     if (res.data.contacts && res.data.contacts.length) applyScannedContacts(lead, res.data.contacts, doc);
     if (res.data.achFields) applyScannedAchFields(lead, res.data.achFields, doc);
+    if (res.data.reoFields) applyScannedReo(lead, res.data.reoFields, doc);
     persist();
   }).catch(function(){});
+}
+// Joe 2026-10-14: an uploaded Schedule of Real Estate Owned / track-record document fills the application's
+// owned-properties and track-record rows by itself (it used to just sit in the Documents tab). Only fills what is
+// still empty -- never overwrites what the borrower or staff typed -- and marks the document as already matching
+// the data so it isn't replaced by a regenerated copy.
+function applyScannedReo(lead, rf, doc){
+  var did = [];
+  if ((!lead.reo || !lead.reo.length) && rf.properties && rf.properties.length){
+    lead.reo = rf.properties; lead.reoOwns = "Yes"; did.push(rf.properties.length + " owned propert" + (rf.properties.length === 1 ? "y" : "ies"));
+  }
+  if ((!lead.trackRecord || !lead.trackRecord.length) && rf.completedProjects && rf.completedProjects.length){
+    lead.trackRecord = rf.completedProjects; did.push(rf.completedProjects.length + " completed project" + (rf.completedProjects.length === 1 ? "" : "s"));
+  }
+  if (!did.length) return;
+  doc.sreoSig = JSON.stringify([lead.reoOwns, lead.reoOwns === "Yes" ? (lead.reo||[]) : [], lead.trackRecord||[]]);
+  lead.activity = lead.activity || [];
+  lead.activity.push({ date: todayISO(), type:"note", text: "AI read " + (doc.name||"the Schedule of Real Estate Owned") + " and filled in the application: " + did.join(" and ") + " — please verify against the document.", author:"AI Assistant" });
 }
 // Joe's ask (2026-09-29): a photographed voided check should fill the ACH
 // Authorization form by itself -- borrower shouldn't retype a single bank
@@ -9702,6 +9722,7 @@ function applyAchAndRtlAppPatch(leadId, achData, rtlData, dscrData){
       uploadGeneratedPdfDocument(leadId, DSCR_APPLICATION_DOC_NAME, buildDscrApplicationPdfBlob(lead), { staffOnly:true, actorLabel: lead.name });
     }
   }
+  maybeGenerateSreoPdf(lead);
 }
 function uploadGeneratedPdfDocument(leadId, docName, blob, opts){
   var lead = leadById(leadId);
@@ -9719,7 +9740,8 @@ function uploadGeneratedPdfDocument(leadId, docName, blob, opts){
     doc.storagePath = path;
     if (opts && opts.staffOnly) doc.staffOnly = true;
     lead.activity = lead.activity || [];
-    lead.activity.push({ date:todayISO(), type:"document", text: (opts && opts.actorLabel ? opts.actorLabel : lead.name) + " completed and signed: " + docName, author: (opts && opts.actorLabel) || lead.name });
+    lead.activity.push({ date:todayISO(), type:"document", text: (opts && opts.activityText) ? opts.activityText : ((opts && opts.actorLabel ? opts.actorLabel : lead.name) + " completed and signed: " + docName), author: (opts && opts.actorLabel) || lead.name });
+    if (opts && opts.onDone) opts.onDone(doc);
     persist();
   });
 }
@@ -19632,6 +19654,8 @@ function flattenCoPatch(patch){
     delete patch.__co;
     if (co) Object.keys(co).forEach(function(k){ patch[k] = co[k]; });
   }
+  // A key left undefined means "this form has no such section": keep the saved value (track record / REO are only on some forms).
+  if (patch) Object.keys(patch).forEach(function(k){ if (patch[k] === undefined) delete patch[k]; });
   return patch;
 }
 function saveCoGuarantorSsn(leadId, ssn){
@@ -20181,6 +20205,7 @@ function buildApplicationFieldsHTML(lead, lang, opts){
             ' value="' + v(lead.termMonths) + '"></div>' +
         '</div>')
     ) +
+    buildReoSectionHTML(lead, lang) +
     buildTrackRecordSectionHTML(lead, lang) +
     buildLeaseDetailSectionHTML(lead, lang) +
     buildScopeOfWorkFieldsHTML(lead, lang) +
@@ -20222,7 +20247,7 @@ function buildTrackRecordSectionHTML(lead, lang){
   var L = function(s){ return esc(tr(s, lang)); };
   if (lead.loanType !== "Fix & Flip" && lead.loanType !== "Ground Up Construction") return "";
   var count = Math.min(lead.experienceDeals||0, 20);
-  return '<div class="section-head" style="margin-top:20px"><h2>' + L("Track Record") + '</h2></div>' +
+  return '<input type="hidden" name="hasTrackSection" value="1"><div class="section-head" style="margin-top:20px"><h2>' + L("Track Record") + '</h2></div>' +
     '<div class="footnote" style="padding:0 0 10px">' + L("One row per completed project — updates automatically based on Investing Experience above.") + '</div>' +
     '<div id="track-record-rows" data-lang="' + lang + '">' + (count ? buildTrackRecordRowsHTML(count, lead.trackRecord, lang) : '<div class="empty">' + L("Enter a number above for Investing Experience to add project rows.") + '</div>') + '</div>';
 }
@@ -20246,6 +20271,7 @@ function collectTrackRecordRowsFromDOM(container){
   return rows;
 }
 function extractTrackRecordFromForm(fd){
+  if (!fd.has("hasTrackSection")) return undefined; // no track-record section on this form: don't wipe what's saved (DSCR forms used to reset it to [])
   var rows = [];
   var i = 0;
   while (fd.has("trackAddress_" + i)){
@@ -20261,6 +20287,150 @@ function extractTrackRecordFromForm(fd){
     i++;
   }
   return rows;
+}
+/* ---------------------------------------------------------------------
+   Schedule of Real Estate Owned (Joe 2026-10-14): every borrower lists the properties they currently own on
+   EVERY application (not just flips), and it is turned into the "Schedule of Real Estate Owned (Track Record)"
+   document on the file automatically. Before this the application never asked, so Tapia's SREO only existed as an
+   uploaded PDF that nothing read. Rows: address, propertyType, purchaseYear, purchasePrice, currentValue,
+   loanBalance, monthlyRent, occupancy. lead.reoOwns = "Yes" | "No" | null (not answered).
+--------------------------------------------------------------------- */
+var SREO_DOC_NAME = "Schedule of Real Estate Owned (Track Record)";
+var REO_PROPERTY_TYPES = ["Single Family","Condo / Townhome","2-4 Unit","Multifamily 5+","Mixed-Use","Commercial","Land"];
+var REO_OCCUPANCY = ["Tenant Occupied","Owner Occupied","Vacant","Under Rehab"];
+function buildReoRowHTML(i, row, lang){
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
+  row = row || {};
+  var v2 = function(x){ return x===null||x===undefined ? "" : x; };
+  var typeOpts = '<option value="">' + L("— Select —") + '</option>' + REO_PROPERTY_TYPES.map(function(t){ return '<option value="' + t + '"' + (row.propertyType===t?" selected":"") + '>' + L(t) + '</option>'; }).join("");
+  var occOpts = '<option value="">' + L("— Select —") + '</option>' + REO_OCCUPANCY.map(function(t){ return '<option value="' + t + '"' + (row.occupancy===t?" selected":"") + '>' + L(t) + '</option>'; }).join("");
+  return '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px">' +
+    '<div class="hint" style="margin-bottom:6px">' + L("Property Owned #") + (i+1) + '</div>' +
+    '<div class="form-row"><label>' + L("Property Address") + '</label><input class="input" name="reoAddress_' + i + '" value="' + esc(row.address||"") + '"></div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Property Type") + '</label><select class="select" name="reoType_' + i + '">' + typeOpts + '</select></div>' +
+      '<div class="form-row"><label>' + L("Occupancy") + '</label><select class="select" name="reoOccupancy_' + i + '">' + occOpts + '</select></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Year Purchased") + '</label><input class="input" type="number" min="1950" max="2100" name="reoYear_' + i + '" value="' + v2(row.purchaseYear) + '"></div>' +
+      '<div class="form-row"><label>' + L("Purchase Price") + '</label><input class="input" type="number" min="0" name="reoPrice_' + i + '" value="' + v2(row.purchasePrice) + '"></div>' +
+    '</div>' +
+    '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Current Market Value") + '</label><input class="input" type="number" min="0" name="reoValue_' + i + '" value="' + v2(row.currentValue) + '"></div>' +
+      '<div class="form-row"><label>' + L("Mortgage Balance (0 if none)") + '</label><input class="input" type="number" min="0" name="reoBalance_' + i + '" value="' + v2(row.loanBalance) + '"></div>' +
+    '</div>' +
+    '<div class="form-row"><label>' + L("Monthly Rent (0 if none)") + '</label><input class="input" type="number" min="0" name="reoRent_' + i + '" value="' + v2(row.monthlyRent) + '"></div>' +
+  '</div>';
+}
+function buildReoRowsHTML(count, existingRows, lang){
+  var rows = [];
+  for (var i=0;i<count;i++){ rows.push(buildReoRowHTML(i, (existingRows||[])[i], lang)); }
+  return rows.join("");
+}
+function buildReoSectionHTML(lead, lang){
+  lang = lang || "en";
+  var L = function(s){ return esc(tr(s, lang)); };
+  var owns = lead.reoOwns || (lead.reo && lead.reo.length ? "Yes" : "");
+  var count = Math.max(1, Math.min((lead.reo||[]).length || 1, 20));
+  return '<input type="hidden" name="hasReoSection" value="1">' +
+    '<div class="section-head" style="margin-top:20px"><h2>' + L("Schedule of Real Estate Owned") + '</h2></div>' +
+    '<div class="footnote" style="padding:0 0 10px">' + L("List every property you currently own, other than the one you are applying for. This becomes your Schedule of Real Estate Owned.") + '</div>' +
+    '<div class="form-row"><label>' + L("Do you currently own any other real estate?") + ' <span style="color:var(--c-rust)">*</span></label>' +
+      '<select class="select" name="reoOwns" data-action="update-reo-count" data-lang="' + lang + '">' +
+        '<option value=""' + (owns ? "" : " selected") + '>' + L("— Select —") + '</option>' +
+        '<option value="Yes"' + (owns==="Yes"?" selected":"") + '>' + L("Yes") + '</option>' +
+        '<option value="No"' + (owns==="No"?" selected":"") + '>' + L("No") + '</option>' +
+      '</select></div>' +
+    '<div id="reo-wrap" style="' + (owns==="Yes" ? "" : "display:none") + '">' +
+      '<div class="form-row"><label>' + L("How many properties do you own?") + '</label><input class="input" type="number" min="1" max="20" name="reoCount" value="' + count + '" data-action="update-reo-count" data-lang="' + lang + '"></div>' +
+      '<div id="reo-rows" data-lang="' + lang + '">' + buildReoRowsHTML(count, lead.reo, lang) + '</div>' +
+    '</div>';
+}
+function collectReoRowsFromDOM(container){
+  var rows = [], i = 0;
+  while (container.querySelector('[name="reoAddress_' + i + '"]')){
+    var get = function(name){ var f = container.querySelector('[name="' + name + '"]'); return f ? f.value : ""; };
+    rows.push({ address: get("reoAddress_" + i), propertyType: get("reoType_" + i), occupancy: get("reoOccupancy_" + i), purchaseYear: get("reoYear_" + i),
+      purchasePrice: get("reoPrice_" + i), currentValue: get("reoValue_" + i), loanBalance: get("reoBalance_" + i), monthlyRent: get("reoRent_" + i) });
+    i++;
+  }
+  return rows;
+}
+function reoSyncFromForm(target){
+  var form = target.closest("form");
+  if (!form) return;
+  var wrap = document.getElementById("reo-wrap"), rowsEl = document.getElementById("reo-rows");
+  if (!wrap || !rowsEl) return;
+  var owns = form.elements["reoOwns"] ? form.elements["reoOwns"].value : "";
+  if (owns !== "Yes"){ wrap.style.display = "none"; return; }
+  wrap.style.display = "";
+  var countEl = form.elements["reoCount"];
+  var n = Math.max(1, Math.min(parseInt(countEl && countEl.value, 10) || 1, 20));
+  if (countEl && String(countEl.value) !== String(n) && target === countEl && countEl.value !== "") countEl.value = n;
+  var existing = collectReoRowsFromDOM(rowsEl);
+  rowsEl.innerHTML = buildReoRowsHTML(n, existing, rowsEl.dataset.lang || "en");
+}
+function extractReoOwnsFromForm(fd){
+  if (!fd.has("hasReoSection")) return undefined;
+  return fd.get("reoOwns") || null;
+}
+function extractReoFromForm(fd){
+  if (!fd.has("hasReoSection")) return undefined; // form without the section: keep what's saved
+  if (fd.get("reoOwns") !== "Yes") return [];
+  var rows = [], i = 0;
+  var num = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
+  while (fd.has("reoAddress_" + i)){
+    var r = { address: String(fd.get("reoAddress_" + i) || "").trim(), propertyType: fd.get("reoType_" + i) || "", occupancy: fd.get("reoOccupancy_" + i) || "",
+      purchaseYear: num("reoYear_" + i), purchasePrice: num("reoPrice_" + i), currentValue: num("reoValue_" + i), loanBalance: num("reoBalance_" + i), monthlyRent: num("reoRent_" + i) };
+    if (r.address || r.currentValue != null || r.loanBalance != null) rows.push(r);
+    i++;
+  }
+  return rows;
+}
+// PDF of the schedule (and the completed-project track record when there is one), filed on the loan as the
+// SREO document. Regenerated only when the data changed since the last one.
+function buildSreoPdfBlob(lead){
+  var w = makePdfWriter("Schedule of Real Estate Owned", (lead.name||"") + " — prepared from the borrower's application " + fmtDate(todayISO()));
+  var rows = lead.reoOwns === "Yes" ? (lead.reo||[]) : [];
+  w.heading("1) Properties Currently Owned");
+  if (!rows.length){
+    w.paragraph(lead.reoOwns === "No" ? "The borrower reports owning no other real estate." : "No properties listed.");
+  } else {
+    var tv = 0, tb = 0, tr2 = 0;
+    rows.forEach(function(p, i){
+      w.row("Property #" + (i+1), p.address || "—");
+      w.twoCol("Type", p.propertyType, "Occupancy", p.occupancy);
+      w.twoCol("Year Purchased", p.purchaseYear, "Purchase Price", p.purchasePrice!=null ? fmtUSD(p.purchasePrice) : null);
+      w.twoCol("Current Value", p.currentValue!=null ? fmtUSD(p.currentValue) : null, "Mortgage Balance", p.loanBalance!=null ? fmtUSD(p.loanBalance) : null);
+      w.twoCol("Monthly Rent", p.monthlyRent!=null ? fmtUSD(p.monthlyRent) : null, "Estimated Equity", (p.currentValue!=null && p.loanBalance!=null) ? fmtUSD(p.currentValue - p.loanBalance) : null);
+      tv += Number(p.currentValue)||0; tb += Number(p.loanBalance)||0; tr2 += Number(p.monthlyRent)||0;
+      w.ensureRoom(12);
+    });
+    w.heading("Portfolio Summary");
+    w.twoCol("Total Current Value", fmtUSD(tv), "Total Mortgage Balances", fmtUSD(tb));
+    w.twoCol("Total Estimated Equity", fmtUSD(tv - tb), "Total Monthly Rent", fmtUSD(tr2));
+  }
+  var tracks = (lead.trackRecord||[]).filter(function(t){ return t && (t.address || t.exitValue); });
+  if (tracks.length){
+    w.heading("2) Completed Projects / Track Record");
+    tracks.forEach(function(t, i){
+      w.row("Project #" + (i+1), t.address || "—");
+      w.twoCol("Purchase Date", t.purchaseDate ? fmtDate(t.purchaseDate) : null, "Purchase Price", t.purchasePrice!=null ? fmtUSD(t.purchasePrice) : null);
+      w.twoCol("Rehab / Construction", t.rehabBudget!=null ? fmtUSD(t.rehabBudget) : null, "Exit", t.exitType);
+      w.twoCol("Exit Date", t.exitDate ? fmtDate(t.exitDate) : null, "Exit Value", t.exitValue!=null ? fmtUSD(t.exitValue) : null);
+    });
+  }
+  w.paragraph("Values, balances and rents are as reported by the borrower and have not been independently verified.");
+  return w.doc.output("blob");
+}
+function maybeGenerateSreoPdf(lead){
+  if (!lead || !sb || !lead.reoOwns || !(window.jspdf && window.jspdf.jsPDF)) return;
+  var sig = JSON.stringify([lead.reoOwns, lead.reoOwns === "Yes" ? (lead.reo||[]) : [], lead.trackRecord||[]]);
+  var existing = (lead.documents||[]).filter(function(d){ return d.name === SREO_DOC_NAME; })[0];
+  if (existing && existing.sreoSig === sig && existing.storagePath) return;
+  if (existing && existing.storagePath && !existing.sreoSig) return; // someone uploaded their own SREO: don't replace it with a generated one
+  uploadGeneratedPdfDocument(lead.id, SREO_DOC_NAME, buildSreoPdfBlob(lead), { actorLabel: ui.publicApply ? lead.name : currentUser().name, activityText: "Schedule of Real Estate Owned generated from the application", onDone: function(d){ d.sreoSig = sig; } });
 }
 // Constructive's DSCR Loan Submission Sheet requires this exact per-unit
 // breakdown ("Lease Detail for all 2-20 Unit Properties") for any Duplex,
@@ -22011,6 +22181,8 @@ appEl.addEventListener("change", function(e){
   } else if (action === "upload-doc-staff"){
     var staffFile = t.files && t.files[0];
     if (staffFile) uploadLeadDocument(t.dataset.lead, parseInt(t.dataset.idx,10), staffFile, currentUser().name);
+  } else if (action === "update-reo-count"){
+    reoSyncFromForm(t);
   } else if (action === "update-track-record-count"){
     var trContainer = document.getElementById("track-record-rows");
     if (trContainer){
@@ -22262,6 +22434,7 @@ function applicationMissingFields(fd){
     if (!txt(p + "YearsAtAddress")) miss.push("yearsAtAddress");
     if (["Married", "Unmarried"].indexOf(txt(p + "MaritalStatus")) === -1) miss.push("maritalStatus");
   });
+  if (fd.has("hasReoSection") && !txt("reoOwns")) miss.push("reoOwns");
   if (fd.get("hasCoBorrower") === "Yes"){
     if (!txt("coFirstName") || !txt("coLastName")) miss.push("coName");
     if (!txt("coAddress")) miss.push("coAddress");
@@ -22274,6 +22447,7 @@ function applicationMissingMsg(miss, lang){
     homeAddress: ["your home address", "su dirección de residencia", "địa chỉ nhà của anh/chị"],
     yearsAtAddress: ["years at your address", "años en su dirección", "số năm ở địa chỉ này"],
     maritalStatus: ["your marital status", "su estado civil", "tình trạng hôn nhân"],
+    reoOwns: ["whether you own any other real estate (Schedule of Real Estate Owned)", "si es dueño de otros bienes raíces (Lista de Bienes Raíces)", "anh/chị có sở hữu bất động sản nào khác không (Danh sách bất động sản)"],
     coName: ["the co-borrower's name", "el nombre del co-prestatario", "tên người đồng vay"],
     coAddress: ["the co-borrower's home address", "la dirección del co-prestatario", "địa chỉ nhà của người đồng vay"],
     coMarital: ["the co-borrower's marital status", "el estado civil del co-prestatario", "tình trạng hôn nhân của người đồng vay"]
@@ -22355,7 +22529,7 @@ appEl.addEventListener("submit", function(e){
       leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
-      trackRecord: extractTrackRecordFromForm(fd), __co: coPatchFromForm(fd)
+      trackRecord: extractTrackRecordFromForm(fd), reoOwns: extractReoOwnsFromForm(fd), reo: extractReoFromForm(fd), __co: coPatchFromForm(fd)
     });
     var taLead = leadById(form.dataset.lead);
     var taAchData = extractAchFromForm(fd, signaturePadDataUrl("sig-ach-" + form.dataset.lead), taLead && taLead.achForm);
@@ -22414,7 +22588,7 @@ appEl.addEventListener("submit", function(e){
       leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
-      trackRecord: extractTrackRecordFromForm(fd), __co: coPatchFromForm(fd)
+      trackRecord: extractTrackRecordFromForm(fd), reoOwns: extractReoOwnsFromForm(fd), reo: extractReoFromForm(fd), __co: coPatchFromForm(fd)
     });
     var eaLead = leadById(form.dataset.lead);
     var eaAchData = extractAchFromForm(fd, signaturePadDataUrl("sig-ach-" + form.dataset.lead), eaLead && eaLead.achForm);
@@ -22482,7 +22656,7 @@ appEl.addEventListener("submit", function(e){
       leaseDetail: extractLeaseDetailFromForm(fd),
       transactionType: fd.get("transactionType"),
       prepayTerm: fd.get("prepayTerm"),
-      trackRecord: extractTrackRecordFromForm(fd), __co: coPatchFromForm(fd)
+      trackRecord: extractTrackRecordFromForm(fd), reoOwns: extractReoOwnsFromForm(fd), reo: extractReoFromForm(fd), __co: coPatchFromForm(fd)
     });
     applyAchAndRtlAppPatch(form.dataset.lead, pubAchData, pubRtlData, pubDscrData);
     uploadAnyDeclarationFiles(form, form.dataset.lead);

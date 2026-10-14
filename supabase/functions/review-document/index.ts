@@ -48,6 +48,7 @@ const DOC_GUIDANCE: Record<string, string> = {
 // application auto-fills instead of the borrower re-typing every digit by
 // hand after already photographing the check.
 const ACH_EXTRACTION_DOC_NAME = "Voided Check / Wire Instructions";
+const SREO_DOC_NAME = "Schedule of Real Estate Owned (Track Record)";
 const DEFAULT_GUIDANCE = "Check the document looks complete, legible, and consistent with the loan details given below. Flag any illegible sections, missing pages, or obvious inconsistencies.";
 
 const TP_ROLES = ["Realtor", "Title Company", "Escrow Officer", "Insurance Agent", "Attorney", "Appraiser", "Lender Contact"];
@@ -153,6 +154,7 @@ Deno.serve(async (req: Request) => {
 
     const guidance = DOC_GUIDANCE[docName] || DEFAULT_GUIDANCE;
     const isAchExtraction = docName === ACH_EXTRACTION_DOC_NAME;
+    const isSreo = docName === SREO_DOC_NAME;
     const isForeignNational = context.citizenshipStatus === "Foreign National";
     const fnNote = isForeignNational
       ? "\n\nFOREIGN NATIONAL FILE: this borrower/guarantor is a Foreign National (not a US citizen, permanent resident, or authorized to work in the US). Per BPL's Foreign Nationals guidelines: on a Government-Issued Photo ID, a foreign passport is acceptable and expected -- do not flag it as wrong just for not being a US-issued ID. On bank statements, funds must be at a U.S. (FDIC-insured) institution seasoned 60+ days -- flag if the institution or seasoning can't be confirmed. On entity/ownership documents, flag if more than 2 Foreign Nationals appear as guarantors or 20%+ owners, or if any owner is itself an entity rather than a natural person."
@@ -172,10 +174,15 @@ Deno.serve(async (req: Request) => {
         ? ('ADDITIONALLY, this document is supposed to be a voided check or wire/ACH instructions sheet. Read the actual printed/MICR-line bank details off it (do not guess) and include an "achFields" object with: accountHolderName (name printed on the check), bankName, bankCityState (city and state printed on the check, if shown), aba (the 9-digit routing/ABA number from the MICR line), accountNumber (the account number from the MICR line), and accountType ("Checking" or "Savings" if determinable, else null). Only fill a field you can actually read on the document -- use null for anything illegible, not shown, or if this document turns out not to actually be a check/wire-instructions sheet at all.\n\n')
         : ""
       ) +
+      (isSreo
+        ? ('ADDITIONALLY, this document is supposed to be a Schedule of Real Estate Owned and/or investment track record. Read every row off it (do not guess) into a "reoFields" object: "properties" = real estate the borrower CURRENTLY OWNS, each {address, propertyType (one of Single Family, Condo / Townhome, 2-4 Unit, Multifamily 5+, Mixed-Use, Commercial, Land, or null), occupancy (Tenant Occupied, Owner Occupied, Vacant, Under Rehab, or null), purchaseYear (4-digit number or null), purchasePrice, currentValue, loanBalance (outstanding mortgage; 0 if stated none), monthlyRent} with plain numbers (no $ or commas, null if not shown); and "completedProjects" = prior completed flips/builds/sales, each {address, purchaseDate (YYYY-MM-DD, or YYYY-01-01 if only a year is shown), purchasePrice, rehabBudget, exitType ("Sold", "Refinanced" or "Still Own"), exitDate (same date rule), exitValue (sale price or new loan amount)}. Use empty arrays if a section is not on the document.\n\n')
+        : ""
+      ) +
       FACTS_INSTRUCTIONS +
       "Look at the actual document above and respond with ONLY a JSON object (no markdown fences, no commentary) with exactly these keys:\n" +
       '{"status": "clear" or "flag", "note": "one or two specific sentences explaining what you found", "facts": {' + FACTS_KEYS + '}, "contacts": [{"role": "...", "name": "...", "company": "... or null", "phone": "... or null", "email": "... or null"}]' +
       (isAchExtraction ? ', "achFields": {"accountHolderName": "... or null", "bankName": "... or null", "bankCityState": "... or null", "aba": "... or null", "accountNumber": "... or null", "accountType": "... or null"}' : "") +
+      (isSreo ? ', "reoFields": {"properties": [], "completedProjects": []}' : "") +
       "}\n" +
       "Use \"flag\" if anything above needs a human's attention before this file can move forward; use \"clear\" only if the document genuinely looks complete and consistent.";
 
@@ -188,7 +195,7 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         model: MODEL,
-        max_tokens: 2000,
+        max_tokens: isSreo ? 4000 : 2000,
         system: "You are a precise loan-document review assistant. Output ONLY valid JSON matching exactly what's requested -- no markdown code fences, no commentary, no preamble.",
         messages: [{ role: "user", content: [contentBlock, { type: "text", text: promptText }] }],
       }),
@@ -244,7 +251,24 @@ Deno.serve(async (req: Request) => {
       if (Object.values(achFields).every((v) => v === null)) achFields = null;
     }
 
-    return corsJson({ ok: true, status, note, contacts, achFields, facts: cleanFacts(parsed.facts) });
+    let reoFields: { properties: any[]; completedProjects: any[] } | null = null;
+    if (isSreo && (parsed as any).reoFields && typeof (parsed as any).reoFields === "object") {
+      const rf = (parsed as any).reoFields;
+      const s = (v: unknown, max: number) => (typeof v === "string" && v.trim()) ? v.trim().slice(0, max) : "";
+      const n = (v: unknown) => { const x = typeof v === "number" ? v : Number(String(v ?? "").replace(/[^0-9.\-]/g, "")); return (v === null || v === undefined || v === "" || !isFinite(x)) ? null : x; };
+      const d = (v: unknown) => { const t = s(v, 10); return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null; };
+      const properties = (Array.isArray(rf.properties) ? rf.properties : []).filter((p: any) => p && s(p.address, 200)).slice(0, 20).map((p: any) => ({
+        address: s(p.address, 200), propertyType: s(p.propertyType, 40), occupancy: s(p.occupancy, 40), purchaseYear: n(p.purchaseYear),
+        purchasePrice: n(p.purchasePrice), currentValue: n(p.currentValue), loanBalance: n(p.loanBalance), monthlyRent: n(p.monthlyRent),
+      }));
+      const completedProjects = (Array.isArray(rf.completedProjects) ? rf.completedProjects : []).filter((p: any) => p && s(p.address, 200)).slice(0, 20).map((p: any) => ({
+        address: s(p.address, 200), purchaseDate: d(p.purchaseDate), purchasePrice: n(p.purchasePrice), rehabBudget: n(p.rehabBudget),
+        exitType: ["Sold", "Refinanced", "Still Own"].includes(p.exitType) ? p.exitType : "", exitDate: d(p.exitDate), exitValue: n(p.exitValue),
+      }));
+      if (properties.length || completedProjects.length) reoFields = { properties, completedProjects };
+    }
+
+    return corsJson({ ok: true, status, note, contacts, achFields, reoFields, facts: cleanFacts(parsed.facts) });
   } catch (err) {
     console.log("review-document: server_error", String(err));
     return corsJson({ ok: true, status: "flag", note: "Automatic review hit an error — please check this document manually." });

@@ -29,7 +29,7 @@ const WRITABLE = new Set([
   "exit_strategy", "purchase_price", "current_value", "current_loan_balance", "arv", "rehab_budget", "rent_estimate",
   "monthly_taxes", "monthly_insurance", "monthly_hoa", "loan_amount", "ltv", "term_months", "property_count", "birthday",
   "entity_legal_name", "guarantor_first_name", "guarantor_middle_name", "guarantor_last_name", "guarantor_phone", "guarantor_email",
-  "guarantor_address", "guarantor_ownership_pct", "track_record", "co_first_name", "co_middle_name", "co_last_name", "co_birthday",
+  "guarantor_address", "guarantor_ownership_pct", "track_record", "reo", "reo_owns", "co_first_name", "co_middle_name", "co_last_name", "co_birthday",
   "co_ownership_pct", "co_phone", "co_email", "co_address", "co_citizenship_status", "co_country_of_domicile", "co_credit_score",
   "co_experience_deals", "co_liquidity", "co_marital_status", "citizenship_status", "country_of_domicile", "marital_status",
   "transaction_type", "prepay_term", "built_year", "current_lender_name", "units_ready_for_rent", "property_occupied", "taxes_current",
