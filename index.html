@@ -4366,7 +4366,19 @@ function renderQuestionnairePanel(lead){
       '<button class="btn btn-sm btn-ghost" type="button" data-action="copy-questionnaire-link" data-lead="' + lead.id + '">Copy link</button>' +
     '</div></div>' + rows + '</div>';
 }
-function sendQuestionnaire(leadId){
+// Auto-send (Joe 2026-10-14: "dont leave up to a button, theyll never press it"): the moment a file is placed with a lender that needs the
+// questionnaire (Velocity), the borrower gets it once, in their language, from their loan officer. Never twice, never after they've started.
+var qAutoSent = {};
+function autoSendQuestionnaire(lead){
+  if (!lead || !/Velocity/i.test(String(lead.outsideLender || ""))) return;
+  if (qAutoSent[lead.id] || questionnaireSentOn(lead)) return;
+  if (lead.propertyQuestionnaire && (lead.propertyQuestionnaire.submittedAt || lead.propertyQuestionnaire.updatedAt)) return;
+  if (!lead.email && !lead.phone) return;
+  if (/^test\b/i.test(String(lead.name || ""))) return;
+  qAutoSent[lead.id] = true;
+  sendQuestionnaire(lead.id, { auto: true });
+}
+function sendQuestionnaire(leadId, opts){
   var lead = leadById(leadId);
   if (!lead) return;
   if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
@@ -4384,10 +4396,11 @@ function sendQuestionnaire(leadId){
     var ok = rs.some(function(x){ return x; });
     if (ok){
       lead.activity = lead.activity || [];
-      lead.activity.push({ date: todayISO(), type:"note", text:"Property Questionnaire sent to the borrower (" + [lead.email ? "email" : "", lead.phone ? "text" : ""].filter(Boolean).join(" + ") + ")", author: currentUser().name });
+      lead.activity.push({ date: todayISO(), type:"note", text:"Property Questionnaire sent to the borrower (" + [lead.email ? "email" : "", lead.phone ? "text" : ""].filter(Boolean).join(" + ") + ")" + (opts && opts.auto ? " automatically when the file was placed" : ""), author: currentUser().name });
       persist();
     }
-    showToast(ok ? "Questionnaire sent to " + first : "Couldn't send — try again");
+    if (!ok) qAutoSent[lead.id] = false;
+    showToast(ok ? ((opts && opts.auto) ? "Property Questionnaire sent to " + first + " automatically" : "Questionnaire sent to " + first) : "Couldn't send the questionnaire — use the button on the Documents tab");
     render();
   });
 }
@@ -5557,6 +5570,7 @@ function sendStoredTermSheetOption(leadId, idx){
   if (tsRoute !== undefined && tsRoute !== (lead.outsideLender || null)){
     lead.outsideLender = tsRoute;
     applyRequiredDocs(lead.id, { silent:true });
+    autoSendQuestionnaire(lead);
     lead.activity = lead.activity || [];
     lead.activity.push({ date: todayISO(), type:"note", text: "Placement updated to match the term sheet sent" + (canManageOutsideLender() ? " (" + (tsRoute || "Constructive") + ")" : ""), author: currentUser().name });
   }
@@ -14759,6 +14773,7 @@ function setOutsideLender(leadId, lender){
   if (!lead || !canManageOutsideLender()) return;
   lead.outsideLender = lender || null;
   var lenderDocsAdded = applyRequiredDocs(lead.id, { silent:true }) || [];
+  autoSendQuestionnaire(lead);
   showToast((lender ? ("Routed to " + lender) : "Set back to in-house / needs manual placement") + (lenderDocsAdded.length ? (" — " + lenderDocsAdded.length + " lender document" + (lenderDocsAdded.length === 1 ? "" : "s") + " added to the checklist") : ""));
   persist();
 }
@@ -15866,6 +15881,7 @@ function lpSelectOption(key, ri, oi, spreadPts){
   var route = lenderRoutingValue(r.lender);
   if (route !== undefined) lead.outsideLender = route;
   applyRequiredDocs(lead.id, { silent:true }); // the placed lender's own submission docs
+  autoSendQuestionnaire(lead);
   lead.activity = lead.activity || [];
   lead.activity.push({ date: todayISO(), type:"note", text: "Pricer: applied " + fmtUSD(lead.loanAmount) + " at " + fmtPct(o.rate) + (canManageOutsideLender() ? (" with " + r.lender + " — placement set to " + (route === undefined ? "(unchanged)" : (route || "Constructive (in-house)"))) : " — placement updated to match"), author: currentUser().name });
   lead.guidelineCheck = Object.assign({}, lead.guidelineCheck || {}, { pricerTerms: {
