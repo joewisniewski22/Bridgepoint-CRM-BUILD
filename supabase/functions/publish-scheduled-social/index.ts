@@ -10,7 +10,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const META_ACCESS_TOKEN = Deno.env.get("META_ACCESS_TOKEN")!;
+// Posting token (pages_manage_posts, instagram_content_publish...) lives in its own secret so it never disturbs the ads token; falls back to the ads token.
+const META_ACCESS_TOKEN = (Deno.env.get("META_SOCIAL_TOKEN") || Deno.env.get("META_ACCESS_TOKEN"))!;
 const META_AD_ACCOUNT_ID = Deno.env.get("META_AD_ACCOUNT_ID")!;
 const GRAPH_VERSION = "v21.0";
 const GRAPH_BASE = "https://graph.facebook.com/" + GRAPH_VERSION;
