@@ -16,6 +16,7 @@ import { RCN_GEO_DATE, RCN_KILLED, RCN_REDUCE, RCN_TARGET, RCN_TARGET_NAMES } fr
 import { checkVelocity, velocityGet, velocityPost } from "./velocity.ts";
 import { checkLend } from "./lend.ts";
 import { checkHomeXpress } from "./homex.ts";
+import { checkDominion } from "./dominion.ts";
 import { RCN_LTR_AREAS, RCN_LTR_ZIP, RCN_LTR_GEO_DATE } from "./rcn_ltr_geo.ts";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -2078,6 +2079,7 @@ const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult
   { key: "velocity", check: (s: Scenario) => checkVelocity(s as any) },
   { key: "lend", check: (s: Scenario) => checkLend(s as any) },
   { key: "homex", check: (s: Scenario) => checkHomeXpress(s as any, stateFromAddress) },
+  { key: "dominion", check: (s: Scenario) => checkDominion(s as any, stateFromAddress) },
 ];
 
 // ---------------------------------------------------------------------

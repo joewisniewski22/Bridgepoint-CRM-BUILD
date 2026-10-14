@@ -1442,9 +1442,10 @@ function lenderKeyForLead(lead){
   if (/Velocity/i.test(ol)) return "velocity";
   if (/Lend Investors|^LEND\b/i.test(ol)) return "lend";
   if (/Home ?Xpress/i.test(ol)) return "homex";
+  if (/Dominion/i.test(ol)) return "dominion";
   return null;
 }
-var LENDER_DOC_LABEL = { constructive:"Constructive", rcn:"RCN", kiavi:"Kiavi", ad:"A&D", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress" };
+var LENDER_DOC_LABEL = { constructive:"Constructive", rcn:"RCN", kiavi:"Kiavi", ad:"A&D", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress", dominion:"Dominion" };
 var LENDER_DOC_PACKS = {
   constructive: function(lead){
     var rtl = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
@@ -9870,8 +9871,8 @@ function dismissAiFlag(leadId, idx){
    own rules, not an approval -- the lender's underwriter makes the call.
    Results live in public.lead_underwriting (staff-only RLS), not on the lead.
 --------------------------------------------------------------------- */
-var VU_LENDER_RX = { constructive:/Constructive/i, rcn:/RCN/i, kiavi:/Kiavi/i, ad:/A&D/i, nextres:/NextRes/i, velocity:/Velocity/i, lend:/Lend Investors|^LEND\b/i, homex:/Home ?Xpress/i };
-var VU_LENDER_NAME = { constructive:"Constructive Capital", rcn:"RCN Capital", kiavi:"Kiavi", ad:"A&D Mortgage", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress" };
+var VU_LENDER_RX = { constructive:/Constructive/i, rcn:/RCN/i, kiavi:/Kiavi/i, ad:/A&D/i, nextres:/NextRes/i, velocity:/Velocity/i, lend:/Lend Investors|^LEND\b/i, homex:/Home ?Xpress/i, dominion:/Dominion/i };
+var VU_LENDER_NAME = { constructive:"Constructive Capital", rcn:"RCN Capital", kiavi:"Kiavi", ad:"A&D Mortgage", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress", dominion:"Dominion" };
 var VU_AREAS = ["Lender fit","Verified numbers","Credit","Documents","Cross-checks","Funds to close","Insurance"];
 function vuState(leadId){ ui.vu = ui.vu || {}; return ui.vu[leadId] || (ui.vu[leadId] = { loaded:false, loading:false, running:false, data:null }); }
 function vuLenderKey(lead){ return lenderKeyForLead(lead) || "constructive"; }
@@ -14561,7 +14562,7 @@ function renderOutsideLenderFitBox(lead){
 // NextRes added 2026-09-26 -- Joe is now a table funder with them and will
 // upload their real term sheets via the existing Upload Outside Term Sheet
 // flow (no dedicated rate sheet/pricer built in yet, unlike Constructive).
-var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital", "HomeXpress"];
+var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital", "HomeXpress", "Dominion"];
 // Pricer lender name -> the routing value the rest of the CRM uses ("RCN Capital"
 // -> "RCN", Constructive -> null = in-house). undefined = unknown lender, leave routing alone.
 function lenderRoutingValue(name){
@@ -14574,6 +14575,7 @@ function lenderRoutingValue(name){
   if (/Velocity/i.test(n)) return "Velocity";
   if (/Lend Investors|^LEND\b/i.test(n)) return "Lend Investors Capital";
   if (/Home ?Xpress/i.test(n)) return "HomeXpress";
+  if (/Dominion/i.test(n)) return "Dominion";
   return undefined;
 }
 // Routing vs. the terms actually applied to the file (pricer) -- flags files like
@@ -14608,7 +14610,8 @@ var LENDER_EXPORT_TARGETS = [
   { key:"NextRes", label:"NextRes", portal:null },
   { key:"Velocity", label:"Velocity Mortgage Capital", portal:"https://www.generatevelocity.com/#/BrokerDashboard" },
   { key:"LEND", label:"Lend Investors Capital", portal:"https://www.leapplenderportal.com/Partner/s/" },
-  { key:"HomeXpress", label:"HomeXpress", portal:"https://xconnect-x1.homexmortgage.com/newregistration" }
+  { key:"HomeXpress", label:"HomeXpress", portal:"https://xconnect-x1.homexmortgage.com/newregistration" },
+  { key:"Dominion", label:"Dominion Financial", portal:"https://app.loanpass.io/c/dominion" }
 ];
 // The file's placement -> its Export to Lender target (Joe 2026-10-06: one click
 // exports to the assigned lender).
@@ -14622,6 +14625,7 @@ function exportKeyForLead(lead){
   if (/Velocity/i.test(ol)) return "Velocity";
   if (/Lend Investors/i.test(ol)) return "LEND";
   if (/Home ?Xpress/i.test(ol)) return "HomeXpress";
+  if (/Dominion/i.test(ol)) return "Dominion";
   return null;
 }
 var LENDER_EXTENSION_ZIP = "https://bridgepoint-crm-build.vercel.app/bridgepoint-lender-export.zip";

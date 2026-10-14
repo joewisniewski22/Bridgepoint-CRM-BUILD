@@ -52,11 +52,11 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 // Joe, Fiore and Erika may see lender names (Joe 10/8: "internal only goes to me, fiore and erika").
 const INSIDER_IDS = new Set(["owner", "lo-fiore", "proc-erika"]);
 function isInsider(caller: Caller): boolean { return INSIDER_IDS.has(caller.id) || caller.role === "owner"; }
-const LENDER_NAME_RX = /\b(Kiavi|RCN( Capital)?|A&D( Mortgage)?|Lend Investors( Capital)?|LEND|Velocity|NextRes|Home ?Xpress|HomeX|X-Connect|InvestorX|Constructive( Capital)?|Figure|BPL)\b/gi;
+const LENDER_NAME_RX = /\b(Kiavi|RCN( Capital)?|A&D( Mortgage)?|Lend Investors( Capital)?|LEND|Velocity|NextRes|Home ?Xpress|HomeX|X-Connect|InvestorX|Dominion( Financial)?|LoanPASS|Constructive( Capital)?|Figure|BPL)\b/gi;
 
 const LOAN_TYPES = ["DSCR", "Fix & Flip", "Ground Up Construction", "Portfolio/Blanket", "Bridge", "Mixed-Use"];
 const SOURCES = ["Meta Ads", "Connected Investors", "Referral", "Repeat Client", "Website", "Self-Generated"];
-const OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital", "HomeXpress"];
+const OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital", "HomeXpress", "Dominion"];
 const CITIZENSHIP_STATUSES = ["US Citizen", "Permanent Resident", "Foreign National", "ITIN"];
 const PREPAY_TERMS = ["5yr", "3yr", "2yr", "1yr", "none"];
 
@@ -148,7 +148,7 @@ const TOOLS = [
         entityType: { type: "string", enum: ["LLC", "Corporation", "Individual"] },
         rentalType: { type: "string", enum: ["ltr", "str"] },
         termMonths: { type: "number" },
-        onlyLender: { type: "string", enum: ["constructive", "rcn", "kiavi", "ad", "nextres", "velocity", "lend", "homex"], description: "STAFF ONLY (Joe, Fiore, Erika): price the deal through just this one lender to answer 'what would Kiavi / RCN / A&D / NextRes / Velocity / LEND / HomeXpress / Constructive do on this?'. Ignored for everyone else." },
+        onlyLender: { type: "string", enum: ["constructive", "rcn", "kiavi", "ad", "nextres", "velocity", "lend", "homex", "dominion"], description: "STAFF ONLY (Joe, Fiore, Erika): price the deal through just this one lender to answer 'what would Kiavi / RCN / A&D / NextRes / Velocity / LEND / HomeXpress / Dominion / Constructive do on this?'. Ignored for everyone else." },
       },
       required: ["loanType", "propertyAddress", "creditScore"],
     },
@@ -484,7 +484,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
       pointsCharged: 0, guarantorFirstName: "Scenario", guarantorLastName: "Check", decliningMarket: "no", vacationArea: "no", creditEvent: "no", appraisalTransfer: "no", plansReady: "no",
     };
     // Joe, Fiore and Erika can ask what ONE lender would do ("what would Kiavi do on this?"); everyone else always gets the blended Bridgepoint view.
-    const only = isInsider(caller) && ["constructive", "rcn", "kiavi", "ad", "nextres", "velocity", "lend", "homex"].includes(String(input.onlyLender || "")) ? [String(input.onlyLender)] : null;
+    const only = isInsider(caller) && ["constructive", "rcn", "kiavi", "ad", "nextres", "velocity", "lend", "homex", "dominion"].includes(String(input.onlyLender || "")) ? [String(input.onlyLender)] : null;
     const runPricer = async (sc: Record<string, unknown>) => {
       const res = await fetch(SUPABASE_URL + "/functions/v1/check-live-rates", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify(only ? { lead: sc, lenders: only } : { lead: sc }) }).then((r) => r.json()).catch(() => null);
       return res && res.ok ? (res.results || []) as any[] : null;
