@@ -560,8 +560,10 @@ Deno.serve(async (req: Request) => {
         if (change.field === "leadgen" && v.leadgen_id) {
           await processLeadgenId(v.leadgen_id, v.page_id, v.form_id, v.ad_id).catch((e) => console.error("meta-leads-webhook: processing error", e));
         } else if (!isIg && change.field === "feed" && v.item === "comment" && v.verb === "add" && v.from) {
+          if (v.message && String(v.from.id) !== pageId && (!v.parent_id || v.parent_id === v.post_id)) await sb.from("social_engagement_inbox").upsert({ ext_id: "fb:" + v.comment_id, platform: "facebook", post_id: v.post_id || null, author: v.from.name || null, author_id: String(v.from.id), text: String(v.message).slice(0, 1000) }, { onConflict: "ext_id", ignoreDuplicates: true });
           await handleSocial({ platform: "facebook", kind: "comment", externalId: "fb:" + v.comment_id, fromId: String(v.from.id), name: v.from.name || null, text: v.message || "", commentId: v.comment_id, pageId }).catch((e) => console.error("social fb comment", e));
         } else if (isIg && change.field === "comments" && v.from) {
+          if (v.text && !v.parent_id) await sb.from("social_engagement_inbox").upsert({ ext_id: "ig:" + v.id, platform: "instagram", post_id: (v.media && v.media.id) || null, author: v.from.username || null, author_id: String(v.from.id), text: String(v.text).slice(0, 1000) }, { onConflict: "ext_id", ignoreDuplicates: true });
           await handleSocial({ platform: "instagram", kind: "comment", externalId: "ig:" + v.id, fromId: String(v.from.id), username: v.from.username || null, text: v.text || "", commentId: v.id, pageId }).catch((e) => console.error("social ig comment", e));
         }
       }
