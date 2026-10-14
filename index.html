@@ -19552,7 +19552,7 @@ function coApplicantBlockHTML(lead, L){
       '<div class="form-row"><label>' + L("Co-Borrower Phone") + '</label><input class="input" name="coPhone" value="' + esc(v(lead.coPhone)) + '"></div>' +
       '<div class="form-row"><label>' + L("Co-Borrower Email") + '</label><input class="input" type="email" name="coEmail" value="' + esc(v(lead.coEmail)) + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>' + L("Co-Borrower Home Address (street, city, state, ZIP)") + '</label><input class="input" name="coAddress" value="' + esc(v(lead.coAddress)) + '"></div>' +
+    '<div class="form-row"><label>' + L("Co-Borrower Home Address (street, city, state, ZIP)") + ' *</label><input class="input" name="coAddress" value="' + esc(v(lead.coAddress)) + '"></div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Citizenship Status") + '</label><select class="select" name="coCitizenshipStatus">' + citOpts + '</select></div>' +
       '<div class="form-row"><label>' + L("Country of Citizenship") + ' <span class="hint">(' + L("if Foreign National") + ')</span></label><input class="input" name="coCountryOfDomicile" value="' + esc(v(lead.coCountryOfDomicile)) + '"></div>' +
@@ -19561,7 +19561,7 @@ function coApplicantBlockHTML(lead, L){
       '<div class="form-row"><label>' + L("Investing Experience (deals completed)") + '</label><input class="input" type="number" min="0" name="coExperienceDeals" value="' + esc(v(lead.coExperienceDeals)) + '"></div>' +
       '<div class="form-row"><label>' + L("Liquidity / Reserves") + '</label><input class="input" type="number" name="coLiquidity" value="' + esc(v(lead.coLiquidity)) + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="coMaritalStatus">' + marOpts + '</select></div>' +
+    '<div class="form-row"><label>' + L("Marital Status") + ' *</label><select class="select" name="coMaritalStatus">' + marOpts + '</select></div>' +
     '</div>' + (ui.publicApply ? "" : additionalBorrowersHTML(lead));
 }
 function clearCoSsnIfAny(leadId){ var l = leadById(leadId); if (l && l.coSsnLast4) saveCoGuarantorSsn(leadId, ""); }
@@ -20429,10 +20429,10 @@ function buildRtlApplicationFieldsHTML(lead, lang){
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Your Current Address") + '</b></div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Own or Rent?") + '</label><select class="select" name="rtlOwnRent"><option value="Own"' + (r.ownRent==="Own"?" selected":"") + '>' + L("Own") + '</option><option value="Rent"' + (r.ownRent==="Rent"?" selected":"") + '>' + L("Rent") + '</option></select></div>' +
-      '<div class="form-row"><label>' + L("Years/Months at Address") + '</label><input class="input" name="rtlYearsAtAddress" value="' + esc(r.yearsAtAddress||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Years/Months at Address") + ' *</label><input class="input" name="rtlYearsAtAddress" value="' + esc(r.yearsAtAddress||"") + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="rtlHomeAddress" value="' + esc(r.homeAddress || lead.guarantorAddress || "") + '"></div>' +
-    '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="rtlMaritalStatus">' +
+    '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + ' *</label><input class="input" name="rtlHomeAddress" value="' + esc(r.homeAddress || lead.guarantorAddress || "") + '"></div>' +
+    '<div class="form-row"><label>' + L("Marital Status") + ' *</label><select class="select" name="rtlMaritalStatus">' +
       '<option value=""' + (r.maritalStatus!=="Married" && r.maritalStatus!=="Unmarried" ? " selected" : "") + '>' + L("— Select —") + '</option>' +
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (r.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>' +
@@ -20679,10 +20679,10 @@ function buildDscrApplicationFieldsHTML(lead, lang){
     '<div class="hint" style="margin:14px 0 6px"><b>' + L("Your Current Address") + '</b></div>' +
     '<div class="form-two">' +
       '<div class="form-row"><label>' + L("Own or Rent?") + '</label><select class="select" name="dscrOwnRent"><option value="Own"' + (d.ownRent==="Own"?" selected":"") + '>' + L("Own") + '</option><option value="Rent"' + (d.ownRent==="Rent"?" selected":"") + '>' + L("Rent") + '</option></select></div>' +
-      '<div class="form-row"><label>' + L("Years/Months at Address") + '</label><input class="input" name="dscrYearsAtAddress" value="' + esc(d.yearsAtAddress||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Years/Months at Address") + ' *</label><input class="input" name="dscrYearsAtAddress" value="' + esc(d.yearsAtAddress||"") + '"></div>' +
     '</div>' +
-    '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + '</label><input class="input" name="dscrHomeAddress" value="' + esc(d.homeAddress || lead.guarantorAddress || "") + '"></div>' +
-    '<div class="form-row"><label>' + L("Marital Status") + '</label><select class="select" name="dscrMaritalStatus">' +
+    '<div class="form-row"><label>' + L("Street Address, City, State, ZIP") + ' *</label><input class="input" name="dscrHomeAddress" value="' + esc(d.homeAddress || lead.guarantorAddress || "") + '"></div>' +
+    '<div class="form-row"><label>' + L("Marital Status") + ' *</label><select class="select" name="dscrMaritalStatus">' +
       '<option value=""' + (d.maritalStatus!=="Married" && d.maritalStatus!=="Unmarried" ? " selected" : "") + '>' + L("— Select —") + '</option>' +
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (d.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>' +
@@ -22085,6 +22085,37 @@ appEl.addEventListener("input", function(e){
   }, 700);
 });
 
+// Joe 2026-10-14: a phone-taken application came through with no home address, marital status or years at address (the form asked, nothing
+// required them) and the lender won't take the file without them. These are now required before an application can be submitted or taken.
+function applicationMissingFields(fd){
+  var miss = [];
+  var txt = function(k){ return String(fd.get(k) || "").trim(); };
+  ["dscr", "rtl"].forEach(function(p){
+    if (!fd.has(p + "HomeAddress")) return;
+    if (!txt(p + "HomeAddress")) miss.push("homeAddress");
+    if (!txt(p + "YearsAtAddress")) miss.push("yearsAtAddress");
+    if (["Married", "Unmarried"].indexOf(txt(p + "MaritalStatus")) === -1) miss.push("maritalStatus");
+  });
+  if (fd.get("hasCoBorrower") === "Yes"){
+    if (!txt("coFirstName") || !txt("coLastName")) miss.push("coName");
+    if (!txt("coAddress")) miss.push("coAddress");
+    if (["Married", "Unmarried"].indexOf(txt("coMaritalStatus")) === -1) miss.push("coMarital");
+  }
+  return miss;
+}
+function applicationMissingMsg(miss, lang){
+  var N = {
+    homeAddress: ["your home address", "su dirección de residencia", "địa chỉ nhà của anh/chị"],
+    yearsAtAddress: ["years at your address", "años en su dirección", "số năm ở địa chỉ này"],
+    maritalStatus: ["your marital status", "su estado civil", "tình trạng hôn nhân"],
+    coName: ["the co-borrower's name", "el nombre del co-prestatario", "tên người đồng vay"],
+    coAddress: ["the co-borrower's home address", "la dirección del co-prestatario", "địa chỉ nhà của người đồng vay"],
+    coMarital: ["the co-borrower's marital status", "el estado civil del co-prestatario", "tình trạng hôn nhân của người đồng vay"]
+  };
+  var i = lang === "es" ? 1 : lang === "vi" ? 2 : 0;
+  var head = ["Please fill in: ", "Por favor complete: ", "Vui lòng điền: "][i];
+  return head + miss.map(function(k){ return N[k][i]; }).join(", ");
+}
 appEl.addEventListener("submit", function(e){
   window.__lastUserAction = Date.now();
   var form = e.target;
@@ -22109,6 +22140,8 @@ appEl.addEventListener("submit", function(e){
       source: fd.get("source"), assignedTo: fd.get("assignedTo"), propertyAddress: fd.get("propertyAddress")
     });
   } else if (type === "take-application"){
+    var missTake = applicationMissingFields(fd);
+    if (missTake.length){ showToast(applicationMissingMsg(missTake, "en"), true); return; }
     var numOrNull = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
     var takeAppSsn = (fd.get("guarantorSsn") || "").trim();
     if (takeAppSsn) saveGuarantorSsn(form.dataset.lead, takeAppSsn);
@@ -22227,6 +22260,8 @@ appEl.addEventListener("submit", function(e){
     if (eaSowPatch) saveScopeOfWork(form.dataset.lead, eaSowPatch.items, eaSowPatch.notes);
     render();
   } else if (type === "public-application"){
+    var missPub = applicationMissingFields(fd);
+    if (missPub.length){ showToast(applicationMissingMsg(missPub, (ui.publicApply && ui.publicApply.lang) || templateLang((leadById(form.dataset.lead) || {}).preferredLanguage)), true); return; }
     var numOrNullPub = function(k){ var x = fd.get(k); return (x===null||x==="") ? null : Number(x); };
     var pubSsn = (fd.get("guarantorSsn") || "").trim();
     if (pubSsn) saveGuarantorSsn(form.dataset.lead, pubSsn);
