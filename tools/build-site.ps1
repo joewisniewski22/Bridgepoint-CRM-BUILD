@@ -155,7 +155,7 @@ $sm = '<?xml version="1.0" encoding="UTF-8"?>' + "`n" + '<urlset xmlns="http://w
 foreach ($p in ($pages | Sort-Object { $_.canon })) { $sm += "  <url><loc>$domain$($p.canon)</loc><lastmod>$today</lastmod><priority>$($p.pri)</priority></url>`n" }
 $sm += "</urlset>`n"
 [IO.File]::WriteAllText((Join-Path $outDir "sitemap.xml"), $sm, (New-Object Text.UTF8Encoding($false)))
-[IO.File]::WriteAllText((Join-Path $outDir "robots.txt"), "User-agent: *`nAllow: /`nDisallow: /thank-you/`nDisallow: /funded-shell/`nSitemap: $domain/sitemap.xml`nSitemap: $domain/funded-sitemap.xml`n", (New-Object Text.UTF8Encoding($false)))
+[IO.File]::WriteAllText((Join-Path $outDir "robots.txt"), "User-agent: *`nAllow: /`nDisallow: /thank-you/`nDisallow: /funded-shell/`nDisallow: /ref/`nDisallow: /partner/`nSitemap: $domain/sitemap.xml`nSitemap: $domain/funded-sitemap.xml`n", (New-Object Text.UTF8Encoding($false)))
 # Search-engine ownership files (Google Search Console etc.) must sit at the site root.
 $verifyDir = Join-Path (Join-Path $root "tools") "site-verify"
 if (Test-Path $verifyDir) { Copy-Item (Join-Path $verifyDir "*") $outDir -Force }

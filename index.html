@@ -6214,7 +6214,9 @@ function rowToReferralPartner(r){
   return {
     id: r.id, name: r.name, company: r.company || "", role: r.role || "Other",
     phone: r.phone || "", email: r.email || "", notes: r.notes || "",
-    createdAt: r.created_at, createdBy: r.created_by || null
+    createdAt: r.created_at, createdBy: r.created_by || null,
+    refCode: r.ref_code || null, status: r.status || "pending", feePoints: r.fee_points == null ? null : Number(r.fee_points),
+    assignedLo: r.assigned_lo || null, lastLoginAt: r.last_login_at || null
   };
 }
 function referralPartnerToRow(p){
@@ -16759,6 +16761,37 @@ function referralPartnerStats(partnerId){
   var lastDate = referred.reduce(function(max,l){ return (!max || l.createdAt > max) ? l.createdAt : max; }, null);
   return { referredCount: referred.length, closedCount: closed.length, volume: volume, lastDate: lastDate, referred: referred };
 }
+// Referral partner links + portal (Joe 2026-10-14). Any LO can add a partner; only Joe or Fiore approve one, set the referral fee, or assign who gets their borrowers.
+function canApprovePartners(){ return isOwner() || (currentUser() && currentUser().id === "lo-fiore"); }
+function partnerLinkFor(p){ return p.refCode ? ("https://bplending.com/ref/?p=" + p.refCode) : ""; }
+function partnerPortalCell(p){
+  var st = p.status || "pending";
+  var pill = '<span class="badge ' + (st === "approved" ? "badge-forest" : st === "suspended" ? "badge-rust" : "badge-gold") + '">' + (st === "approved" ? "Approved" : st === "suspended" ? "Suspended" : "Pending approval") + '</span>';
+  var can = canApprovePartners();
+  var out = '<div>' + pill + (p.lastLoginAt ? '<div class="footnote">Last portal login ' + esc(fmtDate(String(p.lastLoginAt).slice(0,10))) + '</div>' : '') + '</div>';
+  if (st === "approved" && p.refCode) out += '<div style="margin-top:6px"><button class="btn btn-sm" data-action="partner-copy-link" data-id="' + esc(p.id) + '">Copy referral link</button></div>';
+  if (can){
+    out += '<div style="margin-top:6px">' + (st === "approved"
+      ? '<button class="btn btn-sm btn-ghost" data-action="partner-set-status" data-id="' + esc(p.id) + '" data-status="suspended">Suspend</button>'
+      : '<button class="btn btn-sm btn-primary" data-action="partner-set-status" data-id="' + esc(p.id) + '" data-status="approved">' + (st === "suspended" ? "Re-approve" : "Approve") + '</button>') + '</div>';
+    out += '<div class="footnote" style="margin-top:6px">Fee (points)</div><input class="input" style="width:90px" type="number" step="0.25" min="0" max="5" data-action="partner-fee" data-id="' + esc(p.id) + '" value="' + (p.feePoints == null ? "" : esc(p.feePoints)) + '" placeholder="not set">';
+    out += '<div class="footnote" style="margin-top:6px">Borrowers go to</div><select class="select" style="width:150px" data-action="partner-lo" data-id="' + esc(p.id) + '"><option value="">Normal rotation</option>' +
+      state.users.filter(function(u){ return u.role === "loan_officer" || u.role === "owner"; }).map(function(u){ return '<option value="' + esc(u.id) + '"' + (p.assignedLo === u.id ? " selected" : "") + '>' + esc(u.name) + '</option>'; }).join("") + '</select>';
+  }
+  return out;
+}
+function updatePartnerField(id, patch, toast){
+  var p = referralPartnerById(id); if (!p || !sb) return;
+  if (!canApprovePartners()){ showToast("Only Joe or Fiore can change that"); return; }
+  var row = {}; Object.keys(patch).forEach(function(k){ row[({ status:"status", feePoints:"fee_points", assignedLo:"assigned_lo" })[k]] = patch[k]; });
+  if (patch.status === "approved"){ row.approved_by = currentUser().id; row.approved_at = new Date().toISOString(); }
+  sb.from("referral_partners").update(row).eq("id", id).then(function(res){
+    if (res.error){ showToast("Couldn't save — try again"); return; }
+    Object.keys(patch).forEach(function(k){ p[k] = patch[k]; });
+    if (toast) showToast(toast);
+    render();
+  });
+}
 function renderReferralPartners(){
   var partners = (state.referralPartners||[]).slice().sort(function(a,b){ return referralPartnerStats(b.id).volume - referralPartnerStats(a.id).volume; });
   var rows = partners.map(function(p){
@@ -16771,10 +16804,11 @@ function renderReferralPartners(){
       '<td class="num">' + s.closedCount + '</td>' +
       '<td class="num">' + fmtUSD(s.volume) + '</td>' +
       '<td>' + (s.lastDate ? fmtDate(s.lastDate) : '—') + '</td>' +
+      '<td>' + partnerPortalCell(p) + '</td>' +
     '</tr>';
   }).join("");
   var table = partners.length ? (
-    '<div class="table-wrap"><table><thead><tr><th>Partner</th><th>Type</th><th>Contact</th><th>Referred</th><th>Closed</th><th>Volume</th><th>Last Referral</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+    '<div class="table-wrap"><table><thead><tr><th>Partner</th><th>Type</th><th>Contact</th><th>Referred</th><th>Closed</th><th>Volume</th><th>Last Referral</th><th>Portal &amp; link</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
   ) : '<div class="empty">No referral partners yet — add the realtors, wholesalers, and other lenders who send you business.</div>';
 
   var addForm = '<div class="panel panel-pad" style="margin-bottom:20px;max-width:560px">' +
@@ -21455,6 +21489,11 @@ appEl.addEventListener("click", function(e){
   else if (action === "reveal-employee-ach"){ revealEmployeeAch(t.dataset.user); }
   else if (action === "hide-employee-ach"){ hideEmployeeAch(); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
+  else if (action === "partner-copy-link"){
+    var pcl = referralPartnerById(t.dataset.id);
+    if (pcl && pcl.refCode){ try { navigator.clipboard.writeText(partnerLinkFor(pcl)); showToast("Referral link copied — send it to " + pcl.name); } catch(_){ showToast(partnerLinkFor(pcl)); } }
+  }
+  else if (action === "partner-set-status"){ updatePartnerField(t.dataset.id, { status: t.dataset.status }, t.dataset.status === "approved" ? "Partner approved — their link and portal login are live" : "Partner suspended"); }
   else if (action === "toggle-email"){ ui.expandedEmailId = ui.expandedEmailId===t.dataset.id ? null : t.dataset.id; render(); }
   else if (action === "toggle-conversation"){ ui.expandedConversationLead = ui.expandedConversationLead===t.dataset.lead ? null : t.dataset.lead; render(); }
   else if (action === "open-text-messages"){ ui.view = "messages"; ui.textNewOpen = false; ui.textMessagesWith = t.dataset.lead; markTextThreadRead(t.dataset.lead); render(); }
@@ -21811,6 +21850,10 @@ appEl.addEventListener("change", function(e){
     setLoanType(t.dataset.lead, t.value);
   } else if (action === "set-outside-lender"){
     setOutsideLender(t.dataset.lead, t.value);
+  } else if (action === "partner-fee"){
+    updatePartnerField(t.dataset.id, { feePoints: t.value === "" ? null : Number(t.value) }, "Referral fee saved");
+  } else if (action === "partner-lo"){
+    updatePartnerField(t.dataset.id, { assignedLo: t.value || null }, t.value ? "Their borrowers now go to that loan officer" : "Their borrowers use normal rotation");
   } else if (action === "set-comm-language"){
     setCommLanguage(t.dataset.lead, t.value);
   } else if (action === "toggle-notify"){
