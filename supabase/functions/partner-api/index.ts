@@ -110,6 +110,23 @@ async function createReferralLead(partner: Record<string, unknown>, b: Record<st
   const unsure = !LOAN_TYPES.includes(loanTypeRaw);
   const loanType = unsure ? "DSCR" : loanTypeRaw;
   const property = clean(b.propertyAddress, 160), notes = clean(b.notes, 500);
+  // Optional deal details the partner can fill in (same file a borrower's own application would create). No SSN/DOB here: the borrower adds those in their own application.
+  const deal: Record<string, unknown> = {};
+  const refi = clean(b.transactionType, 20) === "refi";
+  const pType = clean(b.propertyType, 40);
+  if (pType) deal.property_type = pType;
+  if (clean(b.transactionType, 20)) deal.transaction_type = refi ? "ratetermrefi" : "purchase";
+  const price = num(b.purchasePrice); if (price) { if (refi) deal.current_value = price; else deal.purchase_price = price; }
+  const rehab = num(b.rehabBudget); if (rehab) deal.rehab_budget = rehab;
+  const arvN = num(b.arv); if (arvN) deal.arv = arvN;
+  const rentN = num(b.rentEstimate); if (rentN) deal.rent_estimate = rentN;
+  const loanAmt = num(b.loanAmount); if (loanAmt) deal.loan_amount = loanAmt;
+  const credit = num(b.creditScore); if (credit && credit >= 300 && credit <= 850) deal.credit_score = Math.round(credit);
+  const expN = b.experienceDeals === "" || b.experienceDeals == null ? null : Number(b.experienceDeals); if (expN != null && isFinite(expN) && expN >= 0 && expN < 1000) deal.experience_deals = Math.round(expN);
+  const entName = clean(b.entityName, 120); if (entName) deal.entity_legal_name = entName;
+  const dealBits = [price ? ((refi ? "value " : "price ") + "$" + Math.round(price).toLocaleString("en-US")) : "", rehab ? "rehab $" + Math.round(rehab).toLocaleString("en-US") : "", arvN ? "ARV $" + Math.round(arvN).toLocaleString("en-US") : "",
+    rentN ? "rent $" + Math.round(rentN).toLocaleString("en-US") + "/mo" : "", loanAmt ? "wants $" + Math.round(loanAmt).toLocaleString("en-US") : "", credit ? "credit ~" + Math.round(credit) + " (partner's estimate — verify)" : "",
+    expN != null && isFinite(expN) ? expN + " prior deals" : "", entName ? "entity " + entName : ""].filter(Boolean);
   if (name.length < 2) return { error: "Please enter the borrower's name." };
   if (phoneDigits.length !== 10) return { error: "Please enter a 10-digit phone number." };
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return { error: "Please enter a valid email." };
@@ -133,7 +150,7 @@ async function createReferralLead(partner: Record<string, unknown>, b: Record<st
   const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
   const appToken = crypto.randomUUID();
   const activity = [
-    { date: today, type: "note", text: "Referred by " + label + " (" + clean(partner.role, 40) + ") via " + (via === "link" ? "their referral link" : "the partner portal") + ". " + (unsure ? "Wasn't sure which loan they need. " : "") + (notes ? "Partner/borrower note: " + notes : ""), author: "System" },
+    { date: today, type: "note", text: "Referred by " + label + " (" + clean(partner.role, 40) + ") via " + (via === "link" ? "their referral link" : "the partner portal") + ". " + (unsure ? "Wasn't sure which loan they need. " : "") + (notes ? "Partner/borrower note: " + notes + ". " : "") + (dealBits.length ? "Deal details entered by " + label + ": " + dealBits.join(", ") + "." : ""), author: "System" },
     { date: today, type: "system", text: via === "link"
       ? "TCPA consent recorded " + stamp + ": borrower checked the box agreeing to calls, texts and email from Bridgepoint Lending at " + phone + " / " + email + " (may be autodialed)."
       : "Consent: " + label + " confirmed on " + stamp + " that the borrower agreed to be contacted by Bridgepoint Lending at " + phone + " / " + email + ".", author: "System" },
@@ -141,7 +158,7 @@ async function createReferralLead(partner: Record<string, unknown>, b: Record<st
   const { error } = await sb.from("leads").insert({
     id, name, email, phone, source: "Referral — " + label, loan_type: loanType, property_address: property || null,
     stage: "new", status: "active", assigned_to: assignee, created_at: today, created_at_ts: stamp, referral_partner_id: partner.id,
-    ai_stage: "engaging", entity_type: "LLC", application_token: appToken, preferred_language: "en", activity,
+    ai_stage: "engaging", entity_type: "LLC", application_token: appToken, preferred_language: "en", activity, ...deal,
   });
   if (error) { console.error("partner-api insert", error.message); return { error: "We couldn't save that — please try again." }; }
 

@@ -116,16 +116,37 @@ noindex: true
         <h2>Send us a deal</h2>
         <p class="pp-muted">Already talking to a borrower? Enter their details and a loan officer will reach out right away. The file is tagged to you.</p>
         <form id="sdf" novalidate><div class="fields">
+          <div class="pp-muted"><b>The borrower</b></div>
           <div><label class="f">Borrower name</label><div class="in"><input name="name"></div></div>
           <div class="pp-two">
             <div><label class="f">Borrower mobile phone</label><div class="in"><input name="phone" type="tel" inputmode="tel"></div></div>
             <div><label class="f">Borrower email</label><div class="in"><input name="email" type="email"></div></div>
           </div>
           <div class="pp-two">
-            <div><label class="f">What do they need?</label><div class="in"><select name="loanType"><option value="Fix &amp; Flip">Fix &amp; flip</option><option value="DSCR">Rental (DSCR)</option><option value="Bridge">Bridge</option><option value="Ground Up Construction">Ground-up construction</option><option value="Mixed-Use">Mixed-use</option><option value="Not sure">Not sure</option></select></div></div>
-            <div><label class="f">Property address (if known)</label><div class="in"><input name="propertyAddress"></div></div>
+            <div><label class="f">Credit score (estimate is fine)</label><div class="in"><input name="creditScore" inputmode="numeric" placeholder="720"></div></div>
+            <div><label class="f">Deals they&rsquo;ve completed</label><div class="in"><input name="experienceDeals" inputmode="numeric" placeholder="0"></div></div>
+          </div>
+          <div><label class="f">Entity name they&rsquo;ll close in (if known)</label><div class="in"><input name="entityName" placeholder="Smith Holdings LLC"></div></div>
+          <div class="pp-muted" style="margin-top:6px"><b>The deal</b></div>
+          <div class="pp-two">
+            <div><label class="f">What do they need?</label><div class="in"><select name="loanType" id="sd-type"><option value="Fix &amp; Flip">Fix &amp; flip</option><option value="DSCR">Rental (DSCR)</option><option value="Bridge">Bridge</option><option value="Ground Up Construction">Ground-up construction</option><option value="Mixed-Use">Mixed-use</option><option value="Not sure">Not sure</option></select></div></div>
+            <div><label class="f">Purchase or refinance</label><div class="in"><select name="transactionType"><option value="purchase">Purchase</option><option value="refi">Refinance</option></select></div></div>
+          </div>
+          <div><label class="f">Property address</label><div class="in"><input name="propertyAddress" placeholder="123 Main St, Tampa, FL 33602"></div></div>
+          <div class="pp-two">
+            <div><label class="f">Property type</label><div class="in"><select name="propertyType"><option value="">Not sure</option><option value="SFR">Single family</option><option value="2-4 Unit">2&ndash;4 unit</option><option value="Condo">Condo</option><option value="Multifamily 5+">5+ units</option><option value="Mixed-Use">Mixed-use</option></select></div></div>
+            <div><label class="f">Purchase price (or value if refi)</label><div class="in"><input name="purchasePrice" inputmode="numeric" placeholder="300000"></div></div>
+          </div>
+          <div class="pp-two" id="sd-rtl">
+            <div><label class="f">Rehab budget</label><div class="in"><input name="rehabBudget" inputmode="numeric" placeholder="60000"></div></div>
+            <div><label class="f">After-repair value (ARV)</label><div class="in"><input name="arv" inputmode="numeric" placeholder="450000"></div></div>
+          </div>
+          <div class="pp-two" id="sd-rent" hidden>
+            <div><label class="f">Monthly rent (market rent if vacant)</label><div class="in"><input name="rentEstimate" inputmode="numeric" placeholder="2600"></div></div>
+            <div><label class="f">Loan amount they want (optional)</label><div class="in"><input name="loanAmount" inputmode="numeric" placeholder="225000"></div></div>
           </div>
           <div><label class="f">Notes for the loan officer (optional)</label><div class="in"><input name="notes" maxlength="400"></div></div>
+          <p class="pp-muted" style="margin:0">Don&rsquo;t enter a Social Security number or date of birth here &mdash; the borrower adds those securely in their own application.</p>
           <label class="consent"><input type="checkbox" name="sendApplication" checked><span>Also text and email the borrower their application link now, from their Bridgepoint loan officer.</span></label>
           <label class="consent"><input type="checkbox" name="consent"><span>I confirm this borrower asked me to share their information and agreed to be contacted by BridgePoint Lending by phone, text and email.</span></label>
           <div class="err" id="sd-err" role="alert" aria-live="polite"></div>
@@ -179,6 +200,12 @@ noindex: true
   // price form: show the right fields for the loan type
   function syncType(){ var rtl=["Fix & Flip","Bridge","Ground Up Construction"].indexOf($("pr-type").value)!==-1; $("pr-rtl").hidden=!rtl; $("pr-rent").hidden=rtl; }
   $("pr-type").addEventListener("change",syncType); syncType();
+  // same switch on the Send us a deal form: construction-style loans ask rehab/ARV, rentals ask rent and loan amount
+  function syncDealType(){ var rtl=["Fix & Flip","Bridge","Ground Up Construction"].indexOf($("sd-type").value)!==-1; $("sd-rtl").hidden=!rtl; $("sd-rent").hidden=rtl; }
+  $("sd-type").addEventListener("change",syncDealType); syncDealType();
+  function showTab(t){ Array.prototype.forEach.call($("pp-tabs").querySelectorAll("button"),function(x){ x.classList.toggle("on",x.dataset.t===t); }); ["home","price","submit"].forEach(function(n){ $("t-"+n).hidden=(n!==t); }); window.scrollTo(0,0); }
+  // after pricing, one tap carries the deal over to the Send us a deal form
+  function carryDeal(){ var src=new FormData($("prf")), f=$("sdf"); ["loanType","propertyType","propertyAddress","purchasePrice","transactionType","rehabBudget","arv","rentEstimate","creditScore","experienceDeals"].forEach(function(k){ var el=f.elements[k], v=src.get(k); if(el&&v!=null&&v!=="") el.value=v; }); syncDealType(); showTab("submit"); }
   $("prf").addEventListener("submit",function(e){ e.preventDefault(); $("pr-err").textContent=""; $("pr-out").innerHTML="";
     var d=new FormData($("prf")), body={action:"price"}; d.forEach(function(v,k){ body[k]=v; });
     var btn=$("pr-btn"); btn.disabled=true; btn.textContent="Pricing… (up to a minute)";
@@ -186,8 +213,9 @@ noindex: true
       if(res.status===401){ signOut(); return; }
       if(!res.ok) throw new Error((res.j&&res.j.error)||"Something went wrong.");
       var j=res.j;
-      if(!j.options.length){ $("pr-out").innerHTML='<div class="pp-opt"><span><b>Nothing places as entered.</b><div class="pp-muted">'+esc((j.reasons||[]).join(" · ")||"")+'</div><div class="pp-muted">'+esc(j.note)+'</div></span></div>'; return; }
-      $("pr-out").innerHTML=j.options.map(function(o){ return '<div class="pp-opt"><span><b>'+esc(o.label)+'</b><div class="pp-muted">'+esc(j.term)+'</div></span><span style="text-align:right"><b>'+esc(o.rate)+'%</b><div class="pp-muted">'+(o.loanAmount?'up to '+money(o.loanAmount):'')+'</div></span></div>'; }).join("")+'<p class="pp-muted">'+esc(j.note)+'</p>';
+      if(!j.options.length){ $("pr-out").innerHTML='<div class="pp-opt"><span><b>Nothing places as entered.</b><div class="pp-muted">'+esc((j.reasons||[]).join(" · ")||"")+'</div><div class="pp-muted">'+esc(j.note)+'</div></span></div><button class="btn btn-gold" type="button" id="pr-carry">Send this deal to Bridgepoint anyway</button>'; $("pr-carry").addEventListener("click",carryDeal); return; }
+      $("pr-out").innerHTML=j.options.map(function(o){ return '<div class="pp-opt"><span><b>'+esc(o.label)+'</b><div class="pp-muted">'+esc(j.term)+'</div></span><span style="text-align:right"><b>'+esc(o.rate)+'%</b><div class="pp-muted">'+(o.loanAmount?'up to '+money(o.loanAmount):'')+'</div></span></div>'; }).join("")+'<p class="pp-muted">'+esc(j.note)+'</p><button class="btn btn-gold" type="button" id="pr-carry">Send this deal to Bridgepoint</button>';
+      $("pr-carry").addEventListener("click",carryDeal);
     }).catch(function(x){ $("pr-err").textContent=x.message; }).then(function(){ btn.disabled=false; btn.textContent="Get ballpark pricing"; }); });
   $("sdf").addEventListener("submit",function(e){ e.preventDefault(); $("sd-err").textContent="";
     var d=new FormData($("sdf")), body={action:"submit_deal",consent:$("sdf").elements.consent.checked,sendApplication:$("sdf").elements.sendApplication.checked}; d.forEach(function(v,k){ if(k!=="consent"&&k!=="sendApplication") body[k]=v; });
