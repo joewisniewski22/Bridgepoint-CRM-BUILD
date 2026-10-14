@@ -33,7 +33,7 @@ const WRITABLE = new Set([
   "co_ownership_pct", "co_phone", "co_email", "co_address", "co_citizenship_status", "co_country_of_domicile", "co_credit_score",
   "co_experience_deals", "co_liquidity", "co_marital_status", "citizenship_status", "country_of_domicile", "marital_status",
   "transaction_type", "prepay_term", "built_year", "current_lender_name", "units_ready_for_rent", "property_occupied", "taxes_current",
-  "property_lease_status", "delayed_purchase", "ny_cema_loan", "ny_closing_attorney", "num_units", "num_residential_units",
+  "property_lease_status", "delayed_purchase", "est_closing_date", "short_term_rental", "ny_cema_loan", "ny_closing_attorney", "num_units", "num_residential_units",
   "num_commercial_units", "lease_detail", "ach_form", "rtl_app", "dscr_app", "scope_of_work", "guideline_check",
   "application_sent_at", "application_taken_at", "preferred_language",
 ]);

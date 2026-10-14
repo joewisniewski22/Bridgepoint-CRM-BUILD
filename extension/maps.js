@@ -264,6 +264,8 @@
         const put = (id, v, name) => { const el = byId(id); if (v == null || v === "") { res.skipped.push(name || id); return; } if (el && S.setValue(el, String(v))) res.filled.push(name || id); else res.missing.push(name || id); };
         const home = splitAddr(g.homeAddress || g.address);
         put("DOB_0", S.FMT.mdy(g.dateOfBirth), "Date of birth");
+        put("COEDate", S.FMT.mdy(p.loan.estClosingDate), "Estimated closing date");
+        put("IsShortTermRental", p.property.shortTermRental, "Short-term rental");
         put("CurrentAddress", home.street, "Home street");
         put("City", home.city, "Home city");
         put("PrimaryState", stateName(home.state), "Home state");

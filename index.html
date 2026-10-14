@@ -850,6 +850,7 @@ var ES_DICT = {
   "Enter a number above for Investing Experience to add project rows.":"Ingrese un número en Experiencia de Inversión para agregar filas de proyectos.",
   "Prior Project #":"Proyecto Anterior #", "Purchase Date":"Fecha de Compra", "Exit Type":"Tipo de Salida",
   "Property Owned #":"Propiedad Poseída #", "Schedule of Real Estate Owned":"Lista de Bienes Raíces en Propiedad", "List every property you currently own, other than the one you are applying for. This becomes your Schedule of Real Estate Owned.":"Anote cada propiedad que posee actualmente, aparte de la que está solicitando. Esto se convierte en su Lista de Bienes Raíces en Propiedad.", "Do you currently own any other real estate?":"¿Es dueño de otros bienes raíces actualmente?", "How many properties do you own?":"¿Cuántas propiedades posee?", "Year Purchased":"Año de Compra", "Current Market Value":"Valor Actual de Mercado", "Mortgage Balance (0 if none)":"Saldo de la Hipoteca (0 si no tiene)", "Monthly Rent (0 if none)":"Renta Mensual (0 si no tiene)", "Single Family":"Casa Unifamiliar", "Condo / Townhome":"Condominio / Casa Adosada", "Commercial":"Comercial", "Tenant Occupied":"Ocupada por Inquilino", "Owner Occupied":"Ocupada por el Dueño", "Under Rehab":"En Remodelación",
+  "Estimated Closing Date":"Fecha Estimada de Cierre", "best guess is fine":"un estimado está bien", "Is this a short-term rental (Airbnb / VRBO)?":"¿Es una renta a corto plazo (Airbnb / VRBO)?",
   "Exit Date":"Fecha de Salida", "Exit Value (sale price or new loan amount)":"Valor de Salida (precio de venta o nuevo monto de préstamo)",
   "Sold":"Vendido", "Refinanced":"Refinanciado", "Still Own":"Todavía es Propietario",
   "Scope of Work":"Alcance del Trabajo",
@@ -1147,6 +1148,7 @@ var VI_DICT = {
   "Enter a number above for Investing Experience to add project rows.":"Nhập một con số ở mục Kinh nghiệm đầu tư phía trên để thêm các dòng dự án.",
   "Prior Project #":"Dự án trước #", "Purchase Date":"Ngày mua", "Exit Type":"Hình thức thoái vốn",
   "Property Owned #":"Bất động sản sở hữu #", "Schedule of Real Estate Owned":"Danh sách bất động sản đang sở hữu", "List every property you currently own, other than the one you are applying for. This becomes your Schedule of Real Estate Owned.":"Liệt kê mọi bất động sản anh/chị hiện đang sở hữu, ngoài bất động sản đang xin vay. Đây sẽ trở thành Danh sách bất động sản đang sở hữu của anh/chị.", "Do you currently own any other real estate?":"Anh/chị hiện có sở hữu bất động sản nào khác không?", "How many properties do you own?":"Anh/chị sở hữu bao nhiêu bất động sản?", "Year Purchased":"Năm mua", "Current Market Value":"Giá trị thị trường hiện tại", "Mortgage Balance (0 if none)":"Dư nợ thế chấp (0 nếu không có)", "Monthly Rent (0 if none)":"Tiền thuê hàng tháng (0 nếu không có)", "Single Family":"Nhà riêng", "Condo / Townhome":"Căn hộ / Nhà phố", "Commercial":"Thương mại", "Tenant Occupied":"Có người thuê", "Owner Occupied":"Chủ ở", "Under Rehab":"Đang sửa chữa",
+  "Estimated Closing Date":"Ngày đóng giao dịch dự kiến", "best guess is fine":"ước chừng là được", "Is this a short-term rental (Airbnb / VRBO)?":"Đây có phải là cho thuê ngắn hạn (Airbnb / VRBO) không?",
   "Exit Date":"Ngày thoái vốn", "Exit Value (sale price or new loan amount)":"Giá trị thoái vốn (giá bán hoặc số tiền vay mới)",
   "Sold":"Đã bán", "Refinanced":"Đã tái cấp vốn", "Still Own":"Vẫn đang sở hữu",
   "Scope of Work":"Phạm vi công việc",
@@ -5595,7 +5597,7 @@ function leadToRow(l){
     marital_status: l.maritalStatus || null,
     built_year: l.builtYear || null, current_lender_name: l.currentLenderName || null,
     units_ready_for_rent: l.unitsReadyForRent || null, property_occupied: l.propertyOccupied || null, taxes_current: l.taxesCurrent || null,
-    property_lease_status: l.propertyLeaseStatus || null, delayed_purchase: l.delayedPurchase || null,
+    property_lease_status: l.propertyLeaseStatus || null, delayed_purchase: l.delayedPurchase || null, est_closing_date: l.estClosingDate || null, short_term_rental: l.shortTermRental || null,
     ny_cema_loan: l.nyCemaLoan || null, ny_closing_attorney: l.nyClosingAttorney || null,
     nurture_off: !!l.nurtureOff, num_units: l.numUnits || null, num_residential_units: (l.numResidentialUnits != null ? l.numResidentialUnits : null), num_commercial_units: (l.numCommercialUnits != null ? l.numCommercialUnits : null), lease_detail: l.leaseDetail || [],
     rural_status: l.ruralStatus || null, rural_checked_at: l.ruralCheckedAt || null,
@@ -5654,7 +5656,7 @@ function rowToLead(r){
     maritalStatus: r.marital_status || null,
     builtYear: r.built_year || null, currentLenderName: r.current_lender_name || null,
     unitsReadyForRent: r.units_ready_for_rent || null, propertyOccupied: r.property_occupied || null, taxesCurrent: r.taxes_current || null,
-    propertyLeaseStatus: r.property_lease_status || null, delayedPurchase: r.delayed_purchase || null,
+    propertyLeaseStatus: r.property_lease_status || null, delayedPurchase: r.delayed_purchase || null, estClosingDate: r.est_closing_date || null, shortTermRental: r.short_term_rental || null,
     nyCemaLoan: r.ny_cema_loan || null, nyClosingAttorney: r.ny_closing_attorney || null,
     nurtureOff: !!r.nurture_off, smsOptOut: !!r.sms_opt_out, numUnits: r.num_units || null, numResidentialUnits: (r.num_residential_units != null ? r.num_residential_units : null), numCommercialUnits: (r.num_commercial_units != null ? r.num_commercial_units : null), leaseDetail: r.lease_detail || [],
     ruralStatus: r.rural_status || null, ruralCheckedAt: r.rural_checked_at || null,
@@ -5924,7 +5926,7 @@ function extractApplicationBaseFieldsFromForm(fd){
     propertyOccupied: fd.get("propertyOccupied"),
     taxesCurrent: fd.get("taxesCurrent"),
     propertyLeaseStatus: fd.get("propertyLeaseStatus"),
-    delayedPurchase: fd.get("delayedPurchase"),
+    delayedPurchase: fd.get("delayedPurchase"), estClosingDate: fd.has("estClosingDate") ? (fd.get("estClosingDate") || null) : undefined, shortTermRental: fd.has("shortTermRental") ? fd.get("shortTermRental") : undefined,
     nyCemaLoan: fd.get("nyCemaLoan"),
     nyClosingAttorney: fd.get("nyClosingAttorney"),
     numResidentialUnits: unitCountFromForm(fd, "numResidentialUnits"), numCommercialUnits: unitCountFromForm(fd, "numCommercialUnits"), numUnits: unitTotalFromForm(fd),
@@ -20183,6 +20185,10 @@ function buildApplicationFieldsHTML(lead, lang, opts){
       '<div class="form-row"><label>' + L("Delayed Purchase?") + '</label>' + appYn("delayedPurchase", lead.delayedPurchase) + '</div>' +
     '</div>' +
     '<div class="form-two">' +
+      '<div class="form-row"><label>' + L("Estimated Closing Date") + ' <span class="hint">(' + L("best guess is fine") + ')</span></label><input class="input" type="date" name="estClosingDate" value="' + (lead.estClosingDate||"") + '"></div>' +
+      '<div class="form-row"><label>' + L("Is this a short-term rental (Airbnb / VRBO)?") + '</label>' + appYn("shortTermRental", lead.shortTermRental) + '</div>' +
+    '</div>' +
+    '<div class="form-two">' +
       '<div class="form-row"><label>' + L("New York CEMA Loan?") + ' <span class="hint">(' + L("NY properties only") + ')</span></label>' + appYn("nyCemaLoan", lead.nyCemaLoan) + '</div>' +
       '<div class="form-row"><label>' + L("NY Closing Attorney") + ' <span class="hint">(' + L("NY loans only") + ')</span></label><input class="input" name="nyClosingAttorney" value="' + esc(lead.nyClosingAttorney||"") + '"></div>' +
     '</div>' +
@@ -22522,7 +22528,7 @@ appEl.addEventListener("submit", function(e){
       propertyOccupied: fd.get("propertyOccupied"),
       taxesCurrent: fd.get("taxesCurrent"),
       propertyLeaseStatus: fd.get("propertyLeaseStatus"),
-      delayedPurchase: fd.get("delayedPurchase"),
+      delayedPurchase: fd.get("delayedPurchase"), estClosingDate: fd.has("estClosingDate") ? (fd.get("estClosingDate") || null) : undefined, shortTermRental: fd.has("shortTermRental") ? fd.get("shortTermRental") : undefined,
       nyCemaLoan: fd.get("nyCemaLoan"),
       nyClosingAttorney: fd.get("nyClosingAttorney"),
       numResidentialUnits: unitCountFromForm(fd, "numResidentialUnits"), numCommercialUnits: unitCountFromForm(fd, "numCommercialUnits"), numUnits: unitTotalFromForm(fd),
@@ -22581,7 +22587,7 @@ appEl.addEventListener("submit", function(e){
       propertyOccupied: fd.get("propertyOccupied"),
       taxesCurrent: fd.get("taxesCurrent"),
       propertyLeaseStatus: fd.get("propertyLeaseStatus"),
-      delayedPurchase: fd.get("delayedPurchase"),
+      delayedPurchase: fd.get("delayedPurchase"), estClosingDate: fd.has("estClosingDate") ? (fd.get("estClosingDate") || null) : undefined, shortTermRental: fd.has("shortTermRental") ? fd.get("shortTermRental") : undefined,
       nyCemaLoan: fd.get("nyCemaLoan"),
       nyClosingAttorney: fd.get("nyClosingAttorney"),
       numResidentialUnits: unitCountFromForm(fd, "numResidentialUnits"), numCommercialUnits: unitCountFromForm(fd, "numCommercialUnits"), numUnits: unitTotalFromForm(fd),
@@ -22649,7 +22655,7 @@ appEl.addEventListener("submit", function(e){
       propertyOccupied: fd.get("propertyOccupied"),
       taxesCurrent: fd.get("taxesCurrent"),
       propertyLeaseStatus: fd.get("propertyLeaseStatus"),
-      delayedPurchase: fd.get("delayedPurchase"),
+      delayedPurchase: fd.get("delayedPurchase"), estClosingDate: fd.has("estClosingDate") ? (fd.get("estClosingDate") || null) : undefined, shortTermRental: fd.has("shortTermRental") ? fd.get("shortTermRental") : undefined,
       nyCemaLoan: fd.get("nyCemaLoan"),
       nyClosingAttorney: fd.get("nyClosingAttorney"),
       numResidentialUnits: unitCountFromForm(fd, "numResidentialUnits"), numCommercialUnits: unitCountFromForm(fd, "numCommercialUnits"), numUnits: unitTotalFromForm(fd),

@@ -118,11 +118,11 @@ async function buildPackage(leadId: string, lender: string) {
       loanType: l.loan_type, transactionType: l.transaction_type || "purchase", loanAmount: l.loan_amount, rate: l.rate, termMonths: l.term_months,
       ltv: l.ltv, purchasePrice: l.purchase_price, currentValue: l.current_value, arv: l.arv, rehabBudget: l.rehab_budget,
       currentLoanBalance: l.current_loan_balance, closeDate: l.close_date, exitStrategy: l.exit_strategy, prepayTerm: l.prepay_term,
-      pointsCharged: l.points_charged,
+      pointsCharged: l.points_charged, estClosingDate: l.est_closing_date || null,
     },
     property: {
       ...prop, propertyType: l.property_type, units: l.num_units, yearBuilt: l.built_year, occupied: l.property_occupied, leaseStatus: l.property_lease_status,
-      monthlyRent: l.rent_estimate, monthlyTaxes: l.monthly_taxes, monthlyInsurance: l.monthly_insurance, monthlyHoa: l.monthly_hoa, rural: l.rural_status,
+      monthlyRent: l.rent_estimate, monthlyTaxes: l.monthly_taxes, monthlyInsurance: l.monthly_insurance, monthlyHoa: l.monthly_hoa, rural: l.rural_status, shortTermRental: l.short_term_rental || null,
     },
     borrower: {
       entityName: l.entity_legal_name, entityType: l.entity_type,
