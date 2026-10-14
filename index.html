@@ -4334,6 +4334,63 @@ function applicationLink(lead){
   qp.set("t", lead.applicationToken || "");
   return CLIENT_URL + "?" + qp.toString();
 }
+/* ---------------------------------------------------------------------
+   Property Questionnaire (Joe 2026-10-14): some lenders (Velocity first) ask the borrower ~30 property / environmental declarations.
+   The borrower answers them once on a branded page (EN/ES/VI) so the file goes to the lender COMPLETE, in one submission.
+   Shown on mixed-use / 5+ unit files and on any file placed with a lender that needs it (the lender is never named here).
+--------------------------------------------------------------------- */
+function questionnaireNeeded(lead){
+  return ["Mixed-Use","Multifamily 5+"].indexOf(lead.propertyType) !== -1 || /Velocity/i.test(String(lead.outsideLender || "")) || (lead.propertyQuestionnaire && (lead.propertyQuestionnaire.updatedAt || lead.propertyQuestionnaire.submittedAt));
+}
+function questionnaireLink(lead){
+  return CLIENT_URL + "questionnaire/?l=" + encodeURIComponent(lead.id) + "&t=" + encodeURIComponent(lead.applicationToken || "") + "&lang=" + templateLang(lead.preferredLanguage);
+}
+function questionnaireSentOn(lead){
+  var a = (lead.activity || []).filter(function(x){ return x && /Property Questionnaire sent to the borrower/i.test(x.text || ""); });
+  return a.length ? a[a.length - 1].date : null;
+}
+function renderQuestionnairePanel(lead){
+  if (!questionnaireNeeded(lead)) return "";
+  var q = lead.propertyQuestionnaire || {}, done = !!q.submittedAt, n = q.answers ? Object.keys(q.answers).length : 0, sent = questionnaireSentOn(lead);
+  var status = done ? ('<span class="badge badge-forest">Completed ' + esc(fmtDate(String(q.submittedAt).slice(0,10))) + '</span>')
+    : (n ? ('<span class="badge">In progress — ' + n + ' answered</span>') : (sent ? ('<span class="badge">Sent ' + esc(fmtDate(sent)) + '</span>') : '<span class="badge badge-rust">Not sent</span>'));
+  var rows = "";
+  if (done && q.answers){
+    rows = '<details style="margin-top:8px"><summary class="hint" style="cursor:pointer">View the borrower\'s answers</summary><div class="field-grid" style="margin-top:6px">' +
+      Object.keys(q.answers).map(function(k){ return '<div class="field"><div class="field-label">' + esc(k) + '</div><div class="field-value">' + esc(q.answers[k]) + '</div></div>'; }).join("") + '</div></details>';
+  }
+  return '<div class="panel panel-pad" style="margin-bottom:12px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between">' +
+    '<div><div class="rail-title" style="margin:0">Property Questionnaire</div><div class="hint" style="margin:2px 0 0">About 30 questions on the building (units, condition, environmental and legal items) that some lenders require. The borrower answers them once, so the file goes in complete.</div></div>' +
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + status +
+      '<button class="btn btn-sm btn-primary" type="button" data-action="send-questionnaire" data-lead="' + lead.id + '">' + (sent || n ? 'Resend to borrower' : 'Send to borrower') + '</button>' +
+      '<button class="btn btn-sm btn-ghost" type="button" data-action="copy-questionnaire-link" data-lead="' + lead.id + '">Copy link</button>' +
+    '</div></div>' + rows + '</div>';
+}
+function sendQuestionnaire(leadId){
+  var lead = leadById(leadId);
+  if (!lead) return;
+  if (!lead.email && !lead.phone){ showToast("Add an email or phone number first"); return; }
+  if (!sb){ showToast("Send service unavailable"); return; }
+  var link = questionnaireLink(lead), lang = templateLang(lead.preferredLanguage), lo = docLoanOfficer(lead), first = (lead.name||"").split(" ")[0];
+  var text = langPick(lang,
+    ("Hi " + first + ", " + (lo.name||"your loan officer") + " here at Bridgepoint Lending. To finish your loan file, please answer a few questions about the property (about 5 minutes): " + link),
+    ("Hola " + first + ", le escribe " + (lo.name||"su oficial de préstamos") + " de Bridgepoint Lending. Para completar su expediente, por favor responda unas preguntas sobre la propiedad (unos 5 minutos): " + link),
+    ("Chào " + first + ", " + (lo.name||"chuyên viên cho vay") + " tại Bridgepoint Lending. Để hoàn tất hồ sơ vay, vui lòng trả lời một số câu hỏi về bất động sản (khoảng 5 phút): " + link));
+  var subject = langPick(lang, "Bridgepoint Lending — Property questionnaire", "Bridgepoint Lending — Cuestionario de la propiedad", "Bridgepoint Lending — Bảng câu hỏi về bất động sản");
+  var calls = [];
+  if (lead.email) calls.push(sb.functions.invoke("send-email", { body: { leadId: lead.id, to: lead.email, subject: subject, text: text, fromName: lo.name, fromAddress: lo.email, fromUserId: lo.id, fromPhotoUrl: lo.photoUrl||null } }).then(function(r){ return !(r.error || !r.data || !r.data.ok); }).catch(function(){ return false; }));
+  if (lead.phone) calls.push(sb.functions.invoke("send-text", { body: { leadId: lead.id, to: lead.phone, text: text, fromName: lo.name } }).then(function(r){ return !(r.error || !r.data || !r.data.ok); }).catch(function(){ return false; }));
+  Promise.all(calls).then(function(rs){
+    var ok = rs.some(function(x){ return x; });
+    if (ok){
+      lead.activity = lead.activity || [];
+      lead.activity.push({ date: todayISO(), type:"note", text:"Property Questionnaire sent to the borrower (" + [lead.email ? "email" : "", lead.phone ? "text" : ""].filter(Boolean).join(" + ") + ")", author: currentUser().name });
+      persist();
+    }
+    showToast(ok ? "Questionnaire sent to " + first : "Couldn't send — try again");
+    render();
+  });
+}
 function sendBorrowerPortalInvite(leadId){
   var lead = leadById(leadId);
   if (!lead) return;
@@ -5646,7 +5703,7 @@ function rowToLead(r){
     entityLegalName: r.entity_legal_name || null,
     guarantorFirstName: r.guarantor_first_name || null, guarantorMiddleName: r.guarantor_middle_name || null, guarantorLastName: r.guarantor_last_name || null,
     guarantorPhone: r.guarantor_phone || null, guarantorEmail: r.guarantor_email || null, guarantorAddress: r.guarantor_address || null, guarantorSsnLast4: r.guarantor_ssn_last4 || null,
-    guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [], reo: r.reo || [], reoOwns: r.reo_owns || null,
+    guarantorOwnershipPct: r.guarantor_ownership_pct || null, trackRecord: r.track_record || [], reo: r.reo || [], reoOwns: r.reo_owns || null, propertyQuestionnaire: r.property_questionnaire || null,
     coFirstName: r.co_first_name || null, coMiddleName: r.co_middle_name || null, coLastName: r.co_last_name || null, coBirthday: r.co_birthday || null,
     coOwnershipPct: r.co_ownership_pct || null, coPhone: r.co_phone || null, coEmail: r.co_email || null, coAddress: r.co_address || null, coSsnLast4: r.co_ssn_last4 || null,
     coCitizenshipStatus: r.co_citizenship_status || null, coCountryOfDomicile: r.co_country_of_domicile || null, coCreditScore: r.co_credit_score || null,
@@ -16059,7 +16116,7 @@ function renderTabDocuments(lead){
     })() : '') +
     (canExportMismo ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="download-mismo-export" data-lead="' + lead.id + '" title="Exports the loan file as a MISMO 3.4 XML document for investors, title, or outside lenders">⬇ Export MISMO 3.4</button>') : '') +
     (canManage ? ('<button class="btn btn-sm btn-ghost" type="button" data-action="open-modal" data-modal="addInternalDocument" data-lead="' + lead.id + '" title="A staff-only file — a completed Constructive Capital sizer, a lender summary, anything the borrower never sees">+ Internal Document</button>') : '') +
-  '</div>' + (canManageOutsideLender() ? renderLenderExportPanel(lead) : '');
+  '</div>' + (canManageOutsideLender() ? renderLenderExportPanel(lead) : '') + (canManage ? renderQuestionnairePanel(lead) : '');
 
   var scanBar = "";
   if (canAiReview){
@@ -21907,6 +21964,8 @@ appEl.addEventListener("click", function(e){
   else if (action === "download-complete-file"){ downloadCompleteFile(t.dataset.lead); }
   else if (action === "lender-export-toggle"){ ui.lenderExport = ui.lenderExport || {}; var lx = ui.lenderExport[t.dataset.lead] = ui.lenderExport[t.dataset.lead] || {}; lx.open = !lx.open; lx.msg = null; render(); }
   else if (action === "lender-export-go"){ lenderExportGo(t.dataset.lead, t.dataset.lender); }
+  else if (action === "send-questionnaire"){ sendQuestionnaire(t.dataset.lead); }
+  else if (action === "copy-questionnaire-link"){ var qlLead = leadById(t.dataset.lead); if (qlLead && navigator.clipboard){ navigator.clipboard.writeText(questionnaireLink(qlLead)).then(function(){ showToast("Link copied"); }); } }
   else if (action === "export-all-documents"){
     exportAllDocuments(t.dataset.lead);
   }
