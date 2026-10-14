@@ -156,7 +156,7 @@ Deno.serve(async (req: Request) => {
     if (submit && !prev.submittedAt) {
       // Tell Joe and the file's loan officer (staff only).
       const who = [...new Set(["owner", lead.assigned_to].filter(Boolean))] as string[];
-      await sb.from("notifications").insert(who.map((u) => ({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: u, lead_id: leadId, kind: "questionnaire", text: "✅ " + lead.name + " finished the property questionnaire. Velocity's property page can be filled now.", date: new Date().toISOString().slice(0, 10), read: false })));
+      await sb.from("notifications").insert(who.map((u) => ({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: u, lead_id: leadId, kind: "questionnaire", text: "✅ " + lead.name + " finished the property questionnaire.", date: new Date().toISOString().slice(0, 10), read: false })));
       const { data: staff } = await sb.from("users").select("id,phone").in("id", who);
       for (const s of staff || []) if (s.phone) await fetch(SUPABASE_URL + "/functions/v1/send-text", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + SERVICE_KEY }, body: JSON.stringify({ to: s.phone, text: "✅ " + lead.name + " finished the property questionnaire. " + "https://app.bplending.com/?lead=" + leadId, fromName: "Bridgepoint CRM" }) }).catch(() => null);
     }
