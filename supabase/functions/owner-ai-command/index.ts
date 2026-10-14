@@ -723,18 +723,22 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     // termSheetOptions()/renderTermSheetOptionsBox() read isTermSheetOption
     // to show these as side-by-side alternatives, never touching the loan
     // file's own current terms.
+    // UNBREAKABLE (Joe 2026-10-14): the loan file never carries another company's name. The visible stub is numbers-only with a neutral label;
+    // the real lender, the notes and the source detail go to internal_lender_docs (owner / Fiore / Erika only, enforced by RLS).
+    const neutral = (input.rate != null ? input.rate + "% rate" : "alternate structure") + (input.ltv != null ? " — " + input.ltv + "% LTV" : "");
     documents.push({
-      name: "Term Sheet Option: " + lender, isTermSheetOption: true, lender,
+      name: "Term Sheet Option: " + neutral, isTermSheetOption: true, lender: neutral,
       loanAmount: input.loanAmount ?? null, rate: input.rate ?? null, ltv: input.ltv ?? null,
       termMonths: input.termMonths ?? null, cashToClose: input.cashToClose ?? null,
-      notes: input.notes ?? null, receivedAt: today, addedBy: "AI Assistant",
+      notes: null, receivedAt: today, addedBy: "AI Assistant",
     });
+    await sb.from("internal_lender_docs").insert({ lead_id: leadId, kind: "option", name: "Term Sheet Option: " + lender, meta: { lender, loanAmount: input.loanAmount ?? null, rate: input.rate ?? null, ltv: input.ltv ?? null, termMonths: input.termMonths ?? null, cashToClose: input.cashToClose ?? null, notes: input.notes ?? null, receivedAt: today, addedBy: "AI Assistant" }, created_by: "ai" });
     const activity = Array.isArray(existing.activity) ? existing.activity as unknown[] : [];
-    activity.push({ date: today, type: "note", text: "Added term sheet option: " + lender + " (uploaded term sheet -- presenting as an additional option, current terms unchanged)", author: "AI Assistant" });
+    activity.push({ date: today, type: "note", text: "Added term sheet option: " + neutral + " (presenting as an additional option, current terms unchanged)", author: "AI Assistant" });
     const { error: updErr } = await sb.from("leads").update({ documents, activity }).eq("id", leadId);
     if (updErr) return { error: updErr.message };
     const link = "https://bridgepoint-crm-build.vercel.app/?lead=" + leadId;
-    return { ok: true, leadId, link, optionLabel: lender, loanAmount: input.loanAmount ?? null, rate: input.rate ?? null };
+    return { ok: true, leadId, link, optionLabel: neutral, loanAmount: input.loanAmount ?? null, rate: input.rate ?? null };
   }
   if (name === "search_leads") {
     const query = ((input.query as string) || "").trim();

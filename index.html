@@ -5533,17 +5533,9 @@ function sendStoredTermSheetOption(leadId, idx){
       persist();
     });
   }
-  if (doc.storagePath){
-    sb.storage.from("lead-documents").download(doc.storagePath).then(function(res){
-      if (res.error || !res.data){ showToast("Couldn't load that term sheet — try again"); return; }
-      var reader = new FileReader();
-      reader.onload = function(){
-        var pdfBase64 = String(reader.result).split(",")[1];
-        finishSend(pdfBase64, doc.fileName || docPdfFilename(lead, "Term Sheet"), "Please see the attached term sheet.");
-      };
-      reader.readAsDataURL(res.data);
-    }).catch(function(){ showToast("Couldn't load that term sheet — try again"); });
-  } else {
+  // UNBREAKABLE (Joe 2026-10-14): an uploaded outside term sheet is only ever read for its numbers. The file itself never goes to a
+  // borrower -- every term sheet that goes out is generated on Bridgepoint's own template from the option's numbers.
+  {
     // No file was attached to this option (the "Add Option" form's upload
     // is optional, and options captured from an uploaded document via the
     // AI never have one either) -- clicking this in the "Which term
@@ -14240,36 +14232,66 @@ function addTermSheetOption(leadId, fd, file){
   var lead = leadById(leadId);
   if (!lead) return;
   lead.documents = lead.documents || [];
+  // UNBREAKABLE (Joe 2026-10-14): nothing on a loan file carries another company's name. The visible option is numbers-only with a neutral label;
+  // the lender/label the staff member typed, the notes and any attached outside term sheet go to the restricted store (owner / Fiore / Erika only).
+  var rateN = fd.get("rate") ? Number(fd.get("rate")) : null, ltvN = fd.get("ltv") ? Number(fd.get("ltv")) : null;
+  var neutral = (rateN != null ? rateN + "% rate" : "alternate structure") + (ltvN != null ? " — " + ltvN + "% LTV" : "");
   var entry = {
-    name: "Term Sheet Option: " + (fd.get("lender")||"Untitled"),
+    name: "Term Sheet Option: " + neutral,
     isTermSheetOption: true,
-    lender: fd.get("lender") || null,
+    lender: neutral,
     loanAmount: fd.get("loanAmount") ? Number(fd.get("loanAmount")) : null,
-    rate: fd.get("rate") ? Number(fd.get("rate")) : null,
-    ltv: fd.get("ltv") ? Number(fd.get("ltv")) : null,
+    rate: rateN,
+    ltv: ltvN,
     termMonths: fd.get("termMonths") ? Number(fd.get("termMonths")) : null,
     cashToClose: fd.get("cashToClose") ? Number(fd.get("cashToClose")) : null,
-    notes: fd.get("notes") || null,
+    notes: null,
     receivedAt: todayISO(),
     addedBy: currentUser().name
   };
   lead.documents.push(entry);
   lead.activity = lead.activity || [];
-  lead.activity.push({ date: todayISO(), type:"note", text: "Added term sheet option: " + (fd.get("lender")||"Untitled"), author: currentUser().name });
+  lead.activity.push({ date: todayISO(), type:"note", text: "Added term sheet option: " + neutral, author: currentUser().name });
   ui.modal = null;
   showToast("Term sheet option added");
   persist();
-  if (file && sb){
-    var idx = lead.documents.indexOf(entry);
-    var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-    var path = leadId + "/" + Date.now() + "-" + safeName;
-    bpStorageUpload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
-      if (res.error){ showToast("Option saved, but the file upload failed — try attaching it again"); return; }
-      entry.storagePath = path;
-      entry.fileName = file.name;
-      persist();
-    });
+  if (sb){
+    var ildRow = { lead_id: leadId, kind: "option", name: "Term Sheet Option: " + (fd.get("lender")||"Untitled"), created_by: currentUser().id,
+      meta: { lender: fd.get("lender") || null, loanAmount: entry.loanAmount, rate: entry.rate, ltv: entry.ltv, termMonths: entry.termMonths, cashToClose: entry.cashToClose, notes: fd.get("notes") || null, receivedAt: entry.receivedAt, addedBy: entry.addedBy } };
+    var saveRow = function(extra){ sb.from("internal_lender_docs").insert(Object.assign(ildRow, extra || {})).then(function(r){ if (r.error) console.error("restricted lender doc not saved", r.error); if (ui.ild) delete ui.ild[leadId]; render(); }); };
+    if (file){
+      var safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      var path = leadId + "/" + Date.now() + "-" + safeName;
+      sb.storage.from("internal-lender-docs").upload(path, file, { contentType: file.type || "application/octet-stream" }).then(function(res){
+        if (res.error){ showToast("Option saved, but the file upload failed — try attaching it again"); saveRow(); return; }
+        saveRow({ file_name: file.name, storage_path: path });
+      });
+    } else saveRow();
   }
+}
+// Restricted lender documents (owner / Fiore / Erika only -- the table and bucket enforce it, this panel is just the window onto them).
+function loadInternalLenderDocs(leadId){
+  if (!sb || !canViewOutsideLender()) return;
+  ui.ild = ui.ild || {};
+  if (ui.ild[leadId] !== undefined) return;
+  ui.ild[leadId] = null;
+  sb.from("internal_lender_docs").select("*").eq("lead_id", leadId).order("created_at", { ascending:false }).then(function(res){
+    ui.ild[leadId] = res.error ? [] : (res.data || []);
+    render();
+  });
+}
+function renderInternalLenderDocs(lead){
+  if (!canViewOutsideLender()) return "";
+  loadInternalLenderDocs(lead.id);
+  var rows = (ui.ild && ui.ild[lead.id]) || [];
+  var list = rows.length ? rows.map(function(r){
+    var m = r.meta || {};
+    return '<div class="panel panel-pad" style="margin-bottom:6px;display:flex;justify-content:space-between;align-items:flex-start;gap:10px"><div><div style="font-weight:600">' + esc(r.name) + '</div>' +
+      '<div class="hint">' + esc(r.kind) + ' · ' + esc(fmtDate(String(r.created_at||"").slice(0,10))) + (r.file_name ? ' · ' + esc(r.file_name) : '') + '</div>' +
+      (m.notes ? '<div class="hint" style="white-space:pre-wrap;margin-top:4px">' + esc(m.notes) + '</div>' : '') + '</div>' +
+      (r.storage_path ? '<button class="btn btn-sm" type="button" data-action="ild-open" data-path="' + esc(r.storage_path) + '">📄 Open</button>' : '') + '</div>';
+  }).join("") : '<div class="hint">' + (ui.ild && ui.ild[lead.id] === null ? "Loading…" : "Nothing here.") + '</div>';
+  return '<div class="section-head" style="margin-top:20px"><h2>🔒 Lender documents</h2></div><div class="panel panel-pad"><div class="footnote" style="padding:0 0 8px">Only Joe, Fiore and Erika can see this. Outside term sheets, sizers and quotes live here, never on the loan file. They are read for terms only and never sent to anyone.</div>' + list + '</div>';
 }
 function deleteTermSheetOption(leadId, idx){
   var lead = leadById(leadId);
@@ -14741,7 +14763,7 @@ function renderTabScenario(lead){
     field("Monthly Payment" + (RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType)!==-1 ? " (interest only)" : " (P&I)"), termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderSubmitForReview(lead) + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
+  '</div>' + renderSubmitForReview(lead) + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderInternalLenderDocs(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
 }
 function renderSubmitForReview(lead){
   if (isLO()){
@@ -21489,6 +21511,14 @@ appEl.addEventListener("click", function(e){
   else if (action === "reveal-employee-ach"){ revealEmployeeAch(t.dataset.user); }
   else if (action === "hide-employee-ach"){ hideEmployeeAch(); }
   else if (action === "open-team-chat"){ openChatWith(t.dataset.user); }
+  else if (action === "ild-open"){
+    if (canViewOutsideLender() && sb && t.dataset.path){
+      sb.storage.from("internal-lender-docs").createSignedUrl(t.dataset.path, 300).then(function(res){
+        if (res.error || !res.data){ showToast("Couldn't open that document"); return; }
+        window.open(res.data.signedUrl, "_blank");
+      });
+    }
+  }
   else if (action === "partner-copy-link"){
     var pcl = referralPartnerById(t.dataset.id);
     if (pcl && pcl.refCode){ try { navigator.clipboard.writeText(partnerLinkFor(pcl)); showToast("Referral link copied — send it to " + pcl.name); } catch(_){ showToast(partnerLinkFor(pcl)); } }
