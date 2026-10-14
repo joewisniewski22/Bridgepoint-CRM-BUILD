@@ -878,9 +878,11 @@ async function checkNextres(s: Scenario): Promise<LenderResult> {
     const r = cache.get(lowest)!;
     return { ...r, eligible: false, reason: (r.reason || "No eligible NextRes programs for this scenario.") + " (Tried loan amounts from $" + fmtMoney(lowest) + " up to $" + fmtMoney(sortedAmts().pop()) + ".)" };
   }
-  for (let round = 0; round < 2; round++) {
+  // Narrow until the highest accepted and the lowest declined amounts are one $500 step apart (10/14/26: two rounds
+  // left Aldo Baca's max at $448,500 when NextRes itself takes $450,000 and declines $450,500).
+  for (let round = 0; round < 7; round++) {
     const up = sortedAmts().find((a) => a > (lo as number));
-    if (up == null) break;
+    if (up == null || up - (lo as number) <= 500) break;
     await Promise.all([0.25, 0.5, 0.75].map((f) => probe((lo as number) + (up - (lo as number)) * f)));
     lo = highestEligible();
   }
