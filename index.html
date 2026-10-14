@@ -15489,7 +15489,7 @@ var LP_DECLINE_CATS = [
   [/individual|entit(y|ies)/i, function(){ return "The borrower needs to close in an LLC or corporation, not as an individual."; }],
   [/foreign|itin|non-permanent|citizen/i, function(sc){ return "The borrower's citizenship/residency status" + (sc.citizenshipStatus ? " (" + sc.citizenshipStatus + ")" : "") + " isn't eligible for this loan."; }],
   [/dscr|cover the payment|rent/i, function(){ return "The rent doesn't cover the payment enough (DSCR too low) at this loan amount."; }],
-  [/minimum|at least \$|under \$|below/i, function(){ return "The loan amount is below the minimum for this loan type."; }],
+  [/minimum|min loan|at least \$|under \$|below/i, function(){ return "The loan amount is below the minimum for this loan type."; }],
   [/maximum|max loan|over \$|exceeds|1,500,000|2,000,000/i, function(){ return "The loan amount is above the maximum for this loan type."; }],
   [/approved|state|baltimore|philadelphia|detroit|cleveland|indianapolis|market|zip|county|area|location|declining/i, function(sc){ return "The property's location" + (sc.propertyState ? " (" + sc.propertyState + ")" : "") + " isn't one we can lend in for this loan type."; }],
   [/mixed|multifamily|5\+|units|condo|land|property type|doesn't lend on|townhome|hotel|manufactured/i, function(sc){ return "This property type" + (sc.propertyType ? " (" + sc.propertyType + ")" : "") + " isn't eligible for this loan type."; }],
@@ -15499,11 +15499,21 @@ var LP_DECLINE_CATS = [
   [/appraisal transfer/i, function(){ return "A transferred appraisal can't be used — a new appraisal is required."; }],
   [/term/i, function(){ return "The requested loan term isn't available for this loan type."; }]
 ];
+// A lender's "no" that is about the product, not the borrower or deal ("only set up for DSCR rentals", "doesn't do ground-up",
+// "isn't modeled") says nothing about why THIS loan fails, so it never becomes a reason for an LO (Joe 2026-10-14: Fanis's
+// foreign-national ground-up deal showed "rent too low" / "credit too low" from lenders that simply don't offer ground-up).
+// Also neutralizes NextRes's "property/credit combination" wording, which isn't a credit-score statement.
+function lpCleanReason(reason){
+  var t = String(reason || "");
+  if (/only set up for|isn't set up|aren't set up|isn't modeled|aren't modeled|not modeled|doesn't do |doesn't offer|isn't priced here|aren't priced here|price directly/i.test(t)) return "";
+  return t.replace(/doesn't price this property\/credit combination/gi, "not offered for this deal");
+}
 function lpLoDeclineReasons(sc, results){
   var counts = {}, order = [], missing = [];
   results.forEach(function(r){
     if (!r || r.eligible || r.unavailable || !r.reason) return;
-    var t = String(r.reason);
+    var t = lpCleanReason(r.reason);
+    if (!t) return;
     for (var i = 0; i < LP_DECLINE_CATS.length; i++){
       if (!LP_DECLINE_CATS[i][0].test(t)) continue;
       if (!LP_DECLINE_CATS[i][1]){ var m = t.replace(/^.*?(needs?|missing)\s*/i, "").replace(/\.$/, ""); if (missing.indexOf(m) === -1) missing.push(m); return; }
@@ -15527,8 +15537,10 @@ function lpViabilityTips(sc, results){
   var rtl = LP_RTL.indexOf(sc.loanType) !== -1;
   // Only real "no" answers count -- "not enough information" and
   // unavailable lenders aren't reasons the deal fails.
+  var fnNo = false;
   var all = results.filter(function(r){ return !r.unavailable && !/not enough information/i.test(r.reason || ""); })
-    .map(function(r){ return String(r.reason || ""); }).join(" | ").toLowerCase();
+    .map(function(r){ var t = lpCleanReason(r.reason); if (/foreign|itin/i.test(t)){ fnNo = true; return ""; } return t; }).join(" | ").toLowerCase();
+  if (fnNo) tips.push("Foreign national / ITIN borrowers are only eligible for a few programs" + (rtl ? " on " + sc.loanType.toLowerCase() : "") + " — usually it takes a larger loan and an experienced borrower. Bring this one to Joe to see if a program can take it.");
   if (sc.creditScore && sc.creditScore < 680 && /credit|fico/.test(all)) tips.push("Credit is the main blocker — most of our lenders need 650–680+ (" + sc.creditScore + " entered). A co-guarantor with stronger credit, or credit repair first.");
   if (/ltc|loan-to-cost|leverage|ltv|over 75% of arv|arv ltv/.test(all)) tips.push("Ask for less leverage — a bigger down payment (lower loan-to-cost)" + (rtl ? " or a higher, supportable ARV." : "."));
   if (rtl && /rehab|holdback/.test(all)) tips.push("Scale the rehab budget down or have the borrower fund part of it.");
