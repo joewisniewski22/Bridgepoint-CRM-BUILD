@@ -90,7 +90,10 @@ async function buildPackage(leadId: string, lender: string) {
   const { data: l, error } = await sb.from("leads").select("*").eq("id", leadId).maybeSingle();
   if (error || !l) throw new Error("file not found");
   const docs: any[] = [];
-  const received = (Array.isArray(l.documents) ? l.documents : []).filter((d: any) => d && d.status === "received" && !d.isTermSheetOption && !NEVER_SEND.test(d.name || ""));
+  // A file that started as a rehab loan and became a rental (DSCR): no rehab budget or rehab documents ever go to the lender (Joe 2026-10-14, Tapia).
+  const isRentalLoan = /DSCR|Portfolio|Mixed/i.test(String(l.loan_type || ""));
+  const REHAB_DOC = /rehab|scope of work|construction budget|renovation|draw schedule|general contractor|builder.s risk/i;
+  const received = (Array.isArray(l.documents) ? l.documents : []).filter((d: any) => d && d.status === "received" && !d.isTermSheetOption && !NEVER_SEND.test(d.name || "") && !(isRentalLoan && REHAB_DOC.test(d.name || "")));
   for (const d of received) {
     const files = [d.storagePath ? { storagePath: d.storagePath, fileName: d.fileName } : null].concat((d.files || []).map((f: any) => ({ storagePath: f.storagePath, fileName: f.fileName }))).filter((f: any) => f && f.storagePath);
     for (const f of files) {
@@ -116,7 +119,7 @@ async function buildPackage(leadId: string, lender: string) {
     meta: { leadId: l.id, lender, generatedAt: new Date().toISOString(), note: "SSNs and bank account numbers are intentionally not included.", loanOfficerName: lo ? lo.name : null, loanOfficerEmail: lo ? lo.email : null },
     loan: {
       loanType: l.loan_type, transactionType: l.transaction_type || "purchase", loanAmount: l.loan_amount, rate: l.rate, termMonths: l.term_months,
-      ltv: l.ltv, purchasePrice: l.purchase_price, currentValue: l.current_value, arv: l.arv, rehabBudget: l.rehab_budget,
+      ltv: l.ltv, purchasePrice: l.purchase_price, currentValue: l.current_value, arv: l.arv, rehabBudget: isRentalLoan ? null : l.rehab_budget,
       currentLoanBalance: l.current_loan_balance, closeDate: l.close_date, exitStrategy: l.exit_strategy, prepayTerm: l.prepay_term,
       pointsCharged: l.points_charged, estClosingDate: l.est_closing_date || null,
     },
