@@ -17,3 +17,5 @@ create table if not exists public.lender_questions (
   unique (lender, screen, question)
 );
 alter table public.lender_questions enable row level security;
+-- Property questionnaire (borrower-answered declarations a lender asks on commercial / mixed-use / 5+ unit properties; first required by Velocity 10/14/26).
+alter table public.leads add column if not exists property_questionnaire jsonb;

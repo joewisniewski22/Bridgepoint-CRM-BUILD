@@ -3,7 +3,7 @@
 // or edit every lead. Now it only talks to this function, which checks the file's application
 // token on every call and only ever touches that one lead.
 //
-// Actions: get (also used for polling), save (whitelisted fields only), upload-url, signed-url.
+// Actions: get (also used for polling), save (whitelisted fields only), upload-url, signed-url, q-get / q-save (property questionnaire).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -16,6 +16,8 @@ const CORS = {
   "Content-Type": "application/json",
 };
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: CORS });
+// Answers the property questionnaire may store (the page sends only these).
+const Q_KEYS = ["yearBuilt","numBuildings","totalUnits","vacantUnits","occupiedUnits","crossStreets","areaDescription","siteSize","siteSizeUnit","buildingSize","waterSource","municipal","wetlands","repairsNeeded","repairsDescribe","multipleParcels","recentSale","marijuanaAdult","rentRegulated","pollution","envAssessment","contamination","dryCleaner","storageTank","storageTankRemoved","rcraGenerator","occupantsRegulated","pendingSuit","waterDamage","moldPlan","currentUse","pastUse"];
 
 // Never sent to the browser.
 const HIDE = [
@@ -129,5 +131,36 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true });
   }
 
+  // ---- Property questionnaire (public page /questionnaire/?l=<lead id>&t=<token>) ----
+  if (action === "q-get") {
+    const q = (lead.property_questionnaire && typeof lead.property_questionnaire === "object") ? lead.property_questionnaire : {};
+    const { data: lo } = lead.assigned_to ? await sb.from("users").select("name,phone").eq("id", lead.assigned_to).maybeSingle() : { data: null as any };
+    return json({ ok: true, firstName: String(lead.name || "").split(" ")[0], language: lead.preferred_language || "en", propertyAddress: lead.property_address || "",
+      totalUnits: lead.num_units ?? null, answers: q.answers || {}, submittedAt: q.submittedAt || null, lo: lo ? { name: lo.name, phone: lo.phone } : null });
+  }
+  if (action === "q-save") {
+    const inA = (body.answers && typeof body.answers === "object") ? body.answers as Record<string, unknown> : {};
+    const clean: Record<string, string> = {};
+    for (const k of Q_KEYS) { const v = inA[k]; if (v != null && String(v).trim() !== "") clean[k] = String(v).trim().slice(0, k === "areaDescription" || k === "repairsDescribe" ? 400 : 160); }
+    const prev = (lead.property_questionnaire && typeof lead.property_questionnaire === "object") ? lead.property_questionnaire : {};
+    const submit = body.submit === true;
+    const next: Record<string, unknown> = { answers: { ...(prev.answers || {}), ...clean }, updatedAt: new Date().toISOString(), language: String(body.language || "").slice(0, 5) || null, submittedAt: prev.submittedAt || null };
+    if (submit) next.submittedAt = new Date().toISOString();
+    const upd: Record<string, unknown> = { property_questionnaire: next };
+    if (submit && !prev.submittedAt) {
+      const today = new Date().toISOString().slice(0, 10);
+      upd.activity = (Array.isArray(lead.activity) ? lead.activity : []).concat([{ date: today, at: new Date().toISOString(), type: "note", author: lead.name, text: "Completed the Property Questionnaire online (" + Object.keys(next.answers as object).length + " answers)." }]);
+    }
+    const { error } = await sb.from("leads").update(upd).eq("id", leadId);
+    if (error) return json({ ok: false, error: "save_failed", detail: error.message }, 500);
+    if (submit && !prev.submittedAt) {
+      // Tell Joe and the file's loan officer (staff only).
+      const who = [...new Set(["owner", lead.assigned_to].filter(Boolean))] as string[];
+      await sb.from("notifications").insert(who.map((u) => ({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: u, lead_id: leadId, kind: "questionnaire", text: "✅ " + lead.name + " finished the property questionnaire. Velocity's property page can be filled now.", date: new Date().toISOString().slice(0, 10), read: false })));
+      const { data: staff } = await sb.from("users").select("id,phone").in("id", who);
+      for (const s of staff || []) if (s.phone) await fetch(SUPABASE_URL + "/functions/v1/send-text", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + SERVICE_KEY }, body: JSON.stringify({ to: s.phone, text: "✅ " + lead.name + " finished the property questionnaire. " + "https://app.bplending.com/?lead=" + leadId, fromName: "Bridgepoint CRM" }) }).catch(() => null);
+    }
+    return json({ ok: true, submitted: !!next.submittedAt });
+  }
   return json({ ok: false, error: "unknown_action" }, 400);
 });

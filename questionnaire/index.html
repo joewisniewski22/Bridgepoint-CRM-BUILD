@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Property Questionnaire</title>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--ink:#16202e;--muted:#5d6b7e;--line:#d6dce5;--brand:#1b2a47;--accent:#b8862b;--good:#1f8f5f;--bad:#b00020}
+@media (prefers-color-scheme:dark){:root{--bg:#10151d;--card:#1a212c;--ink:#eef1f5;--muted:#9aa7b8;--line:#2c3644;--brand:#9fb8e8;--accent:#e0b25a;--good:#3ecf8e;--bad:#ff7a8a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:max(14px,env(safe-area-inset-top)) 16px 40px}
+.wrap{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+header{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+header img{height:46px;width:auto;max-width:100%}
+h1{font-size:25px;margin:2px 0 0;color:var(--brand)}
+.muted{color:var(--muted);font-size:15px}
+.lang{display:flex;gap:12px;font-size:15px}.lang a{color:var(--brand);text-decoration:none;border-bottom:2px solid transparent;cursor:pointer}.lang a.on{border-color:var(--accent);font-weight:700}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:16px}
+h2{font-size:18px;margin:0;color:var(--brand)}
+.q label.t{display:block;font-weight:600;margin-bottom:6px}
+.q .hint{color:var(--muted);font-size:14px;margin:-2px 0 6px}
+.req{color:var(--bad)}
+input[type=text],input[type=number],textarea,select{width:100%;font:inherit;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+textarea{min-height:84px;resize:vertical}
+.row{display:flex;gap:10px}.row>*{flex:1}
+.yn{display:flex;gap:10px}
+.yn label{flex:1;text-align:center;border:1px solid var(--line);border-radius:10px;padding:12px;cursor:pointer;font-weight:600;background:var(--bg)}
+.yn input{position:absolute;opacity:0}
+.yn input:checked+span{color:#fff}
+.yn label:has(input:checked){background:var(--brand);color:#fff;border-color:var(--brand)}
+@media (prefers-color-scheme:dark){.yn label:has(input:checked){color:#10151d}}
+.q.bad{outline:2px solid var(--bad);outline-offset:6px;border-radius:8px}
+button{font:inherit;border:0;border-radius:12px;padding:16px;font-weight:700;width:100%;cursor:pointer;min-height:56px;background:var(--brand);color:#fff;font-size:18px}
+@media (prefers-color-scheme:dark){button{color:#10151d}}
+.saved{color:var(--muted);font-size:14px;text-align:center;min-height:20px}
+.err{color:var(--bad);font-weight:600}
+.done{font-size:20px;font-weight:700;color:var(--good)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <header>
+    <img src="../assets/logo-wide.png" alt="Bridgepoint Lending">
+    <div class="lang" id="lang"><a data-l="en">English</a><a data-l="es">Español</a><a data-l="vi">Tiếng Việt</a></div>
+    <h1 id="title"></h1>
+    <div class="muted" id="intro">…</div>
+  </header>
+  <div id="form" hidden></div>
+  <div class="saved" id="saved"></div>
+  <div class="err" id="err" hidden></div>
+</div>
+<script>
+(function(){
+"use strict";
+var API="https://idzkigmvovehjpapatxv.supabase.co/functions/v1/portal-api";
+var P=new URLSearchParams(location.search),LID=P.get("l")||"",TOK=P.get("t")||"";
+var lang="en",data=null,answers={},timer=null,submitted=false;
+var T={
+ title:{en:"Property Questionnaire",es:"Cuestionario de la Propiedad",vi:"Bảng câu hỏi về bất động sản"},
+ intro:{en:"Hi {n}! These questions are required for your loan file at Bridgepoint Lending. They are about the property: {a}. It takes about 5 minutes and your answers save as you go. If you are not sure about one, give your best answer or call us.",es:"¡Hola {n}! Estas preguntas son necesarias para su expediente de préstamo en Bridgepoint Lending. Son sobre la propiedad: {a}. Toma unos 5 minutos y sus respuestas se guardan solas. Si no está seguro de alguna, dé su mejor respuesta o llámenos.",vi:"Xin chào {n}! Các câu hỏi này cần thiết cho hồ sơ vay của anh/chị tại Bridgepoint Lending. Chúng liên quan đến bất động sản: {a}. Mất khoảng 5 phút và câu trả lời được lưu tự động. Nếu chưa chắc về câu nào, hãy trả lời tốt nhất hoặc gọi cho chúng tôi."},
+ yes:{en:"Yes",es:"Sí",vi:"Có"},no:{en:"No",es:"No",vi:"Không"},
+ submit:{en:"Submit questionnaire",es:"Enviar cuestionario",vi:"Gửi bảng câu hỏi"},
+ saved:{en:"Saved",es:"Guardado",vi:"Đã lưu"},
+ missing:{en:"Please answer the highlighted questions.",es:"Por favor responda las preguntas resaltadas.",vi:"Vui lòng trả lời các câu hỏi được đánh dấu."},
+ thanks:{en:"Thank you! Your answers were sent to your Bridgepoint team.",es:"¡Gracias! Sus respuestas fueron enviadas a su equipo de Bridgepoint.",vi:"Cảm ơn anh/chị! Câu trả lời đã được gửi đến nhóm Bridgepoint của anh/chị."},
+ call:{en:"Questions? Call or text {lo} at {p}.",es:"¿Preguntas? Llame o escriba a {lo} al {p}.",vi:"Có thắc mắc? Gọi hoặc nhắn tin cho {lo} theo số {p}."},
+ bad:{en:"This link is not valid. Please ask your loan officer for a new one.",es:"Este enlace no es válido. Pida uno nuevo a su oficial de préstamos.",vi:"Liên kết này không hợp lệ. Vui lòng xin liên kết mới từ nhân viên cho vay."},
+ sqft:{en:"Square feet",es:"Pies cuadrados",vi:"Feet vuông"},acres:{en:"Acres",es:"Acres",vi:"Mẫu Anh (acre)"}
+};
+var S=[
+ {h:{en:"The property",es:"La propiedad",vi:"Bất động sản"},q:[
+  {k:"yearBuilt",t:"num",r:1,l:{en:"Year the building was built",es:"Año en que se construyó el edificio",vi:"Năm xây dựng tòa nhà"}},
+  {k:"numBuildings",t:"num",r:1,l:{en:"Number of buildings on the property",es:"Número de edificios en la propiedad",vi:"Số tòa nhà trên bất động sản"}},
+  {k:"totalUnits",t:"num",r:1,l:{en:"Total number of units",es:"Número total de unidades",vi:"Tổng số căn"}},
+  {k:"vacantUnits",t:"num",r:1,l:{en:"How many units are vacant today?",es:"¿Cuántas unidades están vacías hoy?",vi:"Hiện có bao nhiêu căn đang trống?"}},
+  {k:"occupiedUnits",t:"num",r:1,l:{en:"How many units are occupied today?",es:"¿Cuántas unidades están ocupadas hoy?",vi:"Hiện có bao nhiêu căn đang có người ở?"}},
+  {k:"crossStreets",t:"text",l:{en:"Nearest cross streets (optional)",es:"Calles transversales más cercanas (opcional)",vi:"Các đường giao gần nhất (không bắt buộc)"}},
+  {k:"siteSize",t:"size",r:1,l:{en:"Approximate lot size",es:"Tamaño aproximado del terreno",vi:"Diện tích đất ước tính"}},
+  {k:"buildingSize",t:"num",r:1,l:{en:"Approximate building size (square feet)",es:"Tamaño aproximado del edificio (pies cuadrados)",vi:"Diện tích tòa nhà ước tính (feet vuông)"}},
+  {k:"areaDescription",t:"area",r:1,l:{en:"Will you, or anyone related to you, live in any part of this property?",es:"¿Vivirá usted, o algún familiar, en alguna parte de esta propiedad?",vi:"Anh/chị hoặc người thân có sống trong phần nào của bất động sản này không?"},h:{en:"If not, write: No - investment property only. If yes, describe which part.",es:"Si no, escriba: No - solo propiedad de inversión. Si sí, describa qué parte.",vi:"Nếu không, hãy viết: Không - chỉ là bất động sản đầu tư. Nếu có, mô tả phần nào."}}]},
+ {h:{en:"Site and condition",es:"Terreno y condición",vi:"Khu đất và tình trạng"},q:[
+  {k:"waterSource",t:"yn",r:1,l:{en:"Does the property have a water source (public water or a well)?",es:"¿La propiedad tiene fuente de agua (agua pública o pozo)?",vi:"Bất động sản có nguồn nước (nước công cộng hoặc giếng) không?"}},
+  {k:"municipal",t:"yn",r:1,l:{en:"Is it served by the municipality (public water or sewer)?",es:"¿Está conectada al municipio (agua o alcantarillado público)?",vi:"Có được thành phố cung cấp (nước hoặc cống công cộng) không?"}},
+  {k:"wetlands",t:"yn",r:1,l:{en:"Are there wetlands on the property?",es:"¿Hay humedales en la propiedad?",vi:"Có vùng đất ngập nước trên bất động sản không?"}},
+  {k:"multipleParcels",t:"yn",r:1,l:{en:"Is the property made up of more than one tax parcel?",es:"¿La propiedad consta de más de una parcela de impuestos?",vi:"Bất động sản có nhiều hơn một lô thuế không?"}},
+  {k:"recentSale",t:"yn",r:1,l:{en:"Has the property been sold in the past 24 months?",es:"¿Se vendió la propiedad en los últimos 24 meses?",vi:"Bất động sản có được bán trong 24 tháng qua không?"}},
+  {k:"repairsNeeded",t:"yn",r:1,l:{en:"Does the property need repairs today?",es:"¿La propiedad necesita reparaciones hoy?",vi:"Hiện bất động sản có cần sửa chữa không?"}},
+  {k:"repairsDescribe",t:"area",show:{k:"repairsNeeded",v:"Yes"},l:{en:"Briefly, what repairs are needed?",es:"Brevemente, ¿qué reparaciones se necesitan?",vi:"Nói ngắn gọn, cần sửa chữa những gì?"}},
+  {k:"rentRegulated",t:"yn",r:1,l:{en:"Is the property, or any tenant, subject to rent control or rent regulation?",es:"¿La propiedad o algún inquilino está sujeto a control o regulación de renta?",vi:"Bất động sản hoặc người thuê có chịu kiểm soát/quy định về giá thuê không?"}},
+  {k:"marijuanaAdult",t:"yn",r:1,l:{en:"Is any part of the property used for a marijuana-related business or adult entertainment?",es:"¿Se usa alguna parte de la propiedad para un negocio de marihuana o entretenimiento para adultos?",vi:"Có phần nào được dùng cho kinh doanh cần sa hoặc giải trí người lớn không?"}}]},
+ {h:{en:"Environmental and legal (to the best of your knowledge)",es:"Ambiental y legal (según su mejor conocimiento)",vi:"Môi trường và pháp lý (theo hiểu biết tốt nhất của anh/chị)"},q:[
+  {k:"pollution",t:"sel",r:1,o:{"not_known":{en:"No known pollution on the site",es:"No se conoce contaminación en el sitio",vi:"Không biết có ô nhiễm tại địa điểm"},"known_nfa":{en:"Known pollution that was closed (a no-further-action letter was issued)",es:"Contaminación conocida que fue cerrada (se emitió carta de no acción adicional)",vi:"Có ô nhiễm đã được đóng hồ sơ (có thư không cần xử lý thêm)"},"known_active":{en:"Known pollution being cleaned up, or not yet investigated",es:"Contaminación conocida en proceso de limpieza o aún sin investigar",vi:"Có ô nhiễm đang được xử lý hoặc chưa điều tra"}},l:{en:"What are the pollution conditions on the property?",es:"¿Cuáles son las condiciones de contaminación de la propiedad?",vi:"Tình trạng ô nhiễm của bất động sản là gì?"}},
+  {k:"envAssessment",t:"yn",r:1,l:{en:"Has an environmental assessment (Phase 1 or Phase 2) been done?",es:"¿Se ha hecho una evaluación ambiental (Fase 1 o Fase 2)?",vi:"Đã có đánh giá môi trường (Giai đoạn 1 hoặc 2) chưa?"}},
+  {k:"contamination",t:"yn",r:1,l:{en:"Do you know of any past or present environmental contamination at the property?",es:"¿Conoce alguna contaminación ambiental pasada o presente en la propiedad?",vi:"Anh/chị có biết về ô nhiễm môi trường trước đây hoặc hiện tại tại bất động sản không?"}},
+  {k:"dryCleaner",t:"sel",r:1,o:{"none":{en:"No dry cleaner on site",es:"No hay tintorería en el sitio",vi:"Không có tiệm giặt khô"},"dropoff":{en:"Drop-off only dry cleaner",es:"Tintorería solo de recepción",vi:"Tiệm giặt khô chỉ nhận đồ"},"green":{en:"Dry cleaner using green (non-perc) cleaning",es:"Tintorería con limpieza ecológica (sin percloroetileno)",vi:"Giặt khô thân thiện môi trường (không dùng perc)"},"perc":{en:"Dry cleaner using perchloroethylene (PERC)",es:"Tintorería que usa percloroetileno (PERC)",vi:"Giặt khô dùng perchloroethylene (PERC)"}},l:{en:"Is there a dry cleaner on the property?",es:"¿Hay una tintorería en la propiedad?",vi:"Có tiệm giặt khô tại bất động sản không?"}},
+  {k:"storageTank",t:"yn",r:1,l:{en:"Are there above-ground or underground storage tanks on the site?",es:"¿Hay tanques de almacenamiento sobre o bajo tierra en el sitio?",vi:"Có bồn chứa trên hoặc dưới mặt đất tại địa điểm không?"}},
+  {k:"storageTankRemoved",t:"yn",r:1,l:{en:"Have any storage tanks ever been removed or abandoned in place?",es:"¿Se ha retirado o abandonado alguna vez algún tanque de almacenamiento en el lugar?",vi:"Đã bao giờ có bồn chứa bị tháo bỏ hoặc bỏ lại tại chỗ chưa?"}},
+  {k:"rcraGenerator",t:"yn",r:1,l:{en:"Is the property a large-quantity hazardous waste generator?",es:"¿Es la propiedad un gran generador de residuos peligrosos?",vi:"Bất động sản có phải là nơi thải chất thải nguy hại số lượng lớn không?"}},
+  {k:"occupantsRegulated",t:"yn",r:1,l:{en:"Has any tenant or occupant, now or before, stored or handled hazardous or regulated substances?",es:"¿Algún inquilino u ocupante, ahora o antes, ha almacenado o manejado sustancias peligrosas o reguladas?",vi:"Có người thuê/người ở nào, hiện tại hoặc trước đây, từng lưu trữ hoặc xử lý chất nguy hại không?"}},
+  {k:"pendingSuit",t:"yn",r:1,l:{en:"Do you know of any past, threatened or pending lawsuit or government proceeding about environmental issues at this property?",es:"¿Conoce alguna demanda o proceso gubernamental pasado, amenazado o pendiente sobre temas ambientales en esta propiedad?",vi:"Anh/chị có biết vụ kiện hoặc thủ tục chính quyền nào (đã có, bị đe dọa hoặc đang chờ) về vấn đề môi trường tại bất động sản này không?"}},
+  {k:"waterDamage",t:"yn",r:1,l:{en:"In the past 3 years, any water damage or mold claim or loss over $25,000 on this property?",es:"En los últimos 3 años, ¿algún reclamo o pérdida por daño de agua o moho de más de $25,000 en esta propiedad?",vi:"Trong 3 năm qua có khiếu nại hoặc tổn thất do nước/nấm mốc trên $25,000 tại bất động sản này không?"}},
+  {k:"moldPlan",t:"yn",r:1,l:{en:"Is there a water-intrusion / mold management plan for the building?",es:"¿Existe un plan de manejo de filtraciones de agua / moho para el edificio?",vi:"Có kế hoạch quản lý nước thấm / nấm mốc cho tòa nhà không?"}}]},
+ {h:{en:"How the property is used",es:"Uso de la propiedad",vi:"Mục đích sử dụng"},q:[
+  {k:"currentUse",t:"text",r:1,l:{en:"How is the property used today? (example: 2 apartments and 1 store)",es:"¿Cómo se usa la propiedad hoy? (ejemplo: 2 apartamentos y 1 tienda)",vi:"Hiện bất động sản được sử dụng như thế nào? (ví dụ: 2 căn hộ và 1 cửa hàng)"}},
+  {k:"pastUse",t:"text",r:1,l:{en:"How was it used in the past?",es:"¿Cómo se usaba antes?",vi:"Trước đây được sử dụng như thế nào?"}}]}
+];
+var $=function(id){return document.getElementById(id)};
+var tr=function(o){return (o&&(o[lang]||o.en))||""};
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function call(a,extra){var b=Object.assign({action:a,leadId:LID,token:TOK},extra||{});return fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)}).then(function(r){return r.json()})}
+function visible(q){return !q.show||answers[q.show.k]===q.show.v}
+function render(){
+  document.documentElement.lang=lang;
+  Array.prototype.forEach.call($("lang").children,function(a){a.className=a.getAttribute("data-l")===lang?"on":""});
+  $("title").textContent=tr(T.title);
+  $("intro").textContent=tr(T.intro).replace("{n}",data.firstName||"").replace("{a}",data.propertyAddress||"");
+  if(submitted){$("form").innerHTML='<div class="card"><div class="done">'+esc(tr(T.thanks))+'</div>'+callLine()+'</div>';$("form").hidden=false;return}
+  var h="";
+  S.forEach(function(sec){
+    h+='<div class="card"><h2>'+esc(tr(sec.h))+'</h2>';
+    sec.q.forEach(function(q){
+      if(!visible(q))return;
+      var v=answers[q.k]==null?"":answers[q.k],id="q_"+q.k;
+      h+='<div class="q" id="w_'+q.k+'"><label class="t" for="'+id+'">'+esc(tr(q.l))+(q.r?' <span class="req">*</span>':'')+'</label>'+(q.h?'<div class="hint">'+esc(tr(q.h))+'</div>':'');
+      if(q.t==="yn"){h+='<div class="yn"><label><input type="radio" name="'+q.k+'" value="Yes"'+(v==="Yes"?" checked":"")+'><span>'+esc(tr(T.yes))+'</span></label><label><input type="radio" name="'+q.k+'" value="No"'+(v==="No"?" checked":"")+'><span>'+esc(tr(T.no))+'</span></label></div>'}
+      else if(q.t==="sel"){h+='<select id="'+id+'" name="'+q.k+'"><option value="">—</option>'+Object.keys(q.o).map(function(o){return '<option value="'+o+'"'+(v===o?" selected":"")+'>'+esc(tr(q.o[o]))+'</option>'}).join("")+'</select>'}
+      else if(q.t==="area"){h+='<textarea id="'+id+'" name="'+q.k+'" maxlength="400">'+esc(v)+'</textarea>'}
+      else if(q.t==="size"){var u=answers.siteSizeUnit||"Square feet";h+='<div class="row"><input id="'+id+'" name="siteSize" type="number" inputmode="decimal" min="0" step="any" value="'+esc(v)+'"><select name="siteSizeUnit"><option value="Square feet"'+(u==="Square feet"?" selected":"")+'>'+esc(tr(T.sqft))+'</option><option value="Acres"'+(u==="Acres"?" selected":"")+'>'+esc(tr(T.acres))+'</option></select></div>'}
+      else{h+='<input id="'+id+'" name="'+q.k+'" type="'+(q.t==="num"?"number":"text")+'"'+(q.t==="num"?' inputmode="decimal" min="0" step="any"':'')+' value="'+esc(v)+'">'}
+      h+='</div>';
+    });
+    h+='</div>';
+  });
+  h+='<button id="go" type="button">'+esc(tr(T.submit))+'</button>'+callLine();
+  $("form").innerHTML=h;$("form").hidden=false;
+}
+function callLine(){return data.lo&&data.lo.phone?'<div class="muted" style="margin-top:8px">'+esc(tr(T.call).replace("{lo}",data.lo.name).replace("{p}",data.lo.phone))+'</div>':""}
+function collect(){var f=$("form");Array.prototype.forEach.call(f.querySelectorAll("input,select,textarea"),function(e){if(e.type==="radio"){if(e.checked)answers[e.name]=e.value}else answers[e.name]=e.value});}
+function save(submit){collect();return call("q-save",{answers:answers,submit:!!submit,language:lang}).then(function(r){if(r&&r.ok){$("saved").textContent=tr(T.saved)+" ✓";setTimeout(function(){if($("saved").textContent.indexOf("✓")>-1)$("saved").textContent=""},2500)}return r})}
+document.addEventListener("input",function(e){if(!e.target.closest("#form")||submitted)return;clearTimeout(timer);timer=setTimeout(function(){save(false)},1200)});
+document.addEventListener("change",function(e){if(!e.target.closest("#form")||submitted)return;collect();var a=document.activeElement;if(e.target.name==="repairsNeeded"){render()}clearTimeout(timer);timer=setTimeout(function(){save(false)},600)});
+document.addEventListener("click",function(e){
+  var l=e.target.closest("#lang a");if(l){collect();lang=l.getAttribute("data-l");if(!submitted)render();else render();return}
+  if(e.target.id==="go"){collect();var bad=[];S.forEach(function(sec){sec.q.forEach(function(q){if(!q.r||!visible(q))return;var v=answers[q.k];if(v==null||String(v).trim()==="")bad.push(q.k)})});
+    S.forEach(function(sec){sec.q.forEach(function(q){var w=$("w_"+q.k);if(w)w.classList.toggle("bad",bad.indexOf(q.k)>-1)})});
+    if(bad.length){$("err").textContent=tr(T.missing);$("err").hidden=false;var w=$("w_"+bad[0]);if(w)w.scrollIntoView({block:"center",behavior:"smooth"});return}
+    $("err").hidden=true;e.target.disabled=true;
+    save(true).then(function(r){if(r&&r.ok){submitted=true;render();window.scrollTo(0,0)}else{e.target.disabled=false;$("err").textContent="Could not send. Please try again.";$("err").hidden=false}});
+  }
+});
+if(!LID||!TOK){$("intro").textContent=tr(T.bad);$("title").textContent=tr(T.title)}
+else call("q-get").then(function(r){
+  if(!r||!r.ok){$("title").textContent=tr(T.title);$("intro").textContent=tr(T.bad);return}
+  data=r;answers=r.answers||{};if(answers.totalUnits==null&&r.totalUnits!=null)answers.totalUnits=String(r.totalUnits);
+  lang=({en:1,es:1,vi:1})[P.get("lang")||r.language]?(P.get("lang")||r.language):"en";
+  submitted=!!r.submittedAt;render();
+}).catch(function(){$("intro").textContent=tr(T.bad)});
+})();
+</script>
+</body>
+</html>
