@@ -102,19 +102,23 @@ export async function checkDominion(s: S, stateFromAddress: (a: string | null) =
     const m = String((e as Error).message || e);
     return no("Dominion's pricing is unavailable right now (" + m.slice(0, 80) + ").", { unavailable: true });
   }
-  const avail = (summary.products || []).filter((p: any) => p.status === "available");
-  if (!avail.length) return no("No Dominion DSCR program fits this scenario (credit, leverage, DSCR, loan size or property).");
+  const priced = (summary.products || []).filter((p: any) => p.status === "approved" || p.status === "available");
+  if (!priced.length) return no("No Dominion DSCR program fits this scenario (credit, leverage, DSCR, loan size, state or property)." + (/^(PA|OH)$/.test(st) ? " Dominion's portal rejected every program in " + st + " when tested 10/14/26." : ""));
 
   const g = (sc: any, id: string) => { const f = (sc.calculatedFields || []).find((x: any) => x.fieldId === id); return f && f.value ? (f.value.value ?? f.value.count) : null; };
-  const perProduct = await Promise.all(avail.map(async (p: any) => {
+  // Only rows Dominion itself marks approved are quotable (rejected / review-required rows are dropped: a shown price must be one they'll take).
+  const toRows = (scs: any[]) => (scs || []).filter((sc: any) => !sc.status || sc.status === "approved")
+    .filter((sc: any) => String(sc.adjustedRateLockPeriod ? sc.adjustedRateLockPeriod.count : g(sc, "calc@adjusted-rate-lock-period")) === "30")
+    .map((sc: any) => ({ rate: Number(sc.adjustedRate ?? g(sc, "calc@final-interest-rate")), price: Number(sc.adjustedPrice ?? g(sc, "calc@adjusted-price")), dscr: Number(g(sc, "calc@final-dscr")) }))
+    .filter((r: any) => isFinite(r.rate) && isFinite(r.price)).sort((a: any, b: any) => a.rate - b.rate);
+  const perProduct = await Promise.all(priced.map(async (p: any) => {
+    const name = String(p.productName).replace(/\s*30 Y(ea)?r\.? Fixed/i, "").replace(/^Product\s+/i, "Program ");
     try {
+      if (Array.isArray(p.priceScenarios) && p.priceScenarios.length) return { name, rows: toRows(p.priceScenarios), eff: null };
       const j = await lp("execute-product", { currentTime: now, pricingProfileId: PROFILE_ID, productId: p.productId, creditApplicationFields: fields, ausFields: [],
         outputFieldsFilter: { type: "only", fieldIds: wantIds }, publishedVersionRequest: { type: "current" }, pipelineRecordId: null, engine: null, bypassWorstCase: false });
-      const rows = (j.priceScenarios || []).filter((sc: any) => String(g(sc, "calc@adjusted-rate-lock-period")) === "30")
-        .map((sc: any) => ({ rate: Number(g(sc, "calc@final-interest-rate")), price: Number(g(sc, "calc@adjusted-price")), dscr: Number(g(sc, "calc@final-dscr")), ltv: Number(g(sc, "calc@loan-to-value")) }))
-        .filter((r: any) => isFinite(r.rate) && isFinite(r.price)).sort((a: any, b: any) => a.rate - b.rate);
-      return { name: String(p.productName).replace(/\s*30 Y(ea)?r\.? Fixed/i, "").replace(/^Product\s+/i, "Program "), rows, eff: j.rateSheetEffectiveTimestamp };
-    } catch (_) { return { name: String(p.productName), rows: [], eff: null }; }
+      return { name, rows: toRows(j.priceScenarios), eff: j.rateSheetEffectiveTimestamp };
+    } catch (_) { return { name, rows: [], eff: null }; }
   }));
   const ranked = perProduct.filter((p: any) => p.rows.length).map((p: any) => { const par = p.rows.findIndex((r: any) => r.price >= 100); return { ...p, parIdx: par, parRate: par >= 0 ? p.rows[par].rate : 99 }; })
     .sort((a: any, b: any) => a.parRate - b.parRate).slice(0, 4);
@@ -135,5 +139,5 @@ export async function checkDominion(s: S, stateFromAddress: (a: string | null) =
     "Dominion's cap on broker points/fee isn't confirmed here: check the 'Broker Points or Fee' limit on their loan-pricing screen before quoting extra points.",
   ];
   if (assumedLoan) assumptions.unshift("No loan amount entered, so 75% of value was priced.");
-  return { lender: L, eligible: true, source: "live", options, loanAmountUsed: loan, maxLoanAmount: loan, assumptions, compCaps: { maxYsp: round3(maxYsp), yspRatePerPoint: 0.25 } };
+  return { lender: L, eligible: true, source: "live", options, loanAmountUsed: loan, maxLoanAmount: loan, assumptions, compCaps: { maxYsp: round3(maxYsp) } };
 }
