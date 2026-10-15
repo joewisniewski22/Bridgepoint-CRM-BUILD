@@ -2822,6 +2822,7 @@ var CALL_OUTCOMES = [
   { key:"connected", label:"Connected" },
   { key:"sent-terms", label:"Sent terms" },
   { key:"callback", label:"Requested call back" },
+  { key:"not-ready", label:"Not ready yet (recheck later)" },
   { key:"not-interested", label:"Not interested" },
   { key:"wrong-number", label:"Wrong number" }
 ];
@@ -3933,7 +3934,7 @@ function computeQueueForLeads(leads, userId, today){
   leads.forEach(function(lead){
     if (lead.status==="active" && CADENCE_STAGES.indexOf(lead.stage) !== -1){
       var attempts = lead.callAttempts || [];
-      var connected = attempts.some(function(a){ return a.outcome==="connected" || a.outcome==="callback" || a.outcome==="sent-terms"; });
+      var connected = attempts.some(function(a){ return a.outcome==="connected" || a.outcome==="callback" || a.outcome==="sent-terms" || a.outcome==="not-ready"; });
       // A client who asked to be called back later isn't chased in the
       // meantime -- whether that's a future date (Belinda on deployment
       // until November) or later THIS SAME day (Mike Bodhaine asked for
@@ -6599,7 +6600,7 @@ function logCall(leadId, outcome, notes, callback){
     lead.termsheetSentAt = d;
     lead.activity.push({ date:d, type:"system", text:"Terms sent (logged from a call)", author: currentUser().name });
   }
-  if (outcome === "connected" || outcome === "callback" || outcome === "sent-terms"){
+  if (outcome === "connected" || outcome === "callback" || outcome === "sent-terms" || outcome === "not-ready"){
     if (lead.status==="cold" || lead.status==="lost"){
       lead.status = "active";
       lead.stage = "qualifying";
@@ -6616,7 +6617,7 @@ function logCall(leadId, outcome, notes, callback){
       notifyUser(currentUser().id, leadId, "note", "Automation paused for " + lead.name + " since you just connected — make sure to follow up yourself as planned.", { skipText:true });
     }
   } else {
-    var unanswered = lead.callAttempts.filter(function(a){ return a.outcome!=="connected" && a.outcome!=="callback" && a.outcome!=="sent-terms"; }).length;
+    var unanswered = lead.callAttempts.filter(function(a){ return a.outcome!=="connected" && a.outcome!=="callback" && a.outcome!=="sent-terms" && a.outcome!=="not-ready"; }).length;
     var callbackPending = !!(lead.nextFollowUp && lead.nextFollowUp > d);
     if (unanswered >= CADENCE_MAX && lead.status==="active" && !callbackPending){
       lead.status = "cold";
@@ -6629,19 +6630,22 @@ function logCall(leadId, outcome, notes, callback){
   // this lead pause until then (see computeQueueForLeads). A callback that has
   // come due is cleared once the person is actually reached (or is done with
   // us), but stays if it went unanswered so it comes back the next day.
-  if (outcome === "callback" && callback && callback.date){
+  // Not ready yet (Joe 2026-10-15: every conversation is an opportunity): a real conversation where the file is not closeable today (credit,
+  // funds, experience). It books a recheck (default 30 days) with the LO's notes as the goal, instead of letting the lead go quiet.
+  if (outcome === "not-ready" && !(callback && callback.date)) callback = { date: addDaysISO(d, 30), time: "09:00" };
+  if ((outcome === "callback" || outcome === "not-ready") && callback && callback.date){
     lead.nextFollowUp = callback.date;
     // Typed as local time, stored as an absolute moment so the server can send the reminder on time.
     lead.nextFollowUpAt = new Date(callback.date + "T" + (callback.time || "09:00") + ":00").toISOString();
-    lead.nextFollowUpNote = "Call back requested" + (notes ? (": " + notes.slice(0, 140)) : "");
-    lead.activity.push({ date:d, type:"system", text:"Call back scheduled for " + fmtDate(callback.date) + " at " + fmtClock(callback.time || "09:00"), author: currentUser().name });
+    lead.nextFollowUpNote = (outcome === "not-ready" ? "Not ready yet - recheck" : "Call back requested") + (notes ? (": " + notes.slice(0, 140)) : "");
+    lead.activity.push({ date:d, type:"system", text:(outcome === "not-ready" ? "Not ready yet: recheck scheduled for " : "Call back scheduled for ") + fmtDate(callback.date) + " at " + fmtClock(callback.time || "09:00"), author: currentUser().name });
   } else if (lead.nextFollowUp && lead.nextFollowUp <= d && ["connected","sent-terms","not-interested","wrong-number"].indexOf(outcome) !== -1){
     lead.nextFollowUp = null;
     lead.nextFollowUpAt = null;
     lead.nextFollowUpNote = null;
     lead.activity.push({ date:d, type:"system", text:"Scheduled call back completed", author: currentUser().name });
   }
-  var callbackJustSet = (outcome === "callback" && !!callback && !!callback.date);
+  var callbackJustSet = ((outcome === "callback" || outcome === "not-ready") && !!callback && !!callback.date);
   // Auto-schedule the next touch on relationship/win-back calls instead of
   // leaving it to the LO to remember -- a closed client stays in a periodic
   // referral-ask rotation regardless of outcome; a cold/lost lead that
@@ -12109,7 +12113,7 @@ function briefTimeline(lead){
 function briefLastNotes(lead){
   return (lead.callAttempts||[]).filter(function(a){ return a.notes; }).slice(-2).reverse();
 }
-var BRIEF_OUTCOME_ICONS = { "connected":"✅", "sent-terms":"📑", "left-voicemail":"📨", "no-answer":"📵", "callback":"🕒", "not-interested":"🚫", "wrong-number":"❌" };
+var BRIEF_OUTCOME_ICONS = { "connected":"✅", "sent-terms":"📑", "left-voicemail":"📨", "no-answer":"📵", "callback":"🕒", "not-ready":"⏳", "not-interested":"🚫", "wrong-number":"❌" };
 function renderBriefScreen(){
   var t = taskById(ui.briefTaskId);
   var lead = t ? leadById(t.leadId) : null;
@@ -12185,7 +12189,7 @@ function renderBriefScreen(){
       '<div class="br-outcomes">' + outcomes + '</div>' +
       '<div id="br-after"' + show(!!b.outcome) + '>' +
         '<textarea class="br-ta" id="br-notes" data-action="brief-field" data-field="notes" rows="3" placeholder="Quick notes — what they said, what you agreed to (talk or type)…">' + esc(b.notes) + '</textarea>' +
-        '<div id="br-cb"' + show(b.outcome === "callback") + '><div class="br-h2">When did they ask you to call back?</div><div class="br-inline"><input class="input" type="date" data-action="brief-field" data-field="cbDate" value="' + esc(b.cbDate) + '"><input class="input" type="time" data-action="brief-field" data-field="cbTime" value="' + esc(b.cbTime) + '"></div></div>' +
+        '<div id="br-cb"' + show(b.outcome === "callback" || b.outcome === "not-ready") + '><div class="br-h2">When did they ask you to call back?</div><div class="br-inline"><input class="input" type="date" data-action="brief-field" data-field="cbDate" value="' + esc(b.cbDate) + '"><input class="input" type="time" data-action="brief-field" data-field="cbTime" value="' + esc(b.cbTime) + '"></div></div>' +
         '<div id="br-nextstep"' + show(b.outcome === "connected") + '><div class="br-h2">Next step — always book one</div><div class="br-chips">' + nextChips + '</div>' +
           '<div id="br-nextpick" class="br-inline"' + show(b.next === "pick") + '><input class="input" type="date" data-action="brief-field" data-field="nextDate" value="' + esc(b.nextDate) + '"><input class="input" type="time" data-action="brief-field" data-field="nextTime" value="' + esc(b.nextTime) + '"></div></div>' +
         '<div id="br-lost"' + show(b.outcome === "not-interested") + '><label class="br-check"><input type="checkbox" data-action="brief-lost-toggle"' + (b.closeFile ? " checked" : "") + '> Close this file</label><select class="select" data-action="brief-field" data-field="lostReason">' + lostReasons + '</select></div>' +
@@ -12274,6 +12278,8 @@ function briefSave(){
   if (b.outcome === "callback"){
     if (!b.cbDate){ showToast("Pick the day they asked you to call back"); return; }
     cb = { date:b.cbDate, time:b.cbTime || "10:00" };
+  } else if (b.outcome === "not-ready"){
+    cb = b.cbDate ? { date:b.cbDate, time:b.cbTime || "10:00" } : null; // blank = the default 30-day recheck
   }
   var notes = (b.notes || "").trim();
   logCall(lead.id, b.outcome, notes, cb);
@@ -12294,7 +12300,7 @@ function briefPickOutcome(o){
   document.querySelectorAll(".br-oc").forEach(function(el){ el.classList.toggle("sel", el.dataset.o === o); });
   var vis = function(id, on){ var el = document.getElementById(id); if (el) el.style.display = on ? "" : "none"; };
   vis("br-after", true);
-  vis("br-cb", o === "callback");
+  vis("br-cb", o === "callback" || o === "not-ready");
   vis("br-nextstep", o === "connected");
   vis("br-lost", o === "not-interested");
   var n = document.getElementById("br-notes");
@@ -13821,7 +13827,7 @@ function todayCallsCardHTML(userId){
   var label = function(k){ var o = CALL_OUTCOMES.filter(function(x){ return x.key === k; })[0]; return o ? o.label : (k || ""); };
   var list = rows.length ? rows.slice(0, 8).map(function(r){
     var tm = r.at ? new Date(r.at).toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : "";
-    var ok = r.outcome === "connected" || r.outcome === "callback" || r.outcome === "sent-terms";
+    var ok = r.outcome === "connected" || r.outcome === "callback" || r.outcome === "sent-terms" || r.outcome === "not-ready";
     return '<div data-action="select-lead" data-lead="' + r.lead.id + '" style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--border-soft);cursor:pointer">' +
       '<span class="footnote" style="width:62px;padding:0">' + esc(tm) + '</span><b style="flex:1">' + esc(r.lead.name) + '</b>' +
       (r.logged ? '<span class="badge ' + (ok ? 'badge-forest' : 'badge-neutral') + '">' + esc(label(r.outcome)) + '</span>' : '<span class="badge badge-gold" title="Dialed through the phone system, but no outcome was saved">Dialed, not logged</span>') + '</div>';
@@ -13834,7 +13840,7 @@ function renderCallLog(){
   var who = isOwner() ? (ui.callLogWho || me.id) : me.id;
   var rows = callLogData(who === "all" ? null : who, day);
   var logged = rows.filter(function(r){ return r.logged; });
-  var connected = logged.filter(function(r){ return r.outcome === "connected" || r.outcome === "callback" || r.outcome === "sent-terms"; }).length;
+  var connected = logged.filter(function(r){ return r.outcome === "connected" || r.outcome === "callback" || r.outcome === "sent-terms" || r.outcome === "not-ready"; }).length;
   var vms = logged.filter(function(r){ return r.outcome === "left-voicemail"; }).length;
   var unlogged = rows.length - logged.length;
   var label = function(k){ var o = CALL_OUTCOMES.filter(function(x){ return x.key === k; })[0]; return o ? o.label : (k || ""); };
@@ -22412,7 +22418,7 @@ appEl.addEventListener("change", function(e){
   if (!t || t.tagName !== "SELECT" || t.name !== "outcome") return;
   var f = t.closest("form");
   var box = f && f.querySelector(".cb-fields");
-  if (box) box.style.display = t.value === "callback" ? "" : "none";
+  if (box) box.style.display = (t.value === "callback" || t.value === "not-ready") ? "" : "none";
 });
 var addressLookupTimer = null;
 appEl.addEventListener("input", function(e){
