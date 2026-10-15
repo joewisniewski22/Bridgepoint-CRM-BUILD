@@ -92,6 +92,18 @@ function loanTypeFrom(fields: Field[], formName: string): string | null {
 //  - qualified: 660+ credit, funds ready, needs the loan within 60 days -> Meta is told
 //    "Qualified Lead" right away so delivery leans toward real closers.
 const LOW_CREDIT_RX = /under 620|below 620|less than 620|menos de 620|dưới 620|poor credit|bad credit|no credit|sin cr[eé]dito|mal cr[eé]dito|không có điểm tín dụng/i;
+// Plain heads-up lines for the assigned LO, from the screen's findings plus the answers (no lead is turned away).
+function headsUpFor(reasons: string[], fields: Field[]): string[] {
+  const out: string[] = [];
+  const val = (rx: RegExp) => { const f = fields.find((x) => rx.test(x.name)); return f && f.values && f.values.length ? String(f.values[0]) : ""; };
+  for (const r of reasons) {
+    if (/credit/i.test(r)) out.push("Credit under 620 / no credit reported. Ask the exact score and history on the first call. Ways to work it: add a co-borrower or guarantor with stronger credit on the LLC, or a short credit-repair plan first. Don't promise terms until the Pricer shows them.");
+    if (/down payment/i.test(r)) out.push("Said no down payment / closing funds on a purchase. Ask what they mean before judging the file (a partner's money, funds from another property, cash-out on something they own). Funds to close are needed: a co-investor, a lower-leverage deal or a cash-out refinance can bridge the gap.");
+  }
+  const exp = val(/projects|proyectos|completed|completados|d[ự]\s*[aá]n/i);
+  if (/first one|primero|primer|^0$|none|ninguno|chưa/i.test(exp)) out.push("First project (no completed flips). Most programs want experience: suggest a lower-leverage deal, an experienced partner or contractor on the LLC, or a different program.");
+  return out;
+}
 function screenLead(fields: Field[]): { verdict: "disqualified" | "qualified" | "neutral"; reasons: string[] } {
   const val = (rx: RegExp) => { const f = fields.find((x) => rx.test(x.name)); return f && f.values && f.values.length ? String(f.values[0]) : ""; };
   const credit = val(/credit|cr[eé]dito|tin_dung|tín_dụng/i);
@@ -172,24 +184,11 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
     return;
   }
 
+  // Joe 2026-10-15: "dont turn away any leads, just let whoever gets assigned the lead know of the potential issue" -- nothing is auto-filtered
+  // any more. Every real lead is assigned and alerted like any other; the screen's findings become a heads-up for the LO (what the issue is
+  // and a way to work it, e.g. a co-borrower on the LLC) instead of a reason to drop the lead.
   const screen = screenLead(fields);
-  if (screen.verdict === "disqualified") {
-    // Filed for the record (and a later nurture), but nobody is rung, alerted, or texted, and it
-    // doesn't take a turn in the rotation.
-    const did = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
-    const owner = spanish ? SPANISH_LO : vietnamese ? VIETNAMESE_LO : "owner";
-    await sb.from("leads").insert({
-      id: did, name, email: email || null, phone: phone || null, source: label, loan_type: loanType, stage: "new", status: "lost",
-      lost_reason: "Auto-filtered: " + screen.reasons.join("; "), assigned_to: owner, created_at: today, created_at_ts: new Date().toISOString(),
-      preferred_language: lang, automation_paused: true, entity_type: "LLC", application_token: crypto.randomUUID(), meta_leadgen_id: leadgenId,
-      activity: [
-        { date: today, type: "note", author: "System", text: "Facebook form lead auto-filtered (" + screen.reasons.join("; ") + ") -- not a closeable file right now. No LO alert, no texts. Form \"" + (formName || formId) + "\"" + (realAdId(data.ad_id, adId) ? " · ad_id=" + realAdId(data.ad_id, adId) : "") },
-        ...(answers.length ? [{ date: today, type: "note", author: "System", text: "Form answers — " + answers.join(" · ") }] : []),
-      ],
-    });
-    await post("meta-crm-events", { leadId: did, secret: await adminSecret() });
-    return;
-  }
+  const heads = headsUpFor(screen.reasons, fields);
   const assignee = spanish ? SPANISH_LO : vietnamese ? VIETNAMESE_LO : await pickEnglishAdLO();
   const id = "L" + crypto.randomUUID().slice(0, 8).toUpperCase();
   const activity: Record<string, string>[] = [
@@ -203,6 +202,7 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
       : { date: today, type: "note", author: "System", text: "No text-consent checkbox on Facebook form \"" + (formName || formId) + "\" — they asked us to contact them about a loan; confirm consent on the first call before any marketing texts." }),
   ];
   if (answers.length) activity.push({ date: today, type: "note", author: "System", text: (spanish ? "Respuestas del formulario — " : "Form answers — ") + answers.join(" · ") });
+  heads.forEach(function (h) { activity.push({ date: today, type: "note", author: "System", text: "Heads-up for the LO: " + h }); });
   const row: Record<string, unknown> = {
     id, name, email: email || null, phone: phone || null, source: label, loan_type: loanType, stage: "new", status: "active",
     assigned_to: assignee, created_at: today, created_at_ts: new Date().toISOString(),
@@ -216,7 +216,7 @@ async function processLeadgenId(leadgenId: string, pageId: string, formId: strin
   if (screen.verdict === "qualified") await post("meta-crm-events", { leadId: id, secret: await adminSecret(), qualified: true });
 
   // Hot-lead alert to the LO.
-  const alertText = "🔥 New Facebook lead" + (spanish ? " (Spanish)" : vietnamese ? " (Vietnamese)" : "") + ": " + name + (loanType ? " · " + loanType : "") + " — open & dial: " + CRM_URL + "?lead=" + id;
+  const alertText = "🔥 New Facebook lead" + (spanish ? " (Spanish)" : vietnamese ? " (Vietnamese)" : "") + ": " + name + (loanType ? " · " + loanType : "") + (heads.length ? " (heads-up: " + heads.map(function (h) { return h.split(".")[0].toLowerCase(); }).join("; ") + " — see the lead notes)" : "") + " — open & dial: " + CRM_URL + "?lead=" + id;
   await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: assignee, lead_id: id, kind: "hot-lead", text: alertText, date: today, read: false });
   const { data: lo } = await sb.from("users").select("id,name,email,phone,photo_url").eq("id", assignee).single();
   if (lo?.phone) await post("send-text", { to: lo.phone, text: alertText, fromName: "Bridgepoint CRM" });
