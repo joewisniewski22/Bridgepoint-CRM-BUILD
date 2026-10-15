@@ -824,6 +824,7 @@ var ES_DICT = {
   "Co-Borrower Social Security Number": "N\u00famero de Seguro Social del co-prestatario", "Co-Borrower Ownership %": "% de propiedad del co-prestatario",
   "Co-Borrower Phone": "Tel\u00e9fono del co-prestatario", "Co-Borrower Email": "Correo del co-prestatario",
   "Co-Borrower Home Address (street, city, state, ZIP)": "Direcci\u00f3n del co-prestatario (calle, ciudad, estado, c\u00f3digo postal)",
+  "Guarantor Home Address (street, city, state, ZIP)": "Direcci\u00f3n de residencia del garante (calle, ciudad, estado, c\u00f3digo postal)",
   "Guarantor First Name":"Nombre del Garante", "Middle Name":"Segundo Nombre", "Last Name":"Apellido",
   "Guarantor Date of Birth":"Fecha de Nacimiento del Garante", "Guarantor Ownership %":"% de Propiedad del Garante",
   "Guarantor Social Security Number":"Número de Seguro Social del Garante",
@@ -1122,6 +1123,7 @@ var VI_DICT = {
   "Co-Borrower Social Security Number": "Số An sinh Xã hội (SSN) của người đồng vay", "Co-Borrower Ownership %": "% sở hữu của người đồng vay",
   "Co-Borrower Phone": "Số điện thoại của người đồng vay", "Co-Borrower Email": "Email của người đồng vay",
   "Co-Borrower Home Address (street, city, state, ZIP)": "Địa chỉ nhà của người đồng vay (số nhà và đường, thành phố, tiểu bang, mã ZIP)",
+  "Guarantor Home Address (street, city, state, ZIP)": "Địa chỉ nhà của người bảo lãnh (số nhà và đường, thành phố, tiểu bang, mã ZIP)",
   "Guarantor First Name":"Tên của người bảo lãnh", "Middle Name":"Tên đệm", "Last Name":"Họ",
   "Guarantor Date of Birth":"Ngày sinh của người bảo lãnh", "Guarantor Ownership %":"% sở hữu của người bảo lãnh",
   "Guarantor Social Security Number":"Số An sinh Xã hội (SSN) của người bảo lãnh",
@@ -5992,7 +5994,7 @@ function extractApplicationBaseFieldsFromForm(fd){
     entityLegalName: fd.get("entityLegalName"),
     citizenshipStatus: fd.get("citizenshipStatus"),
     countryOfDomicile: fd.get("countryOfDomicile"),
-    maritalStatus: fd.get("maritalStatus"),
+    maritalStatus: fd.get("maritalStatus"), guarantorAddress: guarantorAddressFromForm(fd),
     builtYear: fd.get("builtYear") ? Number(fd.get("builtYear")) : null,
     currentLenderName: fd.get("currentLenderName"),
     unitsReadyForRent: fd.get("unitsReadyForRent"),
@@ -20310,6 +20312,7 @@ function buildApplicationFieldsHTML(lead, lang, opts){
       '<option value=""' + (lead.maritalStatus!=="Married" && lead.maritalStatus!=="Unmarried" ? " selected" : "") + '>' + L("— Select —") + '</option>' +
       ["Married","Unmarried"].map(function(o){ return '<option value="' + o + '"' + (lead.maritalStatus===o?" selected":"") + '>' + L(o) + '</option>'; }).join("") +
     '</select></div>') : "") +
+    (["Fix & Flip","Bridge","Ground Up Construction","DSCR","Portfolio/Blanket"].indexOf(lead.loanType) === -1 ? ('<div class="form-row"><label>' + L("Guarantor Home Address (street, city, state, ZIP)") + ' *</label><input class="input" name="guarantorHomeAddress" value="' + esc(lead.guarantorAddress || "") + '"></div>') : "") +
     '<div class="form-row"><label>' + L("Country of Citizenship") + ' <span class="hint">(' + L("if Foreign National") + ')</span></label><input class="input" name="countryOfDomicile" value="' + esc(lead.countryOfDomicile||"") + '" placeholder="' + L("e.g. Mexico") + '"></div>' +
     '<div class="form-row"><label>' + L("Liquidity / Reserves") + '</label><input class="input" type="number" name="liquidity" value="' + v(lead.liquidity) + '"></div>' +
     '<div class="form-row"><label>' + L("Property Address") + '</label>' +
@@ -22593,9 +22596,16 @@ appEl.addEventListener("input", function(e){
 
 // Joe 2026-10-14: a phone-taken application came through with no home address, marital status or years at address (the form asked, nothing
 // required them) and the lender won't take the file without them. These are now required before an application can be submitted or taken.
+// Joe 2026-10-15: every application, for every loan type, asks for the guarantor's personal (home) address and saves it on the file as
+// guarantorAddress (the RTL and DSCR sections have their own field; Mixed-Use and other types use guarantorHomeAddress).
+function guarantorAddressFromForm(fd){
+  var a = String(fd.get("guarantorHomeAddress") || fd.get("rtlHomeAddress") || fd.get("dscrHomeAddress") || "").trim();
+  return a || undefined;
+}
 function applicationMissingFields(fd){
   var miss = [];
   var txt = function(k){ return String(fd.get(k) || "").trim(); };
+  if (fd.has("guarantorHomeAddress") && !txt("guarantorHomeAddress")) miss.push("homeAddress");
   ["dscr", "rtl"].forEach(function(p){
     if (!fd.has(p + "HomeAddress")) return;
     if (!txt(p + "HomeAddress")) miss.push("homeAddress");
@@ -22683,7 +22693,7 @@ appEl.addEventListener("submit", function(e){
       entityLegalName: fd.get("entityLegalName"),
       citizenshipStatus: fd.get("citizenshipStatus"),
       countryOfDomicile: fd.get("countryOfDomicile"),
-      maritalStatus: fd.get("maritalStatus"),
+      maritalStatus: fd.get("maritalStatus"), guarantorAddress: guarantorAddressFromForm(fd),
       builtYear: fd.get("builtYear") ? Number(fd.get("builtYear")) : null,
       currentLenderName: fd.get("currentLenderName"),
       unitsReadyForRent: fd.get("unitsReadyForRent"),
@@ -22742,7 +22752,7 @@ appEl.addEventListener("submit", function(e){
       entityLegalName: fd.get("entityLegalName"),
       citizenshipStatus: fd.get("citizenshipStatus"),
       countryOfDomicile: fd.get("countryOfDomicile"),
-      maritalStatus: fd.get("maritalStatus"),
+      maritalStatus: fd.get("maritalStatus"), guarantorAddress: guarantorAddressFromForm(fd),
       builtYear: fd.get("builtYear") ? Number(fd.get("builtYear")) : null,
       currentLenderName: fd.get("currentLenderName"),
       unitsReadyForRent: fd.get("unitsReadyForRent"),
@@ -22810,7 +22820,7 @@ appEl.addEventListener("submit", function(e){
       entityLegalName: fd.get("entityLegalName"),
       citizenshipStatus: fd.get("citizenshipStatus"),
       countryOfDomicile: fd.get("countryOfDomicile"),
-      maritalStatus: fd.get("maritalStatus"),
+      maritalStatus: fd.get("maritalStatus"), guarantorAddress: guarantorAddressFromForm(fd),
       builtYear: fd.get("builtYear") ? Number(fd.get("builtYear")) : null,
       currentLenderName: fd.get("currentLenderName"),
       unitsReadyForRent: fd.get("unitsReadyForRent"),
