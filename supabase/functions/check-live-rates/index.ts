@@ -18,6 +18,7 @@ import { checkLend } from "./lend.ts";
 import { checkHomeXpress } from "./homex.ts";
 import { checkDominion } from "./dominion.ts";
 import { checkSilverHill } from "./silverhill.ts";
+import { silverHillQuote, silverHillListShape, silverHillRecordProbe } from "./silverhill_live.ts";
 import { RCN_LTR_AREAS, RCN_LTR_ZIP, RCN_LTR_GEO_DATE } from "./rcn_ltr_geo.ts";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -2087,6 +2088,7 @@ const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult
 ];
 // Fallback lenders (Joe 2026-10-14): only shown when no other lender places the scenario, so they stay out of scenarios the others already cover.
 const FALLBACK_LENDERS = ["Silver Hill"];
+const FALLBACK_KEYS = ["silverhill"];
 
 // ---------------------------------------------------------------------
 // Final guideline gate (Joe 10/7/26: "only return rates that actually qualify"). Runs on every
@@ -2124,7 +2126,7 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
   }
   // Commercial property (Joe 10/8/26: offer it): only Velocity lends on these among our lenders.
   // Others must decline -- NextRes would otherwise map an unknown type to SFR and misprice it.
-  if (r && r.eligible && COMMERCIAL_TYPES.includes(s.propertyType) && r.lender !== "Velocity") {
+  if (r && r.eligible && COMMERCIAL_TYPES.includes(s.propertyType) && r.lender !== "Velocity" && r.lender !== "Silver Hill") {
     return { lender: r.lender, eligible: false, source: r.source, reason: r.lender + " doesn't lend on commercial property (" + s.propertyType + ")." };
   }
   // Every quote here assumes a clean history (no bankruptcy/foreclosure/short sale/60+ day mortgage
@@ -2188,22 +2190,40 @@ Deno.serve(async (req: Request) => {
     if (body.velocityRaw && (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "") === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
       return new Response(JSON.stringify(await velocityPost(String(body.velocityPath || "GetPricing").replace(/[^A-Za-z]/g, ""), body.velocityRaw)), { headers: CORS_HEADERS });
     }
+    // Server-key-only: one live Silver Hill price (creates a Deal Scenario record in their portal) -- for testing the sign-in + pricing flow.
+    if (body.silverhillDebug && (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "") === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
+      return new Response(JSON.stringify(await silverHillQuote(body.silverhillDebug, true)), { headers: CORS_HEADERS });
+    }
+    if (body.silverhillRecord && (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "") === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
+      return new Response(JSON.stringify(await silverHillRecordProbe()), { headers: CORS_HEADERS });
+    }
+    if (body.silverhillList && (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "") === Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")) {
+      return new Response(JSON.stringify(await silverHillListShape()), { headers: CORS_HEADERS });
+    }
     const scenario: Scenario = body.lead;
     if (!scenario) {
       return new Response(JSON.stringify({ error: "missing_lead" }), { status: 400, headers: CORS_HEADERS });
     }
     // Optional body.lenders: ["velocity", ...] prices only those (used for accuracy testing).
     const picked = Array.isArray(body.lenders) && body.lenders.length ? LENDERS.filter(function (l) { return body.lenders.indexOf(l.key) !== -1; }) : LENDERS;
-    const results = await Promise.allSettled(picked.map(function (l) { return l.check(scenario); }));
-    const out = results.map(function (r, i) {
-      if (r.status === "fulfilled") return guidelineGate(scenario, r.value);
-      return { lender: picked[i].key, eligible: false, reason: "Lookup failed: " + String(r.reason) };
-    });
-    // Drop fallback lenders when any regular lender placed the scenario (unless the caller asked for specific lenders, e.g. testing).
+    // Fallback lenders (Silver Hill) run only AFTER the regular lenders, and only when none of them placed the scenario (or the caller asked for
+    // them by name, e.g. testing): a live Silver Hill price leaves a record in their portal, so it is never run for deals the others already cover.
     const explicit = Array.isArray(body.lenders) && body.lenders.length > 0;
-    const placed = out.some(function (r: any) { return r && r.eligible && FALLBACK_LENDERS.indexOf(r.lender) === -1; });
-    const shown = (placed && !explicit) ? out.filter(function (r: any) { return !(r && FALLBACK_LENDERS.indexOf(r.lender) !== -1); }) : out;
-    return new Response(JSON.stringify({ ok: true, results: shown }), { headers: CORS_HEADERS });
+    const regular = picked.filter(function (l) { return FALLBACK_KEYS.indexOf(l.key) === -1; });
+    const fallback = picked.filter(function (l) { return FALLBACK_KEYS.indexOf(l.key) !== -1; });
+    const results = await Promise.allSettled(regular.map(function (l) { return l.check(scenario); }));
+    const out: any[] = results.map(function (r, i) {
+      if (r.status === "fulfilled") return guidelineGate(scenario, r.value);
+      return { lender: regular[i].key, eligible: false, reason: "Lookup failed: " + String(r.reason) };
+    });
+    const placed = out.some(function (r: any) { return r && r.eligible; });
+    if (fallback.length && (explicit || !placed)) {
+      const fb = await Promise.allSettled(fallback.map(function (l) { return l.check(scenario); }));
+      fb.forEach(function (r, i) {
+        out.push(r.status === "fulfilled" ? guidelineGate(scenario, r.value) : { lender: fallback[i].key, eligible: false, reason: "Lookup failed: " + String(r.reason) });
+      });
+    }
+    const shown = out;    return new Response(JSON.stringify({ ok: true, results: shown }), { headers: CORS_HEADERS });
   } catch (err) {
     return new Response(JSON.stringify({ error: "server_error", detail: String(err) }), { status: 500, headers: CORS_HEADERS });
   }

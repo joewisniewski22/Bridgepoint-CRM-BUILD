@@ -19,7 +19,35 @@ const DSCR_TYPES = ["SFR", "Single Family", "Duplex", "2-4 Unit", "Condo", "Town
 // Small-balance commercial property types, from the commercial pricing form.
 const SBC_TYPES = ["Multifamily 5+", "Mixed-Use", "Mixed-Use (Commercial Heavy)", "Office", "Retail", "Warehouse", "Self-Storage", "Automotive", "Mobile Home Park", "Commercial Condo", "Day Care"];
 
-export function checkSilverHill(s: S): any {
+import { silverHillQuoteCached } from "./silverhill_live.ts";
+
+// Rules first (free, no portal call); only a scenario that fits is priced live. A live rate makes Silver Hill an eligible lender; if the live
+// price can't be had (sign-in down, outside their guidelines, hourly cap) the result stays a "manual quote" with the reason.
+export async function checkSilverHill(s: S): Promise<any> {
+  const base = checkSilverHillRules(s);
+  if (!base.portalOnly) return base;
+  const q = await silverHillQuoteCached(s);
+  if (!q.ok || !q.rate) {
+    base.assumptions = (base.assumptions || []).concat(["Live rate not available: " + (q.reason || "Silver Hill returned no rate") + (q.errors ? " (" + q.errors + ")" : "")]);
+    return base;
+  }
+  // A rate that comes back with a portal warning ("Final DSCR less than Required DSCR", etc.) isn't an offer Silver Hill will certainly take.
+  if (q.errors) {
+    base.assumptions = (base.assumptions || []).concat(["Silver Hill's portal showed " + q.rate + "% but flagged: " + q.errors + ". Not shown as a price; a person needs to look at it with their account executive."]);
+    return base;
+  }
+  const dscr = /DSCR/.test(q.program || "");
+  const amt = Number(s.loanAmount) || 0;
+  return {
+    lender: "Silver Hill", eligible: true, source: "live",
+    options: [{ program: (q.program || "Silver Hill") + " · 30-yr fixed" + (dscr ? "" : " · full doc"), rate: q.rate, price: 100, loanAmount: amt || undefined, note: "Rate from Silver Hill's broker portal; no lender points." }],
+    loanAmountUsed: amt || undefined, maxLoanAmount: amt || undefined,
+    compCaps: dscr ? { maxBrokerPoints: 5 } : { maxBrokerPoints: 3, maxYsp: 2 },
+    assumptions: ["Live Silver Hill portal rate" + (q.cached ? " (reused from the last 24 hours)" : "") + ", no lender points. Broker compensation up to 5 points" + (dscr ? "" : " (3 origination + 2 yield spread)") + " per Silver Hill; confirm yield-spread handling with their account executive before quoting.", ...(dscr ? ["Estimated DSCR was worked out at about an 8% rate; Silver Hill sets the final rate from the real DSCR on their application."] : [])],
+  };
+}
+
+export function checkSilverHillRules(s: S): any {
   const L = "Silver Hill";
   const no = (reason: string) => ({ lender: L, eligible: false, source: "model", reason });
   const lt = String(s.loanType || "");
