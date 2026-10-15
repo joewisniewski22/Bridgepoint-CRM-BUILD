@@ -1447,9 +1447,10 @@ function lenderKeyForLead(lead){
   if (/Lend Investors|^LEND\b/i.test(ol)) return "lend";
   if (/Home ?Xpress/i.test(ol)) return "homex";
   if (/Dominion/i.test(ol)) return "dominion";
+  if (/Silver ?Hill/i.test(ol)) return "silverhill";
   return null;
 }
-var LENDER_DOC_LABEL = { constructive:"Constructive", rcn:"RCN", kiavi:"Kiavi", ad:"A&D", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress", dominion:"Dominion" };
+var LENDER_DOC_LABEL = { constructive:"Constructive", rcn:"RCN", kiavi:"Kiavi", ad:"A&D", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress", dominion:"Dominion", silverhill:"Silver Hill" };
 var LENDER_DOC_PACKS = {
   constructive: function(lead){
     var rtl = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
@@ -9966,8 +9967,8 @@ function dismissAiFlag(leadId, idx){
    own rules, not an approval -- the lender's underwriter makes the call.
    Results live in public.lead_underwriting (staff-only RLS), not on the lead.
 --------------------------------------------------------------------- */
-var VU_LENDER_RX = { constructive:/Constructive/i, rcn:/RCN/i, kiavi:/Kiavi/i, ad:/A&D/i, nextres:/NextRes/i, velocity:/Velocity/i, lend:/Lend Investors|^LEND\b/i, homex:/Home ?Xpress/i, dominion:/Dominion/i };
-var VU_LENDER_NAME = { constructive:"Constructive Capital", rcn:"RCN Capital", kiavi:"Kiavi", ad:"A&D Mortgage", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress", dominion:"Dominion" };
+var VU_LENDER_RX = { constructive:/Constructive/i, rcn:/RCN/i, kiavi:/Kiavi/i, ad:/A&D/i, nextres:/NextRes/i, velocity:/Velocity/i, lend:/Lend Investors|^LEND\b/i, homex:/Home ?Xpress/i, dominion:/Dominion/i, silverhill:/Silver ?Hill/i };
+var VU_LENDER_NAME = { constructive:"Constructive Capital", rcn:"RCN Capital", kiavi:"Kiavi", ad:"A&D Mortgage", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress", dominion:"Dominion", silverhill:"Silver Hill" };
 var VU_AREAS = ["Lender fit","Verified numbers","Credit","Documents","Cross-checks","Funds to close","Insurance"];
 function vuState(leadId){ ui.vu = ui.vu || {}; return ui.vu[leadId] || (ui.vu[leadId] = { loaded:false, loading:false, running:false, data:null }); }
 function vuLenderKey(lead){ return lenderKeyForLead(lead) || "constructive"; }
@@ -14657,7 +14658,7 @@ function renderOutsideLenderFitBox(lead){
 // NextRes added 2026-09-26 -- Joe is now a table funder with them and will
 // upload their real term sheets via the existing Upload Outside Term Sheet
 // flow (no dedicated rate sheet/pricer built in yet, unlike Constructive).
-var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital", "HomeXpress", "Dominion"];
+var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital", "HomeXpress", "Dominion", "Silver Hill"];
 // Pricer lender name -> the routing value the rest of the CRM uses ("RCN Capital"
 // -> "RCN", Constructive -> null = in-house). undefined = unknown lender, leave routing alone.
 function lenderRoutingValue(name){
@@ -14671,6 +14672,7 @@ function lenderRoutingValue(name){
   if (/Lend Investors|^LEND\b/i.test(n)) return "Lend Investors Capital";
   if (/Home ?Xpress/i.test(n)) return "HomeXpress";
   if (/Dominion/i.test(n)) return "Dominion";
+  if (/Silver ?Hill/i.test(n)) return "Silver Hill";
   return undefined;
 }
 // Routing vs. the terms actually applied to the file (pricer) -- flags files like
@@ -14706,7 +14708,8 @@ var LENDER_EXPORT_TARGETS = [
   { key:"Velocity", label:"Velocity Mortgage Capital", portal:"https://www.generatevelocity.com/#/BrokerDashboard" },
   { key:"LEND", label:"Lend Investors Capital", portal:"https://www.leapplenderportal.com/Partner/s/" },
   { key:"HomeXpress", label:"HomeXpress", portal:"https://xconnect-x1.homexmortgage.com/newregistration" },
-  { key:"Dominion", label:"Dominion Financial", portal:"https://app.loanpass.io/c/dominion" }
+  { key:"Dominion", label:"Dominion Financial", portal:"https://app.loanpass.io/c/dominion" },
+  { key:"SilverHill", label:"Silver Hill Capital", portal:"https://shf.my.site.com/Portal/s/" }
 ];
 // The file's placement -> its Export to Lender target (Joe 2026-10-06: one click
 // exports to the assigned lender).
@@ -14721,6 +14724,7 @@ function exportKeyForLead(lead){
   if (/Lend Investors/i.test(ol)) return "LEND";
   if (/Home ?Xpress/i.test(ol)) return "HomeXpress";
   if (/Dominion/i.test(ol)) return "Dominion";
+  if (/Silver ?Hill/i.test(ol)) return "SilverHill";
   return null;
 }
 var LENDER_EXTENSION_ZIP = "https://bridgepoint-crm-build.vercel.app/bridgepoint-lender-export.zip";
@@ -15466,9 +15470,9 @@ function lpRenderResults(key){
     };
     if (r.eligible && !rtl) (r.options || []).forEach(function(o, oi){ if (best === -1 || ourPts(o) > ourPts(r.options[best])) best = oi; });
     var head = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><div class="rail-title" style="margin:0">' + esc(label) + '</div>' +
-      (r.eligible ? '<span class="badge badge-forest">Eligible</span>' : (r.unavailable ? '<span class="badge badge-neutral">Unavailable</span>' : '<span class="badge badge-rust">Not eligible</span>')) + '</div>';
+      (r.eligible ? '<span class="badge badge-forest">Eligible</span>' : (r.portalOnly ? '<span class="badge badge-neutral">Manual quote</span>' : (r.unavailable ? '<span class="badge badge-neutral">Unavailable</span>' : '<span class="badge badge-rust">Not eligible</span>'))) + '</div>';
     if (!r.eligible){
-      return '<div class="panel panel-pad" style="margin-top:12px">' + head + '<div class="footnote" style="padding-top:8px;color:' + (r.unavailable ? 'var(--ink-muted)' : 'var(--c-rust)') + '">' + esc(lpReasonFor(r, canSee)) + '</div></div>';
+      return '<div class="panel panel-pad" style="margin-top:12px">' + head + '<div class="footnote" style="padding-top:8px;color:' + ((r.unavailable || r.portalOnly) ? 'var(--ink-muted)' : 'var(--c-rust)') + '">' + esc(lpReasonFor(r, canSee)) + '</div></div>';
     }
     // Lender's rate sheet is behind (A&D: daily refresh failed, usually an expired login).
     // The login fix is shown only to Joe/Fiore/Erika -- LOs just see the warning (Joe 2026-10-07).
@@ -15537,7 +15541,13 @@ function lpRenderResults(key){
   // Short-term rental rules aren't confirmed per lender yet -- say so in plain terms.
   if (sc.rentalType === "str" && (en.data || []).some(function(r){ return r && r.eligible && r.strUnverified; })) banner += '<div class="hint" style="color:#6b4e00;padding:10px 0 0">⚠ Short-term rental: some of these terms are not confirmed for short-term rentals yet — ask Joe before quoting.</div>';
   var none = '';
-  if (!anyEligible){
+  // Silver Hill is a fallback lender: when nothing else places and it may fit, the deal needs a manual quote instead of being a flat no.
+  var manualQuote = !anyEligible && en.data.some(function(r){ return r && r.portalOnly; });
+  if (manualQuote){
+    none = '<div class="panel panel-pad" style="margin-top:12px;border:2px solid var(--c-gold, #c8a24a)">' +
+      '<div class="rail-title" style="margin:0">No instant price — this one needs a manual quote</div>' +
+      '<div class="footnote" style="padding-top:6px">' + (canSee ? esc((en.data.filter(function(r){ return r && r.portalOnly; })[0] || {}).reason || 'It may fit a program that has to be priced by hand.') : 'We may be able to do this loan, but it has to be priced by hand. Send it to Joe and he will confirm terms.') + '</div></div>';
+  } else if (!anyEligible){
     // Joe 2026-10-06: if NO lender we use will do the deal, say so plainly and
     // say what would change that.
     // Staff see each lender's reason; LOs get one plain list (no lenders mentioned).

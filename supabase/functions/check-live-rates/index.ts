@@ -17,6 +17,7 @@ import { checkVelocity, velocityGet, velocityPost } from "./velocity.ts";
 import { checkLend } from "./lend.ts";
 import { checkHomeXpress } from "./homex.ts";
 import { checkDominion } from "./dominion.ts";
+import { checkSilverHill } from "./silverhill.ts";
 import { RCN_LTR_AREAS, RCN_LTR_ZIP, RCN_LTR_GEO_DATE } from "./rcn_ltr_geo.ts";
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -2082,7 +2083,10 @@ const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult
   { key: "lend", check: (s: Scenario) => checkLend(s as any) },
   { key: "homex", check: (s: Scenario) => checkHomeXpress(s as any, stateFromAddress) },
   { key: "dominion", check: (s: Scenario) => checkDominion(s as any, stateFromAddress) },
+  { key: "silverhill", check: (s: Scenario) => Promise.resolve(checkSilverHill(s as any)) },
 ];
+// Fallback lenders (Joe 2026-10-14): only shown when no other lender places the scenario, so they stay out of scenarios the others already cover.
+const FALLBACK_LENDERS = ["Silver Hill"];
 
 // ---------------------------------------------------------------------
 // Final guideline gate (Joe 10/7/26: "only return rates that actually qualify"). Runs on every
@@ -2195,7 +2199,11 @@ Deno.serve(async (req: Request) => {
       if (r.status === "fulfilled") return guidelineGate(scenario, r.value);
       return { lender: picked[i].key, eligible: false, reason: "Lookup failed: " + String(r.reason) };
     });
-    return new Response(JSON.stringify({ ok: true, results: out }), { headers: CORS_HEADERS });
+    // Drop fallback lenders when any regular lender placed the scenario (unless the caller asked for specific lenders, e.g. testing).
+    const explicit = Array.isArray(body.lenders) && body.lenders.length > 0;
+    const placed = out.some(function (r: any) { return r && r.eligible && FALLBACK_LENDERS.indexOf(r.lender) === -1; });
+    const shown = (placed && !explicit) ? out.filter(function (r: any) { return !(r && FALLBACK_LENDERS.indexOf(r.lender) !== -1); }) : out;
+    return new Response(JSON.stringify({ ok: true, results: shown }), { headers: CORS_HEADERS });
   } catch (err) {
     return new Response(JSON.stringify({ error: "server_error", detail: String(err) }), { status: 500, headers: CORS_HEADERS });
   }
