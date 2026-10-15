@@ -75,7 +75,8 @@ type Stage =
   | "answering_inbound" | "connecting_staff"                  // inbound, matched lead
   | "ivr_lang_menu" | "ivr_main_menu" | "ivr_directory_menu"   // inbound, unmatched caller
   | "ivr_single_connect" | "ivr_ring_all_leg"
-  | "voicemail_greeting" | "voicemail_recording";
+  | "voicemail_greeting" | "voicemail_recording"
+  | "conf_staff" | "conf_staff_confirm" | "conf_join";           // conference calls started from the dialer (Joe 2026-10-15), see conference-call
 
 interface CallState {
   v: 1;
@@ -93,8 +94,30 @@ interface CallState {
   originalCallControlId?: string;   // ivr_ring_all_leg / voicemail: the caller's own leg
   vmTarget?: { kind: "staff" | "all_los" | "owner"; staffId?: string | null; label: string };
   pairId?: string;                  // direct_dial_leg: which pair this leg belongs to
-  role?: "destination" | "staff";   // direct_dial_leg: which side of the pair this leg is
+  role?: "destination" | "staff" | "client" | "guest";  // direct_dial_leg: which side of the pair this leg is
   announce?: string;                // ringing_staff: custom prompt (new-lead auto-ring, 2026-10-09)
+  confName?: string;                // conf_*: the voice_conferences row this leg belongs to
+}
+
+// Conference helpers (Telnyx Call Control conferences). A conference is created from the loan officer's answered leg; everyone else is dialed
+// and then joined to it, so a third person can be added at any time while it is live.
+async function telnyxConference(path: string, body: Record<string, unknown>) {
+  const res = await fetch("https://api.telnyx.com/v2/conferences" + path, {
+    method: "POST", headers: { "Authorization": "Bearer " + TELNYX_API_KEY, "Content-Type": "application/json" }, body: JSON.stringify(body || {}),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) console.error("voice-webhook: conference" + path + " failed", JSON.stringify(data));
+  return { ok: res.ok, data };
+}
+async function endConferenceLegs(confName: string) {
+  const { data: conf } = await sb.from("voice_conferences").select("telnyx_conference_id,status").eq("name", confName).maybeSingle();
+  if (!conf || conf.status === "ended") return;
+  await sb.from("voice_conferences").update({ status: "ended" }).eq("name", confName);
+  if (!conf.telnyx_conference_id) return;
+  const r = await fetch("https://api.telnyx.com/v2/conferences/" + conf.telnyx_conference_id + "/participants?page[size]=50", { headers: { "Authorization": "Bearer " + TELNYX_API_KEY } }).then((x) => x.json()).catch(() => null);
+  for (const p of ((r && r.data) || []) as Array<Record<string, unknown>>) {
+    if (p && p.call_control_id) await telnyxAction(p.call_control_id as string, "hangup", {});
+  }
 }
 
 function last10(phone: string | null | undefined): string {
@@ -420,6 +443,17 @@ Deno.serve(async (req: Request) => {
         const who = state.leadName ? state.leadName : "your client";
         const prompt = state.announce ? (state.announce + " Press 1 to call them now.") : ("Bridgepoint call to " + who + ". Press 1 to connect.");
         await gather(callControlId, prompt, "1", { ...state, stage: "staff_confirm" });
+      } else if (state.stage === "conf_staff" && state.confName) {
+        // Loan officer's cell picked up -- same press-1 safeguard so a voicemail never starts the conference.
+        await gather(callControlId, "Bridgepoint conference call" + (state.leadName ? " with " + state.leadName : "") + ". Press 1 to start.", "1", { ...state, stage: "conf_staff_confirm" });
+      } else if (state.stage === "conf_join" && state.confName) {
+        // A guest or the client picked up -- put them into the live conference.
+        const { data: conf } = await sb.from("voice_conferences").select("telnyx_conference_id,status").eq("name", state.confName).maybeSingle();
+        if (conf && conf.telnyx_conference_id && conf.status === "live") {
+          await telnyxConference("/" + conf.telnyx_conference_id + "/actions/join", { call_control_id: callControlId });
+        } else {
+          await telnyxAction(callControlId, "hangup", {});
+        }
       } else if (state.stage === "answering_inbound") {
         const nextState: CallState = { ...state, stage: "connecting_staff", originalCallControlId: callControlId };
         await saveTransferState(payload.call_session_id as string, nextState);
@@ -494,6 +528,35 @@ Deno.serve(async (req: Request) => {
           }
         } else {
           // No key press: a voicemail or pocket answer -- don't dial the client.
+          await telnyxAction(callControlId, "hangup", {});
+        }
+        return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+      }
+
+      if (state.stage === "conf_staff_confirm" && state.confName) {
+        if (digits === "1") {
+          const created = await telnyxConference("", { call_control_id: callControlId, name: state.confName, start_conference_on_create: true, beep_enabled: "never" });
+          const confId = created.ok && created.data && created.data.data ? (created.data.data.id as string) : "";
+          if (!confId) {
+            await sb.from("voice_conferences").update({ status: "failed" }).eq("name", state.confName);
+            await speak(callControlId, "Sorry, the conference could not be started.", "en");
+            return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
+          }
+          await sb.from("voice_conferences").update({ status: "live", telnyx_conference_id: confId, staff_call_control_id: callControlId }).eq("name", state.confName);
+          const { data: conf } = await sb.from("voice_conferences").select("participants,lead_id").eq("name", state.confName).maybeSingle();
+          for (const p of ((conf && conf.participants) || []) as Array<Record<string, unknown>>) {
+            if (!p.phone) continue;
+            const isClient = p.role === "client";
+            const jState: CallState = { v: 1, stage: "conf_join", confName: state.confName, role: isClient ? "client" : "staff", leadId: isClient ? ((conf && conf.lead_id) as string || null) : null, leadName: p.name as string, userId: state.userId, staffName: state.staffName } as CallState;
+            await telnyxCreateCall({ connection_id: Deno.env.get("TELNYX_CONNECTION_ID"), to: p.phone, from: TELNYX_FROM_NUMBER, timeout_secs: 45, client_state: encodeState(jState) });
+          }
+          if (state.leadId) {
+            const nowIso = new Date().toISOString();
+            await sb.from("leads").update({ lo_dialed_at: nowIso }).eq("id", state.leadId);
+            await sb.from("leads").update({ first_attempt_at: nowIso }).eq("id", state.leadId).is("first_attempt_at", null);
+          }
+        } else {
+          await sb.from("voice_conferences").update({ status: "missed" }).eq("name", state.confName).eq("status", "ringing_staff");
           await telnyxAction(callControlId, "hangup", {});
         }
         return new Response(JSON.stringify({ ok: true }), { headers: JSON_HEADERS });
@@ -655,6 +718,19 @@ Deno.serve(async (req: Request) => {
           await logCallOutcome({
             leadId: state.leadId, staffId: state.userId, sessionId, outcome: "no-answer", staffMissed: true,
             note: "Dialer call to " + (state.staffName || "staff") + " went unanswered before reaching " + (state.leadName || "the lead"),
+          });
+        }
+      } else if ((state.stage === "conf_staff" || state.stage === "conf_staff_confirm") && state.confName) {
+        // The loan officer's own leg: if they never started it, mark it missed; if they hang up while it is live, the conference ends for everyone.
+        await sb.from("voice_conferences").update({ status: "missed" }).eq("name", state.confName).eq("status", "ringing_staff");
+        await endConferenceLegs(state.confName);
+      } else if (state.stage === "conf_join" && state.confName && state.role === "client") {
+        if (state.leadId) {
+          await logCallOutcome({
+            leadId: state.leadId, staffId: state.userId, sessionId, outcome: neverConnected ? "no-answer" : "connected",
+            note: neverConnected
+              ? "Conference call (via " + (state.staffName || "staff") + "'s cell) — " + (state.leadName || "lead") + " did not pick up"
+              : "Conference call connected with " + (state.leadName || "lead") + " (via " + (state.staffName || "staff") + "'s cell)",
           });
         }
       } else if (state.stage === "staff_confirm") {

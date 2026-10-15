@@ -4611,6 +4611,94 @@ function cancelScheduledFollowup(taskId){
     t.status = "skipped"; showToast("Follow-up canceled"); render();
   });
 }
+// Conference calls (Joe 2026-10-15): "Taeya needs me on a call she's having" -- start a 3-way from the file, add teammates or any number while it is live.
+// Calls already running in the browser phone can't be converted (they aren't under Call Control), so a conference is started with this button.
+function openConference(leadId){
+  var lead = leadById(leadId);
+  if (!lead || !lead.phone){ showToast("No phone number on file for this client"); return; }
+  if (ui.conf && ui.conf.leadId !== leadId && ui.conf.status !== "ended" && ui.conf.status !== "missed" && ui.conf.status !== "failed") ui.conf = null;
+  ui.modal = { type: "conference", leadId: leadId };
+  render();
+  if (ui.conf) confRefresh();
+}
+function confIsActive(){ return !!(ui.conf && (ui.conf.status === "ringing_staff" || ui.conf.status === "live")); }
+function confMates(){ var me = currentUser(); return teammatesForChat().filter(function(u){ return u.phone && u.id !== me.id; }); }
+function modalConference(leadId){
+  var lead = leadById(leadId); if (!lead) return "";
+  var c = ui.conf, active = confIsActive(), mates = confMates();
+  var head = '<div class="modal-head"><h3>👥 Conference call — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>';
+  var body, foot;
+  if (!active){
+    body = '<div class="footnote" style="padding:0 0 8px">Your cell rings first — answer and press 1, and then ' + esc((lead.name || "the client").split(" ")[0]) + ' and anyone you pick below are dialed into the same call. You can add more people once it is live.</div>' +
+      (c && (c.status === "missed" || c.status === "failed" || c.status === "ended") ? '<div class="footnote" style="padding:0 0 8px;color:var(--c-rust)">' + (c.status === "ended" ? "The last conference ended." : c.status === "missed" ? "The last conference never started (the call to your cell wasn\'t confirmed)." : "The last conference couldn\'t be started.") + '</div>' : '') +
+      '<div class="form-row"><label>Add teammates now (optional)</label><div style="display:flex;flex-direction:column;gap:4px">' +
+        (mates.map(function(u){ return '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" class="conf-guest" data-uid="' + u.id + '"> ' + esc(u.name) + '</label>'; }).join("") || '<div class="footnote" style="padding:0">No teammates with a cell on file.</div>') +
+      '</div></div>' +
+      '<div class="form-two"><div class="form-row"><label>Or add another person — name</label><input class="input" id="conf-extra-name" placeholder="e.g. Attorney"></div><div class="form-row"><label>Phone</label><input class="input" id="conf-extra-phone" placeholder="(555) 123-4567"></div></div>' +
+      '<div class="footnote" style="padding:0">Your cell on file: <b>' + esc(currentUser().phone || "none — ask Joe to add it") + '</b>. Calls already running in the browser phone can\'t be converted; start the conference from here instead.</div>';
+    foot = '<button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="button" data-action="conf-start" data-lead="' + lead.id + '">Start conference</button>';
+  } else {
+    var parts = (c.participants || []).map(function(p){ return '<li>' + esc(p.name || "Guest") + ' <span class="footnote" style="padding:0">· ' + esc(p.role === "client" ? "client" : "guest") + '</span></li>'; }).join("");
+    body = '<div style="margin-bottom:8px"><b>' + (c.status === "live" ? "🟢 Live" : "📞 Ringing your cell — answer and press 1") + '</b></div>' +
+      '<ul style="margin:0 0 10px 18px;padding:0">' + parts + '</ul>' +
+      (c.status === "live" ? (
+        '<div class="form-row"><label>Add someone to this call</label><select class="select" id="conf-add-user"><option value="">— Pick a teammate —</option>' +
+          mates.map(function(u){ return '<option value="' + u.id + '">' + esc(u.name) + '</option>'; }).join("") + '</select></div>' +
+        '<div class="form-two"><div class="form-row"><label>Or a name</label><input class="input" id="conf-extra-name" placeholder="e.g. Attorney"></div><div class="form-row"><label>Phone</label><input class="input" id="conf-extra-phone" placeholder="(555) 123-4567"></div></div>' +
+        '<div class="footnote" style="padding:0">They get a call and join automatically when they pick up. Hang up your own phone, or press End, to close it for everyone.</div>'
+      ) : '<div class="footnote" style="padding:0">The client and guests are dialed as soon as you press 1.</div>');
+    foot = '<button class="btn btn-ghost" type="button" data-action="conf-refresh">Refresh</button>' +
+      (c.status === "live" ? '<button class="btn" type="button" data-action="conf-add">Add to call</button>' : '') +
+      '<button class="btn btn-primary" type="button" data-action="conf-end" style="background:var(--c-rust)">End for everyone</button>';
+  }
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop"><div class="modal" data-stop="1" style="max-width:520px">' + head + '<div class="modal-body">' + body + '</div><div class="modal-foot">' + foot + '</div></div></div>';
+}
+function confRefresh(){
+  if (!sb || !ui.conf) return;
+  sb.from("voice_conferences").select("status,participants").eq("name", ui.conf.name).maybeSingle().then(function(res){
+    if (!res.data || !ui.conf) return;
+    ui.conf.status = res.data.status; ui.conf.participants = res.data.participants || [];
+    if (ui.modal && ui.modal.type === "conference") render();
+    if (ui.conf.status === "ringing_staff" && ui.modal && ui.modal.type === "conference"){ setTimeout(confRefresh, 4000); }
+  });
+}
+function confStart(leadId){
+  var lead = leadById(leadId), me = currentUser(); if (!lead || !sb) return;
+  if (!me.phone){ showToast("Your cell number isn't on file — ask Joe to add it", true); return; }
+  var guests = [];
+  document.querySelectorAll(".conf-guest").forEach(function(cb){ if (cb.checked){ var u = userById(cb.getAttribute("data-uid")); if (u && u.phone) guests.push({ name: u.name, phone: u.phone }); } });
+  var xp = ((document.getElementById("conf-extra-phone") || {}).value || "").trim(), xn = ((document.getElementById("conf-extra-name") || {}).value || "").trim();
+  if (xp) guests.push({ name: xn || "Guest", phone: xp });
+  showToast("Calling your cell now — answer and press 1 to start the conference");
+  sb.functions.invoke("conference-call", { body: { action: "start", userId: me.id, leadId: lead.id, guests: guests } }).then(function(res){
+    var d = res.data || {};
+    if (res.error || d.error){ showToast(d.detail || (typeof d.error === "string" ? d.error : "Couldn't start the conference — try again"), true); return; }
+    ui.conf = { name: d.confName, leadId: lead.id, status: "ringing_staff", participants: [{ name: lead.name, role: "client" }].concat(guests.map(function(g){ return { name: g.name, role: "guest" }; })) };
+    lead.firstAttemptAt = lead.firstAttemptAt || todayISO(); persist();
+    render(); setTimeout(confRefresh, 4000);
+  }).catch(function(){ showToast("Couldn't start the conference — try again", true); });
+}
+function confAdd(){
+  if (!sb || !confIsActive() || ui.conf.status !== "live"){ showToast("The conference isn't live yet", true); return; }
+  var uid = (document.getElementById("conf-add-user") || {}).value || "";
+  var xp = ((document.getElementById("conf-extra-phone") || {}).value || "").trim(), xn = ((document.getElementById("conf-extra-name") || {}).value || "").trim();
+  var name, phone;
+  if (xp){ name = xn || "Guest"; phone = xp; } else if (uid){ var u = userById(uid); if (u){ name = u.name; phone = u.phone; } }
+  if (!phone){ showToast("Pick a teammate or enter a number", true); return; }
+  sb.functions.invoke("conference-call", { body: { action: "add", confName: ui.conf.name, name: name, to: phone } }).then(function(res){
+    var d = res.data || {};
+    if (res.error || d.error){ showToast(d.detail || "Couldn't add them — try again", true); return; }
+    showToast("Calling " + name + " now — they join when they pick up");
+    ui.conf.participants = (ui.conf.participants || []).concat([{ name: name, role: "guest" }]); render();
+  }).catch(function(){ showToast("Couldn't add them — try again", true); });
+}
+function confEnd(){
+  if (!sb || !ui.conf) return;
+  if (!window.confirm("End the conference for everyone?")) return;
+  sb.functions.invoke("conference-call", { body: { action: "end", confName: ui.conf.name } }).then(function(){
+    ui.conf.status = "ended"; showToast("Conference ended"); render();
+  }).catch(function(){ showToast("Couldn't end it — hang up your phone to close it", true); });
+}
 function renderLeadFollowups(lead){
   var open = (state.tasks || []).filter(function(t){ return t.leadId === lead.id && t.status === "open"; }).sort(function(a, b){ return taskDueMs(a) - taskDueMs(b); });
   var rows = open.map(function(t){
@@ -16632,6 +16720,7 @@ function renderRail(lead){
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<button class="btn btn-sm" type="button" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline">Email</button>' +
         '<button class="btn btn-sm" type="button" data-action="open-followup" data-lead="' + lead.id + '" title="Pick a time from your own open slots and set a follow-up with this client. You get a text when it is due.">📅 Follow-up</button>' +
+        '<button class="btn btn-sm" type="button" data-action="conf-open" data-lead="' + lead.id + '" title="Start a conference call with this client and add teammates or anyone else">👥 Conference</button>' +
         '<button class="btn btn-sm" type="button" data-action="open-analyzer" data-lead="' + lead.id + '" title="Opens the live Deal Analyzer beside this file, filled in with this deal. Nothing is sent to the client.">📊 Analyzer</button>' +
         '<button class="btn btn-sm" type="button" data-action="send-deal-analyzer" data-lead="' + lead.id + '" title="Texts and emails them the free Deal Analyzer — if they run a deal, it lands on this file and you get an alert">📊 Send Deal Analyzer' + (dealAnalyzerSent(lead) ? ' ✓' : '') + '</button>' +
         '<button class="btn btn-sm" data-action="send-scheduling-link" data-lead="' + lead.id + '" title="Sends your personal booking link by email and text so they can grab a time with you directly">📅 Schedule Appointment</button>' +
@@ -19323,6 +19412,7 @@ function renderModal(){
   if (ui.modal.type === "markLost") return modalMarkLost(ui.modal.leadId);
   if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
   if (ui.modal.type === "scheduleFollowup") return modalScheduleFollowup(ui.modal.leadId);
+  if (ui.modal.type === "conference") return modalConference(ui.modal.leadId);
   if (ui.modal.type === "mergeDuplicate") return modalMergeDuplicate(ui.modal.leadId, ui.modal.dupId);
   if (ui.modal.type === "sendApplication") return modalSendApplication(ui.modal.leadId);
   if (ui.modal.type === "takeApplication") return modalTakeApplication(ui.modal.leadId);
@@ -19675,6 +19765,7 @@ function renderLiveCallPanel(){
       '<div class="modal-foot" style="justify-content:center;gap:10px">' +
         (sp.dropping ? '<span class="footnote" style="align-self:center">📨 Leaving your voicemail…</span>' : ('<button class="btn" type="button" data-action="softphone-drop-vm" title="Plays your recorded voicemail into the call, then hangs up">📨 Drop voicemail</button>')) +
         (sp.leadId ? ('<button class="btn" type="button" data-action="open-followup" data-lead="' + sp.leadId + '" title="Pick a time and set a follow-up with this client while you are still on the call">📅 Follow-up</button>') : '') +
+        (sp.leadId ? ('<button class="btn" type="button" data-action="conf-open" data-lead="' + sp.leadId + '" title="Conference calls are started separately: this opens the conference box (a call already in the browser phone can\'t be converted)">👥 Conference</button>') : '') +
         '<button class="btn" type="button" data-action="softphone-mute">' + (sp.muted ? "Unmute" : "Mute") + '</button>' +
         '<button class="btn btn-primary" type="button" data-action="softphone-hangup" style="background:var(--c-rust)">Hang Up</button>' +
       '</div>' +
@@ -22292,6 +22383,11 @@ appEl.addEventListener("click", function(e){
   else if (action === "send-deal-analyzer"){ sendDealAnalyzer(t.dataset.lead); }
   else if (action === "open-analyzer"){ openAnalyzerDrawer(t.dataset.lead); }
   else if (action === "open-followup"){ openFollowup(t.dataset.lead); }
+  else if (action === "conf-open"){ openConference(t.dataset.lead); }
+  else if (action === "conf-start"){ confStart(t.dataset.lead); }
+  else if (action === "conf-add"){ confAdd(); }
+  else if (action === "conf-end"){ confEnd(); }
+  else if (action === "conf-refresh"){ confRefresh(); }
   else if (action === "fu-pick"){ fuPickSlot(t); }
   else if (action === "fu-save"){ fuSave(t.dataset.lead); }
   else if (action === "fu-cancel"){ cancelScheduledFollowup(t.dataset.task); }
