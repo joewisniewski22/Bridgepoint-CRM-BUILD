@@ -16519,6 +16519,7 @@ function renderRail(lead){
         '<button class="btn btn-sm" data-action="dialer-call" data-lead="' + lead.id + '" title="Calls ' + esc(lead.name) + ' straight through your computer">📞 Call</button>' +
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<button class="btn btn-sm" type="button" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline">Email</button>' +
+        '<button class="btn btn-sm" type="button" data-action="open-analyzer" data-lead="' + lead.id + '" title="Opens the live Deal Analyzer beside this file, filled in with this deal. Nothing is sent to the client.">📊 Analyzer</button>' +
         '<button class="btn btn-sm" type="button" data-action="send-deal-analyzer" data-lead="' + lead.id + '" title="Texts and emails them the free Deal Analyzer — if they run a deal, it lands on this file and you get an alert">📊 Send Deal Analyzer' + (dealAnalyzerSent(lead) ? ' ✓' : '') + '</button>' +
         '<button class="btn btn-sm" data-action="send-scheduling-link" data-lead="' + lead.id + '" title="Sends your personal booking link by email and text so they can grab a time with you directly">📅 Schedule Appointment</button>' +
         // Always visible, regardless of stage or role -- separate from
