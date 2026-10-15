@@ -124,7 +124,7 @@ var DEFAULT_HABITS = [
 ];
 function defaults(){
   return { programs:[], sessions:[], active:null, habits:DEFAULT_HABITS, habitLog:{}, weights:[], hr:[], meals:[],
-           settings:{ name:"Declan", trainerEmail:"robb@coachrobb.com", trainerName:"Coach Robb", heightIn:null, momName:"Mom", momEmail:"nicbodt@gmail.com", allergies:"", dislikes:"", rideDays:3, maxHr:200 }, lastExport:null, plan:null, injury:{ active:true, area:"shoulder", note:"Surgery is planned. Doctor: strengthening the rotator cuff and the muscles around it before surgery is fine, and riding can restart once shoulder strength is back.", since:null, rideClear:false }, rehab:[], wellness:{}, rides:[], rehabLog:{}, mobLog:{}, mindLog:{}, bikes:defaultBikes(), plan:{ days:{} }, tracks:[] };
+           settings:{ name:"Declan", trainerEmail:"robb@coachrobb.com", trainerName:"Coach Robb", heightIn:null, momName:"Mom", momEmail:"nicbodt@gmail.com", allergies:"", dislikes:"", rideDays:3, maxHr:200 }, lastExport:null, mealPlan:null, injury:{ active:true, area:"shoulder", note:"Surgery is planned. Doctor: strengthening the rotator cuff and the muscles around it before surgery is fine, and riding can restart once shoulder strength is back.", since:null, rideClear:false }, rehab:[], wellness:{}, rides:[], rehabLog:{}, mobLog:{}, mindLog:{}, bikes:defaultBikes(), plan:{ days:{} }, tracks:[] };
 }
 var S = load();
 function load(){
@@ -174,9 +174,13 @@ function go(t){ tab = t; render(); window.scrollTo(0, 0); }
 function render(){
   var root = document.getElementById("app");
   root.textContent = "";
+  if (S.plan && S.plan.plan){ if (!S.mealPlan) S.mealPlan = S.plan; S.plan = { days:{} }; save(); }
+  if (S.mealPlan === undefined) S.mealPlan = null;
   if (cloud.recovery){ root.appendChild(viewReset()); return; }
   if (cloud.needLogin){ root.appendChild(viewLogin()); return; }
-  var view = tab === "train" ? viewTrain() : tab === "food" ? viewFood() : tab === "ride" ? viewRide() : tab === "body" ? viewBody() : viewToday();
+  var view;
+  try { view = tab === "train" ? viewTrain() : tab === "food" ? viewFood() : tab === "ride" ? viewRide() : tab === "body" ? viewBody() : viewToday(); }
+  catch(err){ view = el("div", { class:"wrap" }, [header("62", ""), el("div", { class:"card" }, [el("b", { text:"This screen hit a problem." }), el("div", { class:"small muted", style:"margin-top:6px", text:String(err && err.message || err) })])]); }
   root.appendChild(view);
   var bar = el("nav", { class:"tabs", "aria-label":"Main" }, TABS.map(function(t){
     var b = el("button", { type:"button", "aria-current": tab === t[0] ? "page" : null, onclick:function(){ go(t[0]); } }, [icon(t[2]), t[1]]);
@@ -1886,11 +1890,11 @@ function planProfile(){
 }
 function planCard(){
   var c = el("div", { class:"card" }, [el("div", { class:"row between" }, [el("h2", { text:"Meal plan" }),
-    S.plan ? el("span", { class:"pill", text:"Built " + fmtDay(S.plan.date) }) : null])]);
-  if (!S.plan){
+    S.mealPlan ? el("span", { class:"pill", text:"Built " + fmtDay(S.mealPlan.date) }) : null])]);
+  if (!S.mealPlan){
     c.appendChild(el("div", { class:"muted", style:"margin:6px 0 10px", text:"A week of meals sized to your height, weight and how hard you're training — with the grocery list ready to send to " + S.settings.momName + "." }));
   } else {
-    var tg = S.plan.plan.targets;
+    var tg = S.mealPlan.plan.targets;
     c.appendChild(el("div", { class:"macro", style:"margin:10px 0" }, [
       el("div", {}, [el("b", { text:tg.kcalLow + "–" + tg.kcalHigh }), el("span", { text:"kcal" })]),
       el("div", {}, [el("b", { text:tg.proteinG + "g" }), el("span", { text:"protein" })]),
@@ -1903,7 +1907,7 @@ function planCard(){
       el("button", { class:"btn primary grow", type:"button", text:"Shopping list", onclick:openShopping })
     ]));
   }
-  c.appendChild(el("button", { class:"btn block" + (S.plan ? " ghost" : " primary"), style:"margin-top:10px", type:"button", text: S.plan ? "Rebuild for this week" : "Build my plan", onclick:buildPlan }));
+  c.appendChild(el("button", { class:"btn block" + (S.mealPlan ? " ghost" : " primary"), style:"margin-top:10px", type:"button", text: S.mealPlan ? "Rebuild for this week" : "Build my plan", onclick:buildPlan }));
   return c;
 }
 function buildPlan(){
@@ -1911,11 +1915,11 @@ function buildPlan(){
   if (!pr.heightInches || !pr.weightPounds){ toast("Add your height in ⚙ Settings and log a weigh-in first"); if (!pr.heightInches) openSettings(); return; }
   toast("Building your week… about 30 seconds");
   callApi("plan-meals", { profile:pr }).then(function(r){
-    S.plan = { date:today(), plan:r.plan, checked:{} }; save(); render(); toast("Plan ready");
+    S.mealPlan = { date:today(), plan:r.plan, checked:{} }; save(); render(); toast("Plan ready");
   }).catch(function(e){ toast(e.message || "Couldn't build the plan"); });
 }
 function openPlanWeek(){
-  var pl = S.plan.plan, kids = [];
+  var pl = S.mealPlan.plan, kids = [];
   pl.days.forEach(function(d){
     var c = el("div", { class:"card" }, [el("div", { class:"row between" }, [el("h3", { text:d.day }), el("span", { class:"pill", text:d.type })])]);
     d.meals.forEach(function(m){
@@ -1930,21 +1934,21 @@ function openPlanWeek(){
   var m = sheet("Your week", kids.concat([el("button", { class:"btn block", type:"button", text:"Close", onclick:function(){ m.close(); } })]));
 }
 function shoppingText(onlyOpen){
-  var pl = S.plan.plan, out = "Shopping list for " + S.settings.name + " (week of " + fmtDay(S.plan.date) + ")\n";
+  var pl = S.mealPlan.plan, out = "Shopping list for " + S.settings.name + " (week of " + fmtDay(S.mealPlan.date) + ")\n";
   pl.shopping.forEach(function(a){
-    var rows = a.items.filter(function(i){ return !onlyOpen || !S.plan.checked[a.aisle + "|" + i.name]; });
+    var rows = a.items.filter(function(i){ return !onlyOpen || !S.mealPlan.checked[a.aisle + "|" + i.name]; });
     if (!rows.length) return;
     out += "\n" + a.aisle.toUpperCase() + "\n" + rows.map(function(i){ return "• " + i.name + " — " + i.qty; }).join("\n") + "\n";
   });
   return out;
 }
 function openShopping(){
-  var pl = S.plan.plan, kids = [];
+  var pl = S.mealPlan.plan, kids = [];
   pl.shopping.forEach(function(a){
     var c = el("div", { class:"card" }, [el("h3", { text:a.aisle })]);
     a.items.forEach(function(i){
-      var k = a.aisle + "|" + i.name, on = !!S.plan.checked[k];
-      c.appendChild(el("div", { class:"check", onclick:function(){ S.plan.checked[k] = !S.plan.checked[k]; save(); modal.close(); openShopping(); } }, [
+      var k = a.aisle + "|" + i.name, on = !!S.mealPlan.checked[k];
+      c.appendChild(el("div", { class:"check", onclick:function(){ S.mealPlan.checked[k] = !S.mealPlan.checked[k]; save(); modal.close(); openShopping(); } }, [
         el("div", { class:"box" + (on ? " on" : "") }, [icon(CHECK)]),
         el("div", { class:"grow", style: on ? "text-decoration:line-through;opacity:.6" : "", text:i.name }),
         el("div", { class:"small muted", text:i.qty })
