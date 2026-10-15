@@ -4656,8 +4656,8 @@ function companySetting(key, fallback){
   var s = state.companySettings || {};
   return (s[key]!=null && s[key]!=="") ? s[key] : fallback;
 }
-function aeName(){ return companySetting("aeName", "Julia Lanier"); }
-function aeEmail(){ return companySetting("aeEmail", "jlanier@cmwholesale.com"); }
+function aeName(){ return companySetting("aeName", ""); }
+function aeEmail(){ return companySetting("aeEmail", ""); }
 var GOOGLE_REVIEW_LINK = "https://g.page/r/CbJVKQumLqOQEAE/review";
 function loContactLines(lo, lang){
   if (lo.emailSignature) return lo.emailSignature.split("\n");
@@ -6215,6 +6215,13 @@ function hydrateFromSupabase(){
   sb.from("company_settings").select("*").eq("id","default").maybeSingle().then(function(res){
     if (res.error){ console.error("company settings fetch error", res.error); return; }
     if (res.data){ state.companySettings = rowToCompanySettings(res.data); render(); }
+    // The Account Executive is an outside-lender contact: it lives in its own table that only Joe, Fiore and Erika can read (RLS), never in the shared settings.
+    sb.from("company_ae").select("*").eq("id","default").maybeSingle().then(function(r2){
+      if (r2.error || !r2.data) return;
+      state.companySettings = state.companySettings || {};
+      state.companySettings.aeName = r2.data.ae_name || ""; state.companySettings.aeEmail = r2.data.ae_email || "";
+      render();
+    });
   });
   sb.from("availability_rules").select("*").then(function(res){
     if (res.error){ console.error("availability rules fetch error", res.error); return; }
@@ -6312,13 +6319,13 @@ function contactToRow(c){
 function rowToCompanySettings(r){
   return {
     companyName: r.company_name || "", companyAddress: r.company_address || "",
-    companyNmls: r.company_nmls || "", aeName: r.ae_name || "", aeEmail: r.ae_email || ""
+    companyNmls: r.company_nmls || "", aeName: "", aeEmail: ""
   };
 }
 function companySettingsToRow(s){
   return {
     id: "default", company_name: s.companyName||null, company_address: s.companyAddress||null,
-    company_nmls: s.companyNmls||null, ae_name: s.aeName||null, ae_email: s.aeEmail||null,
+    company_nmls: s.companyNmls||null,
     updated_by: currentUser().id
   };
 }
@@ -17176,6 +17183,7 @@ function saveCompanySettings(fd){
     companyName: fd.get("companyName")||"", companyAddress: fd.get("companyAddress")||"",
     companyNmls: ""
   };
+  sb.from("company_ae").upsert({ id: "default", ae_name: s.aeName||null, ae_email: s.aeEmail||null, updated_by: currentUser().id }).then(function(r3){ if (r3.error) console.error("company_ae save error", r3.error); });
   sb.from("company_settings").update(companySettingsToRow(s)).eq("id","default").then(function(res){
     if (res.error){ showToast("Couldn't save — try again"); return; }
     state.companySettings = s;
