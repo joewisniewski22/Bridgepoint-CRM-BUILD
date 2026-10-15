@@ -4510,6 +4510,118 @@ function renderDealAnalyzerPanel(lead){
     '<div class="panel panel-pad"><div class="footnote" style="padding:0 0 10px">The same live analyzer clients use on bplending.com, filled in with this file\'s numbers and the terms applied. Open it beside the file while you are on the phone. Nothing is sent to the client and no lead is created.</div>' +
     '<button class="btn btn-sm btn-primary" type="button" data-action="open-analyzer" data-lead="' + lead.id + '">📊 Open Deal Analyzer</button></div>';
 }
+/* ---------------------------------------------------------------------
+   Follow-up scheduler (Joe 2026-10-15: "an easy way for LOs to schedule their own follow-ups with the specific client, both on the call and in
+   the file, almost like a calendar link in each file that auto-fills the loan officer's days"). One tap opens a calendar-style picker built from
+   THIS loan officer's own availability (the same rules the booking page uses, minus times they already have booked), pick a slot, add a note, done.
+   It saves a manual follow-up task for that client (manual:true so the follow-up engine never auto-closes it); the engine then texts the LO when it is due.
+   --------------------------------------------------------------------- */
+function fuSlotsFor(userId){
+  var days = [];
+  try { days = generateAvailableSlots(userId, 10) || []; } catch (e) { days = []; }
+  if (!days.length){
+    // No availability set up yet: default business hours so the picker still works.
+    var now0 = new Date();
+    for (var d = 0; d < 12 && days.length < 8; d++){
+      var day = new Date(now0.getFullYear(), now0.getMonth(), now0.getDate() + d), dow = day.getDay();
+      if (dow === 0 || dow === 6) continue;
+      var slots = [];
+      [9, 10, 11, 13, 14, 15, 16].forEach(function(h){ [0, 30].forEach(function(m){ var s = new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, m); if (s > now0) slots.push({ start: s, end: new Date(s.getTime() + 1800000) }); }); });
+      if (slots.length) days.push({ date: day, slots: slots });
+    }
+  }
+  var busy = (state.tasks || []).filter(function(t){ return t.status === "open" && t.assignedTo === userId; }).map(function(t){ return taskDueMs(t); });
+  days.forEach(function(dd){ dd.slots = dd.slots.filter(function(s){ return !busy.some(function(b){ return Math.abs(b - s.start.getTime()) < 25 * 60000; }); }); });
+  return days.filter(function(dd){ return dd.slots.length; }).slice(0, 8);
+}
+function fuLabel(d){ return d.toLocaleString([], { weekday:"short", month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }); }
+function openFollowup(leadId){
+  var lead = leadById(leadId); if (!lead) return;
+  var sp = ui.softphoneCall;
+  var live = sp && sp.state !== "hangup" && sp.leadId === leadId;
+  ui.fu = { leadId: leadId, iso: null, note: (live && ui.callNotes) ? ("From the call: " + String(ui.callNotes).slice(0, 220)) : "" };
+  ui.modal = { type: "scheduleFollowup", leadId: leadId };
+  render();
+}
+function modalScheduleFollowup(leadId){
+  var lead = leadById(leadId); if (!lead) return "";
+  var me = currentUser(), fu = ui.fu || {};
+  var days = fuSlotsFor(me.id);
+  var nowD = new Date(), todayKey = nowD.toDateString(), tomorrowKey = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() + 1).toDateString();
+  var pick = function(s){ return '<button type="button" class="btn btn-sm fu-slot" data-action="fu-pick" data-iso="' + s.start.toISOString() + '" style="margin:2px">' + esc(s.start.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" })) + '</button>'; };
+  var firstOn = function(pred){ for (var i = 0; i < days.length; i++){ if (pred(days[i], i)) return days[i].slots[0]; } return null; };
+  var laterToday = (function(){ var d0 = days.filter(function(x){ return x.date.toDateString() === todayKey; })[0]; if (!d0) return null; var t = d0.slots.filter(function(s){ return s.start.getTime() > Date.now() + 45 * 60000; })[0]; return t || null; })();
+  var tomorrow = firstOn(function(x){ return x.date.toDateString() === tomorrowKey; });
+  var in3 = (function(){ var target = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() + 3).getTime(); for (var i = 0; i < days.length; i++){ if (days[i].date.getTime() >= target) return days[i].slots[0]; } return null; })();
+  var nextWeek = (function(){ var target = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() + 7).getTime(); for (var i = 0; i < days.length; i++){ if (days[i].date.getTime() >= target) return days[i].slots[0]; } return null; })();
+  var chip = function(label, s){ return s ? ('<button type="button" class="btn btn-sm" data-action="fu-pick" data-iso="' + s.start.toISOString() + '" style="margin:2px">' + esc(label) + '</button>') : ""; };
+  var dayCols = days.map(function(x){
+    return '<div style="margin:8px 0 2px"><div class="footnote" style="padding:0;font-weight:600">' + esc(x.date.toLocaleDateString([], { weekday:"long", month:"short", day:"numeric" })) + '</div>' + x.slots.map(pick).join("") + '</div>';
+  }).join("");
+  return '<div class="modal-backdrop" id="modal-host" data-action="backdrop"><div class="modal" data-stop="1" style="max-width:560px">' +
+    '<div class="modal-head"><h3>📅 Schedule a follow-up — ' + esc(lead.name) + '</h3><button class="btn btn-ghost btn-sm" data-action="close-modal">✕</button></div>' +
+    '<div class="modal-body">' +
+      '<div class="footnote" style="padding:0 0 6px">These are <b>your</b> open times. Pick one and you will get a text when it is time to call. Nothing is sent to the client.</div>' +
+      '<div>' + chip("Later today", laterToday) + chip("Tomorrow", tomorrow) + chip("In 3 days", in3) + chip("Next week", nextWeek) + '</div>' +
+      '<div style="max-height:230px;overflow:auto;border:1px solid var(--line,#ddd);border-radius:8px;padding:4px 10px">' + (dayCols || '<div class="footnote">No open times found. Use the date and time boxes below.</div>') + '</div>' +
+      '<div class="form-row" style="margin-top:8px"><label>Or pick any date and time</label><div style="display:flex;gap:8px"><input class="input" type="date" id="fu-date"><input class="input" type="time" id="fu-time"></div></div>' +
+      '<div class="form-two"><div class="form-row"><label>How</label><select class="select" id="fu-channel"><option value="call">Call</option><option value="text">Text</option><option value="email">Email</option></select></div>' +
+      '<div class="form-row"><label>Selected time</label><div class="val" id="fu-selected" style="padding-top:8px">None yet</div></div></div>' +
+      '<div class="form-row"><label>Note (what to bring up)</label><textarea class="textarea" id="fu-note" rows="3" placeholder="e.g. Sending revised terms, ask about the co-borrower">' + esc(fu.note || "") + '</textarea></div>' +
+    '</div>' +
+    '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="button" data-action="fu-save" data-lead="' + leadId + '">Schedule follow-up</button></div>' +
+  '</div></div>';
+}
+function fuPickSlot(btn){
+  var iso = btn.getAttribute("data-iso"); if (!iso) return;
+  ui.fu = ui.fu || {}; ui.fu.iso = iso;
+  document.querySelectorAll(".fu-slot").forEach(function(b){ b.classList.toggle("btn-primary", b.getAttribute("data-iso") === iso); });
+  var sel = document.getElementById("fu-selected"); if (sel) sel.textContent = fuLabel(new Date(iso));
+  var dd = document.getElementById("fu-date"), tt = document.getElementById("fu-time"); if (dd) dd.value = ""; if (tt) tt.value = "";
+}
+function fuSave(leadId){
+  var lead = leadById(leadId); if (!lead || !sb) return;
+  var me = currentUser(), fu = ui.fu || {};
+  var dEl = document.getElementById("fu-date"), tEl = document.getElementById("fu-time");
+  var iso = fu.iso;
+  if (dEl && dEl.value && tEl && tEl.value){ var cd = new Date(dEl.value + "T" + tEl.value + ":00"); if (!isNaN(cd.getTime())) iso = cd.toISOString(); }
+  if (!iso){ showToast("Pick a time first", true); return; }
+  if (new Date(iso).getTime() < Date.now() - 60000){ showToast("That time has already passed", true); return; }
+  var note = (document.getElementById("fu-note") || {}).value || "";
+  var ch = (document.getElementById("fu-channel") || {}).value || "call";
+  var when = fuLabel(new Date(iso));
+  var row = { lead_id: lead.id, assigned_to: me.id, situation: "scheduled", step_key: "manual:lo:" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), step_n: 0, channel: ch,
+    title: "Follow up with " + lead.name + (note.trim() ? (": " + note.trim().slice(0, 60)) : ""),
+    goal: note.trim() || "The follow-up you scheduled.", lever: "You set this time yourself. Showing up when you said you would is what builds trust.",
+    due_at: iso, priority: 80, urgent: false, status: "open", meta: { manual: true, scheduledBy: "lo", by: me.id, attempts: (lead.callAttempts || []).length } };
+  sb.from("followup_tasks").insert(row).select().single().then(function(res){
+    if (res.error || !res.data){ showToast("Couldn't schedule it, try again", true); console.error("followup schedule error", res.error); return; }
+    state.tasks = (state.tasks || []).concat([rowToTask(res.data)]);
+    lead.activity = lead.activity || [];
+    lead.activity.push({ date: todayISO(), type: "system", text: "Follow-up scheduled for " + when + " (" + ch + ")" + (note.trim() ? (": " + note.trim().slice(0, 120)) : ""), author: me.name });
+    persist(); ui.modal = null; ui.fu = null;
+    showToast("Follow-up set for " + when);
+    render();
+  });
+}
+function cancelScheduledFollowup(taskId){
+  var t = taskById(taskId); if (!t || !sb) return;
+  if (!window.confirm("Cancel this follow-up?")) return;
+  sb.from("followup_tasks").update({ status: "skipped", completed_at: new Date().toISOString(), completed_by: currentUser().id, outcome: "canceled" }).eq("id", taskId).then(function(){
+    t.status = "skipped"; showToast("Follow-up canceled"); render();
+  });
+}
+function renderLeadFollowups(lead){
+  var open = (state.tasks || []).filter(function(t){ return t.leadId === lead.id && t.status === "open"; }).sort(function(a, b){ return taskDueMs(a) - taskDueMs(b); });
+  var rows = open.map(function(t){
+    var mine = t.meta && t.meta.manual;
+    return '<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line,#eee)"><div style="flex:1"><b>' + esc(fuLabel(new Date(t.dueAt))) + '</b> · ' + esc(userName(t.assignedTo)) + ' · ' + esc(t.channel || "call") + '<div class="footnote" style="padding:0">' + esc(t.title) + (mine ? "" : " (automatic)") + '</div></div>' +
+      (mine ? '<button class="btn btn-sm btn-ghost" type="button" data-action="fu-cancel" data-task="' + t.id + '">Cancel</button>' : '') + '</div>';
+  }).join("");
+  return '<div class="section-head" style="margin-top:20px"><h2>Follow-ups</h2></div><div class="panel panel-pad">' +
+    (rows || '<div class="footnote" style="padding:0 0 8px">No follow-up scheduled for this client.</div>') +
+    '<div style="margin-top:10px"><button class="btn btn-sm btn-primary" type="button" data-action="open-followup" data-lead="' + lead.id + '">📅 Schedule a follow-up</button></div></div>';
+}
 function dealAnalyzerMessage(lead, lang){
   var first = (lead.name||"").split(" ")[0];
   var lo = docLoanOfficer(lead);
@@ -12227,7 +12339,7 @@ function renderBriefScreen(){
         '<div id="br-lost"' + show(b.outcome === "not-interested") + '><label class="br-check"><input type="checkbox" data-action="brief-lost-toggle"' + (b.closeFile ? " checked" : "") + '> Close this file</label><select class="select" data-action="brief-field" data-field="lostReason">' + lostReasons + '</select></div>' +
         '<button type="button" class="br-save" data-action="brief-save">Save &amp; next ›</button>' +
       '</div>' +
-      '<div class="br-foot"><button type="button" class="br-link" data-action="brief-snooze">Snooze to tomorrow</button><button type="button" class="br-link" data-action="brief-skip">Not needed</button></div>' +
+      '<div class="br-foot"><button type="button" class="br-link" data-action="open-followup" data-lead="' + lead.id + '">📅 Schedule a follow-up</button><button type="button" class="br-link" data-action="brief-snooze">Snooze to tomorrow</button><button type="button" class="br-link" data-action="brief-skip">Not needed</button></div>' +
     '</div>' +
   '</div>';
 }
@@ -15043,7 +15155,7 @@ function renderTabScenario(lead){
     field("Monthly Payment" + (RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType)!==-1 ? " (interest only)" : " (P&I)"), termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderSubmitForReview(lead) + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderInternalLenderDocs(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalyzerPanel(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
+  '</div>' + renderLeadFollowups(lead) + renderSubmitForReview(lead) + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderInternalLenderDocs(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalyzerPanel(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
 }
 function renderSubmitForReview(lead){
   if (isLO()){
@@ -16519,6 +16631,7 @@ function renderRail(lead){
         '<button class="btn btn-sm" data-action="dialer-call" data-lead="' + lead.id + '" title="Calls ' + esc(lead.name) + ' straight through your computer">📞 Call</button>' +
         '<button class="btn btn-sm" data-action="open-modal" data-modal="sendText" data-lead="' + lead.id + '">Text</button>' +
         '<button class="btn btn-sm" type="button" data-action="compose-lead-email" data-lead="' + lead.id + '" title="Sends for real through the CRM\'s own internal pipeline">Email</button>' +
+        '<button class="btn btn-sm" type="button" data-action="open-followup" data-lead="' + lead.id + '" title="Pick a time from your own open slots and set a follow-up with this client. You get a text when it is due.">📅 Follow-up</button>' +
         '<button class="btn btn-sm" type="button" data-action="open-analyzer" data-lead="' + lead.id + '" title="Opens the live Deal Analyzer beside this file, filled in with this deal. Nothing is sent to the client.">📊 Analyzer</button>' +
         '<button class="btn btn-sm" type="button" data-action="send-deal-analyzer" data-lead="' + lead.id + '" title="Texts and emails them the free Deal Analyzer — if they run a deal, it lands on this file and you get an alert">📊 Send Deal Analyzer' + (dealAnalyzerSent(lead) ? ' ✓' : '') + '</button>' +
         '<button class="btn btn-sm" data-action="send-scheduling-link" data-lead="' + lead.id + '" title="Sends your personal booking link by email and text so they can grab a time with you directly">📅 Schedule Appointment</button>' +
@@ -19209,6 +19322,7 @@ function renderModal(){
   if (ui.modal.type === "logCall") return modalLogCall(ui.modal.leadId);
   if (ui.modal.type === "markLost") return modalMarkLost(ui.modal.leadId);
   if (ui.modal.type === "sendText") return modalSendText(ui.modal.leadId);
+  if (ui.modal.type === "scheduleFollowup") return modalScheduleFollowup(ui.modal.leadId);
   if (ui.modal.type === "mergeDuplicate") return modalMergeDuplicate(ui.modal.leadId, ui.modal.dupId);
   if (ui.modal.type === "sendApplication") return modalSendApplication(ui.modal.leadId);
   if (ui.modal.type === "takeApplication") return modalTakeApplication(ui.modal.leadId);
@@ -19560,6 +19674,7 @@ function renderLiveCallPanel(){
       '</div>' +
       '<div class="modal-foot" style="justify-content:center;gap:10px">' +
         (sp.dropping ? '<span class="footnote" style="align-self:center">📨 Leaving your voicemail…</span>' : ('<button class="btn" type="button" data-action="softphone-drop-vm" title="Plays your recorded voicemail into the call, then hangs up">📨 Drop voicemail</button>')) +
+        (sp.leadId ? ('<button class="btn" type="button" data-action="open-followup" data-lead="' + sp.leadId + '" title="Pick a time and set a follow-up with this client while you are still on the call">📅 Follow-up</button>') : '') +
         '<button class="btn" type="button" data-action="softphone-mute">' + (sp.muted ? "Unmute" : "Mute") + '</button>' +
         '<button class="btn btn-primary" type="button" data-action="softphone-hangup" style="background:var(--c-rust)">Hang Up</button>' +
       '</div>' +
@@ -22176,6 +22291,10 @@ appEl.addEventListener("click", function(e){
   else if (action === "send-scheduling-link"){ sendSchedulingLink(t.dataset.lead); }
   else if (action === "send-deal-analyzer"){ sendDealAnalyzer(t.dataset.lead); }
   else if (action === "open-analyzer"){ openAnalyzerDrawer(t.dataset.lead); }
+  else if (action === "open-followup"){ openFollowup(t.dataset.lead); }
+  else if (action === "fu-pick"){ fuPickSlot(t); }
+  else if (action === "fu-save"){ fuSave(t.dataset.lead); }
+  else if (action === "fu-cancel"){ cancelScheduledFollowup(t.dataset.task); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }

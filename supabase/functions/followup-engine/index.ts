@@ -609,8 +609,22 @@ Deno.serve(async (req) => {
         if (!body.dry) await sb.from("followup_tasks").update({ status: "superseded", completed_at: new Date().toISOString() }).eq("id", tk.id);
         tk.status = "superseded"; stats.superseded++; continue;
       }
+      // Manual tasks (Joe's reactivations, "get the home address", and follow-ups an LO schedules from the file) are not part of the automatic
+      // cadence: they are done only by an attempt logged AFTER the task was created (never by older history), and they are never superseded just
+      // because the lead's automatic situation changed.
+      const isManual = !!(tk.meta && tk.meta.manual);
       const baseline = (tk.meta && tk.meta.attempts) || 0;
       const nowAttempts = attemptsOf(l).length;
+      if (isManual) {
+        const created = new Date(tk.created_at).getTime();
+        const after = attemptsOf(l).filter((a) => a && a.at && new Date(a.at).getTime() >= created);
+        if (after.length) {
+          const last = after[after.length - 1] || {};
+          if (!body.dry) await sb.from("followup_tasks").update({ status: "done", completed_at: new Date().toISOString(), completed_by: tk.assigned_to, outcome: last.outcome || "logged" }).eq("id", tk.id);
+          tk.status = "done"; tk.outcome = last.outcome; stats.done++;
+        }
+        continue;
+      }
       if (nowAttempts > baseline) {
         const last = attemptsOf(l)[nowAttempts - 1] || {};
         if (!body.dry) await sb.from("followup_tasks").update({ status: "done", completed_at: new Date().toISOString(), completed_by: tk.assigned_to, outcome: last.outcome || "logged" }).eq("id", tk.id);
