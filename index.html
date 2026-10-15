@@ -16037,7 +16037,16 @@ function lpRun(key){
   render();
   sb.functions.invoke("check-live-rates", { body: { lead: scenario } }).then(function(res){
     if (res.error || !res.data || !res.data.ok){ en.status = "error"; en.error = "Couldn't reach the pricer — try again."; }
-    else { en.status = "done"; en.data = res.data.results; en.snapshot = JSON.stringify(scenario); en.ranAt = new Date().toISOString(); }
+    else {
+      en.status = "done"; en.data = res.data.results; en.snapshot = JSON.stringify(scenario); en.ranAt = new Date().toISOString();
+      // The pricer re-checks rural from the address itself (Joe 10/15); keep the file's flag in step so the rural banners and overlays match.
+      var rl = !lpIsStandalone(key) ? leadById(key) : null;
+      if (rl && res.data.ruralChecked && rl.ruralStatus !== res.data.ruralStatus){
+        rl.ruralStatus = res.data.ruralStatus; rl.ruralCheckedAt = todayISO();
+        if (res.data.ruralStatus === "rural") { rl.activity = rl.activity || []; rl.activity.push({ date: todayISO(), type: "system", text: "Marked rural from the address (US Census urban-area check)", author: "System" }); }
+        persist();
+      }
+    }
     render();
   }).catch(function(){ en.status = "error"; en.error = "Couldn't reach the pricer — try again."; render(); });
 }

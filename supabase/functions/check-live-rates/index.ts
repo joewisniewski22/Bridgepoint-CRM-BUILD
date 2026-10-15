@@ -2124,6 +2124,14 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
         ? "Baltimore City is deal-by-deal only at Constructive (65% LTV max on cash-out) — not quotable; bring it to Joe."
         : r.lender + " isn't lending in Baltimore City right now." };
   }
+  // Rural (Joe 10/15, Juan Betancourt: a rural Dayton TX DSCR still showed Dominion 6.875% and Velocity 8.79%). Tested 10/15: NextRes, A&D,
+  // HomeXpress, Constructive, Kiavi and RCN all react to the rural flag (price changes, programs drop, or they decline). Velocity's and Dominion's
+  // engines return the IDENTICAL price rural or not -- we never send them a rural flag and neither has written rural guidelines on file -- and Silver
+  // Hill's rural rule is unread. A shown price must mean the lender will certainly take it, so no instant price from those three on a rural property.
+  if (r && r.eligible && s.ruralStatus === "rural" && (r.lender === "Velocity" || r.lender === "Dominion" || r.lender === "Silver Hill")) {
+    return { lender: r.lender, eligible: false, portalOnly: true, source: r.source,
+      reason: "Rural property — " + r.lender + "'s rural rules aren't confirmed, so there's no instant price. Ask them whether they take this property before quoting." } as LenderResult;
+  }
   // Commercial property (Joe 10/8/26: offer it): only Velocity lends on these among our lenders.
   // Others must decline -- NextRes would otherwise map an unknown type to SFR and misprice it.
   if (r && r.eligible && COMMERCIAL_TYPES.includes(s.propertyType) && r.lender !== "Velocity" && r.lender !== "Silver Hill") {
@@ -2176,6 +2184,26 @@ function guidelineGate(s: Scenario, r: LenderResult): LenderResult {
   return r;
 }
 
+// US Census urban-area test (same source as the geocode-address function): an address matched to no urban area = rural. null = no match / lookup failed.
+async function censusRural(address: string): Promise<"rural" | "urban" | null> {
+  try {
+    const url = "https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress?address=" + encodeURIComponent(address) +
+      "&benchmark=Public_AR_Current&vintage=Current_Current&layers=Urban%20Areas&format=json";
+    const ctl = new AbortController();
+    const timer = setTimeout(function () { ctl.abort(); }, 6000);
+    const res = await fetch(url, { signal: ctl.signal });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const matches = (data.result && data.result.addressMatches) || [];
+    if (!matches.length) return null;
+    const ua = (matches[0].geographies && matches[0].geographies["Urban Areas"]) || [];
+    return ua.length === 0 ? "rural" : "urban";
+  } catch (_e) {
+    return null;
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") {
@@ -2204,6 +2232,16 @@ Deno.serve(async (req: Request) => {
     if (!scenario) {
       return new Response(JSON.stringify({ error: "missing_lead" }), { status: 400, headers: CORS_HEADERS });
     }
+    // Rural is verified here on every run (Joe 10/15, Juan Betancourt): 43 of 70 active files had an address but had never been rural-checked (the
+    // check only ran while someone typed in the address box), and a flag set for an old address goes stale. The Census test is the same one the file
+    // uses (no urban area at the address = rural). A "rural" flag already on the file is kept (someone may know of acreage Census can't see).
+    let ruralChecked: string | null = null;
+    if (scenario.propertyAddress && String(scenario.propertyAddress).length > 8) {
+      const c = await censusRural(String(scenario.propertyAddress));
+      if (c === "rural" || c === "urban") ruralChecked = c;
+      if (c === "rural") scenario.ruralStatus = "rural";
+      else if (c === "urban" && scenario.ruralStatus !== "rural") scenario.ruralStatus = "urban";
+    }
     // Optional body.lenders: ["velocity", ...] prices only those (used for accuracy testing).
     const picked = Array.isArray(body.lenders) && body.lenders.length ? LENDERS.filter(function (l) { return body.lenders.indexOf(l.key) !== -1; }) : LENDERS;
     // Fallback lenders (Silver Hill) run only AFTER the regular lenders, and only when none of them placed the scenario (or the caller asked for
@@ -2223,7 +2261,7 @@ Deno.serve(async (req: Request) => {
         out.push(r.status === "fulfilled" ? guidelineGate(scenario, r.value) : { lender: fallback[i].key, eligible: false, reason: "Lookup failed: " + String(r.reason) });
       });
     }
-    const shown = out;    return new Response(JSON.stringify({ ok: true, results: shown }), { headers: CORS_HEADERS });
+    const shown = out;    return new Response(JSON.stringify({ ok: true, results: shown, ruralChecked: ruralChecked, ruralStatus: scenario.ruralStatus || null }), { headers: CORS_HEADERS });
   } catch (err) {
     return new Response(JSON.stringify({ error: "server_error", detail: String(err) }), { status: 500, headers: CORS_HEADERS });
   }
