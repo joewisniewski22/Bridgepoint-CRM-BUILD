@@ -4480,6 +4480,36 @@ function dealAnalyzerLink(lead){
     (lead.applicationToken ? "&t=" + encodeURIComponent(lead.applicationToken) : "") +
     "&utm_source=crm&utm_medium=lo-share&utm_campaign=deal-analyzer-share&utm_content=" + encodeURIComponent(lo.id || "");
 }
+// Live Deal Analyzer inside the client file (Joe 2026-10-15: "so LOs can look at it while they're on the phone with the client"). Same analyzer clients use on
+// bplending.com, opened in staff mode (?staff=1): prefilled with this file's numbers and applied terms, no contact gate, nothing sent, no lead created.
+// It lives in a side drawer attached to the page body (not inside the app tree) so the CRM's frequent re-renders never reload it and wipe what the LO typed.
+function dealAnalyzerStaffUrl(lead){
+  var lt = lead.loanType || "";
+  var type = /DSCR|Portfolio/i.test(lt) ? "rental" : /Bridge/i.test(lt) ? "bridge" : /Ground Up|Construction/i.test(lt) ? "build" : "flip";
+  return "https://bplending.com/deal-analyzer/?staff=1&type=" + type + "&ref=" + encodeURIComponent(lead.id) + (lead.applicationToken ? "&t=" + encodeURIComponent(lead.applicationToken) : "");
+}
+function openAnalyzerDrawer(leadId){
+  var lead = leadById(leadId); if (!lead) return;
+  var url = dealAnalyzerStaffUrl(lead);
+  var d = document.getElementById("az-drawer");
+  if (!d){
+    d = document.createElement("div"); d.id = "az-drawer";
+    d.style.cssText = "position:fixed;top:0;right:0;bottom:0;width:min(580px,100vw);background:#fff;z-index:9998;box-shadow:-6px 0 24px rgba(0,0,0,.28);display:flex;flex-direction:column";
+    d.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#1b2a47;color:#fff"><b id="az-drawer-title" style="flex:1;font-size:14px"></b><a id="az-drawer-new" target="_blank" rel="noopener" style="color:#fff;font-size:12px;text-decoration:underline">New window</a><button type="button" id="az-drawer-x" aria-label="Close analyzer" style="background:none;border:0;color:#fff;font-size:22px;line-height:1;cursor:pointer">&times;</button></div>' +
+      '<iframe id="az-drawer-frame" title="Deal Analyzer" style="flex:1;border:0;width:100%;background:#fff"></iframe>';
+    document.body.appendChild(d);
+    d.querySelector("#az-drawer-x").addEventListener("click", function(){ d.style.display = "none"; });
+  }
+  d.style.display = "flex";
+  if (d.getAttribute("data-lead") !== leadId){ d.querySelector("#az-drawer-frame").src = url; d.setAttribute("data-lead", leadId); }
+  d.querySelector("#az-drawer-title").textContent = "Deal Analyzer: " + (lead.name || "this file");
+  d.querySelector("#az-drawer-new").href = url;
+}
+function renderDealAnalyzerPanel(lead){
+  return '<div class="section-head" style="margin-top:20px"><h2>Deal Analyzer</h2></div>' +
+    '<div class="panel panel-pad"><div class="footnote" style="padding:0 0 10px">The same live analyzer clients use on bplending.com, filled in with this file\'s numbers and the terms applied. Open it beside the file while you are on the phone. Nothing is sent to the client and no lead is created.</div>' +
+    '<button class="btn btn-sm btn-primary" type="button" data-action="open-analyzer" data-lead="' + lead.id + '">📊 Open Deal Analyzer</button></div>';
+}
 function dealAnalyzerMessage(lead, lang){
   var first = (lead.name||"").split(" ")[0];
   var lo = docLoanOfficer(lead);
@@ -15013,7 +15043,7 @@ function renderTabScenario(lead){
     field("Monthly Payment" + (RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType)!==-1 ? " (interest only)" : " (P&I)"), termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderSubmitForReview(lead) + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderInternalLenderDocs(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
+  '</div>' + renderSubmitForReview(lead) + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderInternalLenderDocs(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalyzerPanel(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
 }
 function renderSubmitForReview(lead){
   if (isLO()){
@@ -22144,6 +22174,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "send-borrower-portal"){ sendBorrowerPortalInvite(t.dataset.lead); }
   else if (action === "send-scheduling-link"){ sendSchedulingLink(t.dataset.lead); }
   else if (action === "send-deal-analyzer"){ sendDealAnalyzer(t.dataset.lead); }
+  else if (action === "open-analyzer"){ openAnalyzerDrawer(t.dataset.lead); }
   else if (action === "print-scope-of-work"){ printScopeOfWork(t.dataset.lead); }
   else if (action === "preview-scope-of-work"){ previewScopeOfWork(t.dataset.lead); }
   else if (action === "send-term-sheet-from-pricer"){ applyPricerRateAndSendTermSheet(t.dataset.lead); }

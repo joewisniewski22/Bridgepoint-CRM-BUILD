@@ -323,6 +323,16 @@
       '<input id="az-' + group + k + '" data-k="' + k + '" data-g="' + group + '" inputmode="decimal" value="' + (t === "usd" ? Number(def).toLocaleString("en-US") : def) + '">' + (t === "pct" ? '<span class="az-u r">%</span>' : "") + '</div></div>';
   }
   function init(root){
+    // ?staff=1 (Joe 2026-10-15): the CRM opens the live analyzer inside a client file so an LO can use it on a call. Staff mode drops the site
+    // chrome, never asks for contact info, never creates or emails a lead, and downloads the PDF straight to the LO.
+    var staffMode = (function(){ try { return new URLSearchParams(location.search).get("staff") === "1"; } catch (x) { return false; } })();
+    if (staffMode){
+      try {
+        var st = document.createElement("style");
+        st.textContent = "header.top,footer.ft,.sticky,.phead,section.sec.alt,.note,.crumbs{display:none!important}body{background:#fff!important}.sec{padding-top:10px!important}";
+        document.head.appendChild(st);
+      } catch (x) {}
+    }
     // ?type=rental etc. opens that tab (the CRM's "Send Deal Analyzer" link sets it from the file's loan type).
     var qsType = (function(){ try { return new URLSearchParams(location.search).get("type"); } catch (x) { return null; } })();
     var type = DEALS[qsType] ? qsType : "flip", touchedRate = false, ballpark = null, lastReport = null, jsPdfPromise = null, logoPromise = null;
@@ -533,7 +543,7 @@
         if (!sc){ err.textContent = "Choose a scope of work for the rehab estimate, or switch to \"I have my own budget\"."; return; }
         if (!sqv && currentAddress().length < 8){ err.textContent = "Enter the living area (sq ft) or the property address so we can estimate the rehab, or switch to \"I have my own budget\"."; return; }
       }
-      if (currentAddress().length >= 8 && !(contact && contact.leadId)){
+      if (!staffMode && currentAddress().length >= 8 && !(contact && contact.leadId)){
         pendingRun = true;
         openContactModal("Run the pro analysis", "To pull recent sales, value and market data for this address, we need your contact info. We'll email you the finished analysis too.");
         return;
@@ -588,6 +598,7 @@
       var tg = e.target;
       if (tg.closest && tg.closest("#az-userehab")){ var mid = tg.closest("#az-userehab").getAttribute("data-mid"); setField("rehab", mid); touched.rehab = true; return; }
       if (tg.closest && tg.closest("#az-dlbtn")){
+        if (staffMode){ if (lastReport) makePdf(lastReport).then(function(res){ if (res) res.doc.save(res.fname); }); return; }
         if (contact && contact.leadId) { deliver({ download: true }); return; }
         var sv = {}; try { sv = JSON.parse(localStorage.getItem("bp_az_contact") || "{}"); } catch (x) {}
         pendingDownload = true;
@@ -822,7 +833,7 @@
           if (p.address) el("az-addr").value = p.address;
           if (p.quoted && p.quoted.rate){ touchedRate = true; quotedTerms = p.quoted; }
           var fin = root.querySelector(".az-fin"); if (fin) fin.open = true;
-          var b = el("az-blurb"); if (b) b.textContent = "Your deal is filled in" + (p.quoted && p.quoted.rate ? " with the terms " + (p.quoted.loName || "your loan officer") + " quoted you" : "") + ". Adjust anything, then click Analyze my deal.";
+          var b = el("az-blurb"); if (b && staffMode) b.textContent = "This file's deal is filled in" + (p.quoted && p.quoted.rate ? " with the terms applied on the file (" + p.quoted.rate + "%" + (p.quoted.points != null ? ", " + p.quoted.points + " pts" : "") + ")" : "") + ". Change any number while you talk, then click Analyze my deal. Nothing is sent to the client."; else if (b) b.textContent = "Your deal is filled in" + (p.quoted && p.quoted.rate ? " with the terms " + (p.quoted.loName || "your loan officer") + " quoted you" : "") + ". Adjust anything, then click Analyze my deal.";
           if (typeof updateRehabOut === "function") updateRehabOut();
         }).catch(function(){});
     })();
