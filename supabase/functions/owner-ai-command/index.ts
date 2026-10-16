@@ -52,11 +52,11 @@ const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 // Joe, Fiore and Erika may see lender names (Joe 10/8: "internal only goes to me, fiore and erika").
 const INSIDER_IDS = new Set(["owner", "lo-fiore", "proc-erika"]);
 function isInsider(caller: Caller): boolean { return INSIDER_IDS.has(caller.id) || caller.role === "owner"; }
-const LENDER_NAME_RX = /\b(Kiavi|RCN( Capital)?|A&D( Mortgage)?|Lend Investors( Capital)?|LEND|Velocity|NextRes|Home ?Xpress|HomeX|X-Connect|InvestorX|Dominion( Financial)?|LoanPASS|Constructive( Capital)?|Figure|BPL)\b/gi;
+const LENDER_NAME_RX = /\b(Kiavi|Roc( Capital)?|Silver ?Hill( Capital)?|RCN( Capital)?|A&D( Mortgage)?|Lend Investors( Capital)?|LEND|Velocity|NextRes|Home ?Xpress|HomeX|X-Connect|InvestorX|Dominion( Financial)?|LoanPASS|Constructive( Capital)?|Figure|BPL)\b/gi;
 
 const LOAN_TYPES = ["DSCR", "Fix & Flip", "Ground Up Construction", "Portfolio/Blanket", "Bridge", "Mixed-Use"];
 const SOURCES = ["Meta Ads", "Connected Investors", "Referral", "Repeat Client", "Website", "Self-Generated"];
-const OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital", "HomeXpress", "Dominion"];
+const OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital", "HomeXpress", "Dominion", "Silver Hill", "Roc Capital"];
 const CITIZENSHIP_STATUSES = ["US Citizen", "Permanent Resident", "Foreign National", "ITIN"];
 const PREPAY_TERMS = ["5yr", "3yr", "2yr", "1yr", "none"];
 

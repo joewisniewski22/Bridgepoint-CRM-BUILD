@@ -1450,9 +1450,10 @@ function lenderKeyForLead(lead){
   if (/Home ?Xpress/i.test(ol)) return "homex";
   if (/Dominion/i.test(ol)) return "dominion";
   if (/Silver ?Hill/i.test(ol)) return "silverhill";
+  if (/\bRoc\b/i.test(ol)) return "roc";
   return null;
 }
-var LENDER_DOC_LABEL = { constructive:"Constructive", rcn:"RCN", kiavi:"Kiavi", ad:"A&D", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress", dominion:"Dominion", silverhill:"Silver Hill" };
+var LENDER_DOC_LABEL = { constructive:"Constructive", rcn:"RCN", kiavi:"Kiavi", ad:"A&D", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress", dominion:"Dominion", silverhill:"Silver Hill", roc:"Roc" };
 var LENDER_DOC_PACKS = {
   constructive: function(lead){
     var rtl = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
@@ -1587,6 +1588,58 @@ var LENDER_DOC_PACKS = {
     ];
     var st = stateFromAddress(lead.propertyAddress);
     if (lead.entityType && lead.entityType !== "Individual") items.push({ name:"Certificate of Authority + Good Standing in the property's state" + (st ? " (" + st + ")" : "") + " if the entity was formed in another state" });
+    return items;
+  },
+  // Roc Capital (white-label table funding; Joe 2026-10-16). Built from the documents in Roc's portal Document Library (read 10/16/26): Rental Loans
+  // UW & Closing Checklists (11-04-2022), Rental / Fix & Flip / Ground Up / Stabilized Bridge product manuals, Insurance Guidelines, Appraisal Guidelines,
+  // Appraisal Transfer Policy, Permits Guidance, Initial Scope of Work, Fix & Flip Tearsheet. Names a borrower can see stay lender-neutral; staff-only items get "(Roc)".
+  roc: function(lead){
+    var rtl = RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType) !== -1;
+    var purchase = !lead.transactionType || lead.transactionType === "purchase";
+    var st = stateFromAddress(lead.propertyAddress);
+    var loan = Number(lead.loanAmount) || 0;
+    var items = [
+      { name:"Loan intake tape + loan submission form entered in the Roc portal", staffOnly:true },
+      { name:"Credit authorization signed through the Roc portal by every guarantor; tri-merge pulled there, background report + OFAC search ordered", staffOnly:true,
+        note: rtl ? "Bridge: at least 51% of the entity must guarantee (every member on a cash-out refinance); credit report no older than 180 days." : "Rentals: every owner of 20%+ must guarantee; credit report no older than 90 days (120 for a repeat borrower with no lates in 12 months)." },
+      { name:"Personal Financial Statement (signed)", note: rtl ? "Guarantor net worth must be at least 10% of the loan amount." : "Used to verify net worth." },
+      { name:"Certified resolution / consent of authority + incumbency certificate for the borrowing entity" },
+      { name:"Organizational chart (every owner of the borrowing entity and any entity guarantor)" },
+      { name:"Form W-9 for the borrowing entity" },
+      { name:"Certificate of Good Standing with seal dated within 90 days", staffOnly:true, note:"Roc's bridge checklist wants the good standing certificate dated within the last 90 days; non-profits and charitable entities are not eligible." },
+      { name:"Proof of funds: two consecutive full months of statements from the same account (no screenshots)", note: purchase ? "Purchase: closing costs + 3 months PITIA, seasoned 3 months; cash-out can count for up to 50%." : "Refinance: closing costs + 6 months PITIA; cash-out can count for up to 50%. Gifts and funds from non-guarantor accounts are not accepted." },
+      { name:"Title commitment: extended coverage, 24-month chain of title, judgment/lien search on entity and guarantors, OFAC search; closing protection letter from a national underwriter", staffOnly:true },
+      { name:"Insurance certificates + paid invoice to Roc at least 24 hours before closing; final policies within 60 days after closing (ElmSure option preferred, third-party needs a binder confirming compliance)", staffOnly:true,
+        note:"Roc minimums: A-VII (Demotech A in FL), 1-year term, 30-day cancellation notice, no windstorm/hail or named-storm exclusion, lender named as mortgagee, general liability $500k per occurrence / $1M aggregate; flood if in a flood zone (greater of $250k or the loan balance). Bridge deductible: 5%; term loans: $1,000 GL deductible, business interruption = 1 year of gross rent." }
+    ];
+    // Eligibility rules (no VT/SD/ND; no rural on rentals, ground-up or stabilized bridge, fix & flip rural capped at 65% initial LTC under $1M; no FL condos on bridge)
+    // live in the INTERNAL_KB Roc section and will go into the pricer's Roc check -- they are warnings, not documents, so they are not listed here.
+    if (loan > 0 && st && ((["NJ","NY"].indexOf(st) !== -1 && loan > 500000) || (["CA","HI"].indexOf(st) !== -1 && loan > 2000000) || (["NJ","NY","CA","HI"].indexOf(st) === -1 && loan > 1000000))){
+      items.push({ name:"Attorney opinion letter (required on this loan size in " + st + ")", staffOnly:true });
+    }
+    if (lead.citizenshipStatus === "Foreign National") items.push({ name:"Foreign national: valid passport + US visa (or visa-waiver country), US FICO if a guarantor; 12 months PITIA in liquidity (rentals)" });
+    if (rtl){
+      items.push({ name:"Wholesaler / assignment: full chain of contracts (A to B and B to C); fee over 20% of the original price needs an as-is valuation" });
+      if (!purchase) items.push({ name:"Original settlement statement (HUD) from the purchase + payoff letter (refinance)" });
+      items.push({ name:"Scope of Work by trade or component (not room by room) at full valuation; soft costs, demolition and contingency each at most 10% of budget and at most 25% combined; on a refinance include costs already spent", staffOnly:true, note:"Roc's Scope Of Work Template (Bridge folder). Draws are reimbursed by line item." });
+      items.push({ name:"Plans + building permit or stamped architect letter (additions, expansions, conversions, ADUs, unit-count changes, ground-up)", note:"Architect letter square footage and bed/bath count must match the appraisal (5% variance on square footage). With only the letter, permits are due before the first hard-cost draw; soft costs without permits are capped at $5,000 ($10,000 ground-up)." });
+      items.push({ name:"Structural engineer report (only if the property has fire damage)" });
+      items.push({ name:"General contractor contract (borrower in a new market or first-time borrower) · GC license (if the borrower is a GC) · real estate license (if the borrower is an agent)" });
+      items.push({ name:"Track record: closed deals in the last 3 years in the same market, with HUDs or other proof of ownership and sale", staffOnly:true, note:"Roc tiers experience from 1-2, 3-4, 5-9 and 10+ completed flips or rentals; agents/brokers and licensed GCs start at Tier 2." });
+      items.push({ name:"Appraisal ordered automatically through Roc's AMC at submission; as-is valuation also needed for entity-to-entity sales, refinances owned over 180 days, or a wholesale fee over 20%; interior inspection unless REO / auction / sheriff / bankruptcy sale", staffOnly:true });
+      items.push({ name:"Interest reserve: 1 month paid at closing; more if FICO is 620-680 (up to 9 months), 1 mortgage late in 12 months, or under 5 tradelines", staffOnly:true });
+    } else {
+      items.push({ name:"Purchase contract with all addenda (purchase); previous closing statement if refinancing a property owned 180 days or less" });
+      items.push({ name:"Leases for every occupied unit: individual tenants only, 12-36 months, no related-party tenants, no lease-to-own, no single-room leases; month-to-month only with proof of a prior 12-month lease" });
+      items.push({ name:"Proof of security deposit received (leases that start within 30 days of closing)" });
+      items.push({ name:"Property management agreement + manager resume (skip if self-managed)" });
+      items.push({ name:"HOA membership certificate or fee letter showing the annual dues; condo questionnaire (all condos)" });
+      items.push({ name:"Real estate tax certificate (county assessor site) and payoff letter (refinance)" });
+      items.push({ name:"Appraisal on Form 1004 + 1007 (1 unit), 1025 (2-4 units) or 1073 (condo), dated within 120 days (121-180 days with recertification); CDA / ARR within 10% of the appraised value; second full appraisal if the loan is over $1.5M", staffOnly:true });
+      items.push({ name:"Flood certification ordered by Roc", staffOnly:true });
+      if (!purchase) items.push({ name:"Refinance: 12-month lease on an SFR (one unit of a 2-4 may be vacant); cash-out not allowed within 90 days of purchase; 91-180 days needs a scope of work for the improvements", staffOnly:true });
+      if (lead.loanType === "Portfolio/Blanket") items.push({ name:"Portfolio: 2-10 properties, $50,000 minimum per property, 90% occupied by unit count; release price 1.2x each allocated loan amount; submit the Portfolio Loan Submission Template", staffOnly:true });
+    }
     return items;
   },
   lend: function(lead){ return []; }
@@ -10267,8 +10320,8 @@ function dismissAiFlag(leadId, idx){
    own rules, not an approval -- the lender's underwriter makes the call.
    Results live in public.lead_underwriting (staff-only RLS), not on the lead.
 --------------------------------------------------------------------- */
-var VU_LENDER_RX = { constructive:/Constructive/i, rcn:/RCN/i, kiavi:/Kiavi/i, ad:/A&D/i, nextres:/NextRes/i, velocity:/Velocity/i, lend:/Lend Investors|^LEND\b/i, homex:/Home ?Xpress/i, dominion:/Dominion/i, silverhill:/Silver ?Hill/i };
-var VU_LENDER_NAME = { constructive:"Constructive Capital", rcn:"RCN Capital", kiavi:"Kiavi", ad:"A&D Mortgage", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress", dominion:"Dominion", silverhill:"Silver Hill" };
+var VU_LENDER_RX = { constructive:/Constructive/i, rcn:/RCN/i, kiavi:/Kiavi/i, ad:/A&D/i, nextres:/NextRes/i, velocity:/Velocity/i, lend:/Lend Investors|^LEND\b/i, homex:/Home ?Xpress/i, dominion:/Dominion/i, silverhill:/Silver ?Hill/i, roc:/\bRoc\b/i };
+var VU_LENDER_NAME = { constructive:"Constructive Capital", rcn:"RCN Capital", kiavi:"Kiavi", ad:"A&D Mortgage", nextres:"NextRes", velocity:"Velocity", lend:"LEND", homex:"HomeXpress", dominion:"Dominion", silverhill:"Silver Hill", roc:"Roc Capital" };
 var VU_AREAS = ["Lender fit","Verified numbers","Credit","Documents","Cross-checks","Funds to close","Insurance"];
 function vuState(leadId){ ui.vu = ui.vu || {}; return ui.vu[leadId] || (ui.vu[leadId] = { loaded:false, loading:false, running:false, data:null }); }
 function vuLenderKey(lead){ return lenderKeyForLead(lead) || "constructive"; }
@@ -15021,7 +15074,7 @@ function renderOutsideLenderFitBox(lead){
 // NextRes added 2026-09-26 -- Joe is now a table funder with them and will
 // upload their real term sheets via the existing Upload Outside Term Sheet
 // flow (no dedicated rate sheet/pricer built in yet, unlike Constructive).
-var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital", "HomeXpress", "Dominion", "Silver Hill"];
+var OUTSIDE_LENDERS = ["Kiavi", "RCN", "A&D Mortgage", "NextRes", "Velocity", "Lend Investors Capital", "HomeXpress", "Dominion", "Silver Hill", "Roc Capital"];
 // Pricer lender name -> the routing value the rest of the CRM uses ("RCN Capital"
 // -> "RCN", Constructive -> null = in-house). undefined = unknown lender, leave routing alone.
 function lenderRoutingValue(name){
@@ -15036,6 +15089,7 @@ function lenderRoutingValue(name){
   if (/Home ?Xpress/i.test(n)) return "HomeXpress";
   if (/Dominion/i.test(n)) return "Dominion";
   if (/Silver ?Hill/i.test(n)) return "Silver Hill";
+  if (/\bRoc\b/i.test(n)) return "Roc Capital";
   return undefined;
 }
 // Routing vs. the terms actually applied to the file (pricer) -- flags files like
@@ -15072,7 +15126,8 @@ var LENDER_EXPORT_TARGETS = [
   { key:"LEND", label:"Lend Investors Capital", portal:"https://www.leapplenderportal.com/Partner/s/" },
   { key:"HomeXpress", label:"HomeXpress", portal:"https://xconnect-x1.homexmortgage.com/newregistration" },
   { key:"Dominion", label:"Dominion Financial", portal:"https://app.loanpass.io/c/dominion" },
-  { key:"SilverHill", label:"Silver Hill Capital", portal:"https://shf.my.site.com/Portal/s/" }
+  { key:"SilverHill", label:"Silver Hill Capital", portal:"https://shf.my.site.com/Portal/s/" },
+  { key:"Roc", label:"Roc Capital", portal:"https://bplending.privatelenderportal.com/lender-portal/submitloan" }
 ];
 // The file's placement -> its Export to Lender target (Joe 2026-10-06: one click
 // exports to the assigned lender).
@@ -15088,6 +15143,7 @@ function exportKeyForLead(lead){
   if (/Home ?Xpress/i.test(ol)) return "HomeXpress";
   if (/Dominion/i.test(ol)) return "Dominion";
   if (/Silver ?Hill/i.test(ol)) return "SilverHill";
+  if (/\bRoc\b/i.test(ol)) return "Roc";
   return null;
 }
 var LENDER_EXTENSION_ZIP = "https://bridgepoint-crm-build.vercel.app/bridgepoint-lender-export.zip";
