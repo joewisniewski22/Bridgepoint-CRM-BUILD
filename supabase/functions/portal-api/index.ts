@@ -42,6 +42,48 @@ const WRITABLE = new Set([
 const STAGE_ORDER = ["new", "attempting", "qualifying", "app_sent", "app_completed", "docs", "processing", "underwriting", "approved", "ctc", "closed", "postclosing"];
 const strip = (row: Record<string, unknown>) => { const r = { ...row }; HIDE.forEach((k) => delete r[k]); return r; };
 
+// What an application has to contain before the file counts as "Application Completed": the deal, not just the borrower.
+function dealGaps(l: Record<string, any>): string[] {
+  const gaps: string[] = [];
+  const num = (x: unknown) => { const n = Number(x); return isFinite(n) && n > 0; };
+  const type = String(l.loan_type || "");
+  const rtl = ["Fix & Flip", "Bridge", "Ground Up Construction"].indexOf(type) !== -1;
+  const purchase = !l.transaction_type || l.transaction_type === "purchase";
+  const portfolio = type === "Portfolio/Blanket";
+  if (!portfolio && !String(l.property_address || "").trim()) gaps.push("property address");
+  if (portfolio && !num(l.property_count)) gaps.push("the list of properties");
+  if (purchase ? !(num(l.purchase_price) || num(l.current_value)) : !(num(l.current_value) || num(l.purchase_price))) gaps.push(purchase ? "purchase price" : "current value");
+  if (rtl && type !== "Bridge" && l.rehab_budget == null) gaps.push(type === "Ground Up Construction" ? "construction budget" : "rehab budget");
+  if (rtl && type !== "Bridge" && !num(l.arv)) gaps.push("after-repair value (ARV)");
+  if (!rtl && type && !num(l.rent_estimate)) gaps.push("monthly rent");
+  return gaps;
+}
+// The borrower submitted but the deal is missing: leave the stage alone, say so on the file, tell the LO, and give them a task.
+async function holdIncompleteApplication(lead: Record<string, any>, gaps: string[]) {
+  const today = new Date().toISOString().slice(0, 10);
+  const text = "Application submitted, but it is missing: " + gaps.join(", ") + ". The file stays at its current stage until the deal details are in.";
+  const { data: cur } = await sb.from("leads").select("activity").eq("id", lead.id).single();
+  const act: any[] = Array.isArray(cur && cur.activity) ? (cur!.activity as any[]) : [];
+  const already = act.some((a) => a && a.type === "application" && String(a.text || "") === text);
+  if (!already) {
+    act.push({ date: today, at: new Date().toISOString(), type: "application", text, author: "System" });
+    await sb.from("leads").update({ activity: act }).eq("id", lead.id);
+    if (lead.assigned_to) {
+      await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: lead.assigned_to, lead_id: lead.id, kind: "application",
+        text: String(lead.name || "A borrower") + " submitted an application with no deal details (missing " + gaps.join(", ") + ") — call to get them.", date: today, read: false });
+    }
+  }
+  if (lead.assigned_to) {
+    await sb.from("followup_tasks").insert({
+      lead_id: lead.id, assigned_to: lead.assigned_to, situation: "scheduled", step_key: "appgap:" + lead.id, step_n: 0, channel: "call",
+      title: "Get the deal details from " + String(lead.name || "the borrower").split(" ")[0] + " — application has no " + gaps[0] + (gaps.length > 1 ? " (+" + (gaps.length - 1) + " more)" : ""),
+      goal: "They submitted the application without: " + gaps.join(", ") + ". Ask what property they are looking at and get those numbers, then update the file.",
+      lever: "They already did the paperwork; the one thing missing is the deal.", due_at: new Date(Date.now() + 45 * 60000).toISOString(), priority: 85, urgent: false, status: "open",
+      meta: { manual: true, source: "application-gap", gaps },
+    });   // unique step_key per lead: a repeat submission doesn't make a second task
+  }
+}
+
 async function loadLead(leadId: string, token: string) {
   if (!leadId || !token) return null;
   const { data } = await sb.from("leads").select("*").eq("id", leadId).eq("application_token", token).maybeSingle();
@@ -91,9 +133,16 @@ Deno.serve(async (req: Request) => {
     const upd: Record<string, any> = {};
     for (const k of Object.keys(row)) if (WRITABLE.has(k)) upd[k] = row[k];
 
-    // stage: the borrower can only move a file forward to "Application Completed"
+    // stage: the borrower can only move a file forward to "Application Completed" -- and only when the deal itself is in the application (Joe 10/16: María correa's
+    // file was tagged Application Completed with no property, price, rehab or ARV). A submission with the deal missing stays "Application Sent", the loan officer
+    // gets a task to collect the missing items, and the file says exactly what is missing.
     const cur = STAGE_ORDER.indexOf(String(lead.stage));
-    if (row.stage === "app_completed" && cur >= 0 && cur < STAGE_ORDER.indexOf("app_completed")) upd.stage = "app_completed";
+    let heldGaps: string[] = [];
+    if (row.stage === "app_completed" && cur >= 0 && cur < STAGE_ORDER.indexOf("app_completed")) {
+      heldGaps = dealGaps({ ...lead, ...upd });
+      if (!heldGaps.length) upd.stage = "app_completed";
+      else delete upd.application_taken_at;   // the engine treats "application taken" as done; it isn't until the deal is in
+    }
 
     // activity + portal chat: append only (a stale copy can never erase staff entries); chat entries must be the borrower's own
     const appendOnly = (existing: unknown, incoming: unknown, onlyBorrower: boolean) => {
@@ -120,6 +169,7 @@ Deno.serve(async (req: Request) => {
       const { error } = await sb.from("leads").update(upd).eq("id", leadId);
       if (error) return json({ ok: false, error: "save_failed", detail: error.message }, 500);
     }
+    if (heldGaps.length) await holdIncompleteApplication(lead, heldGaps);
 
     // alerts for the file's loan officer / processor only
     const notes = (Array.isArray(body.notifications) ? body.notifications : []).slice(-10);
