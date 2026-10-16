@@ -419,15 +419,19 @@ function taskAllowed(userId) {
   if (cfg.mode === "live") return true;
   return (cfg.pilot_users || []).indexOf(userId) !== -1;
 }
-async function textUser(userId, text, leadId, kind) {
+async function textUser(userId, text, leadId, kind, force) {
   const u = users[userId];
   if (!u) return false;
   await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: userId, lead_id: leadId || null, kind: kind || "followup", text: text.slice(0, 240), date: etParts().date, read: false });
   // followup_config.staff_texts = false (Joe 2026-10-07: "too frequent"): staff get the
   // in-app task/notification only, no SMS. Borrower-facing AI touches are unaffected.
-  if (u.phone && cfg.staff_texts !== false) await post("send-text", { to: u.phone, text, fromName: "Bridgepoint CRM" });
+  // force = a follow-up a PERSON scheduled on purpose (the LO's own scheduler, Joe's requests, notes the scanner booked): those always text, with
+  // a heads-up 10 minutes before and a morning list, because the point of scheduling one is to be reminded (Joe 2026-10-16).
+  if (u.phone && (cfg.staff_texts !== false || force)) await post("send-text", { to: u.phone, text, fromName: "Bridgepoint CRM" });
   return true;
 }
+const isManualTask = (tk) => !!(tk && tk.meta && tk.meta.manual);
+function etClock(ms) { return new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" }).format(new Date(ms)); }
 
 // ---------------------------------------------------------------------------
 // AI: call brief for the loan officer
@@ -728,27 +732,35 @@ Deno.serve(async (req) => {
     if (t.hour === 8 && t.minute >= 30 && t.minute < 45) {
       const byLo = {};
       openTasks.filter((x) => new Date(x.due_at).getTime() <= now + 10 * 3600000).forEach((x) => { (byLo[x.assigned_to] = byLo[x.assigned_to] || []).push(x); });
-      for (const [loId, list] of Object.entries(byLo)) {
+      for (const [loId, fullList] of Object.entries(byLo)) {
         if (!userAllowed(loId)) continue;
+        // With general staff texting off, the morning list carries ONLY the follow-ups the person (or Joe) scheduled on purpose.
+        const list = cfg.staff_texts === false ? fullList.filter(isManualTask) : fullList;
+        if (!list.length) continue;
         if (!(await claim("_digest_" + loId, "digest-" + t.date, String(list.length)))) continue;
         list.sort((a, b) => (b.priority - a.priority) || (new Date(a.due_at) - new Date(b.due_at)));
         const overdue = list.filter((x) => new Date(x.due_at).getTime() < now - 12 * 3600000).length;
-        const names = list.slice(0, 3).map((x) => (byId[x.lead_id]?.name || "").split(" ")[0] + " (" + x.title.split(" — ")[0].toLowerCase().slice(0, 28) + ")").join(", ");
-        await textUser(loId, `Good morning ${first(users[loId]?.name)} — ${list.length} follow-up${list.length > 1 ? "s" : ""} today${overdue ? " (" + overdue + " overdue)" : ""}: ${names}${list.length > 3 ? " +" + (list.length - 3) + " more" : ""}. Work the list: ${CRM_URL}?brief=next`, null, "followup");
+        const names = list.slice(0, 3).map((x) => (byId[x.lead_id]?.name || "").split(" ")[0] + " (" + (isManualTask(x) ? etClock(new Date(x.due_at).getTime()) + " " : "") + x.title.split(" — ")[0].toLowerCase().slice(0, 28) + ")").join(", ");
+        await textUser(loId, `Good morning ${first(users[loId]?.name)} — ${list.length} follow-up${list.length > 1 ? "s" : ""} today${overdue ? " (" + overdue + " overdue)" : ""}: ${names}${list.length > 3 ? " +" + (list.length - 3) + " more" : ""}. Work the list: ${CRM_URL}?brief=next`, null, "followup", cfg.staff_texts === false);
         stats.digests++;
       }
     }
     if (inWindow) {
       const sentThisHour = {};
       tasks.forEach((x) => { if (x.notified_at && new Date(x.notified_at).getTime() > hourAgo) sentThisHour[x.assigned_to] = (sentThisHour[x.assigned_to] || 0) + 1; });
-      const due = openTasks.filter((x) => !x.notified_at && new Date(x.due_at).getTime() <= now).sort((a, b) => (Number(b.urgent) - Number(a.urgent)) || (b.priority - a.priority) || (new Date(a.due_at) - new Date(b.due_at)));
+      // Scheduled-on-purpose follow-ups text 10 minutes BEFORE they are due (a moment to pull the file up); everything else at the due time.
+      const due = openTasks.filter((x) => !x.notified_at && new Date(x.due_at).getTime() - (isManualTask(x) ? 10 * 60000 : 0) <= now).sort((a, b) => (Number(b.urgent) - Number(a.urgent)) || (b.priority - a.priority) || (new Date(a.due_at) - new Date(b.due_at)));
       for (const tk of due) {
         const l = byId[tk.lead_id]; if (!l) continue;
         if (!userAllowed(tk.assigned_to)) continue;
         if (tk.meta && tk.meta.noText) { await sb.from("followup_tasks").update({ notified_at: new Date().toISOString() }).eq("id", tk.id); continue; }
-        if (!tk.brief && now - new Date(tk.due_at).getTime() < 8 * 60000) continue; // give the brief a moment
-        if (!tk.urgent && (sentThisHour[tk.assigned_to] || 0) >= (cfg.text_cap_per_hour || 3)) continue;
-        if (await textUser(tk.assigned_to, taskSms(tk, l, tk.brief), l.id, tk.urgent ? "hot-lead" : "followup")) {
+        const manual = isManualTask(tk);
+        if (!manual && !tk.brief && now - new Date(tk.due_at).getTime() < 8 * 60000) continue; // give the brief a moment
+        if (!tk.urgent && !manual && (sentThisHour[tk.assigned_to] || 0) >= (cfg.text_cap_per_hour || 3)) continue;
+        const smsText = manual
+          ? `⏰ ${etClock(new Date(tk.due_at).getTime())} ${tk.channel === "text" ? "text" : tk.channel === "email" ? "email" : "call"}: ${l.name}${l.phone ? " " + l.phone : ""} — ${String(tk.goal || tk.title).slice(0, 90)}. Open: ${taskLink(tk)}`
+          : taskSms(tk, l, tk.brief);
+        if (await textUser(tk.assigned_to, smsText, l.id, tk.urgent ? "hot-lead" : "followup", manual)) {
           await sb.from("followup_tasks").update({ notified_at: new Date().toISOString() }).eq("id", tk.id);
           sentThisHour[tk.assigned_to] = (sentThisHour[tk.assigned_to] || 0) + 1; stats.pings++;
         }
@@ -758,8 +770,10 @@ Deno.serve(async (req) => {
       for (const tk of openTasks.filter((x) => x.notified_at)) {
         const l = byId[tk.lead_id]; if (!l || !userAllowed(tk.assigned_to)) continue;
         const since_ = now - new Date(tk.notified_at).getTime();
-        if (tk.reminder_count === 0 && cfg.staff_texts !== false && since_ >= (tk.urgent ? 30 : 120) * 60000) {
-          await textUser(tk.assigned_to, `⏰ Still open: ${l.name} — ${tk.title}.${l.phone ? " " + l.phone : ""} Brief + log: ${taskLink(tk)}`, l.id, "followup");
+        // A scheduled-on-purpose follow-up still open 30 minutes after its time gets one nudge (other tasks keep the 2-hour rule and the staff_texts switch).
+        const manualOpen = isManualTask(tk) && now - new Date(tk.due_at).getTime() >= 30 * 60000;
+        if (tk.reminder_count === 0 && (manualOpen || (cfg.staff_texts !== false && !isManualTask(tk) && since_ >= (tk.urgent ? 30 : 120) * 60000))) {
+          await textUser(tk.assigned_to, `⏰ Still open: ${l.name} — ${tk.title}.${l.phone ? " " + l.phone : ""} Brief + log: ${taskLink(tk)}`, l.id, "followup", isManualTask(tk));
           await sb.from("followup_tasks").update({ reminded_at: new Date().toISOString(), reminder_count: 1 }).eq("id", tk.id);
           stats.reminders++;
         } else if (tk.reminder_count >= 1 && !(tk.meta && tk.meta.escalated) && now - new Date(tk.due_at).getTime() > 24 * 3600000 && tk.assigned_to !== "owner") {
