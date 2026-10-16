@@ -1,9 +1,9 @@
-// 5-minute lead handoff (Joe 2026-10-09). Cron runs this every minute.
+// Lead handoff (Joe 2026-10-09; window raised from 5 to 10 minutes 2026-10-16). Cron runs this every minute.
 //
 // Joe's rules, as he gave them:
 // - Daytime (9am-10pm ET, every day): a new inbound lead goes to the rotation LO and their phone
 //   rings (new-lead-ring). If they don't pick up and press 1, or call the lead themselves, within
-//   5 minutes, the lead moves to the next LO on the list, whose phone rings, and so on. If nobody
+//   10 minutes, the lead moves to the next LO on the list, whose phone rings, and so on. If nobody
 //   in the pool calls it, it lands with Joe and he gets a text.
 //     English Facebook / website pool: Joe 30%, Fiore 35%, Taeya 35% (Theresa does Vietnamese).
 //     Connected Investors / PrivateLenders pool: Joe and Fiore (50/50); if both miss it, it goes
@@ -25,7 +25,8 @@ const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: 
 
 // Leads that came in before this went live are never moved.
 const HANDOFF_START = "2026-10-09T18:30:00Z";
-const WINDOW_MS = 5 * 60000;
+const HANDOFF_MIN = 10;   // Joe 10/16: "the bounce lead can be extended from 5 minutes to 10"
+const WINDOW_MS = HANDOFF_MIN * 60000;
 const DAY_START = 9 * 60, DAY_END = 22 * 60; // ET minutes
 const POOLS: Record<string, string[]> = {
   english: ["owner", "lo-fiore", "lo-taeya"], // Theresa = Vietnamese (Joe 10/9)
@@ -33,7 +34,7 @@ const POOLS: Record<string, string[]> = {
 };
 // Joe 10/9: "if me and fiore miss our window ... have it go out to entire team on a rotation"
 // -- a Connected Investors lead both of them missed goes to the other LOs (any language; they
-// all speak English), same 5-minute rule, rotating who goes first.
+// all speak English), same 10-minute rule, rotating who goes first.
 const OVERFLOW: Record<string, string[]> = { ci: ["lo-taeya", "lo-theresa", "lo-fanis"] };
 const INBOUND = /^(Facebook|Meta Ads|Website|Connected Investors|Private ?Lenders)/i;
 
@@ -164,7 +165,7 @@ Deno.serve(async (req: Request) => {
       continue;
     }
 
-    // The 5-minute handoff -- only for leads that came in during the day.
+    // The timed handoff -- only for leads that came in during the day.
     if (!createdDay) continue;
     if (!row) {
       row = { lead_id: l.id, pool, first_lo: l.assigned_to, tried: [l.assigned_to], clock_start: l.created_at_ts, moves: 0, status: "watching" };
@@ -217,16 +218,16 @@ Deno.serve(async (req: Request) => {
     const from = await staff(cur);
     const fromName = from ? from.name : cur;
     if (!next) {
-      await note(l.id, "No one in the rotation called this lead within 5 minutes; it stays with " + fromName + ".");
+      await note(l.id, "No one in the rotation called this lead within " + HANDOFF_MIN + " minutes; it stays with " + fromName + ".");
       await textStaff("owner", "Nobody called new lead " + l.name + " -- it's yours. Call now: " + link, l.id);
       log.push({ lead: l.id, final: "owner_kept" });
       continue;
     }
     const to = await staff(next);
     const toName = to ? to.name : next;
-    await note(l.id, "Not called within 5 minutes by " + fromName + " -- automatically passed to " + toName + (finalStop ? " (last stop)." : "."), next);
-    await textStaff(cur, "Lead " + l.name + " was passed to " + toName + " -- not called within 5 minutes.", l.id);
-    await textStaff(next, (finalStop ? "Nobody else called " : "Passed to you: ") + l.name + (finalStop ? " -- it's yours now. " : " wasn't called in 5 min. Call " + first + " now: ") + link, l.id);
+    await note(l.id, "Not called within " + HANDOFF_MIN + " minutes by " + fromName + " -- automatically passed to " + toName + (finalStop ? " (last stop)." : "."), next);
+    await textStaff(cur, "Lead " + l.name + " was passed to " + toName + " -- not called within " + HANDOFF_MIN + " minutes.", l.id);
+    await textStaff(next, (finalStop ? "Nobody else called " : "Passed to you: ") + l.name + (finalStop ? " -- it's yours now. " : " wasn't called in " + HANDOFF_MIN + " min. Call " + first + " now: ") + link, l.id);
     if (!DRY) {
       // The receiver's share counts this lead; the LO who missed it keeps theirs (Joe 10/9: missing leads costs you leads).
       const overflow = (OVERFLOW[row.pool] || []).includes(next);
