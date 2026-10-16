@@ -2076,6 +2076,8 @@ async function checkRcnRaw(s: Scenario): Promise<LenderResult> {
 // Lender registry -- add a new lender by adding one entry here.
 // ---------------------------------------------------------------------
 const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult> }> = [
+  // Roc first (Joe 10/16: "I would actually prefer to use Roc" -- its yield spread is where the monthly money is, especially on short-term loans).
+  { key: "roc", check: (s: Scenario) => checkRoc(s as any, stateFromAddress) },
   { key: "constructive", check: checkConstructive },
   { key: "nextres", check: checkNextres },
   { key: "kiavi", check: checkKiavi },
@@ -2085,7 +2087,6 @@ const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult
   { key: "lend", check: (s: Scenario) => checkLend(s as any) },
   { key: "homex", check: (s: Scenario) => checkHomeXpress(s as any, stateFromAddress) },
   { key: "dominion", check: (s: Scenario) => checkDominion(s as any, stateFromAddress) },
-  { key: "roc", check: (s: Scenario) => checkRoc(s as any, stateFromAddress) },
   { key: "silverhill", check: (s: Scenario) => Promise.resolve(checkSilverHill(s as any)) },
 ];
 // Fallback lenders (Joe 2026-10-14): only shown when no other lender places the scenario, so they stay out of scenarios the others already cover.
