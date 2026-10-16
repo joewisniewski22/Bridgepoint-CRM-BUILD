@@ -4603,13 +4603,14 @@ function modalScheduleFollowup(leadId){
   var me = currentUser(), fu = ui.fu || {};
   var days = fuSlotsFor(me.id);
   var nowD = new Date(), todayKey = nowD.toDateString(), tomorrowKey = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() + 1).toDateString();
-  var pick = function(s){ return '<button type="button" class="btn btn-sm fu-slot" data-action="fu-pick" data-iso="' + s.start.toISOString() + '" style="margin:2px">' + esc(s.start.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" })) + '</button>'; };
+  var on = function(s){ return fu.iso && fu.iso === s.start.toISOString() ? " btn-primary" : ""; };
+  var pick = function(s){ return '<button type="button" class="btn btn-sm fu-slot' + on(s) + '" data-action="fu-pick" data-iso="' + s.start.toISOString() + '" style="margin:2px">' + esc(s.start.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" })) + '</button>'; };
   var firstOn = function(pred){ for (var i = 0; i < days.length; i++){ if (pred(days[i], i)) return days[i].slots[0]; } return null; };
   var laterToday = (function(){ var d0 = days.filter(function(x){ return x.date.toDateString() === todayKey; })[0]; if (!d0) return null; var t = d0.slots.filter(function(s){ return s.start.getTime() > Date.now() + 45 * 60000; })[0]; return t || null; })();
   var tomorrow = firstOn(function(x){ return x.date.toDateString() === tomorrowKey; });
   var in3 = (function(){ var target = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() + 3).getTime(); for (var i = 0; i < days.length; i++){ if (days[i].date.getTime() >= target) return days[i].slots[0]; } return null; })();
   var nextWeek = (function(){ var target = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() + 7).getTime(); for (var i = 0; i < days.length; i++){ if (days[i].date.getTime() >= target) return days[i].slots[0]; } return null; })();
-  var chip = function(label, s){ return s ? ('<button type="button" class="btn btn-sm" data-action="fu-pick" data-iso="' + s.start.toISOString() + '" style="margin:2px">' + esc(label) + '</button>') : ""; };
+  var chip = function(label, s){ return s ? ('<button type="button" class="btn btn-sm fu-slot' + on(s) + '" data-action="fu-pick" data-iso="' + s.start.toISOString() + '" style="margin:2px" title="' + esc(fuLabel(s.start)) + '">' + esc(label) + ' <span style="opacity:.7;font-weight:400">· ' + esc(s.start.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" })) + '</span></button>') : ""; };
   var dayCols = days.map(function(x){
     return '<div style="margin:8px 0 2px"><div class="footnote" style="padding:0;font-weight:600">' + esc(x.date.toLocaleDateString([], { weekday:"long", month:"short", day:"numeric" })) + '</div>' + x.slots.map(pick).join("") + '</div>';
   }).join("");
@@ -4618,10 +4619,11 @@ function modalScheduleFollowup(leadId){
     '<div class="modal-body">' +
       '<div class="footnote" style="padding:0 0 6px">These are <b>your</b> open times. Pick one and you will get a text when it is time to call. Nothing is sent to the client.</div>' +
       '<div>' + chip("Later today", laterToday) + chip("Tomorrow", tomorrow) + chip("In 3 days", in3) + chip("Next week", nextWeek) + '</div>' +
-      '<div style="max-height:230px;overflow:auto;border:1px solid var(--line,#ddd);border-radius:8px;padding:4px 10px">' + (dayCols || '<div class="footnote">No open times found. Use the date and time boxes below.</div>') + '</div>' +
-      '<div class="form-row" style="margin-top:8px"><label>Or pick any date and time</label><div style="display:flex;gap:8px"><input class="input" type="date" id="fu-date"><input class="input" type="time" id="fu-time"></div></div>' +
+      // flex:0 0 auto + min-height: inside the modal's flex column this scroll box used to shrink to a thin strip, hiding every open time (Joe 10/16).
+      '<div style="flex:0 0 auto;min-height:120px;max-height:230px;overflow:auto;border:1px solid var(--line,#ddd);border-radius:8px;padding:4px 10px;margin-top:6px">' + (dayCols || '<div class="footnote">No open times found. Use the date and time boxes below.</div>') + '</div>' +
+      '<div class="form-row" style="margin-top:8px"><label>Or pick any date and time</label><div style="display:flex;gap:8px"><input class="input" type="date" id="fu-date" data-action="fu-typed"><input class="input" type="time" id="fu-time" data-action="fu-typed"></div></div>' +
       '<div class="form-two"><div class="form-row"><label>How</label><select class="select" id="fu-channel"><option value="call">Call</option><option value="text">Text</option><option value="email">Email</option></select></div>' +
-      '<div class="form-row"><label>Selected time</label><div class="val" id="fu-selected" style="padding-top:8px">None yet</div></div></div>' +
+      '<div class="form-row"><label>Selected time</label><div class="val" id="fu-selected" style="padding-top:8px">' + (fu.iso ? esc(fuLabel(new Date(fu.iso))) : 'None yet — tap a time above, or set a date and time') + '</div></div></div>' +
       '<div class="form-row"><label>Note (what to bring up)</label><textarea class="textarea" id="fu-note" rows="3" placeholder="e.g. Sending revised terms, ask about the co-borrower">' + esc(fu.note || "") + '</textarea></div>' +
     '</div>' +
     '<div class="modal-foot"><button class="btn btn-ghost" type="button" data-action="close-modal">Cancel</button><button class="btn btn-primary" type="button" data-action="fu-save" data-lead="' + leadId + '">Schedule follow-up</button></div>' +
@@ -4634,13 +4636,26 @@ function fuPickSlot(btn){
   var sel = document.getElementById("fu-selected"); if (sel) sel.textContent = fuLabel(new Date(iso));
   var dd = document.getElementById("fu-date"), tt = document.getElementById("fu-time"); if (dd) dd.value = ""; if (tt) tt.value = "";
 }
+// A hand-typed date/time also counts as the selection (so "Selected time" always shows what Schedule will use).
+function fuTypedChanged(){
+  var dEl = document.getElementById("fu-date"), tEl = document.getElementById("fu-time"), sel = document.getElementById("fu-selected");
+  var iso = fuTypedIso(); if (!iso || !sel) return;
+  ui.fu = ui.fu || {}; ui.fu.iso = null;
+  document.querySelectorAll(".fu-slot").forEach(function(b){ b.classList.remove("btn-primary"); });
+  sel.textContent = fuLabel(new Date(iso)) + (tEl && !tEl.value ? " (9:00 AM by default)" : "");
+}
+function fuTypedIso(){
+  var dEl = document.getElementById("fu-date"), tEl = document.getElementById("fu-time");
+  if (!dEl || !tEl || (!dEl.value && !tEl.value)) return null;
+  var dStr = dEl.value || todayISO(), tStr = tEl.value || "09:00";
+  var cd = new Date(dStr + "T" + tStr + ":00");
+  return isNaN(cd.getTime()) ? null : cd.toISOString();
+}
 function fuSave(leadId){
   var lead = leadById(leadId); if (!lead || !sb) return;
   var me = currentUser(), fu = ui.fu || {};
-  var dEl = document.getElementById("fu-date"), tEl = document.getElementById("fu-time");
-  var iso = fu.iso;
-  if (dEl && dEl.value && tEl && tEl.value){ var cd = new Date(dEl.value + "T" + tEl.value + ":00"); if (!isNaN(cd.getTime())) iso = cd.toISOString(); }
-  if (!iso){ showToast("Pick a time first", true); return; }
+  var iso = fuTypedIso() || fu.iso;   // a typed date and/or time wins; a date alone means 9:00 AM, a time alone means today
+  if (!iso){ showToast("Tap one of the times, or choose a date and time first", true); return; }
   if (new Date(iso).getTime() < Date.now() - 60000){ showToast("That time has already passed", true); return; }
   var note = (document.getElementById("fu-note") || {}).value || "";
   var ch = (document.getElementById("fu-channel") || {}).value || "call";
@@ -22676,6 +22691,8 @@ appEl.addEventListener("change", function(e){
     applySavedView(t.value);
   } else if (action === "filter-comm"){
     ui.commFilter = t.value; render();
+  } else if (action === "fu-typed"){
+    fuTypedChanged();
   } else if (action === "move-stage" && t.tagName==="SELECT"){
     moveStage(t.dataset.lead, t.value);
   } else if (action === "reassign-lead"){
