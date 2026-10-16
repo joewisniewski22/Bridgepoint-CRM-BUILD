@@ -3915,7 +3915,9 @@ function scopedLeads(){
   if (isOwner()) return state.leads;
   // Processor sees every in-process stage (Docs and Approved were missing until 2026-10-07).
   if (isProcessor()) return state.leads.filter(function(l){
-    return ["docs","processing","underwriting","approved","ctc","closed","postclosing"].indexOf(l.stage) !== -1;
+    // Application Completed is in her pipeline (Erika 2026-10-16); and cold/lost files she worked stay visible in her Cold / Lost column.
+    if ((l.status === "cold" || l.status === "lost") && l.assignedProcessor === ui.viewAs) return true;
+    return ["app_completed","docs","processing","underwriting","approved","ctc","closed","postclosing"].indexOf(l.stage) !== -1;
   });
   if (isLO()) return state.leads.filter(function(l){ return l.assignedTo===ui.viewAs; });
   return state.leads;
@@ -13687,7 +13689,10 @@ function renderToday(){
 
 function renderPipeline(){
   var leads = scopedLeads();
-  var cols = STAGES.map(function(s){
+  // Per-person column choice (Erika 2026-10-16: only Application Complete .. Closed + Cold/Lost). Saved in portalPrefs by her AI assistant
+  // (update_my_view) or the portal customizer; empty/absent = every column, as before.
+  var pp = myPrefs(), onlyStages = Array.isArray(pp.pipelineStages) && pp.pipelineStages.length ? pp.pipelineStages : null;
+  var cols = STAGES.filter(function(s){ return !onlyStages || onlyStages.indexOf(s.key) !== -1; }).map(function(s){
     var inStage = leads.filter(function(l){ return l.stage===s.key && l.status!=="cold" && l.status!=="lost"; });
     var cards = inStage.map(function(l){
       return '<div class="pcard" draggable="true" data-action="select-lead" data-lead="' + l.id + '">' +
@@ -13709,7 +13714,7 @@ function renderPipeline(){
       badgeForStage(l) +
     '</div>';
   }).join("");
-  cols += '<div class="col" data-stage="lost" style="background:var(--c-rust-bg)"><div class="col-head"><span class="name">Cold / Lost</span><span class="n num">' + coldLost.length + '</span></div><div class="col-cards">' + (coldCards||'') + '</div></div>';
+  if (pp.pipelineShowCold !== false) cols += '<div class="col" data-stage="lost" style="background:var(--c-rust-bg)"><div class="col-head"><span class="name">Cold / Lost</span><span class="n num">' + coldLost.length + '</span></div><div class="col-cards">' + (coldCards||'') + '</div></div>';
 
   return topbar("Pipeline", "Lead intake through post-closing, in one board.", "") +
     '<div class="content"><div class="board">' + cols + '</div></div>';

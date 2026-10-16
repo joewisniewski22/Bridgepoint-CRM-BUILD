@@ -125,7 +125,9 @@ Deno.serve(async (req: Request) => {
 
     return new Response(JSON.stringify({
       ok: true,
-      prefs: { accentColor, hiddenNavItems, welcomeNote, density, boardDefaultFilter, boardHiddenChecks, boardSort, quietDays, mobileDefaultTab, mutedTextKinds },
+      // pipelineStages / pipelineShowCold are set by the AI assistant's update_my_view tool; carry them through untouched so this save doesn't wipe them.
+      prefs: { accentColor, hiddenNavItems, welcomeNote, density, boardDefaultFilter, boardHiddenChecks, boardSort, quietDays, mobileDefaultTab, mutedTextKinds,
+        pipelineStages: Array.isArray(current.pipelineStages) ? current.pipelineStages : [], pipelineShowCold: current.pipelineShowCold !== false },
       changeRequest,
       summary,
     }), { headers: CORS_HEADERS });

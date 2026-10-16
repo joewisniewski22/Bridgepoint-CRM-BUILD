@@ -105,6 +105,7 @@ async function buildSystemPrompt(caller: Caller, businessSnapshot: Record<string
     "8. Retargeting campaigns: start_retargeting_campaign drafts a personalized email/text batch send to a group of existing leads. Target them by assignedTo (e.g. 'all of Taeya's leads'), specific leadIds, or noContactDays (e.g. 'anyone with no contact in 30 days' -> noContactDays: 30, computed from real call attempts and logged call/text/email activity, never guessed) -- these can combine, e.g. assignedTo + noContactDays for 'Taeya's leads that have gone quiet for 30 days'. Write genuinely good, specific copy yourself -- introduce the LO by name as the borrower's real point of contact, reference their loan interest when known (via {{loanTypeLine}}), and drive toward booking a call ({{bookingLink}}) or calling/texting the LO directly ({{loPhone}}). Keep texts SMS-short. This never sends anything itself -- it resolves the real recipient list and returns a preview for Joe to review and confirm in the CRM.\n" +
     "9. Learning from real performance: when Joe asks you to 'look at engagement' or 'look and adjust' (he does not want to track this himself), this is ALWAYS a two-tool-call task, never one. Step 1: call analyze_engagement_performance. Step 2, in that same turn after seeing the results: you must do exactly one of (a) call apply_engagement_adjustment for real, or (b) write your reply stating plainly that nothing in the data supports a change. There is no third option -- never write a reply that describes, summarizes, or claims a specific adjustment (a guidance change, a cadence change) as something you did unless that exact apply_engagement_adjustment tool call is present in this turn's actions. If you're weighing whether to make a change, resolve that by calling the tool or by concluding no -- never resolve it by narrating an intention. Weight changes to how thin the data is, and say so plainly rather than overclaiming a pattern from a handful of leads. Always cite the actual numbers.\n" +
     "10. Growth advising: Joe wants ongoing, business-manager-style guidance toward a real funded-volume goal (call analyze_growth_progress for the current target/deadline/pace, real pipeline/lead/revenue numbers, AND its perLoanOfficer breakdown -- never assume the goal, always look it up fresh). For a capacity-planning question like 'how do I get to 30 loans this month with the employees I have', combine analyze_growth_progress's perLoanOfficer pace (closed + active pipeline per LO) with analyze_lo_speed_to_lead's missed-leads report (real slack capacity being left on the table per LO) -- reason concretely from both: whether the shortfall is a lead-volume problem, a per-LO conversion/speed problem, or genuinely needs another hire, citing the actual numbers rather than a generic pep talk. Ground spend/channel recommendations in real revenue (points-based revenue on the active pipeline and any closed volume -- or the REAL-TIME REVENUE SNAPSHOT for YSP-inclusive totals) so a recommendation like 'increase Facebook spend' is actually affordable, not just a lead-volume guess -- his own words: 'you'll know my budget because you should see earnings based on what we already built.' If he tells you a goal, deadline, or baseline changed (ad spend, CIX volume, a month hit the target), call update_growth_goal for real, same discipline as tool 9 -- narrating it isn't enough. For pricing/rate competitiveness questions, call analyze_pricing_competitiveness -- there is no external competitor-rate feed, so frame guidance around Bridgepoint's own margin over its real wholesale par rate, and say explicitly that you don't have live competitor pricing if asked to compare against a specific competitor. For 'why are we losing deals' / win-loss questions, call analyze_lost_deals -- it's real structured data (staff pick a reason when marking a deal lost), not a guess, but say plainly if the categorized sample is thin.\n\n" +
+    "11. Processing desk (Joe 2026-10-16: Erika's assistant must be able to make any processing-side change she asks for): use update_processing_file for stage moves, marking a file lost/dead or cold or reactivating it, on-hold, target close date, assigning the processor, document statuses (received / requested / N/A / reopen / add a line), underwriting conditions (add / clear / waive) and the appraisal / title / insurance milestones -- several of these can go in ONE call. Find the file first with search_leads if you only have a name, and read the document names from get_lead_details before changing one. It only edits the file: it does not text or email the borrower, and it will not move a file to Closed / Funded (that stays in the CRM's stage menu). After it returns, say exactly what changed and, for a new document request or underwriting condition, remind her the borrower has not been notified yet. Use update_my_view when someone asks to change THEIR OWN screen (Pipeline columns, Cold / Lost column, Processing Board filter/sort/hidden checks, quiet days, phone start tab, hidden sidebar sections) -- never claim a view change happened unless that tool returned ok, and tell them to refresh the page to see it. For anything else about how the CRM looks or works that these tools can't do, say so in one line and offer to pass the request to Joe with email_team.\n\n" +
     "You still do NOT have: ad platform access, payments/spend, or any destructive/irreversible action (no deleting files, no changing pricing/guidelines). If asked for one of those, say plainly it isn't wired up rather than pretending.\n\n" +
     "Keep replies concise -- confirm what you actually did (per tool results), don't over-explain. If a tool result shows an error, say so plainly rather than claiming success. " +
     "CRITICAL: never describe an action (sent, triggered, created, updated, published) as done unless you actually called that exact tool THIS turn and its result confirmed success -- don't narrate an effect from context, from what Joe asked for, or from a tool you called for a different purpose. If you only updated a file and didn't call send_document, do not say anything was sent or triggered -- say what you'd need to do that as a separate, explicit step instead.\n\n" +
@@ -317,6 +318,58 @@ const TOOLS = [
         note: { type: "string" },
       },
       required: ["leadId", "note"],
+    },
+  },
+  {
+    name: "update_processing_file",
+    description: "PROCESSING-SIDE changes to an existing loan file (Erika and Joe): move the stage, mark it lost/dead or cold or reactivate it, put it on or take it off hold, set the target close date, assign the processor, change document statuses (received / requested / N/A waived / reopen / add a new document line), add/clear/waive underwriting conditions, and tick the appraisal / title / insurance milestones. Include ONLY what is being changed. This edits the file only -- it does NOT text or email the borrower (say so when you add a document request or an underwriting condition, and tell them to use the Documents tab or the file's Request buttons if the borrower needs to be notified). It will NOT move a file to Closed/Funded or Post-Closing (that fires payroll and review-request steps) -- tell them to use the stage menu in the CRM for that.",
+    input_schema: {
+      type: "object",
+      properties: {
+        leadId: { type: "string", description: "Loan file id (use search_leads first if you only have a name)" },
+        stage: { type: "string", enum: ["new", "attempting", "qualifying", "app_sent", "app_completed", "docs", "processing", "underwriting", "approved", "ctc"], description: "Move the file to this stage. approved = Conditional Approval, ctc = Clear to Close, docs = Doc Collection, app_completed = Application Completed." },
+        status: { type: "string", enum: ["lost", "cold", "reactivate"], description: "lost = mark the file dead; cold = park it as cold; reactivate = bring a cold/lost file back to active." },
+        lostReason: { type: "string", enum: ["rate-price", "didnt-qualify", "other-lender", "deal-fell-through", "unresponsive", "timeline", "changed-mind", "other"], description: "Required when status is lost." },
+        lostNote: { type: "string" },
+        onHold: { type: "boolean", description: "true = put the file on hold, false = take it off hold" },
+        holdNote: { type: "string" },
+        closeDate: { type: "string", description: "Target close date, YYYY-MM-DD" },
+        assignedProcessor: { type: "string", description: "Processor user id from the roster" },
+        documents: {
+          type: "array",
+          description: "Document line changes. name is matched against the file's existing document names (partial, case-insensitive).",
+          items: { type: "object", properties: { name: { type: "string" }, action: { type: "string", enum: ["received", "requested", "waived", "reopen", "add"] } }, required: ["name", "action"] },
+        },
+        uwConditions: {
+          type: "array",
+          description: "Underwriting conditions: add one (description), or clear / waive an existing one (match by id or part of its description).",
+          items: { type: "object", properties: { action: { type: "string", enum: ["add", "clear", "waive"] }, description: { type: "string" }, id: { type: "string" } }, required: ["action"] },
+        },
+        milestones: {
+          type: "object",
+          description: "Tick processing milestones (each stamps today's date).",
+          properties: { appraisalOrdered: { type: "boolean" }, appraisalConfirmed: { type: "boolean" }, titleOrdered: { type: "boolean" }, titleConfirmed: { type: "boolean" }, titleRequested: { type: "boolean" }, insuranceRequested: { type: "boolean" } },
+        },
+        note: { type: "string", description: "Optional note to log on the file's activity" },
+      },
+      required: ["leadId"],
+    },
+  },
+  {
+    name: "update_my_view",
+    description: "Change the CALLER'S OWN screen settings (nobody else's): which Pipeline columns show, whether the Cold / Lost column shows, the Processing Board's default filter, hidden checklist columns, sort order, quiet-days flag, which phone tab opens first, and which sidebar sections are hidden. Only include what is changing; anything omitted stays as it is. Pass pipelineStages as the COMPLETE list of columns to show (empty list = show every column). Stage keys: new (New Lead), attempting (Attempting Contact), qualifying (Contacted / Qualifying), app_sent (Application Sent), app_completed (Application Completed), docs (Doc Collection), processing, underwriting, approved (Conditional Approval), ctc (Clear to Close), closed (Closed / Funded), postclosing (Post-Closing).",
+    input_schema: {
+      type: "object",
+      properties: {
+        pipelineStages: { type: "array", items: { type: "string", enum: ["new", "attempting", "qualifying", "app_sent", "app_completed", "docs", "processing", "underwriting", "approved", "ctc", "closed", "postclosing"] } },
+        pipelineShowCold: { type: "boolean", description: "Show the Cold / Lost column on the Pipeline" },
+        boardDefaultFilter: { type: "string", enum: ["all", "me", "week", "borrower", "third", "quiet"] },
+        boardHiddenChecks: { type: "array", items: { type: "string", enum: ["Docs", "Title", "Insurance", "Appraisal", "Lender", "Conditions"] } },
+        boardSort: { type: "string", enum: ["urgency", "closeDate"] },
+        quietDays: { type: "integer", description: "2-14" },
+        mobileDefaultTab: { type: "string", enum: ["files", "messages", "team", "new", "today", "contacts"] },
+        hiddenNavItems: { type: "array", items: { type: "string", enum: ["pricer", "pipeline", "comms", "performance", "retargeting", "referrals", "repeat", "notifications", "portal", "messages", "teamchat", "email", "calendar", "leads"] }, description: "Complete list of sidebar sections to hide" },
+      },
     },
   },
   {
@@ -786,6 +839,134 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
     const { error } = await sb.from("leads").update({ activity }).eq("id", input.leadId as string);
     if (error) return { error: error.message };
     return { ok: true, leadId: input.leadId };
+  }
+  if (name === "update_my_view") {
+    // Whitelisted, type-checked merge into the CALLER'S OWN portal prefs only (same keys the CRM's own customizer writes).
+    const STAGE_KEYS = ["new", "attempting", "qualifying", "app_sent", "app_completed", "docs", "processing", "underwriting", "approved", "ctc", "closed", "postclosing"];
+    const NAV = ["pricer", "pipeline", "comms", "performance", "retargeting", "referrals", "repeat", "notifications", "portal", "messages", "teamchat", "email", "calendar", "leads"];
+    const { data: me } = await sb.from("users").select("portal_prefs").eq("id", caller.id).single();
+    const prefs: Record<string, unknown> = Object.assign({}, (me && me.portal_prefs) || {});
+    const changed: string[] = [];
+    if (Array.isArray(input.pipelineStages)) { prefs.pipelineStages = (input.pipelineStages as unknown[]).filter((x) => typeof x === "string" && STAGE_KEYS.includes(x as string)); changed.push("pipeline columns"); }
+    if (typeof input.pipelineShowCold === "boolean") { prefs.pipelineShowCold = input.pipelineShowCold; changed.push("Cold / Lost column"); }
+    if (["all", "me", "week", "borrower", "third", "quiet"].includes(String(input.boardDefaultFilter))) { prefs.boardDefaultFilter = input.boardDefaultFilter; changed.push("board filter"); }
+    if (Array.isArray(input.boardHiddenChecks)) { prefs.boardHiddenChecks = (input.boardHiddenChecks as unknown[]).filter((x) => ["Docs", "Title", "Insurance", "Appraisal", "Lender", "Conditions"].includes(String(x))); changed.push("hidden checklist columns"); }
+    if (["urgency", "closeDate"].includes(String(input.boardSort))) { prefs.boardSort = input.boardSort; changed.push("board sort"); }
+    const qd = Math.round(Number(input.quietDays)); if (qd >= 2 && qd <= 14) { prefs.quietDays = qd; changed.push("quiet days"); }
+    if (["files", "messages", "team", "new", "today", "contacts"].includes(String(input.mobileDefaultTab))) { prefs.mobileDefaultTab = input.mobileDefaultTab; changed.push("phone start tab"); }
+    if (Array.isArray(input.hiddenNavItems)) { prefs.hiddenNavItems = (input.hiddenNavItems as unknown[]).filter((x) => NAV.includes(String(x))); changed.push("hidden sidebar sections"); }
+    if (!changed.length) return { error: "nothing_to_change", detail: "No valid view setting was given." };
+    const { data: saved, error } = await sb.from("users").update({ portal_prefs: prefs }).eq("id", caller.id).select("id");
+    if (error) return { error: error.message };
+    if (!saved || !saved.length) return { error: "not_saved", detail: "Your account row wasn't found, so nothing was saved." };
+    return { ok: true, changed, saved: { pipelineStages: prefs.pipelineStages ?? "all", pipelineShowCold: prefs.pipelineShowCold ?? true }, note: "Saved. It shows the next time the CRM page is refreshed (or on their next login)." };
+  }
+  if (name === "update_processing_file") {
+    if (!caller.isOwner && caller.role !== "processor") return { error: "not_authorized", detail: "Processing changes are for the processor and the owner." };
+    const leadId = String(input.leadId || "");
+    const { data: lead } = await sb.from("leads").select("id,name,stage,status,activity,documents,uw_conditions,assigned_to,assigned_processor,close_date,on_hold").eq("id", leadId).single();
+    if (!lead) return { error: "lead_not_found" };
+    const today = new Date().toISOString().slice(0, 10);
+    const who = "AI Assistant (" + caller.name + ")";
+    const activity: Array<Record<string, unknown>> = Array.isArray(lead.activity) ? lead.activity as Array<Record<string, unknown>> : [];
+    const upd: Record<string, unknown> = {};
+    const done: string[] = [];
+    const STAGE_LABEL: Record<string, string> = { new: "New Lead", attempting: "Attempting Contact", qualifying: "Contacted / Qualifying", app_sent: "Application Sent", app_completed: "Application Completed", docs: "Docs Collection", processing: "Processing", underwriting: "Underwriting", approved: "Conditional Approval", ctc: "Clear to Close", closed: "Closed / Funded", postclosing: "Post-Closing" };
+    const LOST_LABEL: Record<string, string> = { "rate-price": "Rate/price", "didnt-qualify": "Didn't qualify", "other-lender": "Went with a different lender", "deal-fell-through": "Deal fell through", unresponsive: "Unresponsive", timeline: "Timeline", "changed-mind": "Changed their mind", other: "Other" };
+    const notifyLo = async (text: string) => {
+      if (lead.assigned_to && lead.assigned_to !== caller.id) await sb.from("notifications").insert({ id: "N" + crypto.randomUUID().slice(0, 8), to_user_id: lead.assigned_to, lead_id: lead.id, kind: "file-dead", text, date: today, read: false });
+    };
+
+    // Lost / cold / reactivate come first so a stage move in the same call doesn't fight with them.
+    if (input.status === "lost") {
+      const reason = String(input.lostReason || "");
+      if (!LOST_LABEL[reason]) return { error: "missing_lostReason", detail: "Ask which reason fits: " + Object.keys(LOST_LABEL).join(", ") };
+      Object.assign(upd, { status: "lost", stage: "lost", lost_reason: reason, lost_reason_note: String(input.lostNote || "") });
+      activity.push({ date: today, type: "system", text: "Marked lost / dead — " + LOST_LABEL[reason] + (input.lostNote ? (": " + input.lostNote) : ""), author: who });
+      await notifyLo(caller.name + " marked " + lead.name + "'s file dead (" + LOST_LABEL[reason] + ")" + (input.lostNote ? (": " + input.lostNote) : "") + ".");
+      done.push("marked lost (" + LOST_LABEL[reason] + ")");
+    } else if (input.status === "cold") {
+      upd.status = "cold"; activity.push({ date: today, type: "system", text: "Marked cold", author: who }); done.push("marked cold");
+    } else if (input.status === "reactivate") {
+      upd.status = "active"; if (lead.stage === "lost") upd.stage = "qualifying";
+      activity.push({ date: today, type: "system", text: "Reactivated", author: who }); done.push("reactivated" + (lead.stage === "lost" ? " (back at Contacted / Qualifying)" : ""));
+    }
+    if (input.stage !== undefined && input.status !== "lost") {
+      const stg = String(input.stage);
+      if (stg === "closed" || stg === "postclosing") return { error: "use_crm_for_closing", detail: "Moving a file to Closed / Funded fires payroll and review requests, so do that from the stage menu on the file in the CRM." };
+      if (!STAGE_LABEL[stg]) return { error: "invalid_stage" };
+      upd.stage = stg; if (!["lost", "cold"].includes(String(input.status))) upd.status = "active";
+      if (["docs", "processing", "underwriting", "approved", "ctc"].includes(stg) && !lead.assigned_processor) upd.assigned_processor = caller.role === "processor" ? caller.id : "proc-erika";
+      activity.push({ date: today, type: "stage", text: "Stage moved: " + (STAGE_LABEL[lead.stage] || lead.stage) + " → " + STAGE_LABEL[stg], author: who });
+      done.push("stage → " + STAGE_LABEL[stg]);
+      if (stg === "docs") done.push("(the borrower portal invite is NOT sent from here — use the CRM stage move if it still needs sending)");
+    }
+    if (typeof input.onHold === "boolean") {
+      upd.on_hold = input.onHold; activity.push({ date: today, type: "system", text: input.onHold ? ("Put on hold" + (input.holdNote ? (": " + input.holdNote) : "")) : "Taken off hold", author: who });
+      done.push(input.onHold ? "put on hold" : "taken off hold");
+    }
+    if (input.closeDate) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(input.closeDate))) return { error: "bad_closeDate", detail: "Use YYYY-MM-DD." };
+      upd.close_date = input.closeDate; done.push("target close date " + input.closeDate);
+    }
+    if (input.assignedProcessor) {
+      const { data: p } = await sb.from("users").select("id,name,role").eq("id", String(input.assignedProcessor)).single();
+      if (!p) return { error: "invalid_assignedProcessor" };
+      upd.assigned_processor = p.id; done.push("processor → " + p.name);
+    }
+    if (Array.isArray(input.documents) && input.documents.length) {
+      const docs: Array<Record<string, unknown>> = Array.isArray(lead.documents) ? lead.documents as Array<Record<string, unknown>> : [];
+      for (const ch of input.documents as Array<Record<string, unknown>>) {
+        const nm = String(ch.name || "").trim(), act = String(ch.action || "");
+        if (!nm) continue;
+        if (act === "add") {
+          docs.push({ name: nm, status: "requested", requestedAt: today, requestedDate: today, addedBy: who });
+          activity.push({ date: today, type: "document", text: "Document line added (requested): " + nm, author: who }); done.push("added document: " + nm); continue;
+        }
+        const hits = docs.filter((d) => String(d.name || "").toLowerCase().includes(nm.toLowerCase()));
+        if (hits.length !== 1) return { error: hits.length ? "ambiguous_document" : "document_not_found", detail: hits.length ? ("Several documents match \"" + nm + "\": " + hits.map((d) => d.name).join(" | ") + " — use a more specific name.") : ("No document on this file matches \"" + nm + "\". Existing: " + docs.map((d) => d.name).join(" | ")) };
+        const d = hits[0];
+        if (act === "received") { d.status = "received"; d.receivedAt = today; d.receivedDate = today; }
+        else if (act === "requested") { d.status = "requested"; d.requestedAt = today; d.requestedDate = today; }
+        else if (act === "waived") { d.status = "waived"; d.waivedAt = today; d.waivedBy = caller.name; }
+        else if (act === "reopen") { d.status = "suggested"; delete d.waivedAt; delete d.waivedBy; }
+        else return { error: "invalid_document_action" };
+        activity.push({ date: today, type: "document", text: String(d.name) + " marked " + (act === "waived" ? "N/A" : act) + " by " + who, author: who });
+        done.push(String(d.name) + " → " + (act === "waived" ? "N/A" : act));
+      }
+      upd.documents = docs;
+    }
+    if (Array.isArray(input.uwConditions) && input.uwConditions.length) {
+      const conds: Array<Record<string, unknown>> = Array.isArray(lead.uw_conditions) ? lead.uw_conditions as Array<Record<string, unknown>> : [];
+      for (const ch of input.uwConditions as Array<Record<string, unknown>>) {
+        const act = String(ch.action || "");
+        if (act === "add") {
+          const desc = String(ch.description || "").trim(); if (!desc) return { error: "missing_condition_description" };
+          conds.push({ id: "uwc-" + Date.now().toString(36) + conds.length, description: desc, createdAt: today, createdBy: who, status: "open", fileUrl: null, fileName: null, borrowerFileUrl: null, borrowerFileName: null });
+          activity.push({ date: today, type: "note", text: "Underwriting condition added: " + desc, author: who }); done.push("condition added: " + desc.slice(0, 60));
+        } else if (act === "clear" || act === "waive") {
+          const key = String(ch.id || ch.description || "").toLowerCase();
+          const hits = conds.filter((c) => c.status !== "cleared" && c.status !== "waived" && (String(c.id || "").toLowerCase() === key || String(c.description || "").toLowerCase().includes(key)));
+          if (hits.length !== 1) return { error: hits.length ? "ambiguous_condition" : "condition_not_found", detail: "Open conditions: " + conds.filter((c) => c.status !== "cleared" && c.status !== "waived").map((c) => c.id + " = " + c.description).join(" | ") };
+          hits[0].status = act === "clear" ? "cleared" : "waived"; hits[0][act === "clear" ? "clearedAt" : "waivedAt"] = today;
+          activity.push({ date: today, type: "note", text: "Underwriting condition " + (act === "clear" ? "cleared" : "waived") + ": " + String(hits[0].description), author: who }); done.push("condition " + (act === "clear" ? "cleared" : "waived") + ": " + String(hits[0].description).slice(0, 60));
+        } else return { error: "invalid_condition_action" };
+      }
+      upd.uw_conditions = conds;
+    }
+    const ms = (input.milestones || {}) as Record<string, unknown>;
+    const MS: Array<[string, Record<string, unknown>, string]> = [
+      ["appraisalOrdered", { appraisal_ordered: true, appraisal_ordered_at: today }, "appraisal ordered"], ["appraisalConfirmed", { appraisal_confirmed: true, appraisal_confirmed_at: today }, "appraisal confirmed"],
+      ["titleOrdered", { title_ordered: true, title_ordered_at: today }, "title ordered"], ["titleConfirmed", { title_confirmed: true, title_confirmed_at: today }, "title confirmed"],
+      ["titleRequested", { title_requested_at: today }, "title requested"], ["insuranceRequested", { insurance_requested_at: today }, "insurance requested"],
+    ];
+    for (const [k, cols, label] of MS) if (ms[k] === true) { Object.assign(upd, cols); activity.push({ date: today, type: "system", text: "Marked: " + label, author: who }); done.push(label); }
+    if (input.note) { activity.push({ date: today, type: "note", text: String(input.note), author: who }); done.push("note logged"); }
+    if (!done.length) return { error: "nothing_to_change", detail: "No change was given." };
+    upd.activity = activity;
+    const { error } = await sb.from("leads").update(upd).eq("id", lead.id);
+    if (error) return { error: error.message };
+    return { ok: true, leadId: lead.id, name: lead.name, changes: done, borrowerNotified: false, note: "Saved to the file. The borrower was not texted or emailed by this." };
   }
   if (name === "email_team" || name === "text_team") {
     let query = sb.from("users").select("id,name,email,phone,role").neq("id", "demo").neq("id", "demo-processor");
