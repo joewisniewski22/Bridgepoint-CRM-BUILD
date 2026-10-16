@@ -11,7 +11,9 @@
 
 const TENANT = "cf53a247-d337-47ba-be5a-1efb52ec417b";
 const CLIENT_IDS = ["5a085745-2b95-46e5-80f7-7efade63dc4d", "6e83e819-5748-4c9f-b86b-afc738d9beef"]; // "Broker Portal Client" first (the portal's own sign-in)
-const API = "https://www.generatevelocity.com/api/";
+// 10/16/26: Velocity rebuilt the broker portal as a new web app overnight; the same API now lives on its own host (BP_API in the app's public config), and www.generatevelocity.com/api/ is gone (405).
+const HOST = "https://vccbrokerportalprod.azurewebsites.net/";
+const API = HOST + "api/";
 
 let tokenMemo: { token: string; exp: number } | null = null;
 
@@ -39,7 +41,7 @@ export async function velocityToken(fresh = false): Promise<string> {
 let xsrfMemo: { cookie: string; token: string; at: number } | null = null;
 async function velocityXsrf(): Promise<{ cookie: string; token: string }> {
   if (xsrfMemo && Date.now() - xsrfMemo.at < 20 * 60000) return xsrfMemo;
-  const r = await fetch("https://www.generatevelocity.com/", { redirect: "follow" });
+  const r = await fetch(HOST, { redirect: "follow" });
   const setc = (r.headers as any).getSetCookie ? (r.headers as any).getSetCookie() : [r.headers.get("set-cookie") || ""];
   const pairs = setc.flatMap((c: string) => c.split(/,(?=\s*[^;,]+=)/)).map((c: string) => c.split(";")[0].trim()).filter(Boolean);
   const tokPair = pairs.find((p: string) => p.startsWith("XSRF-TOKEN="));
