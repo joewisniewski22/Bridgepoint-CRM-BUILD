@@ -14,6 +14,7 @@
 // in-house paper and Joe hands us the sheet directly every time it changes).
 import { RCN_GEO_DATE, RCN_KILLED, RCN_REDUCE, RCN_TARGET, RCN_TARGET_NAMES } from "./rcn_geo.ts";
 import { checkVelocity, velocityGet, velocityPost } from "./velocity.ts";
+import { checkRoc } from "./roc.ts";
 import { checkLend } from "./lend.ts";
 import { checkHomeXpress } from "./homex.ts";
 import { checkDominion } from "./dominion.ts";
@@ -2084,6 +2085,7 @@ const LENDERS: Array<{ key: string; check: (s: Scenario) => Promise<LenderResult
   { key: "lend", check: (s: Scenario) => checkLend(s as any) },
   { key: "homex", check: (s: Scenario) => checkHomeXpress(s as any, stateFromAddress) },
   { key: "dominion", check: (s: Scenario) => checkDominion(s as any, stateFromAddress) },
+  { key: "roc", check: (s: Scenario) => checkRoc(s as any, stateFromAddress) },
   { key: "silverhill", check: (s: Scenario) => Promise.resolve(checkSilverHill(s as any)) },
 ];
 // Fallback lenders (Joe 2026-10-14): only shown when no other lender places the scenario, so they stay out of scenarios the others already cover.

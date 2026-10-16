@@ -149,7 +149,7 @@ const TOOLS = [
         entityType: { type: "string", enum: ["LLC", "Corporation", "Individual"] },
         rentalType: { type: "string", enum: ["ltr", "str"] },
         termMonths: { type: "number" },
-        onlyLender: { type: "string", enum: ["constructive", "rcn", "kiavi", "ad", "nextres", "velocity", "lend", "homex", "dominion"], description: "STAFF ONLY (Joe, Fiore, Erika): price the deal through just this one lender to answer 'what would Kiavi / RCN / A&D / NextRes / Velocity / LEND / HomeXpress / Dominion / Constructive do on this?'. Ignored for everyone else." },
+        onlyLender: { type: "string", enum: ["constructive", "rcn", "kiavi", "ad", "nextres", "velocity", "lend", "homex", "dominion", "roc"], description: "STAFF ONLY (Joe, Fiore, Erika): price the deal through just this one lender to answer 'what would Kiavi / RCN / A&D / NextRes / Velocity / LEND / HomeXpress / Dominion / Constructive do on this?'. Ignored for everyone else." },
       },
       required: ["loanType", "propertyAddress", "creditScore"],
     },
@@ -537,7 +537,7 @@ async function runTool(name: string, input: Record<string, unknown>, caller: Cal
       pointsCharged: 0, guarantorFirstName: "Scenario", guarantorLastName: "Check", decliningMarket: "no", vacationArea: "no", creditEvent: "no", appraisalTransfer: "no", plansReady: "no",
     };
     // Joe, Fiore and Erika can ask what ONE lender would do ("what would Kiavi do on this?"); everyone else always gets the blended Bridgepoint view.
-    const only = isInsider(caller) && ["constructive", "rcn", "kiavi", "ad", "nextres", "velocity", "lend", "homex", "dominion"].includes(String(input.onlyLender || "")) ? [String(input.onlyLender)] : null;
+    const only = isInsider(caller) && ["constructive", "rcn", "kiavi", "ad", "nextres", "velocity", "lend", "homex", "dominion", "roc"].includes(String(input.onlyLender || "")) ? [String(input.onlyLender)] : null;
     const runPricer = async (sc: Record<string, unknown>) => {
       const res = await fetch(SUPABASE_URL + "/functions/v1/check-live-rates", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify(only ? { lead: sc, lenders: only } : { lead: sc }) }).then((r) => r.json()).catch(() => null);
       return res && res.ok ? (res.results || []) as any[] : null;
