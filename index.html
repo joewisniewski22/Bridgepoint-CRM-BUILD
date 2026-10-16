@@ -6115,8 +6115,10 @@ function ensureStaffLeadPolling(leadId){
       var idx = state.leads.findIndex(function(l){ return l.id === leadId; });
       if (idx === -1) return;
       var old = state.leads[idx];
+      if (syncTimer || syncInFlight || leadIsDirty(old)) return;   // keep your unsaved change; it saves, then the next poll refreshes
       if (JSON.stringify(old) === JSON.stringify(fresh)) return;
       state.leads[idx] = fresh;
+      rememberSynced([fresh]);
       render();
     });
   }, 15000);
@@ -6438,9 +6440,12 @@ function ensureGlobalPolling(){
   if (globalPollTimer || !sb) return;
   globalPollTimer = setInterval(function(){
     if (!ui.loggedIn || ui.publicApply || ui.publicBorrower || ui.publicSign || ui.publicBooking || ui.publicShowcase) return;
+    // Never refresh while one of your own changes is queued or saving (it used to wipe the change; see rememberSynced).
+    if (syncTimer || syncInFlight) return;
     sb.from("leads").select("*").then(function(res){
       if (res.error || !res.data) return;
-      var fresh = res.data.map(rowToLead);
+      if (syncTimer || syncInFlight) return;   // a change was made while this download was running
+      var fresh = mergeServerLeads(res.data);
       if (JSON.stringify(state.leads||[]) === JSON.stringify(fresh)) return;
       state.leads = fresh;
       // Never force a full page rebuild out from under someone actively
@@ -6469,7 +6474,7 @@ function hydrateFromSupabase(){
   });
   sb.from("leads").select("*").then(function(res){
     if (res.error){ console.error("lead fetch error", res.error); return; }
-    if (res.data){ state.leads = res.data.map(rowToLead); }
+    if (res.data){ state.leads = res.data.map(rowToLead); rememberSynced(state.leads); }
     if (ui.pendingDeepLinkLead){
       var pl = leadById(ui.pendingDeepLinkLead);
       if (pl){
@@ -6766,6 +6771,25 @@ function isBirthdayToday(lead){
 // server copy. The poll now refuses to overwrite anything while a sync
 // is queued or in flight, closing that window instead of racing it.
 var syncInFlight = false;
+// Unsaved-change tracking (Joe 2026-10-16: "I clicked apply and the information is gone"). The CRM keeps every lead in the browser, saves them all with one
+// upsert, and a background poll used to REPLACE all of them with the server's copy every 25 seconds -- without asking whether a change of yours was still
+// waiting to save. A change made inside that window was wiped (and a later save could write the old copy back over someone else's newer edit).
+// Now: syncedSnap remembers what the server last had for each lead; a lead whose current row differs is "dirty" (unsaved). Polls never overwrite a dirty
+// lead, saves send only dirty leads, and a failed save is reported on screen instead of vanishing into the console.
+var syncedSnap = {};
+function rowSnap(l){ try { return JSON.stringify(leadToRow(l)); } catch (e) { return null; } }
+function rememberSynced(leads){ (leads || []).forEach(function(l){ if (l && l.id){ var s = rowSnap(l); if (s !== null) syncedSnap[l.id] = s; } }); }
+function leadIsDirty(l){ if (!l || !l.id) return false; var s = syncedSnap[l.id]; return s === undefined ? true : rowSnap(l) !== s; }
+// Server rows in, but never over a lead with unsaved local changes (and leads created here that the server hasn't seen stay).
+function mergeServerLeads(rows){
+  var fresh = (rows || []).map(rowToLead), freshById = {}, localById = {};
+  fresh.forEach(function(f){ freshById[f.id] = f; });
+  (state.leads || []).forEach(function(l){ localById[l.id] = l; });
+  var out = fresh.map(function(f){ var loc = localById[f.id]; if (loc && leadIsDirty(loc)) return loc; rememberSynced([f]); return f; });
+  (state.leads || []).forEach(function(l){ if (!freshById[l.id] && leadIsDirty(l)) out.unshift(l); });
+  return out;
+}
+var syncRetries = 0;
 // Document storage. Staff talk to storage directly (signed-in session). The public borrower page has no
 // storage access of its own: portal-api checks the file's token and hands back a one-time upload slot or
 // a short-lived link, only inside that file's own folder.
@@ -6799,7 +6823,25 @@ function syncToSupabase(){
     return;
   }
   if (state.leads && state.leads.length){
-    pending.push(sb.from("leads").upsert(state.leads.map(leadToRow)).then(function(res){ if (res.error) console.error("lead sync error", res.error); }));
+    // Only the leads that actually changed here are sent (was: all of them every time).
+    var changedRows = [], snaps = {};
+    state.leads.forEach(function(l){ var s = rowSnap(l); if (s !== null && syncedSnap[l.id] !== s){ changedRows.push(leadToRow(l)); snaps[l.id] = s; } });
+    if (changedRows.length){
+      pending.push(sb.from("leads").upsert(changedRows).then(function(res){
+        if (!res.error){ Object.keys(snaps).forEach(function(id){ syncedSnap[id] = snaps[id]; }); syncRetries = 0; return; }
+        console.error("lead sync error", res.error);
+        var msg = String((res.error && (res.error.message || res.error.code)) || "unknown error").slice(0, 120);
+        if (/jwt|expired|401|not authenticated/i.test(msg)){ showToast("⚠ Your sign-in expired, so your last change was NOT saved. Refresh the page and sign in again.", true); return; }
+        // One bad file shouldn't block the rest: save them one at a time, say which one fails, and keep retrying the failed ones.
+        return Promise.all(changedRows.map(function(r){
+          return sb.from("leads").upsert(r).then(function(rr){
+            if (!rr.error){ syncedSnap[r.id] = snaps[r.id]; return; }
+            console.error("lead sync error for " + r.id, rr.error);
+            showToast("⚠ Couldn't save changes to " + (r.name || r.id) + ": " + String(rr.error.message || rr.error.code || "error").slice(0, 100) + ". Your edit is kept on screen; tell Joe.", true);
+          });
+        })).then(function(){ if (syncRetries < 3){ syncRetries++; setTimeout(scheduleSync, 15000); } });
+      }));
+    }
   }
   if (state.notifications && state.notifications.length){
     pending.push(sb.from("notifications").upsert(state.notifications.map(notifToRow)).then(function(res){ if (res.error) console.error("notification sync error", res.error); }));
@@ -11807,7 +11849,7 @@ function refreshLeadsNow(){
   if (!sb) return;
   sb.from("leads").select("*").then(function(res){
     if (res.error || !res.data){ showToast("Couldn't refresh — check your connection"); return; }
-    state.leads = res.data.map(rowToLead);
+    state.leads = mergeServerLeads(res.data);
     showToast("Updated");
     render();
   });
