@@ -6904,6 +6904,58 @@ function logCall(leadId, outcome, notes, callback){
   if (sb && lead.phone && (outcome === "no-answer" || outcome === "left-voicemail")) sendMissedCallFollowUp(lead);
   // Joe 10/12: AI recap built from the loan officer's own notes (nothing hears or records the call).
   if (sb && notes && notes.trim().length >= 25) requestCallRecap(lead, loggedAttempt, outcome, notes);
+  // Joe 10/16: every note is read -- dates and promised actions become follow-ups, facts are remembered for briefs and messages.
+  if (sb && notes && notes.trim().length >= 12) requestNoteScan(lead, notes, outcome, "call");
+}
+// Sends a note to the scan-notes function (reads it once; books follow-ups for the file's loan officer; saves what it learned).
+function requestNoteScan(lead, notes, outcome, source){
+  if (!sb || !lead || !notes || String(notes).trim().length < 12) return;
+  sb.functions.invoke("scan-notes", { body: { leadId: lead.id, source: source || "call", notes: notes, outcome: outcome || null } }).then(function(res){
+    var d = res && res.data;
+    if (!d || !d.ok || d.skipped) return;
+    var f = d.followups || [];
+    if (f.length){
+      sb.from("followup_tasks").select("*").in("id", f.map(function(x){ return x.id; })).then(function(tr){
+        (tr.data || []).forEach(function(r){ if (!taskById(r.id)){ state.tasks = state.tasks || []; state.tasks.push(rowToTask(r)); } });
+        render();
+      });
+      lead.activity = lead.activity || [];
+      lead.activity.push({ date: todayISO(), type: "system", text: "Notes scanned: booked " + f.map(function(x){ return x.title.replace(/ — .*$/, "") + " (" + x.label + (x.inferred ? ", from your note" : "") + ")"; }).join("; ") + ". Cancel any of these under Follow-ups on this file.", author: "System" });
+      persist();
+      showToast("Follow-up booked from your note: " + f[0].label + (f.length > 1 ? " (+" + (f.length - 1) + " more)" : ""));
+    }
+    if ((d.insights || []).length && ui.insights) delete ui.insights[lead.id];   // reload the "What the notes say" card next time it shows
+  }).catch(function(){});
+}
+var INSIGHT_LABELS = { preference:"Prefers", personal:"Personal", objection:"Concern", timeline:"Timeline", deal_fact:"Deal", issue:"Open issue", commitment:"Promised", sentiment:"Mood", deal_update:"Suggested file change" };
+function insightsFor(lead){
+  ui.insights = ui.insights || {};
+  var e = ui.insights[lead.id];
+  if (!e){
+    e = ui.insights[lead.id] = { status: "loading", rows: [] };
+    if (sb) sb.from("lead_insights").select("id,kind,text,created_at").eq("lead_id", lead.id).eq("active", true).order("created_at", { ascending: false }).limit(30).then(function(r){
+      e.rows = (r && r.data) || []; e.status = "done"; if (e.rows.length) render();
+    }).catch(function(){ e.status = "done"; });
+  }
+  return e;
+}
+function renderLeadInsights(lead){
+  var e = insightsFor(lead);
+  if (!e.rows.length) return "";
+  var rows = e.rows.map(function(r){
+    return '<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line,#eee)"><div style="flex:1"><b>' + esc(INSIGHT_LABELS[r.kind] || r.kind) + ':</b> ' + esc(r.text) +
+      ' <span class="footnote" style="padding:0">· ' + esc(fmtDate(String(r.created_at).slice(0, 10))) + '</span></div>' +
+      '<button class="btn btn-sm btn-ghost" type="button" data-action="hide-insight" data-lead="' + lead.id + '" data-id="' + r.id + '" title="Wrong or no longer true — stop using this">✕</button></div>';
+  }).join("");
+  return '<div class="section-head" style="margin-top:20px"><h2>What the notes say</h2></div><div class="panel panel-pad">' + rows +
+    '<div class="footnote" style="padding:8px 0 0">Pulled from your call and file notes. Call briefs and automatic messages use these so they sound like they know the client. Remove anything that is wrong.</div></div>';
+}
+function hideInsight(leadId, id){
+  var lead = leadById(leadId); if (!lead || !sb) return;
+  sb.from("lead_insights").update({ active: false }).eq("id", id).then(function(){
+    if (ui.insights) delete ui.insights[leadId];
+    render();
+  });
 }
 function requestCallRecap(lead, attempt, outcome, notes){
   sb.functions.invoke("summarize-call", { body: { leadId: lead.id, outcome: outcome, notes: notes } }).then(function(res){
@@ -8538,6 +8590,7 @@ function addNote(leadId, text){
   lead.activity = lead.activity || [];
   lead.activity.push({ date:todayISO(), type:"note-manual", text:text, author: currentUser().name });
   persist();
+  requestNoteScan(lead, text, null, "note");   // Joe 10/16: file notes are read too
 }
 
 function setFollowUp(leadId, date, note){
@@ -15251,7 +15304,7 @@ function renderTabScenario(lead){
     field("Monthly Payment" + (RTL_AUTO_LOAN_TYPES.indexOf(lead.loanType)!==-1 ? " (interest only)" : " (P&I)"), termSheetMonthlyPayment(lead) ? fmtUSD(termSheetMonthlyPayment(lead)) : "—", true) +
     field("Exit Strategy", esc(lead.exitStrategy||"—")) +
     field("Target Close Date", fmtDate(lead.closeDate)) +
-  '</div>' + renderLeadFollowups(lead) + renderSubmitForReview(lead) + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderInternalLenderDocs(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalyzerPanel(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
+  '</div>' + renderLeadFollowups(lead) + renderLeadInsights(lead) + renderSubmitForReview(lead) + renderLoanDetailsEditor(lead) + renderOutsideTermSheetUpload(lead) + renderInternalLenderDocs(lead) + renderGuidelineCheck(lead) + renderPricingInputsEditor(lead) + renderPricer(lead) + renderDealAnalyzerPanel(lead) + renderDealAnalysis(lead) + renderScopeOfWork(lead);
 }
 function renderSubmitForReview(lead){
   if (isLO()){
@@ -22400,6 +22453,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "send-deal-analyzer"){ sendDealAnalyzer(t.dataset.lead); }
   else if (action === "open-analyzer"){ openAnalyzerDrawer(t.dataset.lead); }
   else if (action === "open-followup"){ openFollowup(t.dataset.lead); }
+  else if (action === "hide-insight"){ hideInsight(t.dataset.lead, t.dataset.id); }
   else if (action === "conf-open"){ openConference(t.dataset.lead); }
   else if (action === "conf-start"){ confStart(t.dataset.lead); }
   else if (action === "conf-add"){ confAdd(); }

@@ -502,7 +502,19 @@ function fallbackBrief(l, plan) {
     text_after: `Great talking with you, ${first_}. As discussed, [next step]. I'll follow up ${"[day]"}.`,
   };
 }
+// What the scan-notes function has learned from staff notes on this file (Joe 2026-10-16: the AI learns from call notes for custom communication).
+// forClient = text going to the borrower: leave out internal-only kinds (issues, mood, suggested file changes).
+async function insightsFor(leadId, forClient) {
+  try {
+    const { data } = await sb.from("lead_insights").select("kind,text,created_at").eq("lead_id", leadId).eq("active", true).order("created_at", { ascending: false }).limit(14);
+    let rows = data || [];
+    if (forClient) rows = rows.filter((r) => ["preference", "personal", "timeline", "commitment", "deal_fact"].indexOf(r.kind) !== -1);
+    const LBL = { preference: "Prefers", personal: "Personal", objection: "Concern", timeline: "Timeline", deal_fact: "Deal", issue: "OPEN ISSUE", commitment: "Promised", sentiment: "Mood", deal_update: "Suggested file change" };
+    return rows.map((r) => "- " + (LBL[r.kind] || r.kind) + " (" + String(r.created_at).slice(0, 10) + "): " + r.text).join("\n");
+  } catch (_e) { return ""; }
+}
 async function makeBrief(l, plan, lo) {
+  const learned = await insightsFor(l.id, false);
   const lang = l.preferred_language === "es" ? "Spanish" : l.preferred_language === "vi" ? "Vietnamese" : "English";
   const prompt = `You are a sales coach writing a 20-second call brief for ${lo.name}, a loan officer at Bridgepoint Lending. Bridgepoint makes BUSINESS-PURPOSE real estate investor loans only (DSCR rentals, fix & flip, bridge, ground-up construction, portfolio) — never consumer mortgages, never use consumer-mortgage terms.
 Today is ${etParts().date}. The loan officer is about to follow up with an investor. Use ONLY the facts below; never invent rates, numbers, approvals, or promises.
@@ -521,7 +533,7 @@ ${timelineFacts(l, Date.now())}
 
 RECENT CONVERSATION / NOTES
 ${recentConversation(l) || "(nothing logged yet)"}
-
+${learned ? "\nWHAT THE TEAM'S NOTES HAVE TAUGHT US ABOUT THIS CLIENT (durable facts: weave them into the opening, recap and questions; respect their stated preferences; any OPEN ISSUE must be raised or resolved on this call and appear in next_step; never contradict these):\n" + learned + "\n" : ""}
 Write the brief in ${lang} as strict JSON with these keys (keep each short and conversational, no markdown):
 "why_now" (max 140 chars: why this call matters today, referencing a concrete fact like days since application),
 "recap" (max 260 chars: what we know and what was discussed last time),
@@ -541,6 +553,7 @@ No emojis anywhere. Return ONLY the JSON.`;
 
 // AI-written borrower touch
 async function makeTouch(touch, l, lo, sit, anchorLabel) {
+  const learnedClient = await insightsFor(l.id, true);
   const bookingLink = CLIENT_URL + "?book=" + l.assigned_to + "&forLead=" + l.id;
   const appLink = CLIENT_URL + "?apply=" + l.id + "&t=" + (l.application_token || "");
   const lang = l.preferred_language === "es" ? "Spanish" : l.preferred_language === "vi" ? "Vietnamese" : "English";
@@ -550,6 +563,7 @@ Situation: ${SIT[sit].label}. Goal of this message: ${touch.angle}
 What we know: ${leadFacts(l).split("\n").slice(0, 8).join("; ")}.
 ${timelineFacts(l, Date.now()).split("\n").join("; ")}
 ${exp ? "Their term sheet is valid through " + exp + "." : ""}
+${learnedClient ? "Things they have told our team before (make the message feel personal by using ONE of these naturally if it fits; follow any contact preference, e.g. keep it short if they dislike long messages; never recite a list, never say we keep notes):\n" + learnedClient : ""}
 ${touch.app || sit === "docs" ? "Application / portal link to include: " + appLink : "Booking link you may include if it fits: " + bookingLink}
 Never quote a rate, fee, approval or closing time unless it is stated above. Never invent facts or statistics. Do not say you are automated. ${touch.ch === "email" ? "Reply with the email body only (no subject line)." : "Reply with ONLY the message text."}`;
   let body = await claude(TOUCH_MODEL, prompt, 360);
@@ -578,6 +592,12 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => ({}));
   const { data: auth } = await sb.from("ad_followup_auth").select("secret").eq("id", 1).single();
   if (!auth || body.secret !== auth.secret) return new Response(JSON.stringify({ error: "not_authorized" }), { status: 403, headers: { "Content-Type": "application/json" } });
+  // Notes scanner catch-all (Joe 2026-10-16): every few minutes, read recent staff notes nobody has scanned yet (mobile, AI assistant, imports...).
+  // Runs in its own invocation so it can't eat this run's time budget.
+  try {
+    const sweepP = fetch(SUPABASE_URL + "/functions/v1/scan-notes", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + SERVICE_ROLE_KEY }, body: JSON.stringify({ sweep: true }) }).catch(() => null);
+    if (typeof EdgeRuntime !== "undefined" && EdgeRuntime && EdgeRuntime.waitUntil) EdgeRuntime.waitUntil(sweepP);
+  } catch (_e) { /* the sweep is best-effort */ }
   const { data: cfgRow } = await sb.from("followup_config").select("*").eq("id", 1).single();
   if (cfgRow) cfg = cfgRow;
   if (cfg.mode === "off" && !body.dry) return new Response(JSON.stringify({ ok: true, mode: "off" }), { headers: { "Content-Type": "application/json" } });

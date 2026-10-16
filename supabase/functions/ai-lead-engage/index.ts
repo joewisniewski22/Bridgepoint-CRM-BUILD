@@ -168,6 +168,12 @@ Deno.serve(async (req: Request) => {
       ? ("Additional guidance learned from real conversion data across all conversations, follow this: " + engagementConfig.messaging_guidance + " ")
       : "";
 
+    // What the team's own call notes have taught us about this person (scan-notes, Joe 2026-10-16) -- so the AI texts like someone who knows them.
+    // Internal-only kinds (issues, mood, suggested file changes) are left out because this text goes to the borrower.
+    const { data: insightRows } = await sb.from("lead_insights").select("kind,text").eq("lead_id", leadId).eq("active", true).in("kind", ["preference", "personal", "timeline", "commitment", "deal_fact"]).order("created_at", { ascending: false }).limit(10);
+    const learnedNotes = (insightRows && insightRows.length)
+      ? ("What our team already knows about them from earlier calls (use ONE naturally if it fits, follow any stated contact preference such as short messages or texts over calls, never recite a list and never say we keep notes): " + insightRows.map((r: { kind: string; text: string }) => r.text).join(" | ") + ". ")
+      : "";
     const bookingLink = CLIENT_URL + "?book=" + lead.assigned_to + "&forLead=" + leadId;
     const hasLoanType = !!lead.loan_type;
     const alreadyApplied = !!lead.application_sent_at;
@@ -181,6 +187,7 @@ Deno.serve(async (req: Request) => {
             : "Their loan type is NOT yet known. Before offering or sending an application, find out what type of financing they need (fix & flip, DSCR/rental, ground-up construction, etc.) -- never set readyForApplication true and never offer to send the application until you know this, since sending the wrong application type would confuse them.")) +
       " Once they seem ready to talk (or if the conversation has gone back and forth a couple times with no clear next step), send them this exact booking link so they can grab a real time slot themselves instead of a vague \"let's hop on a call\": " + bookingLink + " -- don't send it on literally the first message unless they ask to schedule directly. " +
       pricingGuidance +
+      learnedNotes +
       messagingGuidance +
       (rateNote ? (rateNote + " ") : "") +
       (awaitingLanguage
