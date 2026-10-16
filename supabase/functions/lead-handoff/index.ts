@@ -13,8 +13,8 @@
 //   been called by noon, Joe gets a text (alert only, nothing moves).
 // - Language leads (Spanish -> Fanis, Vietnamese -> Theresa) never move. If Fanis hasn't called a daytime one in 15
 //   minutes, Joe gets a text.
-// "Called" means a real dial to the borrower (leads.lo_dialed_at, set on press-1 / in-app call /
-// direct dial, or a call the LO logged) -- a text doesn't count.
+// "Contacted" means the LO really tried: a dial to the borrower (leads.lo_dialed_at, set on press-1 / in-app call /
+// direct dial), a call or voicemail the LO logged, OR a text the LO sent themselves (10/16). AI and automated texts never count.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -54,8 +54,11 @@ function poolOf(l: any): string | null {
 }
 function dialed(l: any): boolean {
   if (l.lo_dialed_at) return true;
-  // Any logged call counts, except texts and the auto-ring the LO themselves didn't pick up.
-  return ((l.call_attempts || []) as any[]).some((a) => a && a.outcome && a.outcome !== "texted" && !/went unanswered before reaching/i.test(String(a.notes || "")));
+  // Any logged attempt counts (Joe 10/16: "if the LO physically texts the person it can count as contact, not AI contact -- or an attempted contact"):
+  // a call (answered or not), a voicemail, or a text the LO sent themselves from the CRM or by replying to the alert text. call_attempts only ever holds
+  // human actions -- AI and automated texts live in the activity log, never here -- so AI contact can't stop the handoff. The one thing that never counts is
+  // the auto-ring to the LO's own cell that they didn't pick up.
+  return ((l.call_attempts || []) as any[]).some((a) => a && a.outcome && !/went unanswered before reaching/i.test(String(a.notes || "")));
 }
 
 const staffCache: Record<string, any> = {};
