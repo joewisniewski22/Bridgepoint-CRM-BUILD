@@ -83,10 +83,13 @@ Deno.serve(async (req: Request) => {
       const phone = toE164(b.to);
       if (!phone) return json({ error: "no_phone", detail: "Pick someone or enter a number." }, 400);
       const name = String(b.name || "Guest").slice(0, 60);
+      // Joe 2026-10-17: Joe was dialed twice on Taeya's first conference (picked up front AND tapped Add). One leg per number.
+      const l10 = (x: string) => (x || "").replace(/\D/g, "").slice(-10);
+      if ((row.participants || []).some((p: any) => l10(p.phone) === l10(phone))) return json({ error: "already_on_call", detail: name + " is already on this call (or being dialed)." }, 409);
       const state = { v: 1, stage: "conf_join", confName, role: "guest", leadId: null, leadName: name, userId: row.started_by };
       const r = await telnyx("/calls", { connection_id: TELNYX_CONNECTION_ID, to: phone, from: TELNYX_FROM_NUMBER, timeout_secs: 40, client_state: b64(state) });
       if (!r.ok) return json({ error: "dial_failed", detail: JSON.stringify(r.data).slice(0, 200) }, 502);
-      const parts = (row.participants || []).concat([{ name, phone, role: "guest", added: true }]);
+      const parts = (row.participants || []).concat([{ name, phone, role: "guest", added: true, dialed: true }]);
       await sb.from("voice_conferences").update({ participants: parts }).eq("name", confName);
       return json({ ok: true, calling: name });
     }

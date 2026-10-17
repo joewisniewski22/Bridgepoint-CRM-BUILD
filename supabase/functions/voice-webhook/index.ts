@@ -120,6 +120,26 @@ async function endConferenceLegs(confName: string) {
   }
 }
 
+// Say something to the loan officer only (their own leg of the conference), so they know what is happening while a phone rings.
+// Joe 2026-10-17: Taeya's first real conference had her and a guest on an empty line for ~30s while the client's phone rang, with no cue, and she hung up.
+async function confSpeakStaff(confId: string | null | undefined, staffCcid: string | null | undefined, text: string) {
+  if (!confId || !staffCcid) return;
+  await telnyxConference("/" + confId + "/actions/speak", { call_control_ids: [staffCcid], payload: text, voice: VOICE_EN, language: "en-US" });
+}
+// Guests picked at the start are dialed only AFTER the client is on the line, so the loan officer never waits on an empty call.
+async function dialPendingGuests(confName: string, state: CallState) {
+  const { data: conf } = await sb.from("voice_conferences").select("participants").eq("name", confName).maybeSingle();
+  const parts = ((conf && conf.participants) || []) as Array<Record<string, unknown>>;
+  let changed = false;
+  for (const p of parts) {
+    if (p.role === "client" || !p.phone || p.dialed) continue;
+    p.dialed = true; changed = true;
+    const jState = { v: 1, stage: "conf_join", confName, role: "guest", leadId: null, leadName: p.name as string, userId: state.userId, staffName: state.staffName } as CallState;
+    await telnyxCreateCall({ connection_id: Deno.env.get("TELNYX_CONNECTION_ID"), to: p.phone, from: TELNYX_FROM_NUMBER, timeout_secs: 45, client_state: encodeState(jState) });
+  }
+  if (changed) await sb.from("voice_conferences").update({ participants: parts }).eq("name", confName);
+}
+
 function last10(phone: string | null | undefined): string {
   return (phone || "").replace(/\D/g, "").slice(-10);
 }
@@ -448,9 +468,14 @@ Deno.serve(async (req: Request) => {
         await gather(callControlId, "Bridgepoint conference call" + (state.leadName ? " with " + state.leadName : "") + ". Press 1 to start.", "1", { ...state, stage: "conf_staff_confirm" });
       } else if (state.stage === "conf_join" && state.confName) {
         // A guest or the client picked up -- put them into the live conference.
-        const { data: conf } = await sb.from("voice_conferences").select("telnyx_conference_id,status").eq("name", state.confName).maybeSingle();
+        const { data: conf } = await sb.from("voice_conferences").select("telnyx_conference_id,status,staff_call_control_id").eq("name", state.confName).maybeSingle();
         if (conf && conf.telnyx_conference_id && conf.status === "live") {
           await telnyxConference("/" + conf.telnyx_conference_id + "/actions/join", { call_control_id: callControlId });
+          if (state.role === "client") {
+            // The client is on: tell the loan officer, then bring in anyone chosen up front.
+            await confSpeakStaff(conf.telnyx_conference_id, (conf as any).staff_call_control_id, (state.leadName || "Your client") + " is on the line.");
+            await dialPendingGuests(state.confName, state);
+          }
         } else {
           await telnyxAction(callControlId, "hangup", {});
         }
@@ -544,12 +569,16 @@ Deno.serve(async (req: Request) => {
           }
           await sb.from("voice_conferences").update({ status: "live", telnyx_conference_id: confId, staff_call_control_id: callControlId }).eq("name", state.confName);
           const { data: conf } = await sb.from("voice_conferences").select("participants,lead_id").eq("name", state.confName).maybeSingle();
-          for (const p of ((conf && conf.participants) || []) as Array<Record<string, unknown>>) {
-            if (!p.phone) continue;
-            const isClient = p.role === "client";
-            const jState: CallState = { v: 1, stage: "conf_join", confName: state.confName, role: isClient ? "client" : "staff", leadId: isClient ? ((conf && conf.lead_id) as string || null) : null, leadName: p.name as string, userId: state.userId, staffName: state.staffName } as CallState;
+          // Dial the CLIENT first; guests chosen up front are dialed once the client picks up (see dialPendingGuests).
+          const parts = ((conf && conf.participants) || []) as Array<Record<string, unknown>>;
+          await confSpeakStaff(confId, callControlId, "Calling " + (state.leadName || "your client") + " now. I will tell you when they are on the line.");
+          for (const p of parts) {
+            if (!p.phone || p.role !== "client") continue;
+            p.dialed = true;
+            const jState: CallState = { v: 1, stage: "conf_join", confName: state.confName, role: "client", leadId: ((conf && conf.lead_id) as string || null), leadName: p.name as string, userId: state.userId, staffName: state.staffName } as CallState;
             await telnyxCreateCall({ connection_id: Deno.env.get("TELNYX_CONNECTION_ID"), to: p.phone, from: TELNYX_FROM_NUMBER, timeout_secs: 45, client_state: encodeState(jState) });
           }
+          await sb.from("voice_conferences").update({ participants: parts }).eq("name", state.confName);
           if (state.leadId) {
             const nowIso = new Date().toISOString();
             await sb.from("leads").update({ lo_dialed_at: nowIso }).eq("id", state.leadId);
@@ -725,6 +754,11 @@ Deno.serve(async (req: Request) => {
         await sb.from("voice_conferences").update({ status: "missed" }).eq("name", state.confName).eq("status", "ringing_staff");
         await endConferenceLegs(state.confName);
       } else if (state.stage === "conf_join" && state.confName && state.role === "client") {
+        if (neverConnected) {
+          // Tell the loan officer (still on the line) the client didn't pick up, instead of leaving them in silence.
+          const { data: cf } = await sb.from("voice_conferences").select("telnyx_conference_id,status,staff_call_control_id").eq("name", state.confName).maybeSingle();
+          if (cf && cf.status === "live") await confSpeakStaff(cf.telnyx_conference_id, cf.staff_call_control_id, (state.leadName || "The client") + " did not pick up. You can hang up now.");
+        }
         if (state.leadId) {
           await logCallOutcome({
             leadId: state.leadId, staffId: state.userId, sessionId, outcome: neverConnected ? "no-answer" : "connected",
