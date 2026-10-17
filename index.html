@@ -3034,6 +3034,7 @@ try {
   var adLeadCampaign = qp.get("adlead");
   if (deepLinkLead) ui.pendingDeepLinkLead = deepLinkLead;
   if (qp.get("brief")) ui.pendingBrief = qp.get("brief");
+  if (qp.get("dial")) ui.pendingDial = qp.get("dial");
   if (qp.get("studio")) ui.studio = true;
   if (adLeadCampaign){
     ui.adLanding = { campaign: adLeadCampaign, status: "form" };
@@ -3896,6 +3897,26 @@ function startDialer(){
   ui.modal = { type: "dialer" };
   render();
 }
+// Joe 2026-10-17 ("send a link to power dial just those deals ... make sure it's logged into the main system"): <CRM>/?dial=appsent opens the
+// SAME Power Dialer on only this person's Application Sent files, oldest first. Same dialer, same call log, so every call is credited and logged on the
+// file exactly like any other dialer call. Skipping just moves on (no backfill from the daily queue) so the session stays strictly the stuck files.
+function startAppSentDialer(){
+  var me = currentUser(), today = startOfToday();
+  var mine = state.leads.filter(function(l){ return l.assignedTo === me.id && l.status === "active" && l.stage === "app_sent"; });
+  mine.sort(function(a, b){ return String(a.applicationSentAt || a.createdAt || "").localeCompare(String(b.applicationSentAt || b.createdAt || "")); });
+  if (!mine.length){ showToast("Nothing left in Application Sent - nice work"); return; }
+  var itemsByLead = {};
+  mine.forEach(function(l){
+    var since = String(l.applicationSentAt || l.createdAt || "").slice(0, 10);
+    var d = since ? daysDiff(new Date(since + "T00:00:00"), today) : null;
+    itemsByLead[l.id] = { type:"stale-app", leadId:l.id, priority:2,
+      label: d !== null && !isNaN(d) ? ("Application sent " + d + " day(s) ago, not completed") : "Application sent, not completed",
+      reason: "Find out what is stopping the application and help them finish it" };
+  });
+  ui.dialer = { queueIds: mine.map(function(l){ return l.id; }), itemsByLead: itemsByLead, index: 0, userId: me.id, autoDial: SOFTPHONE_ENABLED, fixed: true };
+  ui.modal = { type: "dialer" };
+  render();
+}
 function dialerAdvance(){
   if (!ui.dialer) return;
   ui.dialer.index++;
@@ -3938,6 +3959,7 @@ function scheduleAutoDial(){
 // internal backfill pool directly.
 function dialerSkipCurrent(){
   if (!ui.dialer) return;
+  if (ui.dialer.fixed){ dialerAdvance(); return; } // ?dial=appsent session: no backfill, no skip-count penalty
   var skippedId = ui.dialer.queueIds[ui.dialer.index];
   if (skippedId) skipQueueItem(skippedId);
 
@@ -6485,6 +6507,8 @@ function hydrateFromSupabase(){
       ui.pendingDeepLinkLead = null;
     }
     render();
+    // ?dial=appsent (Joe 2026-10-17): open the Power Dialer on ONLY this person's Application Sent files.
+    if (ui.pendingDial === "appsent"){ ui.pendingDial = null; try { startAppSentDialer(); } catch(e){ console.error("appsent dialer", e); } }
     // Follow-up tasks (needs the leads loaded first so a ?brief= link can open straight into its brief).
     loadFollowupTasks();
     startFollowupPolling();
