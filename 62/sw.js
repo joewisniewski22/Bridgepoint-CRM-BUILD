@@ -1,5 +1,5 @@
 // Offline shell: the gym has bad signal, so the app must open and log workouts with none.
-var CACHE = "app62-v5";
+var CACHE = "app62-v6";
 var SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }));

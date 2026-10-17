@@ -81,6 +81,14 @@ input:focus,textarea:focus,select:focus,button:focus-visible{outline:2px solid v
 .done.on{background:var(--good);border-color:var(--good)}
 .done svg{width:22px;height:22px;stroke:#fff;stroke-width:3;fill:none;opacity:0}
 .done.on svg{opacity:1}
+.exchk{width:52px;flex:none}
+.card.exdone{border-color:var(--good)}
+.tset{padding:8px 0;border-top:1px solid var(--line)}
+.tset:first-of-type{border-top:0}
+.tset .top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.tset .top .lbl{font-weight:600}
+.tkrow{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
+.tk{font-family:var(--display);font-size:38px;font-weight:800;line-height:1;min-width:104px;font-variant-numeric:tabular-nums}
 .restbar{position:fixed;left:10px;right:10px;bottom:calc(76px + env(safe-area-inset-bottom));background:var(--plate);color:var(--plate-ink);border-radius:16px;padding:10px 14px;display:flex;align-items:center;gap:12px;z-index:30;box-shadow:0 6px 24px rgba(0,0,0,.35)}
 .restbar .t{font-family:var(--display);font-weight:800;font-size:44px;line-height:1;min-width:92px;font-variant-numeric:tabular-nums}
 .restbar .l{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.07em}
@@ -1579,14 +1587,61 @@ function viewTrain(){
   w.appendChild(historyCard());
   return w;
 }
+/* How an exercise is logged: "timed" = a duration block (45 min bike) with its own countdown, "check" = just tick it off
+   (foam rolling, a shake, a nap, mile blocks), "reps" = weight x reps (a seconds target like 30s adds a reusable timer). */
+function timedSecs(reps){ var m = String(reps == null ? "" : reps).replace(/\s+/g, "").match(/^(\d+(?:\.\d+)?)(min|mins|minutes|m)$/i); return m ? Math.round(parseFloat(m[1]) * 60) : 0; }
+function repSecs(reps){ var m = String(reps == null ? "" : reps).replace(/\s+/g, "").match(/^(\d+)(s|sec|secs|seconds)$/i); return m ? parseInt(m[1], 10) : 0; }
+function exMode(ex){
+  var r = String(ex.reps == null ? "" : ex.reps).trim();
+  if (timedSecs(r)) return "timed";
+  if (/amrap|max|failure/i.test(r)) return "reps";
+  if (/mile|\bmi\b|\bkm\b/i.test(r) || !parseInt(r, 10) || ((ex.sets || 1) === 1 && /^1(\s*[a-z].*)?$/i.test(r))) return "check";
+  return "reps";
+}
 function startSession(p, d){
   S.active = { id:uid(), date:today(), programId:p.id, programName:p.name, dayName:d.name, startedAt:Date.now(),
     entries: d.exercises.map(function(ex){
-      var last = lastWeightFor(ex.name), reps = parseInt(ex.reps, 10) || null;
-      var sets = []; for (var i = 0; i < (ex.sets || 3); i++) sets.push({ w:last, r:reps, done:false });
+      var mode = exMode(ex), sets = [];
+      if (mode === "reps"){
+        var last = lastWeightFor(ex.name), reps = repSecs(ex.reps) ? null : (parseInt(ex.reps, 10) || null);
+        for (var i = 0; i < (ex.sets || 3); i++) sets.push({ w:last, r:reps, done:false });
+      } else for (var j = 0; j < (ex.sets || 1); j++) sets.push({ w:null, r:null, done:false });
       return { name:ex.name, target:{ sets:ex.sets, reps:ex.reps, rest:ex.rest, notes:ex.notes || "" }, sets:sets };
     }) };
+  exT = {};
   save(); keepAwake(true); render();
+}
+/* Per-set countdown timers. They live in memory (not in the saved workout) and keep running across screen redraws. */
+var exT = {}, exTick = null;
+function tkLeft(t){ return t.run ? Math.max(0, (t.end - Date.now()) / 1000) : t.left; }
+function ensureExTick(){
+  if (exTick) return;
+  exTick = setInterval(function(){
+    var any = false;
+    Object.keys(exT).forEach(function(k){
+      var t = exT[k]; if (!t.run) return; any = true;
+      var left = (t.end - Date.now()) / 1000, d = document.querySelector('[data-tk="' + k + '"]');
+      if (d) d.textContent = mmss(Math.ceil(Math.max(0, left)));
+      if (left <= 0){ t.run = false; t.left = 0; beep(); if (t.onEnd) t.onEnd(); render(); }
+    });
+    if (!any){ clearInterval(exTick); exTick = null; }
+  }, 250);
+}
+function exTimerEl(key, secs, onEnd){
+  var t = exT[key] || (exT[key] = { total:secs, left:secs, end:0, run:false });
+  t.onEnd = onEnd || null;
+  var started = t.run || (t.left < t.total && t.left > 0);
+  var go = el("button", { class:"btn sm primary", type:"button", text: t.run ? "Pause" : (started ? "Resume" : (t.left <= 0 ? "Again" : "Start")), onclick:function(){
+    if (t.run){ t.left = tkLeft(t); t.run = false; }
+    else {
+      if (t.left <= 0) t.left = t.total;
+      t.end = Date.now() + t.left * 1000; t.run = true;
+      try{ audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume(); }catch(e){}
+      ensureExTick();
+    }
+    render(); } });
+  var reset = el("button", { class:"btn sm ghost", type:"button", text:"Reset", onclick:function(){ t.run = false; t.left = t.total; render(); } });
+  return el("div", { class:"tkrow" }, [el("div", { class:"tk", "data-tk":key, text: mmss(Math.ceil(tkLeft(t))) }), go, started || t.left <= 0 ? reset : null]);
 }
 function keepAwake(on){
   try{ if (on && navigator.wakeLock){ navigator.wakeLock.request("screen").then(function(l){ wakeLock = l; }).catch(function(){}); }
@@ -1600,11 +1655,36 @@ function renderRunner(w){
     el("button", { class:"btn primary", type:"button", text:"Finish", onclick:finishSession })
   ]));
   w.appendChild(hrStripEl());
-  a.entries.forEach(function(en){
-    var c = el("div", { class:"card" }, [
-      el("div", { class:"row between" }, [el("h2", { text:en.name }), el("span", { class:"pill", text: (en.target.sets || en.sets.length) + " × " + (en.target.reps || "—") + (en.target.rest ? " · " + en.target.rest + "s rest" : "") })]),
+  a.entries.forEach(function(en, ei){
+    var mode = exMode(en.target), allDone = en.sets.length > 0 && en.sets.every(function(s){ return s.done; });
+    var chk = el("button", { class:"done exchk" + (allDone ? " on" : ""), type:"button", "aria-label":"Mark " + en.name + " done", "aria-pressed": allDone ? "true" : "false",
+      onclick:function(){ var to = !allDone; en.sets.forEach(function(s){ s.done = to; }); save(); render(); } }, [icon(CHECK)]);
+    var pillTxt = mode === "reps" || mode === "timed" ? (en.target.sets || en.sets.length) + " × " + (en.target.reps || "—") + (mode === "reps" && en.target.rest ? " · " + en.target.rest + "s rest" : "") : "";
+    var c = el("div", { class:"card" + (allDone ? " exdone" : "") }, [
+      el("div", { class:"row between" }, [el("h2", { text:en.name }), el("div", { class:"row", style:"gap:8px;flex-wrap:nowrap" }, [pillTxt ? el("span", { class:"pill", text:pillTxt }) : null, chk])]),
       en.target.notes ? el("div", { class:"small muted", text:en.target.notes }) : null
     ]);
+    if (mode !== "reps"){
+      // Duration blocks get a countdown per block; everything else is a plain tick-off.
+      var secs = timedSecs(en.target.reps), wrap = el("div", { style:"margin-top:8px" });
+      en.sets.forEach(function(s, i){
+        var lbl = en.sets.length > 1 ? (secs ? "Block " : "Part ") + (i + 1) + " of " + en.sets.length : (secs ? "Timer" : "Tick off when you've done it");
+        var dnb2 = el("button", { class:"done" + (s.done ? " on" : ""), type:"button", style:"width:52px", "aria-label":"Mark " + lbl + " done", "aria-pressed": s.done ? "true" : "false",
+          onclick:function(){ s.done = !s.done; save(); render(); } }, [icon(CHECK)]);
+        var multi = en.sets.length > 1;
+        if (!secs && !multi) return; // a single tick-off item only needs the check at the top of the card
+        var row = el("div", { class:"tset" }, multi ? [el("div", { class:"top" }, [el("div", { class:"lbl", text:lbl }), dnb2])] : []);
+        if (secs) row.appendChild(exTimerEl(a.id + "-" + ei + "-" + i, secs, function(){ s.done = true; save(); }));
+        wrap.appendChild(row);
+      });
+      c.appendChild(wrap);
+      if (S.injury && S.injury.active) c.appendChild(el("button", { class:"btn sm ghost" + (en.skipped ? " danger" : ""), type:"button", style:"margin-top:8px", text: en.skipped ? "Skipped because of injury (tap to undo)" : "Skip this one - injury", onclick:function(){ en.skipped = !en.skipped; save(); render(); } }));
+      w.appendChild(c);
+      return;
+    }
+    // A seconds target (e.g. 3 × 30s curls) keeps the weight/reps boxes and adds one reusable timer.
+    var rsecs = repSecs(en.target.reps);
+    if (rsecs) c.appendChild(el("div", { style:"margin-top:8px" }, [exTimerEl(a.id + "-" + ei + "-t", rsecs, null)]));
     var grid = el("div", { class:"sets", style:"margin-top:10px" }, [
       el("div", { class:"hd", text:"Set" }), el("div", { class:"hd", text:"Weight (lb)" }), el("div", { class:"hd", text:"Reps" }), el("div", { class:"hd", text:"" })
     ]);
@@ -1632,7 +1712,7 @@ function renderRunner(w){
     w.appendChild(c);
   });
   w.appendChild(el("button", { class:"btn block danger", type:"button", text:"Cancel workout (discard)", onclick:function(){
-    if (confirm("Discard this workout?")){ S.active = null; save(); stopRestSilent(); keepAwake(false); render(); } } }));
+    if (confirm("Discard this workout?")){ S.active = null; exT = {}; save(); stopRestSilent(); keepAwake(false); render(); } } }));
 }
 function stopRestSilent(){ clearInterval(rest.timer); rest.end = 0; }
 function finishSession(){
@@ -1642,7 +1722,7 @@ function finishSession(){
   a.entries = a.entries.map(function(e){ return { name:e.name, target:e.target, skipped:!!e.skipped, sets: e.skipped ? [] : e.sets.filter(function(s){ return s.done; }) }; }).filter(function(e){ return e.sets.length || e.skipped; });
   a.durationMin = Math.round((Date.now() - a.startedAt) / 60000);
   var hsum = hrSummary(a); a.hrSummary = hsum; delete a.hr;
-  S.sessions.push(a); S.active = null; save(); stopRestSilent(); keepAwake(false);
+  S.sessions.push(a); S.active = null; exT = {}; save(); stopRestSilent(); keepAwake(false);
   toast("Workout saved");
   openExport([a], "Workout saved. Send it to " + S.settings.trainerName + "?");
   render();
@@ -1753,10 +1833,16 @@ function callApi(fn, body){
 
 /* ---------- export to coach ---------- */
 function bwLabel(name){ return /pull|chin|push|plank|dip|lunge|sit-?up|crunch|burpee|jump|squat jump|mountain|bear|hang|bridge|raise/i.test(name) ? "BW" : "—"; }
+// Timed blocks and tick-off items have no weight/reps: report them as done (with the block length when there is one).
+function doneLabel(e){
+  if (e.sets.some(function(x){ return x.w != null || x.r != null; })) return null;
+  var t = e.target || {};
+  return timedSecs(t.reps) ? "completed " + e.sets.length + " × " + t.reps : "done";
+}
 function sessionsText(list){
   return list.map(function(s){
     var t = s.dayName + " — " + s.programName + "\n" + fmtDay(s.date) + (s.durationMin ? " (" + s.durationMin + " min)" : "") + (s.hrSummary ? "  ·  HR avg " + s.hrSummary.avg + ", max " + s.hrSummary.max : "") + "\n";
-    s.entries.forEach(function(e){ if (e.skipped){ t += "  " + e.name + ": skipped (injury)\n"; return; } t += "  " + e.name + ": " + e.sets.map(function(x){ return (x.w != null ? x.w + "lb" : bwLabel(e.name)) + "×" + (x.r != null ? x.r : "?"); }).join(", ") + "\n"; });
+    s.entries.forEach(function(e){ if (e.skipped){ t += "  " + e.name + ": skipped (injury)\n"; return; } t += "  " + e.name + ": " + (doneLabel(e) || e.sets.map(function(x){ return (x.w != null ? x.w + "lb" : bwLabel(e.name)) + "×" + (x.r != null ? x.r : "?"); }).join(", ")) + "\n"; });
     return t;
   }).join("\n") + rehabText() + rehabText2();
 }
@@ -1768,6 +1854,7 @@ function sessionsDoc(list){
     h += '<h2>' + esc(s.dayName) + ' <small>(' + esc(s.programName) + ')</small></h2><p>' + esc(fmtDay(s.date)) + (s.durationMin ? ' · ' + s.durationMin + ' min' : '') + (s.hrSummary ? ' · Heart rate avg ' + s.hrSummary.avg + ', max ' + s.hrSummary.max + ' bpm' : '') + '</p>';
     s.entries.forEach(function(e){
       if (e.skipped){ h += '<p><b>' + esc(e.name) + '</b> - skipped because of injury</p>'; return; }
+      if (doneLabel(e)){ h += '<p><b>' + esc(e.name) + '</b> - ' + esc(doneLabel(e)) + '</p>'; return; }
       h += '<p><b>' + esc(e.name) + '</b>' + (e.target && e.target.reps ? ' <i>(target ' + esc(e.target.sets) + '×' + esc(e.target.reps) + ')</i>' : '') + '</p><table><tr><th>Set</th><th>Weight (lb)</th><th>Reps</th></tr>';
       e.sets.forEach(function(x, i){ h += '<tr><td>' + (i+1) + '</td><td>' + (x.w != null ? esc(x.w) : esc(bwLabel(e.name))) + '</td><td>' + (x.r != null ? esc(x.r) : '') + '</td></tr>'; });
       h += '</table>';
