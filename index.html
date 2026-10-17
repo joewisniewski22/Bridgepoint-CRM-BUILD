@@ -3900,6 +3900,16 @@ function startDialer(){
 // Joe 2026-10-17 ("send a link to power dial just those deals ... make sure it's logged into the main system"): <CRM>/?dial=appsent opens the
 // SAME Power Dialer on only this person's Application Sent files, oldest first. Same dialer, same call log, so every call is credited and logged on the
 // file exactly like any other dialer call. Skipping just moves on (no backfill from the daily queue) so the session stays strictly the stuck files.
+var APP_SENT_DEADLINE_ISO = "2026-10-23";
+// This person's active Application Sent files that have sat for more than 2 days (anything sent Thursday or later is "no big deal" per Joe), oldest first.
+function appSentStuck(userId){
+  var today = startOfToday();
+  return state.leads.filter(function(l){ return l.assignedTo === userId && l.status === "active" && l.stage === "app_sent"; }).map(function(l){
+    var since = String(l.applicationSentAt || l.createdAt || "").slice(0, 10);
+    var d = since ? daysDiff(new Date(since + "T00:00:00"), today) : 0;
+    return { name: l.name, days: isNaN(d) ? 0 : d };
+  }).filter(function(x){ return x.days > 2; }).sort(function(a, b){ return b.days - a.days; });
+}
 function startAppSentDialer(){
   var me = currentUser(), today = startOfToday();
   var mine = state.leads.filter(function(l){ return l.assignedTo === me.id && l.status === "active" && l.stage === "app_sent"; });
@@ -13779,6 +13789,21 @@ function renderToday(){
     '</div>';
   }
 
+  // Joe 2026-10-17: 41 files were stuck in Application Sent. Make it unmissable on each person's own Today screen until they are moved.
+  var appSentBanner = "";
+  if (scopeIsMine && !isProcessor()){
+    var stuckApps = appSentStuck(ui.viewAs);
+    if (stuckApps.length){
+      var pastDue = todayISO() > APP_SENT_DEADLINE_ISO;
+      appSentBanner = '<div class="section" style="padding:16px 20px;border-left:4px solid var(--danger);background:var(--danger-bg)">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">' +
+        '<div><b>' + stuckApps.length + ' file' + (stuckApps.length === 1 ? '' : 's') + ' stuck in Application Sent.</b> ' +
+          (pastDue ? 'These are past the Friday, Oct 23 deadline. ' : 'Move each one to Application Completed, or update its true status, by end of day Friday, Oct 23. ') +
+          'Oldest: ' + esc(stuckApps[0].name) + ' (' + stuckApps[0].days + ' days).</div>' +
+        '<button class="btn btn-sm btn-primary" data-action="start-appsent-dialer">▶ Power dial these files</button>' +
+        '</div></div>';
+    }
+  }
   if (scopeIsMine && !isProcessor()) quotaBanner += todayCallsCardHTML(ui.viewAs);
   var kpis = '<div class="kpi-row">' +
     '<div class="kpi"><div class="kpi-label">Calls due today</div><div class="kpi-value num">' + k.callsDue + '</div><div class="kpi-sub">' + (!isOwner() ? "Across your desk" : (scopeIsMine ? "Your queue — switch to Whole Team below to see everyone's" : "Across all loan officers")) + '</div></div>' +
@@ -13870,7 +13895,7 @@ function renderToday(){
   }
 
   return topbar("Today", "Call list generated from new-lead cadence, market rate moves, and refinance timing.", '<button class="btn btn-ghost" data-action="open-modal" data-modal="importLendingWise">⬆ Import from LendingWise</button>') +
-    '<div class="content">' + kpis + quotaBanner + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML + (scopeIsMine ? renderFollowUpSection() : renderTeamFollowUpGlance()) + sections +
+    '<div class="content">' + appSentBanner + kpis + quotaBanner + renderMyCalendarWidget() + companyPerfHTML + teamSnapshotHTML + commissionHTML + (scopeIsMine ? renderFollowUpSection() : renderTeamFollowUpGlance()) + sections +
     '</div>';
 }
 
@@ -22630,6 +22655,7 @@ appEl.addEventListener("click", function(e){
   else if (action === "clear-lead-filters"){ ui.leadFilter = { q:"", stage:"", loanType:"", assignedTo:"", status:"active", source:"", dateFrom:"", dateTo:"", amountMin:"", amountMax:"", sort:"newest" }; render(); }
   else if (action === "extend-daily-quota"){ ui.dailyQuotaExtra = (ui.dailyQuotaExtra||0) + 20; render(); }
   else if (action === "start-dialer"){ startDialer(); }
+  else if (action === "start-appsent-dialer"){ startAppSentDialer(); }
   else if (action === "dialer-skip"){ dialerSkipCurrent(); }
   else if (action === "dialer-toggle-auto"){
     if (ui.dialer){
